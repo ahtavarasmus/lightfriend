@@ -117,12 +117,12 @@ pub async fn google_calendar_status(
     tracing::info!("Checking Google Calendar connection status");
 
     // Check if user has active Google Calendar connection
-    match state.user_repository.has_active_google_calendar(auth_user.user_id) {
+    match state.user_repository.has_active_google_calendar() {
         Ok(has_connection) => {
-            tracing::info!("Successfully checked calendar connection status for user {}: {}", auth_user.user_id, has_connection);
+            tracing::info!("Successfully checked calendar connection status for user: {}", has_connection);
             Ok(Json(json!({
                 "connected": has_connection,
-                "user_id": auth_user.user_id,
+                "user_id": 1,
             })))
         },
         Err(e) => {
@@ -142,7 +142,7 @@ pub async fn get_calendar_email(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+    match state.user_repository.get_google_calendar_tokens() {
         Ok(Some((access_token, _))) => {
             let client = reqwest::Client::new();
             let response = client
@@ -204,10 +204,9 @@ pub async fn create_calendar_event(
     auth_user: AuthUser,
     Json(event_request): Json<CreateEventRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Creating new calendar event for user: {}", auth_user.user_id);
 
     // Check if user has active Google Calendar connection
-    match state.user_repository.has_active_google_calendar(auth_user.user_id) {
+    match state.user_repository.has_active_google_calendar() {
         Ok(has_connection) => {
             if !has_connection {
                 return Err((
@@ -229,7 +228,7 @@ pub async fn create_calendar_event(
     }
 
     // Get tokens
-    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens() {
         Ok(Some((access, refresh))) => (access, refresh),
         Ok(None) => return Err((
             StatusCode::BAD_REQUEST,
@@ -343,7 +342,6 @@ pub async fn create_calendar_event(
 
                 // Update the access token in the database
                 state.user_repository.update_google_calendar_access_token(
-                    auth_user.user_id,
                     new_access_token.as_str(),
                     expires_in,
                 ).map_err(|e| (
@@ -407,23 +405,22 @@ pub async fn handle_calendar_fetching_route(
     };
 
     // Call the existing handler function
-    handle_calendar_fetching(&state, auth_user.user_id, start, end).await
+    handle_calendar_fetching(&state, start, end).await
 }
 
 pub async fn handle_calendar_fetching(
     state: &AppState,
-    user_id: i32,
     start: &str,
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user's timezone from settings
-    let user_timezone = match state.user_core.get_user_info(user_id) {
+    let user_timezone = match state.user_core.get_user_info() {
         Ok(info) => {
             match info.timezone {
                 Some(tz) => match tz.parse::<Tz>() {
                     Ok(parsed_tz) => Some(parsed_tz),
                     Err(_) => {
-                        tracing::warn!("Invalid timezone format for user {}: {}", user_id, tz);
+                        tracing::warn!("Invalid timezone format for user: {}", tz);
                         None
                     }
                 },
@@ -435,7 +432,7 @@ pub async fn handle_calendar_fetching(
             None
         }
     };
-    tracing::debug!("Starting calendar tool call for user: {}", user_id);
+    tracing::debug!("Starting calendar tool call for user");
     
     // Parse start and end times
     let parse_datetime = |datetime_str: &str| {
@@ -478,7 +475,7 @@ pub async fn handle_calendar_fetching(
 
     // Check if user has active Google Calendar connection
     println!("Checking if user has active Google Calendar connection");
-    match state.user_repository.has_active_google_calendar(user_id) {
+    match state.user_repository.has_active_google_calendar() {
         Ok(has_connection) => {
             tracing::debug!("no errors checking active google calendar connection");
             if !has_connection {
@@ -511,7 +508,7 @@ pub async fn handle_calendar_fetching(
 
     // Fetch calendar events
     println!("Fetching calendar events");
-    match fetch_calendar_events(state, user_id, timeframe).await {
+    match fetch_calendar_events(state, timeframe).await {
         Ok(events) => {
             println!("Successfully fetched {} events", events.len());
             // Format events into a more readable response
@@ -711,12 +708,11 @@ async fn fetch_events_from_calendar(
 
 pub async fn fetch_calendar_events(
     state: &AppState,
-    user_id: i32,
     timeframe: TimeframeQuery,
 ) -> Result<Vec<CalendarEvent>, CalendarError> {
     // Get Google Calendar tokens
-    tracing::debug!("Getting Google Calendar tokens for user_id: {}", user_id);
-    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(user_id) {
+    tracing::debug!("Getting Google Calendar tokens");
+    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens() {
         Ok(Some((access, refresh))) => {
             tracing::debug!("Access token length: {}, Refresh token length: {}", 
                 access.len(), refresh.len());
@@ -744,7 +740,6 @@ pub async fn fetch_calendar_events(
 
     async fn refresh_access_token(
         state: &AppState,
-        user_id: i32,
         refresh_token: String,
     ) -> Result<String, CalendarError> {
         let http_client = reqwest::ClientBuilder::new()
@@ -768,7 +763,6 @@ pub async fn fetch_calendar_events(
 
         // Update the access token in the database
         state.user_repository.update_google_calendar_access_token(
-            user_id,
             &new_access_token,
             expires_in,
         ).map_err(|e| CalendarError::TokenError(e.to_string()))?;
@@ -779,19 +773,15 @@ pub async fn fetch_calendar_events(
     async fn fetch_with_token(
         client: &reqwest::Client,
         state: &AppState,
-        user_id: i32,
         access_token: &str,
         refresh_token: &str,
         start_time: &str,
         end_time: &str
     ) -> Result<Vec<CalendarEvent>, CalendarError> {
 
-        println!("fetching calendar list for user: {}", user_id);
         async fn attempt_fetch(
             client: &reqwest::Client,
-
             access_token: &str,
-
             start_time: &str,
             end_time: &str,
         ) -> Result<Vec<CalendarEvent>, CalendarError> {
@@ -854,7 +844,7 @@ pub async fn fetch_calendar_events(
                     if err.contains("401") {
                         // Token expired, refresh and retry
                         tracing::info!("Access token expired, refreshing...");
-                        match refresh_access_token(state, user_id, refresh_token.to_string()).await {
+                        match refresh_access_token(state, refresh_token.to_string()).await {
                             Ok(new_token) => {
                                 tracing::info!("Token refreshed successfully, retrying fetch");
                                 attempt_fetch(client, &new_token, start_time, end_time).await
@@ -874,7 +864,6 @@ pub async fn fetch_calendar_events(
     let result = fetch_with_token(
         &client,
         state,
-        user_id,
         &access_token,
         &refresh_token,
         &start_time,
@@ -911,7 +900,6 @@ pub async fn fetch_calendar_events(
             // Update the access token in the database
             println!("Updating access token in database...");
             state.user_repository.update_google_calendar_access_token(
-                user_id,
                 new_access_token.clone().as_str(),
                 expires_in,
             ).map_err(|e| CalendarError::TokenError(e.to_string()))?;
@@ -921,7 +909,6 @@ pub async fn fetch_calendar_events(
             fetch_with_token(
                 &client,
                 state,
-                user_id,
                 &new_access_token,
                 &refresh_token,
                 &start_time,

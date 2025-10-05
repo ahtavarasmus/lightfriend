@@ -198,135 +198,6 @@ pub async fn set_twilio_webhook(
     Ok(())
 }
 
-pub async fn validate_user_twilio_signature(
-    request: Request<Body>,
-    next: middleware::Next,
-) -> Result<Response, StatusCode> {
-    tracing::info!("\n=== Starting User-Specific Twilio Signature Validation ===");
-
-    // Extract user_id from the request path
-    let path = request.uri().path();
-    let user_id = match path.split('/').last() {
-        Some(id) => match id.parse::<i32>() {
-            Ok(id) => {
-                tracing::info!("✅ Successfully extracted user_id: {}", id);
-                id
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to parse user_id: {}", e);
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        },
-        None => {
-            tracing::error!("❌ No user_id found in path");
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-
-    // Get the Twilio signature from headers
-    let signature = match request.headers().get("X-Twilio-Signature") {
-        Some(header) => match header.to_str() {
-            Ok(s) => {
-                tracing::info!("✅ Successfully retrieved X-Twilio-Signature");
-                s.to_string()
-            },
-            Err(e) => {
-                tracing::error!("❌ Error converting X-Twilio-Signature to string: {}", e);
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-        },
-        None => {
-            tracing::error!("❌ No X-Twilio-Signature header found");
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    // Get the user-specific Twilio auth token
-    let auth_token = match std::env::var(format!("TWILIO_AUTH_TOKEN_{}", user_id)) {
-        Ok(token) => {
-            tracing::info!("✅ Successfully retrieved user-specific TWILIO_AUTH_TOKEN");
-            token
-        },
-        Err(e) => {
-            tracing::error!("❌ Failed to get user-specific TWILIO_AUTH_TOKEN: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Get the server URL
-    let url = match std::env::var("SERVER_URL") {
-        Ok(url) => {
-            tracing::info!("✅ Successfully retrieved SERVER_URL");
-            format!("{}/api/sms/server/{}", url, user_id)
-        },
-        Err(e) => {
-            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Get request body for validation
-    let (parts, body) = request.into_parts();
-    let body_bytes = match to_bytes(body, 1024 * 1024).await {  // 1MB limit
-        Ok(bytes) => {
-            tracing::info!("✅ Successfully read request body");
-            bytes
-        },
-        Err(e) => {
-            tracing::error!("❌ Failed to read request body: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Convert body to string and parse form data
-    let params_str = match String::from_utf8(body_bytes.to_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("❌ Failed to convert body to UTF-8: {}", e);
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-
-    // Parse form parameters into a sorted map
-    let params: BTreeMap<String, String> = form_urlencoded::parse(params_str.as_bytes())
-        .into_owned()
-        .collect();
-
-    // Build the string to sign
-    let mut string_to_sign = url;
-    for (key, value) in params.iter() {
-        string_to_sign.push_str(key);
-        string_to_sign.push_str(value);
-    }
-
-    // Create HMAC-SHA1
-    let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
-        Ok(mac) => mac,
-        Err(e) => {
-            tracing::error!("❌ Failed to create HMAC: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    mac.update(string_to_sign.as_bytes());
-
-    // Get the result and encode as base64
-    let result = BASE64.encode(mac.finalize().into_bytes());
-
-    // Compare signatures
-    if result != signature {
-        tracing::error!("❌ Signature validation failed");
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    tracing::info!("✅ Signature validation successful");
-
-    // Rebuild request and pass to next handler
-    let request = Request::from_parts(parts, Body::from(params_str));
-
-    Ok(next.run(request).await)
-}
-
 pub async fn validate_twilio_signature(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
@@ -390,7 +261,7 @@ pub async fn validate_twilio_signature(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-    let user = match state.user_core.find_by_phone_number(from_phone) {
+    let _ = match state.user_core.find_by_phone_number(from_phone) {
         Ok(Some(user)) => {
             tracing::info!("✅ Found user {} for phone {}", user.id, from_phone);
             user
@@ -405,10 +276,8 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
     let auth_token: String;
     let url: String;
-    if is_self_hosted {
         (auth_token, url) = match state.user_core.get_settings_for_tier3() {
             Ok((_, Some(token), _, Some(server_url), _, _)) => {
                 tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
@@ -423,33 +292,6 @@ pub async fn validate_twilio_signature(
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         };
-    } else {
-
-        auth_token = if user.phone_number.starts_with("+1") ||
-                   user.phone_number.starts_with("+358") ||
-                   user.phone_number.starts_with("+31") ||
-                   user.phone_number.starts_with("+44") ||
-                   user.phone_number.starts_with("+61") {
-            std::env::var("TWILIO_AUTH_TOKEN")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        } else {
-            match state.user_core.get_twilio_credentials(user.id) {
-                Ok((_, token)) => token,
-                Err(_) => return Err(StatusCode::UNAUTHORIZED)
-            }
-        };
-
-        url = match std::env::var("SERVER_URL") {
-            Ok(url) => {
-                tracing::info!("✅ Successfully retrieved SERVER_URL");
-                url + "/api/sms/server"
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-    }
 
     // Build the string to sign
     let mut string_to_sign = url;
@@ -493,18 +335,7 @@ pub async fn delete_twilio_message_media(
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    } else {
-        state.user_core.get_twilio_credentials(user.id)?
-    };
+    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
     let client = Client::new();
 
     let response = client
@@ -562,21 +393,8 @@ pub async fn delete_twilio_message(
     user: &User,
 ) -> Result<(), Box<dyn Error>> {
     tracing::debug!("deleting incoming message");
-    let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    } else {
-        state.user_core.get_twilio_credentials(user.id)?
-    };
-
+    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
     let client = Client::new();
 
     // Wait 1-2 minutes to avoid 'resource not complete' errors
@@ -617,7 +435,7 @@ pub async fn send_conversation_message(
     let history_entry = crate::models::user_models::NewMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),
-        encrypted_content: body.clone().to_string(),
+        encrypted_content: body.to_string(),
         tool_name: None,
         tool_call_id: None,
         tool_calls_json: None,
@@ -659,33 +477,11 @@ pub async fn send_conversation_message(
     // If TextBee not set up or failed, fall back to Twilio
 
     // Twilio send logic
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    } else {
-        state.user_core.get_twilio_credentials(user.id)?
-    };
-
+    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
     let client = Client::new();
 
     // Get or set country
     let mut country = user.phone_number_country.clone();
-    if country.is_none() {
-        match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
-            Ok(c) => country = c,
-            Err(e) => {
-                tracing::error!("Failed to set phone country: {}", e);
-                // Fallback to preferred_number logic
-                country = Some("Other".to_string());
-            }
-        }
-    }
 
     // Determine From strategy
     let mut use_messaging_service = false;
@@ -694,12 +490,7 @@ pub async fn send_conversation_message(
     if let Some(c) = country {
         match c.as_str() {
             "US" => use_messaging_service = true,
-            "CA" => from_number = env::var("CAN_PHONE").unwrap_or_else(|_| { tracing::error!("CAN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
-            "FI" => from_number = env::var("FIN_PHONE").unwrap_or_else(|_| { tracing::error!("FIN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
-            "NL" => from_number = env::var("NL_PHONE").unwrap_or_else(|_| { tracing::error!("NL_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
-            "GB" => from_number = env::var("GB_PHONE").unwrap_or_else(|_| { tracing::error!("GB_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
-            "AU" => from_number = env::var("AUS_PHONE").unwrap_or_else(|_| { tracing::error!("AUS_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
-            _ => tracing::info!("Using preferred_number for unsupported country: {}", c),
+            _ => use_messaging_service = false,
         }
     }
 

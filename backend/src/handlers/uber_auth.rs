@@ -185,7 +185,6 @@ pub async fn uber_callback(
     }
     // Store the connection in the database
     if let Err(e) = state.user_repository.create_uber_connection(
-        user_id,
         &access_token,
         refresh_token.as_ref().map(|s| s.as_str()),
         expires_in,
@@ -211,12 +210,12 @@ pub async fn uber_disconnect(
     tracing::info!("Received request to disconnect Uber for user {}", auth_user.user_id);
 
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_uber_tokens(auth_user.user_id) {
+    let tokens = match state.user_repository.get_uber_tokens() {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::info!("No tokens found to revoke for user {}", auth_user.user_id);
             // Still attempt to delete from DB in case there's a record
-            let _ = state.user_repository.delete_uber_connection(auth_user.user_id);
+            let _ = state.user_repository.delete_uber_connection();
             return Ok(StatusCode::OK);
         },
         Err(e) => {
@@ -272,7 +271,7 @@ pub async fn uber_disconnect(
     }
 
     // Delete the connection from the database
-    state.user_repository.delete_uber_connection(auth_user.user_id)
+    state.user_repository.delete_uber_connection()
         .map_err(|e| {
             tracing::error!("Failed to delete Uber connection: {}", e);
             (
@@ -291,7 +290,7 @@ pub async fn get_valid_uber_access_token(
     state: &Arc<AppState>,
     user_id: i32,
 ) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    let token_info = state.user_repository.get_uber_token_info(user_id)
+    let token_info = state.user_repository.get_uber_token_info()
         .map_err(|e| {
             tracing::error!("Failed to fetch Uber token info: {}", e);
             (
@@ -354,7 +353,6 @@ pub async fn get_valid_uber_access_token(
 
     // Update access token
     state.user_repository.update_uber_access_token(
-        user_id,
         &new_access_token,
         new_expires_in,
     )
@@ -370,7 +368,6 @@ pub async fn get_valid_uber_access_token(
     if let Some(rt) = token_result.refresh_token() {
         let new_refresh_token = rt.secret().clone();
         state.user_repository.update_uber_refresh_token(
-            user_id,
             &new_refresh_token,
         )
         .map_err(|e| {
@@ -391,7 +388,7 @@ pub async fn uber_status(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Checking Uber connection status");
     // Check if user has active Uber connection
-    match state.user_repository.has_active_uber(auth_user.user_id) {
+    match state.user_repository.has_active_uber() {
         Ok(has_connection) => {
             tracing::info!("Successfully checked Uber connection status for user {}: {}", auth_user.user_id, has_connection);
             Ok(Json(json!({

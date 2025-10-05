@@ -109,7 +109,7 @@ pub async fn delete_google_calendar_connection(
     tracing::info!("Received request to delete Google Calendar connection");
 
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+    let tokens = match state.user_repository.get_google_calendar_tokens() {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::info!("No tokens found to revoke for user {}", auth_user.user_id);
@@ -159,9 +159,9 @@ pub async fn delete_google_calendar_connection(
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_google_calendar_connection(auth_user.user_id) {
+    match state.user_repository.delete_google_calendar_connection() {
         Ok(_) => {
-            tracing::info!("Successfully deleted Google Calendar connection for user {}", auth_user.user_id);
+            tracing::info!("Successfully deleted Google Calendar connection for user");
             Ok(Json(json!({
                 "message": "Google Calendar connection deleted and permissions revoked successfully"
             })))
@@ -183,7 +183,7 @@ pub async fn refresh_google_token(
     tracing::info!("Received request to refresh Google Calendar token");
 
     // Get the stored tokens
-    let tokens = match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+    let tokens = match state.user_repository.get_google_calendar_tokens() {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::error!("No Google Calendar connection found for user {}", auth_user.user_id);
@@ -230,7 +230,6 @@ pub async fn refresh_google_token(
 
     // Update the access token in the database
     if let Err(e) = state.user_repository.update_google_calendar_access_token(
-        auth_user.user_id,
         new_access_token,
         expires_in,
     ) {

@@ -231,7 +231,7 @@ pub async fn get_triggering_message_in_room(
     );
 
     // Validate bridge connection
-    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+    if let Some(bridge) = state.user_repository.get_bridge(service)? {
         if bridge.status != "connected" {
             return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
         }
@@ -240,10 +240,10 @@ pub async fn get_triggering_message_in_room(
     }
 
     // Get Matrix client
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
 
     // Get user info for timezone
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let user_info = state.user_core.get_user_info()?;
 
     // Get the room
     let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id_str)?;
@@ -348,7 +348,7 @@ pub async fn get_latest_sent_message_in_room(
     );
 
     // Validate bridge connection
-    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+    if let Some(bridge) = state.user_repository.get_bridge(service)? {
         if bridge.status != "connected" {
             return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
         }
@@ -357,10 +357,10 @@ pub async fn get_latest_sent_message_in_room(
     }
 
     // Get Matrix client
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
 
     // Get user info for timezone
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let user_info = state.user_core.get_user_info()?;
 
     // Get the room
     let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id_str)?;
@@ -447,17 +447,17 @@ pub async fn fetch_bridge_room_messages(
         chat_name,
         limit.unwrap_or(20)
     );
-    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+    if let Some(bridge) = state.user_repository.get_bridge(service)? {
         if bridge.status != "connected" {
             return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
         }
     } else {
         return Err(anyhow!("{} bridge not found", capitalize(&service)));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
     let rooms = get_service_rooms(&client, service).await?;
     let matching_room = search_best_match(&rooms, chat_name);
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let user_info = state.user_core.get_user_info()?;
     match matching_room {
         Some(room_info) => {
             let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str()) {
@@ -479,16 +479,15 @@ use matrix_sdk::notification_settings::RoomNotificationMode;
 pub async fn fetch_bridge_messages(
     service: &str,
     state: &Arc<AppState>,
-    user_id: i32,
     start_time: i64,
     unread_only: bool,
 ) -> Result<Vec<BridgeMessage>> {
-    tracing::info!("Fetching {} messages for user {}", service, user_id);
+    tracing::info!("Fetching {} messages for user", service);
   
-    let user_info= state.user_core.get_user_info(user_id)?;
+    let user_info= state.user_core.get_user_info()?;
     // Get Matrix client and check bridge status (use cached version for better performance)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
+    let bridge = state.user_repository.get_bridge(service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
@@ -610,8 +609,8 @@ pub async fn send_bridge_message(
     // Get user for timezone info
     tracing::info!("Sending {} message", service);
    
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
+    let bridge = state.user_repository.get_bridge(service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
@@ -690,7 +689,7 @@ pub async fn send_bridge_message(
         room.send(RoomMessageEventContent::text_plain(message)).await?;
     }
     tracing::debug!("Message sent!");
-    let user_info= state.user_core.get_user_info(user_id)?;
+    let user_info= state.user_core.get_user_info()?;
     let current_timestamp = chrono::Utc::now().timestamp();
     // Return the sent message details
     Ok(BridgeMessage {
@@ -832,7 +831,7 @@ pub async fn handle_bridge_message(
     let bridge_types = vec!["signal", "telegram", "whatsapp"];
     let mut bridges = Vec::new();
     for bridge_type in &bridge_types {
-        if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
+        if let Ok(Some(bridge)) = state.user_repository.get_bridge(bridge_type) {
             bridges.push(bridge);
         }
     }
@@ -903,12 +902,12 @@ pub async fn handle_bridge_message(
             tracing::info!("Detected disconnection in {} bridge for user {}: {}", bridge.bridge_type, user_id, content);
           
             // Delete the bridge record
-            if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
+            if let Err(e) = state.user_repository.delete_bridge(&bridge.bridge_type) {
                 tracing::error!("Failed to delete {} bridge: {}", bridge.bridge_type, e);
             }
           
             // Check if there are any remaining active bridges
-            let has_active_bridges = match state.user_repository.has_active_bridges(user_id) {
+            let has_active_bridges = match state.user_repository.has_active_bridges() {
                 Ok(has) => has,
                 Err(e) => {
                     tracing::error!("Failed to check active bridges: {}", e);
@@ -954,7 +953,7 @@ pub async fn handle_bridge_message(
     };
     use matrix_sdk::ruma::{events::receipt::{ReceiptType, ReceiptThread}, api::client::room::get_room_event};
     use tokio::time::{sleep, Duration};
-    let bridge = match state.user_repository.get_bridge(user_id, service.as_str()) {
+    let bridge = match state.user_repository.get_bridge(service.as_str()) {
         Ok(Some(b)) => b,
         Ok(None) => {
             tracing::error!("No bridge found for service {}", service);
@@ -1008,7 +1007,6 @@ pub async fn handle_bridge_message(
                     tracing::info!("Skipping processing because user has read this or a later message");
                     let last_seen_online = i32::try_from(any_event.origin_server_ts().as_secs()).unwrap();
                     let rows = state.user_repository.update_bridge_last_seen_online(
-                        user_id,
                         service.as_str(),
                         last_seen_online,
                     ).unwrap();
@@ -1025,22 +1023,12 @@ pub async fn handle_bridge_message(
 
     tracing::info!("No recent read detected; proceeding with message processing");
     let sender_prefix = get_sender_prefix(&service);
-    if user_id == 1 {
-        println!("sender_prefix: {}", sender_prefix);
-    }
     if !sender_localpart.starts_with(&sender_prefix) {
         tracing::info!("Skipping non-{} sender", service);
         return;
     }
-    // Check if user has valid subscription
-    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) ||
-        state.user_repository.has_valid_subscription_tier(user_id, "self_hosted").unwrap_or(false);
-    if !has_valid_sub {
-        tracing::debug!("User {} does not have valid subscription for WhatsApp monitoring", user_id);
-        return;
-    }
-    if !state.user_core.get_proactive_agent_on(user_id).unwrap_or(true) {
-        tracing::debug!("User {} does not have monitoring enabled", user_id);
+    if !state.user_core.get_proactive_agent_on().unwrap_or(true) {
+        tracing::debug!("User does not have monitoring enabled");
         return;
     }
     // Extract message content
@@ -1067,9 +1055,6 @@ pub async fn handle_bridge_message(
         }
     };
     let member_count = members.len() as u64;
-    if user_id == 1 {
-        println!("members: {}", member_count);
-    }
     if member_count > 3 {
         let is_mentioned = event.content.mentions.as_ref()
             .map(|m| m.user_ids.contains(&matrix_user_id))
@@ -1111,7 +1096,6 @@ pub async fn handle_bridge_message(
                                 tokio::spawn(async move {
                                     crate::proactive::utils::send_notification(
                                         &state_clone,
-                                        user_id,
                                         &message,
                                         notification_type,
                                         Some(first_message),
@@ -1153,7 +1137,7 @@ pub async fn handle_bridge_message(
         .unwrap_or(&sender_localpart)
         .to_string();
     let waiting_checks = state.user_repository.get_waiting_checks(user_id, "messaging").unwrap_or(Vec::new());
-    let priority_senders = state.user_repository.get_priority_senders(user_id, &service).unwrap_or(Vec::new());
+    let priority_senders = state.user_repository.get_priority_senders(&service).unwrap_or(Vec::new());
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
         let prefix = format!("{} from ", capitalize(&service));
         let separator = ": ";
@@ -1187,33 +1171,23 @@ pub async fn handle_bridge_message(
                 };
                 let notification_type = format!("{}_priority{}", service, suffix);
             
-                // Check if user has enough credits for notification
-                match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
-                    Ok(()) => {
-                        // User has enough credits, proceed with notification
-                        let state_clone = state.clone();
-                        let content_clone = content.clone();
-                        let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
-                        let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                    
-                        // Spawn a new task for sending notification
-                        tokio::spawn(async move {
-                            // Send the notification
-                            crate::proactive::utils::send_notification(
-                                &state_clone,
-                                user_id,
-                                &message,
-                                notification_type,
-                                Some(first_message),
-                            ).await;
-                        
-                        });
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("User {} does not have enough credits for priority sender notification: {}, continuing though", user_id, e);
-                    }
-                }
+                // User has enough credits, proceed with notification
+                let state_clone = state.clone();
+                let content_clone = content.clone();
+                let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
+                let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
+            
+                // Spawn a new task for sending notification
+                tokio::spawn(async move {
+                    // Send the notification
+                    crate::proactive::utils::send_notification(
+                        &state_clone,
+                        &message,
+                        notification_type,
+                        Some(first_message),
+                    ).await;
+                
+                });
             }
         }
     }
@@ -1250,7 +1224,6 @@ pub async fn handle_bridge_message(
                 tokio::spawn(async move {
                     crate::proactive::utils::send_notification(
                         &state_clone,
-                        user_id,
                         &message,
                         notification_type,
                         Some(first_message),
@@ -1261,7 +1234,7 @@ pub async fn handle_bridge_message(
         }
     }
     // Check message importance based on waiting checks and criticality
-    let user_settings = match state.user_core.get_user_settings(user_id) {
+    let user_settings = match state.user_core.get_user_settings() {
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get user settings: {}", e);
@@ -1340,7 +1313,6 @@ pub async fn handle_bridge_message(
                 tokio::spawn(async move {
                     crate::proactive::utils::send_notification(
                         &state_clone,
-                        user_id,
                         &message,
                         notification_type,
                         Some(first_message),
@@ -1359,11 +1331,11 @@ pub async fn search_bridge_rooms(
     search_term: &str,
 ) -> Result<Vec<BridgeRoom>> {
     // Validate bridge connection first
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    let bridge = state.user_repository.get_bridge(service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
     let all_rooms = get_service_rooms(&client, service).await?;
     let search_term_lower = search_term.trim().to_lowercase();
     // Single-pass matching with prioritized results
@@ -1405,11 +1377,11 @@ pub async fn fetch_recent_bridge_contacts(
     state: &Arc<AppState>,
     user_id: i32,
 ) -> Result<Vec<String>> {
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    let bridge = state.user_repository.get_bridge(service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
     let rooms = get_service_rooms(&client, service).await?;
     let mut futures = Vec::new();
     for bridge_room in rooms {

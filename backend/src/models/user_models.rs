@@ -26,34 +26,18 @@ use crate::schema::uber;
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct User {
     pub id: i32,
-    pub email: String,
-    pub password_hash: String,
     pub phone_number: String,
     pub nickname: Option<String>, // what user wants the ai to call them
-    pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
-    pub verified: bool, 
     pub credits: f32, // user purchased credits, will not expire, can be bought if has subscribtion or is a early user(discount = true)
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
-    pub charge_when_under: bool, // flag for if user wants to automatically buy more overage credits
-    pub charge_back_to: Option<f32>, // the credit amount to charge 
-    pub stripe_customer_id: Option<String>,
-    pub stripe_payment_method_id: Option<String>,
-    pub stripe_checkout_session_id: Option<String>,
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
-    pub sub_tier: Option<String>, // tier 1(basic), tier 1.5(oracle), tier 2(sentinel), tier 3(self hosted)
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
-    pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
-    pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
-    pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
-    pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
-    pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
-    pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
-    pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
+    pub twilio_messaging_service_sid: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

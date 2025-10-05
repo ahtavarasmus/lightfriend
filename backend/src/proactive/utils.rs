@@ -396,10 +396,10 @@ fn hours_since(current_hour: u32, previous_hour: u32) -> u32 {
     }
 }
 
-pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn check_morning_digest(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
-    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests()?;
+    let user_info = state.user_core.get_user_info()?;
     
     // If morning digest is enabled (Some value) and we have a timezone, check the time
     if let (Some(digest_hour_str), Some(timezone)) = (morning_digest.clone(), user_info.timezone) {
@@ -459,8 +459,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
 
             // Check if user has active Google Calendar before fetching events
-            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
-                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+            let calendar_events = if state.user_repository.has_active_google_calendar()? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), &start_time, &end_time).await {
                     Ok(axum::Json(value)) => {
                         if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
                             events.iter().filter_map(|event| {
@@ -489,9 +489,9 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
             
             // Check if user has IMAP credentials before fetching emails
-            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+            let mut messages = if state.user_repository.get_imap_credentials()?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -516,7 +516,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                     }
                 }
             } else {
-                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                tracing::debug!("Skipping email fetch - user has no IMAP credentials configured");
                 Vec::new()
             };
 
@@ -528,8 +528,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
-                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -560,8 +560,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             }
 
             // Fetch Telegram messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
-                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, start_timestamp, true).await {
                     Ok(telegram_messages) => {
                         // Convert TelegramMessage to MessageInfo and add to messages
                         let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
@@ -592,8 +592,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             }
 
             // Fetch Signal messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
-                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, start_timestamp, true).await {
                     Ok(signal_messages) => {
                         // Convert Signal Message to MessageInfo and add to messages
                         let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
@@ -637,7 +637,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             // Fetch priority senders for each platform and build a lookup map
             let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
             for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let priors = state.user_repository.get_priority_senders(platform).unwrap_or(Vec::new());
                 let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
                 if !set.is_empty() {
                     tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
@@ -674,12 +674,11 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 ),
             };
                 
-            tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}", 
-                user_id, digest_hour, timezone);
+            tracing::info!("Sending morning digest for user at {}:00 in timezone {}", 
+                digest_hour, timezone);
                 
             send_notification(
                 state,
-                user_id,
                 &digest_message,
                 "morning_digest".to_string(),
                 Some("Good morning! Want to hear your morning digest?".to_string()),
@@ -690,10 +689,10 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
     Ok(())
 }
 
-pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn check_day_digest(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
-    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests()?;
+    let user_info = state.user_core.get_user_info()?;
     
     // If day digest is enabled (Some value) and we have a timezone, check the time
     if let (Some(digest_hour_str), Some(timezone)) = (day_digest.clone(), user_info.timezone) {
@@ -749,8 +748,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
 
             // Fetch calendar events for the period
-            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
-                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+            let calendar_events = if state.user_repository.has_active_google_calendar()? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), &start_time, &end_time).await {
                     Ok(axum::Json(value)) => {
                         if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
                             events.iter().filter_map(|event| {
@@ -779,9 +778,9 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let start_timestamp = cutoff_time.timestamp();
             
             // Check if user has IMAP credentials before fetching emails
-            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+            let mut messages = if state.user_repository.get_imap_credentials()?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -806,7 +805,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                     }
                 }
             } else {
-                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                tracing::debug!("Skipping email fetch - user has no IMAP credentials configured");
                 Vec::new()
             };
 
@@ -818,8 +817,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
-                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -850,8 +849,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             }
 
             // Fetch Telegram messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
-                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, start_timestamp, true).await {
                     Ok(telegram_messages) => {
                         // Convert TelegramMessage to MessageInfo and add to messages
                         let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
@@ -868,10 +867,6 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             telegram_infos.len(),
                             hours_since_prev
                         );
-                        if user_id == 1 {
-                            println!("telegram_infos: {:#?}", telegram_infos);
-                        }
-
                         // Extend messages with Telegram messages
                         messages.extend(telegram_infos);
 
@@ -885,8 +880,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             }
 
             // Fetch Signal messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
-                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, start_timestamp, true).await {
                     Ok(signal_messages) => {
                         // Convert Signal Message to MessageInfo and add to messages
                         let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
@@ -930,7 +925,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             // Fetch priority senders for each platform and build a lookup map
             let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
             for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let priors = state.user_repository.get_priority_senders(platform).unwrap_or(Vec::new());
                 let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
                 if !set.is_empty() {
                     tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
@@ -966,12 +961,11 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 ),
             };
                 
-            tracing::info!("Sending day digest for user {} at {}:00 in timezone {}", 
-                user_id, digest_hour, timezone);
+            tracing::info!("Sending day digest for user at {}:00 in timezone {}", 
+                digest_hour, timezone);
                 
             send_notification(
                 state,
-                user_id,
                 &digest_message,
                 "day_digest".to_string(),
                 Some("Hello! Want to hear your daily digest?".to_string()),
@@ -982,10 +976,10 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
     Ok(())
 }
 
-pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn check_evening_digest(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
-    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests()?;
+    let user_info = state.user_core.get_user_info()?;
     
     // If morning digest is enabled (Some value) and we have a timezone, check the time
     if let (Some(digest_hour_str), Some(timezone)) = (evening_digest.clone(), user_info.timezone) {
@@ -1056,8 +1050,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let end_time = tomorrow_end.with_timezone(&Utc).to_rfc3339();
 
             // Check if user has active Google Calendar before fetching events
-            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
-                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+            let calendar_events = if state.user_repository.has_active_google_calendar()? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), &start_time, &end_time).await {
                     Ok(axum::Json(value)) => {
                         if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
                             events.iter().filter_map(|event| {
@@ -1086,9 +1080,9 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
             
             // Check if user has IMAP credentials before fetching emails
-            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+            let mut messages = if state.user_repository.get_imap_credentials()?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -1113,7 +1107,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                     }
                 }
             } else {
-                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                tracing::debug!("Skipping email fetch - user has no IMAP credentials configured");
                 Vec::new()
             };
 
@@ -1125,8 +1119,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
-                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -1157,8 +1151,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             }
 
             // Fetch Telegram messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
-                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, start_timestamp, true).await {
                     Ok(telegram_messages) => {
                         // Convert Telegram to MessageInfo and add to messages
                         let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
@@ -1189,8 +1183,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             }
 
             // Fetch Signal messages
-            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
-                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge("signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, start_timestamp, true).await {
                     Ok(signal_messages) => {
                         // Convert Signal Message to MessageInfo and add to messages
                         let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
@@ -1234,7 +1228,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         // Fetch priority senders for each platform and build a lookup map
             let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
             for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let priors = state.user_repository.get_priority_senders(platform).unwrap_or(Vec::new());
                 let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
                 if !set.is_empty() {
                     tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
@@ -1270,12 +1264,11 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 ),
             };
                 
-            tracing::info!("Sending evening digest for user {} at {}:00 in timezone {}", 
-                user_id, digest_hour, timezone);
+            tracing::info!("Sending evening digest for user at {}:00 in timezone {}", 
+                digest_hour, timezone);
                 
             send_notification(
                 state,
-                user_id,
                 &digest_message,
                 "evening_digest".to_string(),
                 Some("Good evening! Want to hear your evening digest?".to_string()),
@@ -1444,7 +1437,6 @@ pub async fn generate_digest(
 
 pub async fn send_notification(
     state: &Arc<AppState>,
-    user_id: i32,
     notification: &str,
     content_type: String,
     first_message: Option<String>,
@@ -1455,31 +1447,31 @@ pub async fn send_notification(
         .unwrap()
         .as_secs() as i32;
     // Get user info
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
-            tracing::error!("User {} not found for notification", user_id);
+            tracing::error!("User not found for notification");
             return;
         }
         Err(e) => {
-            tracing::error!("Failed to get user {}: {}", user_id, e);
+            tracing::error!("Failed to get user: {}", e);
             return;
         }
     };
 
     // Get user settings (assuming state has a user_settings repository or similar)
-    let user_settings = match state.user_core.get_user_settings(user_id) {
+    let user_settings = match state.user_core.get_user_settings() {
         Ok(settings) => settings,
         Err(e) => {
-            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
+            tracing::error!("Failed to get settings for user: {}", e);
             return;
         }
     };
 
-    let user_info = match state.user_core.get_user_info(user_id) {
+    let user_info = match state.user_core.get_user_info() {
         Ok(info) => info,
         Err(e) => {
-            tracing::error!("Failed to get info for user {}: {}", user_id, e);
+            tracing::error!("Failed to get info for user: {}", e);
             return;
         }
     };
@@ -1498,10 +1490,6 @@ pub async fn send_notification(
 
     match notification_type {
         "call" => {
-            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_call", None).await {
-                tracing::warn!("User {} has insufficient credits: {}", user.id, e);
-                return;
-            }
 
             // Create dynamic variables (optional, can be customized based on needs)
             let dynamic_vars = std::collections::HashMap::new();
@@ -1511,7 +1499,6 @@ pub async fn send_notification(
                 content_type.clone(), // Notification type
                 first_message.clone().unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
                 notification.to_string(),
-                user.id.to_string(),
                 user_info.timezone,
             ).await {
                 Ok(mut response) => {
@@ -1541,7 +1528,6 @@ pub async fn send_notification(
 
                     // Log successful call notification
                     if let Err(e) = state.user_repository.log_usage(
-                        user_id,
                         response.get("sid").and_then(|v| v.as_str()).map(String::from),
                         content_type,
                         None,
@@ -1554,19 +1540,13 @@ pub async fn send_notification(
                     ) {
                         tracing::error!("Failed to log call notification usage: {}", e);
                     }
-
-                    // Deduct credits after successful notification
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_call", None) {
-                        tracing::error!("Failed to deduct credits for user {} after call notification: {}", user_id, e);
-                    }
                 }
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
-                    println!("Failed to send call notification for user {}", user_id);
+                    println!("Failed to send call notification for user");
                     
                     // Log failed call notification
                     if let Err(e) = state.user_repository.log_usage(
-                        user_id,
                         None,
                         content_type,
                         None,
@@ -1584,14 +1564,6 @@ pub async fn send_notification(
         }
         _ => {
 
-            // Default to SMS notification
-            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
-                tracing::warn!("User {} has insufficient credits: {}", user.id, e);
-                return;
-            }
-            if user.id == 1 {
-                println!("sending noti: {}", notification);
-            }
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &notification,
@@ -1599,8 +1571,8 @@ pub async fn send_notification(
                 &user,
             ).await {
                 Ok(response_sid) => {
-                    tracing::info!("Successfully sent notification to user {}", user_id);
-                    println!("SMS notification sent successfully for user {}", user_id);
+                    tracing::info!("Successfully sent notification to user");
+                    println!("SMS notification sent successfully for user");
                     
                     // Store notification in message history
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
@@ -1621,7 +1593,6 @@ pub async fn send_notification(
                     
                     // Log successful SMS notification
                     if let Err(e) = state.user_repository.log_usage(
-                        user_id,
                         Some(response_sid),
                         content_type,
                         None,
@@ -1634,18 +1605,13 @@ pub async fn send_notification(
                     ) {
                         tracing::error!("Failed to log SMS notification usage: {}", e);
                     }
-                    // Deduct credits after successful notification
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_msg", None) {
-                        tracing::error!("Failed to deduct credits for user {} after SMS notification: {}", user_id, e);
-                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to send notification: {}", e);
-                    println!("Failed to send SMS notification for user {}", user_id);
+                    println!("Failed to send SMS notification for user");
                     
                     // Log failed SMS notification
                     if let Err(log_err) = state.user_repository.log_usage(
-                        user_id,
                         None,
                         content_type,
                         None,

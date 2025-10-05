@@ -111,7 +111,7 @@ pub async fn imap_status(
 
     let credentials = state
         .user_repository
-        .get_imap_credentials(auth_user.user_id)
+        .get_imap_credentials()
         .map_err(|e| {
             tracing::error!("Failed to fetch IMAP credentials: {}", e);
             (

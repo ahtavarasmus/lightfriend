@@ -86,7 +86,7 @@ async fn connect_whatsapp_with_retry(
                     sleep(RETRY_DELAY).await;
                     
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(&state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -275,7 +275,7 @@ pub async fn start_whatsapp_connection(
     // Fetch user's phone number
     let phone_number = state
         .user_core
-        .find_by_id(auth_user.user_id)
+        .get_user()
         .map_err(|e| {
             tracing::error!("Failed to fetch phone number: {}", e);
             (
@@ -292,7 +292,7 @@ pub async fn start_whatsapp_connection(
 
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -388,7 +388,7 @@ pub async fn get_whatsapp_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking WhatsApp status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state.user_repository.get_bridge( "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge status: {}", e);
             (
@@ -478,7 +478,7 @@ async fn monitor_whatsapp_connection(
                                     created_at: Some(current_time),
                                 };
 
-                                state.user_repository.delete_bridge(user_id, "whatsapp")?;
+                                state.user_repository.delete_bridge("whatsapp")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
                                 // Add client to app state and start sync
@@ -558,7 +558,7 @@ async fn monitor_whatsapp_connection(
 
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ WhatsApp connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_bridge(user_id, "whatsapp")?;
+                                state.user_repository.delete_bridge("whatsapp")?;
                                 return Err(anyhow!("WhatsApp connection failed: {}", content));
                             }
                         }
@@ -572,7 +572,7 @@ async fn monitor_whatsapp_connection(
     }
 
     // If we reach here, connection timed out
-    state.user_repository.delete_bridge(user_id, "whatsapp")?;
+    state.user_repository.delete_bridge("whatsapp")?;
     Err(anyhow!("WhatsApp connection timed out after 3 minutes"))
 }
 
@@ -584,7 +584,7 @@ pub async fn resync_whatsapp(
     println!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state.user_repository.get_bridge("whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge: {}", e);
             (
@@ -601,7 +601,7 @@ pub async fn resync_whatsapp(
     };
 
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -709,7 +709,7 @@ pub async fn disconnect_whatsapp(
     tracing::debug!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state.user_repository.get_bridge("whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge: {}", e);
             (
@@ -725,7 +725,7 @@ pub async fn disconnect_whatsapp(
     };
 
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -770,7 +770,7 @@ pub async fn disconnect_whatsapp(
     }
 
     // Delete the bridge record
-    state.user_repository.delete_bridge(auth_user.user_id, "whatsapp")
+    state.user_repository.delete_bridge("whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to delete WhatsApp bridge: {}", e);
             (
@@ -780,7 +780,7 @@ pub async fn disconnect_whatsapp(
         })?;
 
     // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
+    let has_active_bridges = state.user_repository.has_active_bridges()
         .map_err(|e| {
             tracing::error!("Failed to check active bridges: {}", e);
             (

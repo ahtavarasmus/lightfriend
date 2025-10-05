@@ -87,11 +87,11 @@ pub async fn update_twilio_phone(
     auth_user: AuthUser,
     Json(req): Json<UpdateTwilioPhoneRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.update_preferred_number(auth_user.user_id, &req.twilio_phone) {
+    match state.user_core.update_preferred_number(&req.twilio_phone) {
         Ok(_) => {
             tracing::debug!("Successfully updated Twilio phone for user: {}", auth_user.user_id);
 
-            if let Ok((account_sid, auth_token)) = state.user_core.get_twilio_credentials(auth_user.user_id) {
+            if let Ok((account_sid, auth_token, _)) = state.user_core.get_twilio_credentials() {
                 let phone = req.twilio_phone.clone();
                 let user_id = auth_user.user_id;
                 let state_clone = state.clone();
@@ -124,7 +124,7 @@ pub async fn update_twilio_creds(
     auth_user: AuthUser,
     Json(req): Json<UpdateTwilioCredsRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    let user_opt = match state.user_core.find_by_id(auth_user.user_id) {
+    let user_opt = match state.user_core.get_user() {
         Ok(opt) => opt,
         Err(e) => {
             tracing::error!("Failed to fetch user: {}", e);
@@ -146,7 +146,7 @@ pub async fn update_twilio_creds(
         }
     };
 
-    match state.user_core.update_twilio_credentials(auth_user.user_id, &req.account_sid, &req.auth_token) {
+    match state.user_core.update_twilio_credentials(&req.account_sid, &req.auth_token) {
         Ok(_) => {
             tracing::debug!("Successfully updated Twilio credentials for user: {}", auth_user.user_id);
 
@@ -454,177 +454,6 @@ pub async fn setup_subdomain(
     }))
 }
 
-pub async fn self_hosted_status(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<SelfHostedStatusResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Check if environment is self-hosted
-    let env_type = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "normal".to_string());
-    
-    if env_type == "self_hosted" {
-        // Check if there are any users in the database
-        match state.user_core.get_all_users() {
-            Ok(users) => {
-                let status = if users.is_empty() {
-                    "self-hosted-signup"
-                } else {
-                    "self-hosted-login"
-                };
-                println!("status: {}", status);
-                Ok(Json(SelfHostedStatusResponse { status: status.to_string() }))
-            }
-            Err(e) => {
-                println!("Database error while checking users: {}", e);
-                Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Database error"}))
-                ))
-            }
-        }
-    } else {
-        println!("status: normal");
-        Ok(Json(SelfHostedStatusResponse {
-            status: "normal".to_string()
-        }))
-    }
-}
-
-pub async fn check_pairing(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PairingVerificationRequest>,
-) -> Result<Json<PairingVerificationResponse>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Attempting to verify pairing code for server instance: {}", req.server_instance_id);
-
-    // Verify the pairing code and update server instance ID
-    match state.user_core.verify_pairing_code(&req.pairing_code, &req.server_instance_id) {
-        Ok((true, number)) => {
-            println!("Pairing code verified successfully for server instance: {}", req.server_instance_id);
-            Ok(Json(PairingVerificationResponse {
-                valid: true,
-                number: number.unwrap_or("".to_string()),
-                message: "Pairing code verified successfully".to_string(),
-            }))
-        },
-        Ok((false, number)) => {
-            println!("Invalid pairing code provided for server instance: {}", req.server_instance_id);
-            Ok(Json(PairingVerificationResponse {
-                valid: false,
-                number: number.unwrap_or("".to_string()),
-                message: "Invalid pairing code".to_string(),
-            }))
-        },
-        Err(e) => {
-            println!("Database error while verifying pairing code: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to verify pairing code due to database error"}))
-            ))
-        }
-    }
-}
-
-// generates a new pairing code for the user. normally this is done on stripe subscription webhook.
-pub async fn generate_pairing_code(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser, 
-) -> Result<Json<GeneratePairingCodeResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Generate a random 6-character pairing code
-    let pairing_code: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(6)
-        .map(char::from)
-        .collect::<String>()
-        .to_uppercase();
-
-    // Save the new pairing code 
-    if let Err(e) = state.user_core.set_server_instance_id(auth_user.user_id, &pairing_code.as_str()) {
-        println!("Failed to save pairing code: {}", e);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to generate pairing code"}))
-        ));
-    }
-
-    Ok(Json(GeneratePairingCodeResponse {
-        pairing_code
-    }))
-}
-
-pub async fn self_host_ping(
-    State(state): State<Arc<AppState>>,
-    Json(ping_req): Json<SelfHostPingRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received self-host ping from instance: {}", ping_req.instance_id);
-
-    // Find user with this instance ID
-    match state.user_core.find_user_by_pairing_code(&ping_req.instance_id) {
-        Ok(Some(user_id)) => {
-            tracing::debug!("Self-host ping successful for instance: {}", ping_req.instance_id);
-            Ok(StatusCode::OK)
-        },
-        Ok(None) => {
-            tracing::error!("Invalid instance ID received in ping: {}", ping_req.instance_id);
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Invalid instance ID"}))
-            ))
-        },
-        Err(e) => {
-            tracing::error!("Database error while processing ping: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
-            ))
-        }
-    }
-}
-
-pub async fn update_server_ip(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(req): Json<UpdateServerIpRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-
-    // Fetch the user to check sub_tier
-    let user = match state.user_core.find_by_id(auth_user.user_id) {
-        Ok(Some(u)) => u,
-        Ok(None) => return Err((StatusCode::NOT_FOUND, Json(json!({"error": "User not found"})))),
-        Err(e) => {
-            tracing::error!("Failed to fetch user: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"}))));
-        }
-    };
-
-    // Check if sub_tier is Some("tier 3")
-    if user.sub_tier != Some("tier 3".to_string()) {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Requires self-hosted subscription"}))));
-    }
-
-    // Update the server_ip in user_settings
-    match state.user_core.update_server_ip(auth_user.user_id, &req.server_ip) {
-        Ok(_) => {
-            tracing::debug!("Successfully updated server IP for user: {}", auth_user.user_id);
-
-            // Call setup_subdomain to update DNS if necessary
-            let setup_req = SetupSubdomainRequest {
-                ip_address: req.server_ip.clone(),
-            };
-            match setup_subdomain(State(state.clone()), auth_user.clone(), Json(setup_req)).await {
-                Ok(_) => Ok(StatusCode::OK),
-                Err(e) => {
-                    tracing::error!("Failed to setup subdomain: {:?}", e);
-                    Err(e)
-                }
-            }
-        },
-        Err(e) => {
-            tracing::error!("Failed to update server IP: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update server IP"}))
-            ))
-        }
-    }
-}
 
 use reqwest::Client;
 use crate::handlers::auth_dtos::LoginRequest;
@@ -633,6 +462,11 @@ use crate::handlers::auth_dtos::LoginRequest;
 struct CheckCredsResponse {
     user_id: String,
     phone_number: String,
+    preferred_number: String,
+    phone_number_country: String,
+    messaging_service_sid: Option<String>,
+    twilio_account_sid: Option<String>,
+    twilio_auth_token: Option<String>,
 }
 
 use axum::response::IntoResponse;
@@ -684,53 +518,14 @@ pub async fn self_hosted_login(
         ))?;
     let main_phone_number = check_data.phone_number;
     println!("Credentials verified successfully for main user_id: {}", check_data.user_id);
-    // Check if local user with id == 1 exists
-    let user = match state.user_core.find_by_id(1) {
-        Ok(Some(mut u)) => {
-            // User exists, check if the email matches the stored email
-            if u.email != login_req.email {
-                println!("Email mismatch for existing self-hosted user");
-                return Err((
-                    axum::http::StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Invalid credentials for this instance"}))
-                ));
-            }
-            u
-        }
+    let user = match state.user_core.get_user() {
+        Ok(Some(mut u)) => u,
         Ok(None) => {
-            // No user exists, create a new user with provided email, random password, and phone from main
-            // Generate random password
-            let random_password: String = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(32)
-                .map(char::from)
-                .collect();
-            let password_hash = bcrypt::hash(&random_password, bcrypt::DEFAULT_COST)
-                .map_err(|e| {
-                    println!("Password hashing failed: {}", e);
-                    (
-                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "Password hashing failed"}))
-                    )
-                })?;
-            // Calculate time_to_live
-            let five_minutes_from_now = Utc::now()
-                .checked_add_signed(Duration::minutes(5))
-                .expect("Failed to calculate timestamp")
-                .timestamp() as i32;
             // Create new user
             let new_user = NewUser {
-                email: login_req.email.clone(),
-                password_hash,
                 phone_number: main_phone_number.clone(),
-                time_to_live: five_minutes_from_now,
-                verified: false,
                 credits: 0.00,
                 credits_left: 0.00,
-                charge_when_under: false,
-                waiting_checks_count: 0,
-                discount: false,
-                sub_tier: None,
             };
             state.user_core.create_user(new_user).map_err(|e| {
                 println!("User creation failed: {}", e);
@@ -741,7 +536,7 @@ pub async fn self_hosted_login(
             })?;
             println!("New self-hosted user created successfully");
             // Get the newly created user
-            state.user_core.find_by_email(&login_req.email)
+            state.user_core.get_user()
                 .map_err(|e| (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
@@ -761,110 +556,13 @@ pub async fn self_hosted_login(
     };
 
     // Set phone country
-    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(&state, &user.phone_number).await {
         tracing::error!("Failed to set phone country during self-hosted login: {}", e);
         // Proceed anyway
     }
-    // Set preferred number if US
-    if user.phone_number.starts_with("+1") {
-        if let Err(e) = state.user_core.set_preferred_number_to_us_default(user.id) {
-            tracing::error!("Failed to set preferred number during self-hosted login: {}", e);
-            // Proceed anyway
-        }
-    }
-
-    // Generate and update server_key on self-hosted
-    let server_key = generate_api_key(32);
-    state.user_core.update_server_key(user.id, &server_key).map_err(|e| {
-        println!("Failed to update server key on self-hosted: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to update server key"})),
-        )
-    })?;
-
-    // Update server_key on main server
-    let update_req = json!({
-        "email": login_req.email,
-        "password": login_req.password,
-        "server_key": server_key
-    });
-    let update_resp = client
-        .post("https://lightfriend.ai/api/profile/update-server-key")
-        .json(&update_req)
-        .send()
-        .await
-        .map_err(|_| (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to update main server"}))
-        ))?;
-    if !update_resp.status().is_success() {
-        println!("Failed to update server key on main server");
-        return Err((
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to update main server"}))
-        ));
-    }
-
     generate_tokens_and_response(user.id)
 }
 
-#[derive(Deserialize)]
-pub struct UpdateServerKeyRequest {
-    email: String,
-    password: String,
-    server_key: String,
-}
-
-pub async fn update_server_key_main(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<UpdateServerKeyRequest>,
-) -> impl axum::response::IntoResponse {
-    println!("Update server key attempt for email: {}", req.email);
-    // Define rate limit: 5 attempts per minute
-    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
-    let limiter_key = req.email.clone();
-    // Get or create a keyed rate limiter for this email
-    let entry = state.login_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
-        println!("Rate limit exceeded for email: [redacted]");
-        return (axum::http::StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "Too many attempts, try again later"}))).into_response();
-    }
-    let user = match state.user_core.find_by_email(&req.email) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            println!("User not found for email: [redacted]");
-            return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid credentials"}))).into_response();
-        }
-        Err(_) => {
-            println!("Database error during update server key");
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"}))).into_response();
-        }
-    };
-    match bcrypt::verify(&req.password, &user.password_hash) {
-        Ok(valid) => {
-            if valid {
-                println!("Credentials verified for update server key, user_id: {}", user.id);
-                if let Err(e) = state.user_core.update_server_key(user.id, &req.server_key) {
-                    println!("Failed to update server key: {}", e);
-                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to update server key"}))).into_response();
-                }
-                (axum::http::StatusCode::OK, Json(json!({"message": "Server key updated"}))).into_response()
-            } else {
-                println!("Password verification failed for email: [redacted]");
-                (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid credentials"}))).into_response()
-            }
-        }
-        Err(err) => {
-            println!("Password verification error: {:?}", err);
-            (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid credentials"}))).into_response()
-        }
-    }
-}
 
 fn generate_api_key(length: usize) -> String {
     rand::thread_rng()

@@ -30,13 +30,9 @@ use sentry;
 mod handlers {
     pub mod auth_middleware;
     pub mod auth_dtos;
-    pub mod admin_handlers;
     pub mod auth_handlers;
     pub mod profile_handlers;
     pub mod filter_handlers;
-    pub mod twilio_handlers;
-    pub mod billing_handlers;
-    pub mod stripe_handlers;
     pub mod google_calendar;
     pub mod google_calendar_auth;
     pub mod imap_auth;
@@ -61,7 +57,6 @@ mod handlers {
 mod utils {
     pub mod encryption;
     pub mod tool_exec;
-    pub mod usage;
     pub mod matrix_auth;
     pub mod bridge;
     pub mod elevenlabs_prompts;
@@ -81,13 +76,10 @@ mod tool_call_utils {
     pub mod bridge;
 }
 mod api {
-    pub mod vapi_endpoints;
-    pub mod vapi_dtos;
     pub mod twilio_sms;
     pub mod twilio_utils;
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
-    pub mod shazam_call;
 }
 mod error;
 mod models {
@@ -96,7 +88,6 @@ mod models {
 mod repositories {
     pub mod user_core;
     pub mod user_repository;
-    pub mod user_subscriptions;
     pub mod connection_auth;
 }
 mod schema;
@@ -106,14 +97,14 @@ mod jobs {
 use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use handlers::{
-    auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
-    admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
+    auth_handlers, self_host_handlers, profile_handlers,
+    google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
-    signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
+    signal_auth, signal_handlers, filter_handlers, uber_auth,
     messenger_auth, messenger_handlers, instagram_auth, instagram_handlers,
 };
-use api::{twilio_sms, elevenlabs, elevenlabs_webhook, shazam_call};
+use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 async fn health_check() -> &'static str {
     "OK"
@@ -121,11 +112,8 @@ async fn health_check() -> &'static str {
 type GoogleOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 type UberOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 pub struct AppState {
-    db_pool: DbPool,
     user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
-    sessions: shazam_call::CallSessions,
-    user_calls: shazam_call::UserCallMap,
     google_calendar_oauth_client: GoogleOAuthClient,
     google_tasks_oauth_client: GoogleOAuthClient,
     uber_oauth_client: GoogleOAuthClient,
@@ -134,7 +122,6 @@ pub struct AppState {
     password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
-    matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
     phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
@@ -146,11 +133,11 @@ pub fn validate_env() {
     let required_vars = [
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "AUS_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
+        "AUS_PHONE",
         "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
-        "SHAZAM_PHONE_NUMBER", "SHAZAM_API_KEY", "SERVER_URL",
+        "SERVER_URL",
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID",
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
@@ -220,14 +207,10 @@ async fn main() {
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/tasks/callback", server_url_oauth)).expect("Invalid redirect URL"));
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
-    let matrix_invitation_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
-        db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
-        sessions: Arc::new(Mutex::new(HashMap::new())),
-        user_calls: Arc::new(Mutex::new(HashMap::new())),
         google_calendar_oauth_client,
         google_tasks_oauth_client,
         uber_oauth_client,
@@ -237,7 +220,6 @@ async fn main() {
         password_reset_verify_limiter: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
-        matrix_invitation_tasks,
         matrix_clients,
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
@@ -245,11 +227,8 @@ async fn main() {
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
     });
     let twilio_routes = Router::new()
-        .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
+        .route("/api/sms/server", post(twilio_sms::handle_incoming_sms))
         .layer(middleware::from_fn_with_state(state.clone(), api::twilio_utils::validate_twilio_signature));
-    let user_twilio_routes = Router::new()
-        .route("/api/sms/server/{user_id}", post(twilio_sms::handle_incoming_sms))
-        .route_layer(middleware::from_fn(api::twilio_utils::validate_user_twilio_signature));
     let textbee_routes = Router::new()
         .route("/api/sms/textbee-server", post(twilio_sms::handle_textbee_sms));
         // textbee requests are validated using device_id and phone number combo
@@ -260,7 +239,6 @@ async fn main() {
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
     let elevenlabs_routes = Router::new()
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
-        .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/calendar/create", get(elevenlabs::handle_calendar_event_creation))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
@@ -278,54 +256,21 @@ async fn main() {
         .route("/api/call/send-chat-message", post(elevenlabs::handle_send_chat_message))
         .route("/api/call/directions", post(elevenlabs::handle_directions_tool_call))
         .route("/api/call/firecrawl", post(elevenlabs::handle_firecrawl_tool_call))
-        .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
     let auth_built_in_webhook_routes = Router::new()
-        .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
         .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback))
         .route("/api/auth/uber/callback", get(uber_auth::uber_callback));
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
-        .route("/api/unsubscribe", get(admin_handlers::unsubscribe))
-        .route("/api/login", post(auth_handlers::login))
-        .route("/api/register", post(auth_handlers::register))
-        .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
-        .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
-        .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
-        .route("/api/phone-verify/verify", post(auth_handlers::verify_phone_verify))
-        .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login))
-        .route("/api/check-creds", post(self_host_handlers::update_server_key_main))
-        .route("/api/self-hosting-status", get(self_host_handlers::self_hosted_status))
-        .route("/api/check-pairing", post(self_host_handlers::check_pairing))
-        .route("/api/self-host-ping", post(self_host_handlers::self_host_ping))
-        .route("/api/country-info", post(twilio_handlers::get_country_info));
-    // Admin routes that need admin authentication
-    let admin_routes = Router::new()
-        .route("/testing", post(auth_handlers::testing_handler))
-        .route("/api/admin/users", get(auth_handlers::get_users))
-        .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
-        .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
-        .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
-        .route("/api/admin/broadcast-email", post(admin_handlers::broadcast_email))
-        .route("/api/admin/usage-logs", get(admin_handlers::get_usage_logs))
-        .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
-        .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
-        .route("/api/admin/test-sms", post(admin_handlers::test_sms))
-        .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
-        .route("/api/admin/monthly-credits/{user_id}/{amount}", post(admin_handlers::update_monthly_credits))
-        .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
-        .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
+        .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login));
     // Protected routes that need user authentication
     let protected_routes = Router::new()
-        .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
-        .route("/api/profile/generate-pairing-code", post(self_host_handlers::generate_pairing_code))
-        .route("/api/profile/server-ip", post(self_host_handlers::update_server_ip))
         .route("/api/profile/twilio-phone", post(self_host_handlers::update_twilio_phone))
         .route("/api/profile/twilio-creds", post(self_host_handlers::update_twilio_creds))
         .route("/api/profile/textbee-creds", post(self_host_handlers::update_textbee_creds))
@@ -340,12 +285,6 @@ async fn main() {
         .route("/api/profile/proactive-agent", post(profile_handlers::update_proactive_agent_on))
         .route("/api/profile/proactive-agent", get(profile_handlers::get_proactive_agent_on))
         .route("/api/profile/get_nearby_places", get(profile_handlers::get_nearby_places))
-        .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
-        .route("/api/billing/usage", post(billing_handlers::get_usage_data))
-        .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
-        .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
-        .route("/api/stripe/unified-subscription-checkout/{user_id}", post(stripe_handlers::create_unified_subscription_checkout))
-        .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
         .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
         .route("/api/auth/google/calendar/connection", delete(google_calendar_auth::delete_google_calendar_connection))
         .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
@@ -428,13 +367,8 @@ async fn main() {
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     let app = Router::new()
         .merge(public_routes)
-        .merge(admin_routes)
         .merge(protected_routes)
         .merge(auth_built_in_webhook_routes)
-        .route("/api/twiml", get(shazam_call::twiml_handler).post(shazam_call::twiml_handler))
-        .route("/api/stream", get(shazam_call::stream_handler))
-        .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
-        .merge(user_twilio_routes) // More specific routes first
         .merge(textbee_routes)
         .merge(twilio_routes) // More general routes last
         .merge(elevenlabs_routes)
@@ -468,15 +402,6 @@ async fn main() {
     let state_for_scheduler = state.clone();
     tokio::spawn(async move {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
-    });
-    let shazam_state = crate::api::shazam_call::ShazamState {
-        sessions: state.sessions.clone(),
-        user_calls: state.user_calls.clone(),
-        user_core: state.user_core.clone(),
-        user_repository: state.user_repository.clone(),
-    };
-    tokio::spawn(async move {
-        crate::api::shazam_call::process_audio_with_shazam(Arc::new(shazam_state)).await;
     });
     use tokio::net::TcpListener;
     let port = match std::env::var("ENVIRONMENT").as_deref() {

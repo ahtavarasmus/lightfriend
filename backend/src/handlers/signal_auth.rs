@@ -79,7 +79,7 @@ async fn connect_signal_with_retry(
                     sleep(RETRY_DELAY).await;
                    
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(&state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -231,7 +231,6 @@ use matrix_sdk::media::MediaFormat;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::media::MediaRequestParameters;
 use base64::engine::general_purpose::STANDARD as Base64Engine;
-use matrix_sdk::ruma::MxcUri;
 use base64::Engine;
 
 pub async fn start_signal_connection(
@@ -241,7 +240,7 @@ pub async fn start_signal_connection(
     tracing::debug!("🚀 Starting Signal connection process for user {}", auth_user.user_id);
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -360,7 +359,7 @@ pub async fn get_signal_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking Signal status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "signal")
+    let bridge = state.user_repository.get_bridge("signal")
         .map_err(|e| {
             tracing::error!("Failed to get Signal bridge status: {}", e);
             (
@@ -438,7 +437,7 @@ async fn monitor_signal_connection(
                                     data: None,
                                     created_at: Some(current_time),
                                 };
-                                state.user_repository.delete_bridge(user_id, "signal")?;
+                                state.user_repository.delete_bridge("signal")?;
                                 state.user_repository.create_bridge(new_bridge)?;
                                 // Add client to app state and start sync
                                 let mut matrix_clients = state.matrix_clients.lock().await;
@@ -493,7 +492,7 @@ async fn monitor_signal_connection(
                             ];
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ Signal connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_bridge(user_id, "signal")?;
+                                state.user_repository.delete_bridge("signal")?;
                                 return Err(anyhow!("Signal connection failed: {}", content));
                             }
                         }
@@ -505,7 +504,7 @@ async fn monitor_signal_connection(
         sleep(Duration::from_secs(3)).await; // Reduced from 5 to 3 seconds
     }
     // If we reach here, connection timed out
-    state.user_repository.delete_bridge(user_id, "signal")?;
+    state.user_repository.delete_bridge("signal")?;
     Err(anyhow!("Signal connection timed out after 3 minutes"))
 }
 
@@ -515,7 +514,7 @@ pub async fn resync_signal(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     println!("🔄 Starting Signal resync process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "signal")
+    let bridge = state.user_repository.get_bridge("signal")
         .map_err(|e| {
             tracing::error!("Failed to get Signal bridge: {}", e);
             (
@@ -530,7 +529,7 @@ pub async fn resync_signal(
         ));
     };
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -606,7 +605,7 @@ pub async fn disconnect_signal(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("🔌 Starting Signal disconnection process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "signal")
+    let bridge = state.user_repository.get_bridge("signal")
         .map_err(|e| {
             tracing::error!("Failed to get Signal bridge: {}", e);
             (
@@ -620,7 +619,7 @@ pub async fn disconnect_signal(
         })));
     };
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -704,7 +703,7 @@ pub async fn disconnect_signal(
         sync_task.abort();
     }
     // Delete the bridge record
-    state.user_repository.delete_bridge(auth_user.user_id, "signal")
+    state.user_repository.delete_bridge("signal")
         .map_err(|e| {
             tracing::error!("Failed to delete Signal bridge: {}", e);
             (
@@ -713,7 +712,7 @@ pub async fn disconnect_signal(
             )
         })?;
     // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
+    let has_active_bridges = state.user_repository.has_active_bridges()
         .map_err(|e| {
             tracing::error!("Failed to check active bridges: {}", e);
             (

@@ -81,7 +81,7 @@ async fn connect_messenger_with_retry(
                     sleep(RETRY_DELAY).await;
                   
                     // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(&state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -180,7 +180,7 @@ pub async fn start_messenger_connection(
     tracing::debug!("🚀 Starting Messenger connection process for user {}", auth_user.user_id);
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -263,7 +263,7 @@ pub async fn get_messenger_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking Messenger status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state.user_repository.get_bridge("messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge status: {}", e);
             (
@@ -341,7 +341,7 @@ async fn monitor_messenger_connection(
                                     data: None,
                                     created_at: Some(current_time),
                                 };
-                                state.user_repository.delete_bridge(user_id, "messenger")?;
+                                state.user_repository.delete_bridge("messenger")?;
                                 state.user_repository.create_bridge(new_bridge)?;
                                 // Add client to app state and start sync
                                 let mut matrix_clients = state.matrix_clients.lock().await;
@@ -396,7 +396,7 @@ async fn monitor_messenger_connection(
                             ];
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ Messenger connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_bridge(user_id, "messenger")?;
+                                state.user_repository.delete_bridge("messenger")?;
                                 return Err(anyhow!("Messenger connection failed: {}", content));
                             }
                         }
@@ -408,7 +408,7 @@ async fn monitor_messenger_connection(
         sleep(Duration::from_secs(3)).await; // Reduced from 5 to 3 seconds
     }
     // If we reach here, connection timed out
-    state.user_repository.delete_bridge(user_id, "messenger")?;
+    state.user_repository.delete_bridge("messenger")?;
     Err(anyhow!("Messenger connection timed out after 3 minutes"))
 }
 
@@ -418,7 +418,7 @@ pub async fn resync_messenger(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     println!("🔄 Starting Messenger resync process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state.user_repository.get_bridge("messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge: {}", e);
             (
@@ -433,7 +433,7 @@ pub async fn resync_messenger(
         ));
     };
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -497,7 +497,7 @@ pub async fn disconnect_messenger(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("🔌 Starting Messenger disconnection process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state.user_repository.get_bridge("messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge: {}", e);
             (
@@ -511,7 +511,7 @@ pub async fn disconnect_messenger(
         })));
     };
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -548,7 +548,7 @@ pub async fn disconnect_messenger(
         sleep(Duration::from_secs(5)).await;
     }
     // Delete the bridge record
-    state.user_repository.delete_bridge(auth_user.user_id, "messenger")
+    state.user_repository.delete_bridge("messenger")
         .map_err(|e| {
             tracing::error!("Failed to delete Messenger bridge: {}", e);
             (
@@ -557,7 +557,7 @@ pub async fn disconnect_messenger(
             )
         })?;
     // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
+    let has_active_bridges = state.user_repository.has_active_bridges()
         .map_err(|e| {
             tracing::error!("Failed to check active bridges: {}", e);
             (

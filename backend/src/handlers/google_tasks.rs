@@ -77,7 +77,7 @@ pub async fn google_tasks_status(
     tracing::info!("Checking Google Tasks connection status");
 
     // Check if user has active Google Calendar connection
-    match state.user_repository.has_active_google_tasks(auth_user.user_id) {
+    match state.user_repository.has_active_google_tasks() {
         Ok(has_connection) => {
             tracing::info!("Successfully checked tasks connection status for user {}: {}", auth_user.user_id, has_connection);
             Ok(Json(json!({
@@ -215,7 +215,7 @@ pub async fn create_task(
     task_request: &CreateTaskRequest,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get Google Tasks tokens
-    let (access_token, refresh_token) = match state.user_repository.get_google_tasks_tokens(user_id) {
+    let (access_token, refresh_token) = match state.user_repository.get_google_tasks_tokens() {
         Ok(Some((access, refresh))) => (access, refresh),
         Ok(None) => {
             return Err((
@@ -264,7 +264,6 @@ pub async fn create_task(
 
             // Update the access token in the database
             state.user_repository.update_google_tasks_access_token(
-                user_id,
                 new_access_token.clone().as_str(),
                 expires_in,
             ).map_err(|e| (
@@ -358,7 +357,7 @@ pub async fn get_tasks(
     user_id: i32,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get Google Tasks tokens
-    let (access_token, refresh_token) = match state.user_repository.get_google_tasks_tokens(user_id) {
+    let (access_token, refresh_token) = match state.user_repository.get_google_tasks_tokens() {
         Ok(Some((access, refresh))) => (access, refresh),
         Ok(None) => {
             return Err((
@@ -407,7 +406,6 @@ pub async fn get_tasks(
 
             // Update the access token in the database
             state.user_repository.update_google_tasks_access_token(
-                user_id,
                 new_access_token.clone().as_str(),
                 expires_in,
             ).map_err(|e| (

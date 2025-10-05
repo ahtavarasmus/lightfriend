@@ -125,7 +125,7 @@ pub async fn handle_fetch_calendar_events(
         }
     };
 
-    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, &c.start, &c.end).await {
+    match crate::handlers::google_calendar::handle_calendar_fetching(&state, &c.start, &c.end).await {
         Ok(Json(response)) => {
             if let Some(events) = response.get("events") {
                 let empty_vec = Vec::new();
@@ -237,7 +237,7 @@ pub async fn handle_create_calendar_event(
     let duration_minutes: i32 = args.duration_minutes.parse().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
     args.duration_minutes = duration_minutes.to_string();  // Optional: store back as string if needed, but not necessary
     
-    let user_info = state.user_core.get_user_info(user_id)?;
+    let user_info = state.user_core.get_user_info()?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
    
     // Parse the start time

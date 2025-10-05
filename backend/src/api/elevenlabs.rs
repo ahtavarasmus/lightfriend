@@ -164,7 +164,7 @@ pub async fn fetch_assistant(
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
           
-            let user_settings = match state.user_core.get_user_settings(user.id) {
+            let user_settings = match state.user_core.get_user_settings() {
                 Ok(settings) => settings,
                 Err(e) => {
                     error!("Failed to get user settings: {}", e);
@@ -177,7 +177,7 @@ pub async fn fetch_assistant(
                     ));
                 }
             };
-            let user_info= match state.user_core.get_user_info(user.id) {
+            let user_info= match state.user_core.get_user_info() {
                 Ok(settings) => settings,
                 Err(e) => {
                     error!("Failed to get user settings: {}", e);
@@ -190,42 +190,6 @@ pub async fn fetch_assistant(
                     ));
                 }
             };
-            // If user is not verified, verify them
-            if !user.verified {
-                if let Err(e) = state.user_core.verify_user(user.id) {
-                    tracing::error!("Error verifying user: {}", e);
-                    // Continue even if verification fails
-                } else {
-                    if user_settings.agent_language == "fi" {
-                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string();
-                        conversation_config_override.tts.voice_id = fi_voice_id.clone();
-                    } else if user_settings.agent_language == "de" {
-                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string();
-                        conversation_config_override.tts.voice_id = de_voice_id.clone();
-                    } else {
-                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string();
-                        conversation_config_override.tts.voice_id = us_voice_id.clone();
-                    }
-                }
-            } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
-                // Send insufficient credits message
-                let error_message = "Insufficient credits to make a voice call".to_string();
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_message,
-                    None,
-                    &user,
-                ).await {
-                    error!("Failed to send insufficient credits message: {}", e);
-                }
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "error": "Insufficient credits balance",
-                        "message": "Please add more credits to your account to continue on lightfriend website",
-                    }))
-                ));
-            }
             if user_settings.agent_language == "fi" {
                 conversation_config_override.agent.first_message = "Moi {{name}}!".to_string();
                 conversation_config_override.tts.voice_id = fi_voice_id.clone();
@@ -306,7 +270,6 @@ pub async fn fetch_assistant(
             let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
             // log usage and start call
             if let Err(e) = state.user_repository.log_usage(
-                user.id,
                 Some(call_sid),
                 "call".to_string(),
                 None,
@@ -387,7 +350,7 @@ pub async fn handle_create_waiting_check_tool_call(
         }
     };
     // Verify user exists
-    match state.user_core.find_by_id(user_id) {
+    match state.user_core.get_user() {
         Ok(Some(_user)) => {
             let new_check = crate::models::user_models::NewWaitingCheck {
                 user_id: user_id,
@@ -453,7 +416,7 @@ pub async fn handle_update_monitoring_status_tool_call(
     tracing::debug!("Received monitoring status update request");
 
     // Verify user exists
-    match state.user_core.find_by_id(payload.user_id) {
+    match state.user_core.get_user() {
         Ok(Some(_user)) => {
             match state.user_core.update_proactive_agent_on(payload.user_id, payload.enabled) {
                 Ok(_) => {
@@ -518,7 +481,7 @@ pub async fn handle_email_fetch_tool_call(
     };
     tracing::debug!("Received email fetch request for user: {}", user_id);
     
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false, false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, true, Some(10), false, false).await {
         Ok(emails) => {
             if emails.is_empty() {
                 return Ok(Json(json!({
@@ -627,35 +590,9 @@ pub async fn handle_send_sms_tool_call(
     Json(payload): Json<MessageCallPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Received SMS send request");
-    
-    // Get user_id from query params
-    let user_id_str = match params.get("user_id") {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing user_id query parameter"
-                }))
-            ));
-        }
-    };
-
-    // Convert String to i32
-    let user_id: i32 = match user_id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid user_id format, must be an integer"
-                }))
-            ));
-        }
-    };
 
     // Fetch user from user_repository
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -739,67 +676,6 @@ pub async fn handle_send_sms_tool_call(
     }
 }
 
-pub async fn handle_shazam_tool_call(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received shazam request with params: {:?}", params);
-    
-    // Get user_id from query params
-    let user_id_str = match params.get("user_id") {
-        Some(id) => {
-            tracing::debug!("Found user_id in params: {}", id);
-            id
-        },
-        None => {
-            tracing::error!("Missing user_id in query parameters");
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing user_id query parameter"
-                }))
-            ));
-        }
-    };
-
-    // Convert String to i32
-    let user_id: i32 = match user_id_str.parse() {
-        Ok(id) => {
-            tracing::debug!("Successfully parsed user_id to integer: {}", id);
-            id
-        },
-        Err(e) => {
-            tracing::error!("Failed to parse user_id '{}' to integer: {}", user_id_str, e);
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid user_id format, must be an integer"
-                }))
-            ));
-        }
-    };
-
-    // Spawn a new thread to handle the Shazam call
-    let state_clone = Arc::clone(&state);
-    let user_id_string = user_id.to_string();
-    
-    tracing::info!("Spawning new task for Shazam call for user_id: {}", user_id);
-    tokio::spawn(async move {
-        tracing::debug!("Starting Shazam call for user_id: {}", user_id_string);
-        crate::api::shazam_call::start_call_for_user(
-            axum::extract::Path(user_id_string),
-            axum::extract::State(state_clone),
-        ).await;
-        tracing::debug!("Completed Shazam call task for user_id: {}", user_id);
-    });
-
-    tracing::info!("Successfully initiated Shazam call for user_id: {}", user_id);
-    Ok(Json(json!({
-        "status": "success",
-        "message": "Shazam call initiated",
-        "user_id": user_id
-    })))
-}
 
 pub async fn handle_perplexity_tool_call(
     State(state): State<Arc<AppState>>,
@@ -896,7 +772,7 @@ pub async fn handle_calendar_tool_call(
     };
 
     // Call the handler in google_calendar.rs
-    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, start, end).await {
+    match crate::handlers::google_calendar::handle_calendar_fetching(&state, start, end).await {
         Ok(response) => response,
         Err((_, json_response)) => json_response,
     }
@@ -1055,7 +931,7 @@ pub async fn handle_email_search_tool_call(
     };
 
     // First fetch recent emails with increased limit
-    match fetch_emails_imap(&state, user_id, true, Some(50), false, false).await {
+    match fetch_emails_imap(&state, true, Some(50), false, false).await {
         Ok(emails) => {
             let search_term = payload.search_term.to_lowercase();
             let search_type = payload.search_type.as_deref().unwrap_or("all");
@@ -1356,7 +1232,7 @@ pub async fn handle_send_chat_message(
         }
     };
     // Get user from database
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1378,7 +1254,7 @@ pub async fn handle_send_chat_message(
     };
     let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
     // Check bridge connection
-    let bridge = match state.user_repository.get_bridge(user_id, &platform) {
+    let bridge = match state.user_repository.get_bridge(&platform) {
         Ok(bridge) => bridge,
         Err(e) => {
             error!("Failed to get bridge: {}", e);
@@ -1407,7 +1283,7 @@ pub async fn handle_send_chat_message(
             }))
         ));
     }
-    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
+    let client = match crate::utils::matrix_auth::get_cached_client(&state).await {
         Ok(client) => client,
         Err(e) => {
             let error_msg = format!("Failed to get client: {}", e);
@@ -1558,7 +1434,7 @@ pub async fn handle_email_send(
         }
     };
     // Get user from database
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1663,7 +1539,7 @@ pub async fn handle_respond_to_email(
         }
     };
     // Get user from database
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -2017,7 +1893,7 @@ pub async fn handle_fetch_recent_messages_tool_call(
     // Set start_time to 2 days ago
     let start_timestamp = (chrono::Utc::now() - chrono::Duration::days(1)).timestamp();
     // Fetch messages using the existing utility function
-    match crate::utils::bridge::fetch_bridge_messages(&platform, &state, user_id, start_timestamp, false).await {
+    match crate::utils::bridge::fetch_bridge_messages(&platform, &state, start_timestamp, false).await {
         Ok(messages) => {
             if messages.is_empty() {
                 let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
@@ -2087,7 +1963,7 @@ pub async fn handle_cancel_pending_message_tool_call(
     };
     tracing::debug!("Received cancel pending message request for user: {}", user_id);
     // Verify user exists
-    match state.user_core.find_by_id(user_id) {
+    match state.user_core.get_user() {
         Ok(Some(_user)) => {
             match crate::tool_call_utils::utils::cancel_pending_message(&state, user_id).await {
                 Ok(true) => {
@@ -2147,14 +2023,13 @@ pub async fn make_notification_call(
     content_type: String,
     notification_first_message: String,
     notification_message: String,
-    user_id: String,
     user_timezone: Option<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user information to check for discount tier
-    let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
-            error!("User not found for ID: {}", user_id);
+            error!("User not found");
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({
@@ -2175,7 +2050,7 @@ pub async fn make_notification_call(
         }
     };
     let to_phone_number = user.phone_number.clone();
-    let user_settings = match state.user_core.get_user_settings(user.id) {
+    let user_settings = match state.user_core.get_user_settings() {
         Ok(settings) => settings,
         Err(e) => {
             error!("Failed to get user settings: {}", e);
@@ -2192,7 +2067,7 @@ pub async fn make_notification_call(
     let country = match user.phone_number_country {
         Some(c) => c,
         None => {
-            match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+            match crate::handlers::profile_handlers::set_user_phone_country(&state, &user.phone_number).await {
                 Ok(Some(c)) => c,
                 Ok(None) => {
                     error!("Failed to determine country for user {} after lookup", user.id);
@@ -2268,7 +2143,6 @@ pub async fn make_notification_call(
   
     // set the ids to -1 to prevent agent from making mistake
     dynamic_variables.insert("content_type".to_string(), json!(content_type));
-    dynamic_variables.insert("user_id".to_string(), json!(user_id));
     // Get timezone from user info or default to UTC
     let timezone_str = match user_timezone {
         Some(ref tz) => tz.as_str(),
@@ -2337,10 +2211,10 @@ pub async fn make_notification_call(
         ));
     }
     // Get user information before spawning the thread
-    let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
-            error!("User not found for ID: {}", user_id);
+            error!("User not found");
             return Ok(Json(json!({
                 "status": "success",
                 "message": "Notification call initiated successfully, but user not found for status updates",

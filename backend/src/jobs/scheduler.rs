@@ -3,20 +3,15 @@ use std::sync::Arc;
 use tracing::{debug, error};
 use crate::AppState;
 
-use crate::handlers::imap_handlers::ImapEmailPreview;
-
-use std::env;
-
 use crate::handlers::imap_handlers;
-use crate::api::twilio_utils;
-use reqwest::StatusCode;
 
 async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
     
     // Get all users with active WhatsApp connection
-    match state.user_repository.get_users_with_matrix_bridge_connections() {
-        Ok(users) => {
+    match state.user_repository.has_active_bridges() {
+        Ok(true) => {
+            let user = state.user_core.get_user().unwrap().unwrap();
             let mut matrix_clients = state.matrix_clients.lock().await;
             let mut sync_tasks = state.matrix_sync_tasks.lock().await;
             
@@ -27,58 +22,57 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
             matrix_clients.clear();
 
             // Setup clients and sync tasks for active users
-            for user_id in users {
-                tracing::debug!("Setting up new Matrix client for user {}", user_id);
-                
-                // Create and initialize client
-                match crate::utils::matrix_auth::get_client(user_id, &state).await {
-                    Ok(client) => {
-                        // Add event handlers before storing/cloning the client
-                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                        use matrix_sdk::room::Room;
-                        
-                        let state_for_handler = Arc::clone(&state);
-                        client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                            let state = Arc::clone(&state_for_handler);
-                            async move {
-                                tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
-                            }
-                        });
+            tracing::debug!("Setting up new Matrix client for user");
+            
+            // Create and initialize client
+            match crate::utils::matrix_auth::get_client(&state).await {
+                Ok(client) => {
+                    // Add event handlers before storing/cloning the client
+                    use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                    use matrix_sdk::room::Room;
+                    
+                    let state_for_handler = Arc::clone(&state);
+                    client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                        let state = Arc::clone(&state_for_handler);
+                        async move {
+                            tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+                            crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
+                        }
+                    });
 
-                        // Store the client
-                        let client = Arc::new(client);
-                        matrix_clients.insert(user_id, client.clone());
+                    // Store the client
+                    let client = Arc::new(client);
+                    matrix_clients.insert(user.id, client.clone());
 
-                        // Create sync task
-                        let sync_settings = matrix_sdk::config::SyncSettings::default()
-                            .timeout(std::time::Duration::from_secs(30))
-                            .full_state(true);
+                    // Create sync task
+                    let sync_settings = matrix_sdk::config::SyncSettings::default()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .full_state(true);
 
-                        let handle = tokio::spawn(async move {
-                            loop {
-                                match client.sync(sync_settings.clone()).await {
-                                    Ok(_) => {
-                                        tracing::debug!("Sync completed normally for user {}", user_id);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                    },
-                                    Err(e) => {
-                                        error!("Matrix sync error for user {}: {}", user_id, e);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                                    }
+                    let handle = tokio::spawn(async move {
+                        loop {
+                            match client.sync(sync_settings.clone()).await {
+                                Ok(_) => {
+                                    tracing::debug!("Sync completed normally for user {}", user.id);
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                },
+                                Err(e) => {
+                                    error!("Matrix sync error for user {}: {}", user.id, e);
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
                                 }
                             }
-                        });
+                        }
+                    });
 
-                        sync_tasks.insert(user_id, handle);
-                    },
-                    Err(e) => {
-                        error!("Failed to create Matrix client for user {}: {}", user_id, e);
-                    }
+                    sync_tasks.insert(user.id, handle);
+                },
+                Err(e) => {
+                    error!("Failed to create Matrix client for user {}: {}", user.id, e);
                 }
             }
         },
-        Err(e) => error!("Failed to get active WhatsApp users: {}", e),
+        Ok(false) => error!("User doesn't have connected bridges"),
+        Err(e) => error!("Failed to get active bridge: {}", e),
     }
 }
 
@@ -95,245 +89,237 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     //let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            
-            // Process each subscribed user
-            for user in state.user_core.get_users_by_tier("tier 2").unwrap_or(Vec::new()){
+            // Check IMAP service
+            if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
+                let user = state.user_core.get_user().unwrap().unwrap();
+                if imap_users.contains(&user.id) {
+                    match imap_handlers::fetch_emails_imap(&state, true, Some(10), true, true).await {
+                        Ok(emails) => {
+                            match state.user_repository.get_processed_emails(user.id) {
+                                Ok(mut processed_emails) => {
+                                    // Define constants
+                                    let fetch_window = 10;  // Number of emails your scheduler fetches
+                                    let cleanup_threshold = 100;  // Only cleanup when we have significantly more than fetch window
 
-                // Check IMAP service
-                if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
-                    if imap_users.contains(&user.id) {
-                        match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true, true).await {
-                            Ok(emails) => {
-                                match state.user_repository.get_processed_emails(user.id) {
-                                    Ok(mut processed_emails) => {
-                                        // Define constants
-                                        let fetch_window = 10;  // Number of emails your scheduler fetches
-                                        let cleanup_threshold = 100;  // Only cleanup when we have significantly more than fetch window
+                                    if processed_emails.len() > cleanup_threshold {
+                                        // Sort by processed_at timestamp (newest first)
+                                        processed_emails.sort_by(|a, b| b.processed_at.cmp(&a.processed_at));
+                                        
+                                        // Keep at least fetch_window emails plus some buffer
+                                        let keep_count = fetch_window * 2;  // Keep 20 emails (double the fetch window)
+                                        
+                                        // Get emails to delete (older than our keep_count)
+                                        let emails_to_delete: Vec<_> = processed_emails
+                                            .iter()
+                                            .skip(keep_count)
+                                            .collect();
 
-                                        if processed_emails.len() > cleanup_threshold {
-                                            // Sort by processed_at timestamp (newest first)
-                                            processed_emails.sort_by(|a, b| b.processed_at.cmp(&a.processed_at));
-                                            
-                                            // Keep at least fetch_window emails plus some buffer
-                                            let keep_count = fetch_window * 2;  // Keep 20 emails (double the fetch window)
-                                            
-                                            // Get emails to delete (older than our keep_count)
-                                            let emails_to_delete: Vec<_> = processed_emails
-                                                .iter()
-                                                .skip(keep_count)
-                                                .collect();
-
-                                            // Delete old processed emails
-                                            for email in emails_to_delete {
-                                                if let Err(e) = state.user_repository.delete_processed_email(user.id, &email.email_uid) {
-                                                    error!("Failed to delete old processed email {}: {}", email.email_uid, e);
-                                                } else {
-                                                    debug!("Deleted old processed email {} for user {}", email.email_uid, user.id);
-                                                }
-                                            }
-
-                                            // Update the original collection
-                                            processed_emails.truncate(keep_count);
-
-                                            // Also clean up old email judgments
-                                            if let Err(e) = state.user_repository.delete_old_email_judgments(user.id) {
-                                                error!("Failed to delete old email judgments for user {}: {}", user.id, e);
+                                        // Delete old processed emails
+                                        for email in emails_to_delete {
+                                            if let Err(e) = state.user_repository.delete_processed_email(user.id, &email.email_uid) {
+                                                error!("Failed to delete old processed email {}: {}", email.email_uid, e);
                                             } else {
-                                                debug!("Successfully cleaned up old email judgments for user {}", user.id);
+                                                debug!("Deleted old processed email {} for user {}", email.email_uid, user.id);
                                             }
                                         }
-                                    }
-                                    Err(e) => error!("Failed to fetch processed emails for garbage collection: {}", e),
-                                }
-                                
-                                if !emails.is_empty() {
-                                    // Sort emails by date in descending order (most recent first)
-                                    let mut sorted_emails = emails;
-                                    sorted_emails.sort_by(|a, b| {
-                                        let a_date = a.date.unwrap_or_else(|| chrono::Utc::now());
-                                        let b_date = b.date.unwrap_or_else(|| chrono::Utc::now());
-                                        b_date.cmp(&a_date)
-                                    });
 
-                                    let priority_senders = match state.user_repository.get_priority_senders(user.id, "imap") {
-                                        Ok(senders) => senders,
+                                        // Update the original collection
+                                        processed_emails.truncate(keep_count);
+
+                                        // Also clean up old email judgments
+                                        if let Err(e) = state.user_repository.delete_old_email_judgments(user.id) {
+                                            error!("Failed to delete old email judgments for user {}: {}", user.id, e);
+                                        } else {
+                                            debug!("Successfully cleaned up old email judgments for user {}", user.id);
+                                        }
+                                    }
+                                }
+                                Err(e) => error!("Failed to fetch processed emails for garbage collection: {}", e),
+                            }
+                            
+                            if !emails.is_empty() {
+                                // Sort emails by date in descending order (most recent first)
+                                let mut sorted_emails = emails;
+                                sorted_emails.sort_by(|a, b| {
+                                    let a_date = a.date.unwrap_or_else(|| chrono::Utc::now());
+                                    let b_date = b.date.unwrap_or_else(|| chrono::Utc::now());
+                                    b_date.cmp(&a_date)
+                                });
+
+                                let priority_senders = match state.user_repository.get_priority_senders("imap") {
+                                    Ok(senders) => senders,
+                                    Err(e) => {
+                                        tracing::error!("Failed to get priority senders for user {}: {}", user.id, e);
+                                        Vec::new()
+                                    }
+                                };
+                                // Mark emails as processed and format them for importance checking
+                                let mut emails_content = String::from("New emails:\n");
+                                for email in &sorted_emails {
+                                    // Check if sender matches priority senders and send the noti anyways about it
+                                    if let Some(matched_sender) = priority_senders.iter().filter(|p_send| p_send.noti_mode == "all").find(|priority_sender| {
+                                        let priority_lower = priority_sender.sender.to_lowercase();
+                                        // Check 'from' (display name)
+                                        let from_matches = email.from.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
+                                        // Also check 'from_email' (actual email address)
+                                        let from_email_matches = email.from_email.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
+                                        from_matches || from_email_matches
+                                    }) {
+                                        tracing::info!("Fast check: Priority sender matched for user {}", user.id);
+                                       
+                                        // Determine suffix based on noti_type
+                                        let suffix = match matched_sender.noti_type.as_ref().map(|s| s.as_str()) {
+                                            Some("call") => "_call",
+                                            _ => "_sms",
+                                        };
+                                        let notification_type = format!("email_priority{}", suffix);
+                                       
+                                        // Format the notification message with sender and content
+                                        let message = format!(
+                                            "Email from: {}\nSubject: {}\nContent: {}",
+                                            email.from.as_deref().unwrap_or("Unknown"),
+                                            email.subject.as_deref().unwrap_or("No subject"),
+                                            email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
+                                        );
+                                        let first_message = format!("Hello, you have a critical email from {} with subject: {}",
+                                            email.from.as_deref().unwrap_or("Unknown"),
+                                            email.subject.as_deref().unwrap_or("No subject")
+                                        );
+                                       
+                                        // Spawn a new task for sending notification
+                                        let state_clone = state.clone();
+                                        tokio::spawn(async move {
+                                            crate::proactive::utils::send_notification(
+                                                &state_clone,
+                                                &message,
+                                                notification_type,
+                                                Some(first_message),
+                                            ).await;
+                                        });
+                                        continue;
+                                    }
+                                    // Format email content for checking
+                                    let email_content = format!(
+                                        "From: {}\nSubject: {}\nDate: {}\nBody: {}\n---\n",
+                                        email.from.as_deref().unwrap_or("Unknown"),
+                                        email.subject.as_deref().unwrap_or("No subject"),
+                                        email.date_formatted.as_deref().unwrap_or("Unknown date"),
+                                        email.body.as_deref().unwrap_or("No content")
+                                    );
+
+                                                                            // Check waiting checks first if they exist
+                                    let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "email") {
+                                        Ok(checks) => checks,
                                         Err(e) => {
-                                            tracing::error!("Failed to get priority senders for user {}: {}", user.id, e);
+                                            tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
                                             Vec::new()
                                         }
                                     };
-                                    // Mark emails as processed and format them for importance checking
-                                    let mut emails_content = String::from("New emails:\n");
-                                    for email in &sorted_emails {
-                                        // Check if sender matches priority senders and send the noti anyways about it
-                                        if let Some(matched_sender) = priority_senders.iter().filter(|p_send| p_send.noti_mode == "all").find(|priority_sender| {
-                                            let priority_lower = priority_sender.sender.to_lowercase();
-                                            // Check 'from' (display name)
-                                            let from_matches = email.from.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
-                                            // Also check 'from_email' (actual email address)
-                                            let from_email_matches = email.from_email.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
-                                            from_matches || from_email_matches
-                                        }) {
-                                            tracing::info!("Fast check: Priority sender matched for user {}", user.id);
-                                           
-                                            // Determine suffix based on noti_type
-                                            let suffix = match matched_sender.noti_type.as_ref().map(|s| s.as_str()) {
-                                                Some("call") => "_call",
-                                                _ => "_sms",
-                                            };
-                                            let notification_type = format!("email_priority{}", suffix);
-                                           
-                                            // Format the notification message with sender and content
-                                            let message = format!(
-                                                "Email from: {}\nSubject: {}\nContent: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject"),
-                                                email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
-                                            );
-                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject")
-                                            );
-                                           
-                                            // Spawn a new task for sending notification
-                                            let state_clone = state.clone();
-                                            tokio::spawn(async move {
-                                                crate::proactive::utils::send_notification(
-                                                    &state_clone,
-                                                    user.id,
-                                                    &message,
-                                                    notification_type,
-                                                    Some(first_message),
-                                                ).await;
-                                            });
-                                            continue;
-                                        }
-                                        // Format email content for checking
-                                        let email_content = format!(
-                                            "From: {}\nSubject: {}\nDate: {}\nBody: {}\n---\n",
-                                            email.from.as_deref().unwrap_or("Unknown"),
-                                            email.subject.as_deref().unwrap_or("No subject"),
-                                            email.date_formatted.as_deref().unwrap_or("Unknown date"),
-                                            email.body.as_deref().unwrap_or("No content")
-                                        );
-
-                                                                                // Check waiting checks first if they exist
-                                        let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "email") {
-                                            Ok(checks) => checks,
-                                            Err(e) => {
-                                                tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
-                                                Vec::new()
-                                            }
-                                        };
-                                        if !waiting_checks.is_empty() {
-                                            // Check if any waiting checks match the message
-                                            if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
-                                                &state,
-                                                &email_content,
-                                                &waiting_checks,
-                                            ).await {
-                                                if let Some(check_id) = check_id_option {
-                                                    let message = message.unwrap_or("Waiting check matched in Email, but failed to get content".to_string());
-                                                    let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in Email.".to_string());
-                                                   
-                                                    // Find the matched waiting check to determine noti_type
-                                                    let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
-                                                    let suffix = if let Some(wc) = matched_waiting_check {
-                                                        match wc.noti_type.as_ref().map(|s| s.as_str()) {
-                                                            Some("call") => "_call",
-                                                            _ => "_sms",
-                                                        }
-                                                    } else {
-                                                        "_sms"
-                                                    };
-                                                    let notification_type = format!("email_waiting_check{}", suffix);
-                                                   
-                                                    // Delete the matched waiting check
-                                                    if let Err(e) = state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
-                                                        tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
+                                    if !waiting_checks.is_empty() {
+                                        // Check if any waiting checks match the message
+                                        if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
+                                            &state,
+                                            &email_content,
+                                            &waiting_checks,
+                                        ).await {
+                                            if let Some(check_id) = check_id_option {
+                                                let message = message.unwrap_or("Waiting check matched in Email, but failed to get content".to_string());
+                                                let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in Email.".to_string());
+                                               
+                                                // Find the matched waiting check to determine noti_type
+                                                let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
+                                                let suffix = if let Some(wc) = matched_waiting_check {
+                                                    match wc.noti_type.as_ref().map(|s| s.as_str()) {
+                                                        Some("call") => "_call",
+                                                        _ => "_sms",
                                                     }
-                                                   
-                                                    // Send notification
-                                                    let state_clone = state.clone();
-                                                    let user_id = user.id;
-                                                    tokio::spawn(async move {
-                                                        crate::proactive::utils::send_notification(
-                                                            &state_clone,
-                                                            user_id,
-                                                            &message,
-                                                            notification_type,
-                                                            Some(first_message),
-                                                        ).await;
-                                                    });
-                                                    continue;
+                                                } else {
+                                                    "_sms"
+                                                };
+                                                let notification_type = format!("email_waiting_check{}", suffix);
+                                               
+                                                // Delete the matched waiting check
+                                                if let Err(e) = state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
+                                                    tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
                                                 }
-                                            }
-                                        }
-
-                                        // Add email to content string for importance checking
-                                        emails_content.push_str(&email_content);
-                                    }
-
-
-                                    // Check message importance based on waiting checks and criticality
-                                    let user_settings = match state.user_core.get_user_settings(user.id) {
-                                        Ok(settings) => settings,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get user settings: {}", e);
-                                            return;
-                                        }
-                                    };
-
-                                    if user_settings.critical_enabled.is_none() {
-                                        tracing::debug!("Critical message checking disabled for user {}", user.id);
-                                        return;
-                                    }
-
-                                    // Check message importance based on criticality
-                                    match crate::proactive::utils::check_message_importance(&state, user.id, &emails_content, "", "", "").await {
-                                        Ok((is_critical, message, first_message)) => {
-                                            if is_critical {
-                                                let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());
-                                                let first_message = first_message.unwrap_or("Hey, I found some critical email you should know.".to_string());
-                                                tracing::info!(
-                                                    "Email critical check passed for user {}: {}",
-                                                    user.id, message
-                                                );
-                                                                
-                                                // Spawn a new task for sending critical message notification
+                                               
+                                                // Send notification
                                                 let state_clone = state.clone();
-                                                let message_clone= message.clone();
+                                                let user_id = user.id;
                                                 tokio::spawn(async move {
                                                     crate::proactive::utils::send_notification(
                                                         &state_clone,
-                                                        user.id,
-                                                        &message_clone,
-                                                        "email_critical".to_string(),
+                                                        &message,
+                                                        notification_type,
                                                         Some(first_message),
                                                     ).await;
                                                 });
-                                            } else {
-                                                tracing::debug!(
-                                                    "Email not considered important for user {}: {}",
-                                                    user.id, message.unwrap_or("failed to get the email content".to_string())
-                                                );
-
+                                                continue;
                                             }
                                         }
-                                        Err(e) => {
-                                            tracing::error!("Failed to check email importance: {}", e);
+                                    }
+
+                                    // Add email to content string for importance checking
+                                    emails_content.push_str(&email_content);
+                                }
+
+
+                                // Check message importance based on waiting checks and criticality
+                                let user_settings = match state.user_core.get_user_settings() {
+                                    Ok(settings) => settings,
+                                    Err(e) => {
+                                        tracing::error!("Failed to get user settings: {}", e);
+                                        return;
+                                    }
+                                };
+
+                                if user_settings.critical_enabled.is_none() {
+                                    tracing::debug!("Critical message checking disabled for user {}", user.id);
+                                    return;
+                                }
+
+                                // Check message importance based on criticality
+                                match crate::proactive::utils::check_message_importance(&state, user.id, &emails_content, "", "", "").await {
+                                    Ok((is_critical, message, first_message)) => {
+                                        if is_critical {
+                                            let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());
+                                            let first_message = first_message.unwrap_or("Hey, I found some critical email you should know.".to_string());
+                                            tracing::info!(
+                                                "Email critical check passed for user {}: {}",
+                                                user.id, message
+                                            );
+                                                            
+                                            // Spawn a new task for sending critical message notification
+                                            let state_clone = state.clone();
+                                            let message_clone= message.clone();
+                                            tokio::spawn(async move {
+                                                crate::proactive::utils::send_notification(
+                                                    &state_clone,
+                                                    &message_clone,
+                                                    "email_critical".to_string(),
+                                                    Some(first_message),
+                                                ).await;
+                                            });
+                                        } else {
+                                            tracing::debug!(
+                                                "Email not considered important for user {}: {}",
+                                                user.id, message.unwrap_or("failed to get the email content".to_string())
+                                            );
+
                                         }
                                     }
+                                    Err(e) => {
+                                        tracing::error!("Failed to check email importance: {}", e);
+                                    }
                                 }
-                            },
-                            Err(e) => {
-                                error!("Failed to fetch IMAP emails for user {}: Error: {:?}", user.id, e);
                             }
+                        },
+                        Err(e) => {
+                            error!("Failed to fetch IMAP emails for user {}: Error: {:?}", user.id, e);
                         }
                     }
                 }
             }
-
         })
     }).expect("Failed to create message monitor job");
 
@@ -497,35 +483,17 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let digest_check_job = Job::new_async("0 0 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            debug!("Running hourly morning digest check...");
-            
-            // Get all users with tier 2 subscription
-            match state.user_core.get_all_users() {
-                Ok(users) => {
-                    for user in users {
-                        // Check if user has a tier 2 subscription
-                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
-
-                            if !state.user_core.get_proactive_agent_on(user.id).unwrap_or(true) {
-                                tracing::debug!("User {} does not have monitoring enabled", user.id);
-                                continue;
-                            }
-                            if tier == "tier 2" {
-                                debug!("Checking morning digest for user {} with tier 2 subscription", user.id);
-                                if let Err(e) = crate::proactive::utils::check_morning_digest(&state, user.id).await {
-                                    error!("Failed to check morning digest for user {}: {}", user.id, e);
-                                }
-                                if let Err(e) = crate::proactive::utils::check_day_digest(&state, user.id).await {
-                                    error!("Failed to check day digest for user {}: {}", user.id, e);
-                                }
-                                if let Err(e) = crate::proactive::utils::check_evening_digest(&state, user.id).await {
-                                    error!("Failed to check evening digest for user {}: {}", user.id, e);
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(e) => error!("Failed to fetch users for morning digest check: {}", e),
+            if !state.user_core.get_proactive_agent_on().unwrap_or(true) {
+                tracing::debug!("User does not have monitoring enabled");
+            }
+            if let Err(e) = crate::proactive::utils::check_morning_digest(&state).await {
+                error!("Failed to check morning digest for user: {}", e);
+            }
+            if let Err(e) = crate::proactive::utils::check_day_digest(&state).await {
+                error!("Failed to check day digest for user: {}", e);
+            }
+            if let Err(e) = crate::proactive::utils::check_evening_digest(&state).await {
+                error!("Failed to check evening digest for user: {}",  e);
             }
         })
     }).expect("Failed to create digest check job");
@@ -558,184 +526,76 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     }
                 }
             }
-
-            // Get all users with valid Google Calendar connection and subscription
-            let users = match state.user_core.get_all_users() {
-                Ok(users) => users.into_iter().filter(|user| {
-                    // Check subscription and calendar status
-                    matches!(state.user_repository.has_valid_subscription_tier(user.id, "tier 2"), Ok(true)) &&
-                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true)) &&
-                    matches!(state.user_core.get_proactive_agent_on(user.id), Ok(true))
-                }).collect::<Vec<_>>(),
-                Err(e) => {
-                    error!("Failed to fetch users: {}", e);
-                    return;
-                }
-            };
-            tracing::info!("users: {}", users.len());
+            if !matches!(state.user_repository.has_active_google_calendar(), Ok(true)) {
+                debug!("no active google calendar connection");
+                return;
+            }
 
             let now = chrono::Utc::now();
             let window_end = now + chrono::Duration::minutes(30);
 
-            debug!("🗓️ Calendar check: Starting check for {} users at {}", 
-                users.len(),
+            debug!("🗓️ Calendar check: Starting check at {}", 
                 now.format("%Y-%m-%d %H:%M:%S UTC")
             );
 
             // Process users with rate limiting
-            for (index, user) in users.iter().enumerate() {
-                // Add delay between users to avoid rate limiting
-                if index > 0 {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            let user = state.user_core.get_user().unwrap().unwrap();
+            // Fetch upcoming events
+            match crate::handlers::google_calendar::fetch_calendar_events(
+                &state,
+                crate::handlers::google_calendar::TimeframeQuery {
+                    start: now,
+                    end: window_end,
                 }
-
-                debug!("🗓️ Calendar check: Processing user {} ({}/{})", 
-                    user.id, 
-                    index + 1, 
-                    users.len()
-                );
-
-                // Fetch upcoming events
-                match crate::handlers::google_calendar::fetch_calendar_events(
-                    &state,
-                    user.id,
-                    crate::handlers::google_calendar::TimeframeQuery {
-                        start: now,
-                        end: window_end,
-                    }
-                ).await {
-                    Ok(events) => {
-                        debug!("🗓️ Calendar check: Found {} events for user {}", events.len(), user.id);
-                        for event in events {
-                            if let (Some(reminders), Some(start_time)) = (&event.reminders, event.start.date_time) {
-                                for reminder in &reminders.overrides {
-                                    let reminder_key = format!("{}_{}", event.id, reminder.minutes);
-                                    
-                                    // Check if notification was already sent
-                                    if state.user_repository.check_calendar_notification_exists(user.id, &reminder_key).unwrap_or(true) {
-                                        continue;
-                                    }
-
-                                    // Record notification before sending
-                                    let new_notification = crate::models::user_models::NewCalendarNotification {
-                                        user_id: user.id,
-                                        event_id: reminder_key.clone(),
-                                        notification_time: now.timestamp() as i32,
-                                    };
-                                    
-                                    if let Err(e) = state.user_repository.create_calendar_notification(&new_notification) {
-                                        error!("Failed to record calendar notification: {}", e);
-                                        continue;
-                                    }
-
-                                    let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
-                                    let notification = format!("Calendar: {} in {} mins", event_summary, reminder.minutes);
-
-                                    let state_clone = state.clone();
-                                    let first_message = format!("Hello, you have a calendar event starting in {}.", reminder.minutes);
-                                    let user_id = user.id.clone();
-                                    tokio::spawn(async move {
-                                        crate::proactive::utils::send_notification(
-                                            &state_clone,
-                                            user_id,
-                                            &notification,
-                                            "calendar_notification".to_string(),
-                                            Some(first_message),
-                                        ).await;
-                                    });
+            ).await {
+                Ok(events) => {
+                    debug!("🗓️ Calendar check: Found {} events for user {}", events.len(), user.id);
+                    for event in events {
+                        if let (Some(reminders), Some(start_time)) = (&event.reminders, event.start.date_time) {
+                            for reminder in &reminders.overrides {
+                                let reminder_key = format!("{}_{}", event.id, reminder.minutes);
+                                
+                                // Check if notification was already sent
+                                if state.user_repository.check_calendar_notification_exists(user.id, &reminder_key).unwrap_or(true) {
+                                    continue;
                                 }
+
+                                // Record notification before sending
+                                let new_notification = crate::models::user_models::NewCalendarNotification {
+                                    user_id: user.id,
+                                    event_id: reminder_key.clone(),
+                                    notification_time: now.timestamp() as i32,
+                                };
+                                
+                                if let Err(e) = state.user_repository.create_calendar_notification(&new_notification) {
+                                    error!("Failed to record calendar notification: {}", e);
+                                    continue;
+                                }
+
+                                let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
+                                let notification = format!("Calendar: {} in {} mins", event_summary, reminder.minutes);
+
+                                let state_clone = state.clone();
+                                let first_message = format!("Hello, you have a calendar event starting in {}.", reminder.minutes);
+                                let user_id = user.id.clone();
+                                tokio::spawn(async move {
+                                    crate::proactive::utils::send_notification(
+                                        &state_clone,
+                                        &notification,
+                                        "calendar_notification".to_string(),
+                                        Some(first_message),
+                                    ).await;
+                                });
                             }
                         }
-                    },
-                    Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
-                }
+                    }
+                },
+                Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
             }
         })
     }).expect("Failed to create calendar notification job");
 
     sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
-
-    // Create a job that runs daily to check self-hosted instance status
-    let state_clone = Arc::clone(&state);
-    let self_host_check_job = Job::new_async("0 0 0 * * *", move |_, _| {  // Run at midnight every day
-        let state = state_clone.clone();
-        Box::pin(async move {
-            debug!("Running self-hosted instance status check...");
-            
-            // Get user with self-hosted subscription
-            match state.user_core.get_all_users() {
-                Ok(users) => {
-                    for user in users {
-                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
-                            if tier == "self_hosted" {
-                                // Get server instance ID
-                                if let Ok(settings) = state.user_core.get_user_settings(user.id) {
-                                    if let Some(instance_id) = settings.server_instance_id {
-                                        // Get current timestamp
-                                        let current_timestamp = chrono::Utc::now().timestamp() as i32;
-                                        
-                                        // Check if we've already pinged today
-                                        if let Some(last_ping) = settings.server_instance_last_ping_timestamp {
-                                            let last_ping_date = chrono::NaiveDateTime::from_timestamp_opt(last_ping as i64, 0)
-                                                .map(|dt| dt.date());
-                                            let current_date = chrono::NaiveDateTime::from_timestamp_opt(current_timestamp as i64, 0)
-                                                .map(|dt| dt.date());
-                                            
-                                            if let (Some(last), Some(current)) = (last_ping_date, current_date) {
-                                                if last == current {
-                                                    debug!("Already pinged self-hosted instance today, skipping");
-                                                    continue;
-                                                }
-                                            }
-                                        }
-
-                                        // Send ping request
-                                        let client = reqwest::Client::new();
-                                        let server_url = env::var("SERVER_URL").unwrap_or_else(|_| "https://lightfriend.ai".to_string());
-                                        let ping_url = format!("{}/api/self-host-ping", server_url);
-                                        
-                                        match client.post(&ping_url)
-                                            .json(&serde_json::json!({
-                                                "instance_id": instance_id
-                                            }))
-                                            .send()
-                                            .await 
-                                        {
-                                            Ok(response) => {
-                                                if response.status() != StatusCode::OK {
-                                                    error!("Self-hosted instance ping failed with status: {}", response.status());
-                                                    // Update user's subscription tier to None
-                                                    if let Err(e) = state.user_core.update_subscription_tier(user.id, Some("self_hosted_inactive")) {
-                                                        error!("Failed to update subscription tier: {}", e);
-                                                    }
-                                                } else {
-                                                    debug!("Self-hosted instance ping successful");
-                                                    // Update last ping timestamp
-                                                    if let Err(e) = state.user_core.update_server_instance_last_ping(user.id, current_timestamp) {
-                                                        error!("Failed to update last ping timestamp: {}", e);
-                                                    }
-                                                }
-                                            },
-                                            Err(e) => {
-                                                error!("Failed to send self-hosted instance ping: {}", e);
-                                                // Update user's subscription tier to self_hosted_inactive
-                                                if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some("self_hosted_inactive")) {
-                                                    error!("Failed to update subscription tier: {}", e);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                Err(e) => error!("Failed to fetch users for self-hosted instance check: {}", e),
-            }
-        })
-    }).expect("Failed to create self-host check job");
-
-    sched.add(self_host_check_job).await.expect("Failed to add self-host check job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

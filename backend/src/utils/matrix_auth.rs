@@ -165,7 +165,7 @@ pub async fn login_with_password(client: &MatrixClient, state: &Arc<AppState>, u
         
         // Store the new device_id and access_token
         tracing::debug!("💾 Saving new device ID and access token to database");
-        state.user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
+        state.user_repository.set_matrix_device_id_and_access_token(&response.access_token, &response.device_id.as_str())?;
         tracing::debug!("✅ Successfully saved credentials");
         
     } else {
@@ -177,11 +177,11 @@ pub async fn login_with_password(client: &MatrixClient, state: &Arc<AppState>, u
 }
 
 
-pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
-    tracing::info!("🔄 Starting get_client for user_id: {}", user_id);
+pub async fn get_client(state: &Arc<AppState>) -> Result<MatrixClient> {
+    tracing::info!("🔄 Starting get_client");
 
     // Get user profile from database
-    let user = state.user_core.find_by_id(user_id).unwrap().unwrap();
+    let user = state.user_core.get_user().unwrap().unwrap();
     tracing::debug!("👤 Found user: id={}", user.id);
 
     // Initialize the Matrix client
@@ -194,7 +194,7 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
     let (username, password, device_id, access_token) = if user.matrix_username.is_none() {
         tracing::info!("🆕 Registering new Matrix user");
         let (username, access_token, device_id, password) = register_user(&homeserver_url, &shared_secret).await?;
-        state.user_repository.set_matrix_credentials(user.id, &username, &access_token, &device_id, &password)?;
+        state.user_repository.set_matrix_credentials(&username, &access_token, &device_id, &password)?;
         (username, password, Some(device_id), Some(access_token))
     } else {
         tracing::debug!("✓ Existing Matrix credentials found");
@@ -243,7 +243,6 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
                 tracing::debug!("🔍 Server reports user_id: {}", response.user_id);
                 // Update database if credentials changed
                 state.user_repository.set_matrix_credentials(
-                    user.id,
                     &username,
                     &stored_session.tokens.access_token,
                     &response.device_id.expect("default").as_str(),
@@ -277,7 +276,6 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
                 // Verify session
                 if let Ok(response) = client.whoami().await {
                     state.user_repository.set_matrix_credentials(
-                        user.id,
                         &username,
                         &access_token.as_str(),
                         &response.device_id.expect("default").as_str(),
@@ -297,36 +295,35 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
     tracing::info!("✅ Authentication complete - client is logged already in");
     // here we should have client store, our db and server synced with the same device id and access token
     
-    tracing::info!("✅ Matrix client fully initialized for user {}", user_id);
+    tracing::info!("✅ Matrix client fully initialized for user");
     Ok(client)
 }
 
 /// Get a cached Matrix client from AppState, with fallback to creating a new client
 /// Note: The fallback client is not stored in the cache - that's managed by the scheduler
 pub async fn get_cached_client(
-    user_id: i32,
     state: &Arc<AppState>,
 ) -> Result<Arc<MatrixClient>> {
     // Get the matrix clients map from AppState
     let matrix_clients = state.matrix_clients.lock().await;
     
     // Try to get the client for this user
-    if let Some(client) = matrix_clients.get(&user_id) {
-        tracing::debug!("Found cached Matrix client for user {}", user_id);
+    if let Some(client) = matrix_clients.get(&1) {
+        tracing::debug!("Found cached Matrix client for user");
         Ok(client.clone())
     } else {
-        tracing::debug!("No cached Matrix client found for user {}, creating temporary client", user_id);
+        tracing::debug!("No cached Matrix client found for user, creating temporary client");
         // Drop the lock before the potentially long-running get_client operation
         drop(matrix_clients);
         
         // Create a new client as fallback
-        match get_client(user_id, state).await {
+        match get_client(state).await {
             Ok(client) => {
-                tracing::debug!("Successfully created temporary Matrix client for user {}", user_id);
+                tracing::debug!("Successfully created temporary Matrix client for user");
                 Ok(Arc::new(client))
             },
             Err(e) => {
-                tracing::error!("Failed to create temporary Matrix client for user {}: {}", user_id, e);
+                tracing::error!("Failed to create temporary Matrix client for user: {}", e);
                 Err(anyhow!("Failed to create Matrix client: {}", e))
             }
         }

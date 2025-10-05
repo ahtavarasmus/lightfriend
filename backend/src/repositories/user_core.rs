@@ -34,19 +34,10 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn find_by_email(&self, search_email: &str) -> Result<Option<User>, DieselError> {
+    pub fn get_user(&self) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
-            .filter(lower(users::email).eq(lower(search_email)))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(user)
-    }
-
-    pub fn find_by_id(&self, user_id: i32) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
+            .find(1)
             .first::<User>(&mut conn)
             .optional()?;
         Ok(user)
@@ -65,64 +56,26 @@ impl UserCore {
         Ok(user)
     }
 
-    pub fn get_all_users(&self) -> Result<Vec<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let users_list = users::table
-            .load::<User>(&mut conn)?;
-        Ok(users_list)
-    }
-
-    pub fn get_users_by_tier(&self, tier: &str) -> Result<Vec<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let users_list = users::table
-            .filter(users::sub_tier.eq(Some(tier)))
-            .load::<User>(&mut conn)?;
-        Ok(users_list)
-    }
-
-    pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(users::table.find(user_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn verify_user(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::verified.eq(true))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_password(&self, email: &str, password_hash: &str) -> Result<(), DieselError> {
+    pub fn update_phone_number_country(&self, country: Option<&str>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table)
-            .filter(users::email.eq(email))
-            .set(users::password_hash.eq(password_hash))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_phone_number_country(&self, user_id: i32, country: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table)
-            .filter(users::id.eq(user_id))
+            .filter(users::id.eq(1))
             .set(users::phone_number_country.eq(country))
             .execute(&mut conn)?;
         Ok(())
     }
 
     // Helper function to ensure user_info exists
-    pub fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn ensure_user_info_exists(&self) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let exists = user_info::table
-            .filter(user_info::user_id.eq(user_id))
+            .filter(user_info::user_id.eq(1))
             .first::<UserInfo>(&mut conn)
             .optional()?
             .is_some();
 
+        let user_id = 1;
         if !exists {
             let new_user_info = NewUserInfo {
                 user_id,
@@ -143,13 +96,13 @@ impl UserCore {
     }
 
     // Get user_info, ensuring it exists first
-    pub fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError> {
-        self.ensure_user_info_exists(user_id)?;
+    pub fn get_user_info(&self) -> Result<UserInfo, DieselError> {
+        self.ensure_user_info_exists()?;
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let user_info = user_info::table
-            .filter(user_info::user_id.eq(user_id))
+            .filter(user_info::user_id.eq(1))
             .first::<UserInfo>(&mut conn)?;
 
         Ok(user_info)
@@ -157,14 +110,15 @@ impl UserCore {
 
 
     // User settings operations
-    pub fn get_user_settings(&self, user_id: i32) -> Result<UserSettings, DieselError> {
+    pub fn get_user_settings(&self) -> Result<UserSettings, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
+            .filter(user_settings::user_id.eq(1))
             .first::<UserSettings>(&mut conn)
             .optional()?;
             
+        let user_id = 1;
         match settings {
             Some(settings) => Ok(settings),
             None => {
@@ -196,16 +150,17 @@ impl UserCore {
     }
 
     // Helper function to ensure user settings exist
-    pub fn ensure_user_settings_exist(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn ensure_user_settings_exist(&self) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let settings_exist = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
+            .filter(user_settings::user_id.eq(1))
             .first::<UserSettings>(&mut conn)
             .optional()?
             .is_some();
 
+        let user_id = 1;
         if !settings_exist {
             let new_settings = NewUserSettings {
                 user_id,
@@ -228,39 +183,12 @@ impl UserCore {
         Ok(())
     }
 
-    // Basic validation methods
-    pub fn email_exists(&self, search_email: &str) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let existing_user: Option<User> = users::table
-            .filter(lower(users::email).eq(lower(search_email)))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(existing_user.is_some())
-    }
-
-    pub fn phone_number_exists(&self, search_phone: &str) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let existing_user: Option<User> = users::table
-            .filter(users::phone_number.eq(search_phone))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(existing_user.is_some())
-    }
-
-    pub fn is_admin(&self, user_id: i32) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-        Ok(user.email == "rasmus@ahtava.com" && user.id == 1)
-    }
-
     pub fn update_blocker_password(&self, user_id: i32, new_password: Option<&str>) -> Result<(), DieselError> {
         use crate::schema::user_info;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Ensure user settings exist
-        self.ensure_user_info_exists(user_id)?;
+        self.ensure_user_info_exists()?;
 
         // Update  
         diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
@@ -274,7 +202,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Ensure user settings exist
-        self.ensure_user_info_exists(user_id)?;
+        self.ensure_user_info_exists()?;
 
         // Update  
         diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
@@ -288,7 +216,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the settings
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -299,9 +227,9 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn update_preferred_number(&self, user_id: i32, preferred_number: &str) -> Result<(), DieselError> {
+    pub fn update_preferred_number(&self, preferred_number: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
+        diesel::update(users::table.find(1))
             .set(users::preferred_number.eq(preferred_number))
             .execute(&mut conn)?;
         Ok(())
@@ -315,15 +243,6 @@ impl UserCore {
             .set(user_settings::agent_language.eq(language))
             .execute(&mut conn)?;
         Ok(())
-    }
-
-    pub fn set_preferred_number_to_us_default(&self, user_id: i32) -> Result<String, Box<dyn Error>> {
-        let preferred_number = std::env::var("USA_PHONE").expect("USA_PHONE not found");
-
-        // Update the user's preferred number in the database
-        self.update_preferred_number(user_id, &preferred_number)?;
-
-        Ok(preferred_number)
     }
 
     // Update user's profile
@@ -344,16 +263,7 @@ impl UserCore {
             if existing_phone.is_some() {
                 return Err(DieselError::RollbackTransaction);
             }
-            // Check if email exists for a different user
-            let existing_email = users::table
-                .filter(users::email.eq(email.to_lowercase()))
-                .filter(users::id.ne(user_id))
-                .first::<User>(conn)
-                .optional()?;
                
-            if existing_email.is_some() {
-                return Err(DieselError::NotFound);
-            }
             // Get current user to check if phone number is changing
             let current_user = users::table
                 .find(user_id)
@@ -363,16 +273,14 @@ impl UserCore {
             // Update user table
             diesel::update(users::table.find(user_id))
                 .set((
-                    users::email.eq(email),
                     users::phone_number.eq(phone_number),
                     users::nickname.eq(nickname),
-                    users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
                 ))
                 .execute(conn)?;
             // Ensure user settings exist
-            self.ensure_user_settings_exist(user_id)?;
+            self.ensure_user_settings_exist()?;
             // Ensure user info exists
-            self.ensure_user_info_exists(user_id)?;
+            self.ensure_user_info_exists()?;
             // Update the settings
             diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
                 .set((
@@ -400,7 +308,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the settings
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -415,7 +323,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // First fetch the user settings to check timezone_auto
-        let user_settings= self.get_user_settings(user_id)?;
+        let user_settings= self.get_user_settings()?;
         // Only update if timezone_auto is false (manual timezone setting)
         if !user_settings.timezone_auto.unwrap_or(false) {
             diesel::update(user_info::table)
@@ -427,73 +335,12 @@ impl UserCore {
         Ok(())
     }
 
-    // Update user's auto top-up settings
-    pub fn update_auto_topup(&self, user_id: i32, active: bool, amount: Option<f32>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Update the user's auto top-up settings
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::charge_when_under.eq(active),
-                users::charge_back_to.eq(amount),
-            ))
-            .execute(&mut conn)?;
-            
-        Ok(())
-    }
-
-
-    pub fn update_last_credits_notification(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::last_credits_notification.eq(timestamp))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn has_auto_topup_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let charge_when_under = users::table
-            .find(user_id)
-            .select(users::charge_when_under)
-            .first::<bool>(&mut conn)?;
-        Ok(charge_when_under)
-    }
-
-    pub fn update_discount_tier(&self, user_id: i32, discount_tier: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::discount_tier.eq(discount_tier))
-            .execute(&mut conn)?;
-            
-        Ok(())
-    }
-
-    pub fn clear_confirm_send_event(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Start a transaction
-        conn.transaction(|conn| {
-            // Clear the confirm_send_event flag
-            diesel::update(users::table.find(user_id))
-                .set(users::confirm_send_event.eq::<Option<String>>(None))
-                .execute(conn)?;
-
-            // Delete any existing temp variables for this user
-            diesel::delete(temp_variables::table.filter(temp_variables::user_id.eq(user_id)))
-                .execute(conn)?;
-
-            Ok(())
-        })
-    }
-
     pub fn update_digests(&self, user_id: i32, morning_digest: Option<&str>, day_digest: Option<&str>, evening_digest: Option<&str>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the digest settings
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -507,16 +354,16 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn get_digests(&self, user_id: i32) -> Result<(Option<String>, Option<String>, Option<String>), DieselError> {
+    pub fn get_digests(&self) -> Result<(Option<String>, Option<String>, Option<String>), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Get the user settings
         let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
+            .filter(user_settings::user_id.eq(1))
             .select((
                 user_settings::morning_digest,
                 user_settings::day_digest,
@@ -532,7 +379,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -542,16 +389,16 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn get_proactive_agent_on(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn get_proactive_agent_on(&self) -> Result<bool, DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Get the setting
         let proactive_agent_on= user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
+            .filter(user_settings::user_id.eq(1))
             .select(user_settings::proactive_agent_on)
             .first::<bool>(&mut conn)?;
 
@@ -563,7 +410,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
       
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
         // Update the critical_enabled setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::critical_enabled.eq(enabled))
@@ -576,7 +423,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
       
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
         // Update the action_on_critical_message setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::action_on_critical_message.eq(action))
@@ -589,7 +436,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Get the setting
         let proactive_agent_on= user_settings::table
@@ -605,7 +452,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
        
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
         // Update the call_notify setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::notify_about_calls.eq(call_notify))
@@ -617,7 +464,7 @@ impl UserCore {
         use crate::schema::{user_settings, usage_logs};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
         // Get the critical_enabled and call_notify settings
         let (enabled, call_notify, action_on_critical_message) = user_settings::table
             .filter(user_settings::user_id.eq(user_id))
@@ -669,7 +516,7 @@ impl UserCore {
         println!("average per day: {}", average_critical_per_day);
         // Get user's phone number to determine country
         let phone_number = self
-            .find_by_id(user_id)?
+            .get_user()?
             .map(|user| user.phone_number)
             .ok_or_else(|| diesel::result::Error::NotFound)?;
         // Determine country based on phone number
@@ -714,7 +561,7 @@ impl UserCore {
         })
     }
 
-    pub fn get_priority_notification_info(&self, user_id: i32) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error> {
+    pub fn get_priority_notification_info(&self) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error> {
         use crate::schema::{usage_logs};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         // Get average priority notifications per day
@@ -726,7 +573,7 @@ impl UserCore {
             let thirty_days_ago: i64 = now - 2_592_000; // 30 * 86_400
             let active_days_count: i64 = usage_logs::table
                 .select(sql::<BigInt>("COUNT(DISTINCT created_at / 86400)"))
-                .filter(crate::schema::usage_logs::user_id.eq(user_id))
+                .filter(crate::schema::usage_logs::user_id.eq(1))
                 .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
                 .first(&mut conn)?;
             if active_days_count < 3 {
@@ -734,7 +581,7 @@ impl UserCore {
             } else {
                 let oldest_day: i64 = usage_logs::table
                     .select(sql::<BigInt>("MIN(created_at / 86400)"))
-                    .filter(crate::schema::usage_logs::user_id.eq(user_id))
+                    .filter(crate::schema::usage_logs::user_id.eq(1))
                     .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
                     .first(&mut conn)?;
                 let current_day: i64 = now / 86_400;
@@ -745,7 +592,7 @@ impl UserCore {
                     let start_timestamp: i64 = oldest_day * 86_400;
                     let end_timestamp: i64 = (current_day + 1) * 86_400;
                     let total_priority: i64 = usage_logs::table
-                        .filter(crate::schema::usage_logs::user_id.eq(user_id))
+                        .filter(crate::schema::usage_logs::user_id.eq(1))
                         .filter(usage_logs::activity_type.like("%_priority"))
                         .filter(usage_logs::created_at.ge(start_timestamp as i32))
                         .filter(usage_logs::created_at.lt(end_timestamp as i32))
@@ -761,7 +608,7 @@ impl UserCore {
         };
         // Get user's phone number to determine country
         let phone_number = self
-            .find_by_id(user_id)?
+            .get_user()?
             .map(|user| user.phone_number)
             .ok_or_else(|| diesel::result::Error::NotFound)?;
         // Determine country based on phone number
@@ -796,183 +643,6 @@ impl UserCore {
         })
     }
 
-    pub fn verify_pairing_code(&self, pairing_code: &str, server_instance_id: &str) -> Result<(bool, Option<String>), DieselError> {
-        // Try to find a user with the given pairing code
-        if let Some(user_id) = self.find_user_by_pairing_code(pairing_code)? {
-            // If user found, update their server instance ID
-            self.set_server_instance_id(user_id, server_instance_id)?;
-            
-            // Get the user's phone number
-            let user = self.find_by_id(user_id)?;
-            let phone_number = user.map(|u| u.phone_number);
-            
-            Ok((true, phone_number))
-        } else {
-            Ok((false, None))
-        }
-    }
-
-    pub fn update_next_billing_date(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
-        use crate::schema::users;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::next_billing_date_timestamp.eq(timestamp))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn update_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
-        use crate::schema::users;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::sub_tier.eq(tier))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn update_server_instance_last_ping(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the last ping timestamp
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_instance_last_ping_timestamp.eq(timestamp))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn update_server_key(&self, user_id: i32, server_key: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_key.eq(server_key))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn update_server_ip(&self, user_id: i32, server_ip: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the last ping timestamp
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_ip.eq(server_ip))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn get_next_billing_date(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-        use crate::schema::users;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let timestamp = users::table
-            .find(user_id)
-            .select(users::next_billing_date_timestamp)
-            .first::<Option<i32>>(&mut conn)?;
-
-        Ok(timestamp)
-    }
-
-    pub fn generate_pairing_code(&self, user_id: i32) -> Result<String, DieselError> {
-        use crate::schema::user_settings;
-        use rand::{thread_rng, Rng};
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Get current timestamp for uniqueness
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        loop {
-            // Generate base random part (8 chars)
-            const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            let mut rng = thread_rng();
-            let random_part: String = (0..8)
-                .map(|_| {
-                    let idx = rng.gen_range(0..CHARSET.len());
-                    CHARSET[idx] as char
-                })
-                .collect();
-
-            // Create unique code combining:
-            // - First 2 chars: User-specific hash (to spread users across the space)
-            // - Next 4 chars: Timestamp-based (for temporal uniqueness)
-            // - Last 8 chars: Random (for entropy)
-            let user_hash = (user_id as u64 * 17 + 255) % 1296; // 36^2 possibilities
-            let time_hash = timestamp % 1679616; // 36^4 possibilities
-            
-            let user_part = Self::encode_base36(user_hash, 2);
-            let time_part = Self::encode_base36(time_hash, 4);
-            
-            let code = format!("{}{}{}", user_part, time_part, random_part);
-
-            // Verify this code doesn't exist anywhere in the database
-            let exists = user_settings::table
-                .filter(user_settings::server_instance_id.eq(&code))
-                .count()
-                .get_result::<i64>(&mut conn)?;
-
-            if exists == 0 {
-                // Update the user settings with the new code
-                diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-                    .set(user_settings::server_instance_id.eq(Some(&code)))
-                    .execute(&mut conn)?;
-
-                return Ok(code);
-            }
-            // If code exists (extremely unlikely), loop will continue and generate a new one
-        }
-    }
-
-    // Helper function to encode numbers in base36 with fixed width
-    fn encode_base36(mut num: u64, width: usize) -> String {
-        const CHARSET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let mut result = vec!['0'; width];
-        
-        for i in (0..width).rev() {
-            let digit = (num % 36) as usize;
-            result[i] = CHARSET[digit] as char;
-            num /= 36;
-        }
-        
-        result.into_iter().collect()
-    }
-
-    pub fn find_user_by_pairing_code(&self, pairing_code: &str) -> Result<Option<i32>, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Search for a user_settings record with matching server_instance_id
-        let user_id = user_settings::table
-            .filter(user_settings::server_instance_id.eq(pairing_code))
-            .select(user_settings::user_id)
-            .first::<i32>(&mut conn)
-            .optional()?;
-            
-        Ok(user_id)
-    }
 
     pub fn get_openrouter_api_key(&self, user_id: i32) -> Result<String, Box<dyn Error>> {
         use crate::schema::user_settings;
@@ -997,7 +667,7 @@ impl UserCore {
         }
     }
 
-    pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
+    pub fn get_twilio_credentials(&self) -> Result<(String, String, String), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::decrypt;
         
@@ -1005,37 +675,38 @@ impl UserCore {
         
         // Get the user settings
         let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
+            .filter(user_settings::user_id.eq(1))
             .select((
                 user_settings::encrypted_twilio_account_sid,
                 user_settings::encrypted_twilio_auth_token,
+                user_settings::server_url,
             ))
-            .first::<(Option<String>, Option<String>)>(&mut conn)?;
+            .first::<(Option<String>, Option<String>, Option<String>)>(&mut conn)?;
 
         match settings {
-            (Some(encrypted_account_sid), Some(encrypted_auth_token)) => {
+            (Some(encrypted_account_sid), Some(encrypted_auth_token), Some(server_url)) => {
                 let account_sid = decrypt(&encrypted_account_sid)?;
                 let auth_token = decrypt(&encrypted_auth_token)?;
-                Ok((account_sid, auth_token))
+                Ok((account_sid, auth_token, server_url))
             },
             _ => Err("Twilio credentials not found".into())
         }
     }
 
 
-    pub fn update_twilio_credentials(&self, user_id: i32, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
+    pub fn update_twilio_credentials(&self, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::encrypt;
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let encrypted_account_sid = encrypt(account_sid)?;
         let encrypted_auth_token = encrypt(auth_token)?;
 
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(1)))
             .set((
                 user_settings::encrypted_twilio_account_sid.eq(encrypted_account_sid.clone()),
                 user_settings::encrypted_twilio_auth_token.eq(encrypted_auth_token.clone()),
@@ -1075,7 +746,7 @@ impl UserCore {
         use crate::utils::encryption::encrypt;
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -1096,7 +767,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Get the critical_enabled setting
         let number= user_settings::table
@@ -1113,7 +784,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the server_instance_id
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -1129,7 +800,7 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the server_instance_id
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
@@ -1150,7 +821,7 @@ impl UserCore {
             .first::<User>(&mut conn)?;
 
         // Ensure user settings exist for this user
-        self.ensure_user_settings_exist(first_user.id)?;
+        self.ensure_user_settings_exist()?;
 
         // Update the server_instance_id for this user
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(first_user.id)))

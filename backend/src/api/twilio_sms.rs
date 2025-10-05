@@ -133,72 +133,12 @@ pub async fn handle_textbee_sms(
     handle_incoming_sms(State(state), Form(twilio_payload)).await
 }
 
-
-// New wrapper handler for the regular SMS endpoint
-pub async fn handle_regular_sms(
-    State(state): State<Arc<AppState>>,
-    Form(payload): Form<TwilioWebhookPayload>,
-) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
-    // First check if this user has a discount_tier == sms - they shouldn't be using this endpoint, but their own dedicated
-    match state.user_core.find_by_phone_number(&payload.from) {
-        Ok(Some(user)) => {
-            if let Some(tier) = user.discount_tier {
-                if tier == "msg".to_string() {
-                    tracing::warn!("User {} with discount_tier equal to msg attempted to use regular SMS endpoint", user.id);
-                    return (
-                        StatusCode::FORBIDDEN,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(TwilioResponse {
-                            message: "Please use your dedicated SMS endpoint. Contact support if you need help.".to_string(),
-                        })
-                    );
-                }
-            }
-        },
-        Ok(None) => {
-            tracing::error!("No user found for phone number: {}", payload.from);
-            return (
-                StatusCode::NOT_FOUND,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "User not found".to_string(),
-                })
-            );
-        },
-        Err(e) => {
-            tracing::error!("Database error while finding user: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Internal server error".to_string(),
-                })
-            );
-        }
-    }
-
-    // If we get here, the user is allowed to use this endpoint
-    handle_incoming_sms(State(state), Form(payload)).await
-}
-
 // Original handler becomes internal and is used by both routes
 pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
-
-    // Check for Shazam shortcut ('S' or 's')
-    if payload.body.trim() == "S" || payload.body.trim() == "s" {
-
-        return (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(TwilioResponse {
-                message: "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string(),
-            })
-        );
-    }
 
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
@@ -267,18 +207,6 @@ pub async fn process_sms(
             );
         }
     };
-
-    // Check if user has sufficient credits before processing the message
-    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
-        tracing::warn!("User {} has insufficient credits: {}", user.id, e);
-        return (
-            StatusCode::PAYMENT_REQUIRED,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(TwilioResponse {
-                message: e,
-            })
-        );
-    }
     tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
 
     // Handle 'cancel' message specially
@@ -307,7 +235,6 @@ pub async fn process_sms(
                             // Log usage (similar to regular message)
                             let processing_time_secs = start_time_clone.elapsed().as_secs();
                             if let Err(e) = state_clone.user_repository.log_usage(
-                                user_clone.id,
                                 Some(message_sid.clone()),
                                 "sms".to_string(),
                                 None,
@@ -320,9 +247,6 @@ pub async fn process_sms(
                             ) {
                                 tracing::error!("Failed to log SMS usage for cancel: {}", e);
                             }
-                            if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
-                                tracing::error!("Failed to deduct user credits for cancel: {}", e);
-                            }
                         }
                         Err(e) => {
                             tracing::error!("Failed to send cancel response message: {}", e);
@@ -330,7 +254,6 @@ pub async fn process_sms(
                             let processing_time_secs = start_time_clone.elapsed().as_secs();
                             let error_status = format!("failed to send: {}", e);
                             if let Err(log_err) = state_clone.user_repository.log_usage(
-                                user_clone.id,
                                 None,
                                 "sms".to_string(),
                                 None,
@@ -405,7 +328,7 @@ pub async fn process_sms(
 
     
     // Get user settings to access timezone
-    let user_settings = match state.user_core.get_user_settings(user.id) {
+    let user_settings = match state.user_core.get_user_settings() {
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get user settings: {}", e);
@@ -419,7 +342,7 @@ pub async fn process_sms(
         }
     };
 
-    let user_info= match state.user_core.get_user_info(user.id) {
+    let user_info= match state.user_core.get_user_info() {
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get user settings: {}", e);
@@ -810,12 +733,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     },
                 };
 
-                // Check if user has access to this tool
-                if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone(), user.discount) {
-                    tracing::info!("Attempted to use subscription-only tool {} without proper subscription", name);
-                    tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
-                    continue;
-                }
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,
@@ -927,8 +844,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             continue;
                         }
                     };
-                } else if name == "use_shazam" {
-                    tool_answers.insert(tool_call_id, "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string());
                 } else if name == "fetch_emails" {
                     tracing::debug!("Executing fetch_emails tool call");
                     let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
@@ -1499,7 +1414,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     if is_test {
         // Log the test usage without actually sending the message
         if let Err(e) = state.user_repository.log_usage(
-            user.id,
             None,  // No message SID in test mode
             "sms_test".to_string(),
             None,
@@ -1558,11 +1472,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         &user
     ).await {
         Ok(message_sid) => {
-            // Log the SMS usage metadata and store message history
-            
             // Log usage
             if let Err(e) = state.user_repository.log_usage(
-                user.id,
                 Some(message_sid.clone()),
                 "sms".to_string(),
                 None,
@@ -1574,38 +1485,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 None,
             ) {
                 tracing::error!("Failed to log SMS usage: {}", e);
-            }
-
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                tracing::error!("Failed to deduct user credits: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Failed to process credits points".to_string(),
-                    })
-                );
-            }
-                    
-            match state.user_repository.is_credits_under_threshold(user.id) {
-                Ok(is_under) => {
-                    if is_under {
-                        tracing::debug!("User {} credits is under threshold, attempting automatic charge", user.id);
-                        // Get user information
-                        if user.charge_when_under {
-                            use axum::extract::{State, Path};
-                            let state_clone = Arc::clone(&state);
-                            tokio::spawn(async move {
-                                let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                    State(state_clone),
-                                    Path(user.id),
-                                ).await;
-                                tracing::debug!("Recharged the user successfully back up!");
-                            });
-                        }
-                    }
-                },
-                Err(e) => tracing::error!("Failed to check if user credits is under threshold: {}", e),
             }
 
             (
@@ -1621,7 +1500,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Log the failed attempt with error message in status
             let error_status = format!("failed to send: {}", e);
             if let Err(log_err) = state.user_repository.log_usage(
-                user.id,
                 None,
                 "sms".to_string(),
                 None,

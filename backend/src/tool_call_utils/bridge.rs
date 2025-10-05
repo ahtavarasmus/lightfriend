@@ -208,7 +208,7 @@ pub async fn handle_send_chat_message(
 ) -> Result<(StatusCode, [(HeaderName, &'static str); 1], Json<TwilioResponse>), Box<dyn std::error::Error>> {
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
     let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-    let bridge = state.user_repository.get_bridge(user_id, &args.platform)?;
+    let bridge = state.user_repository.get_bridge(&args.platform)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
@@ -227,7 +227,7 @@ pub async fn handle_send_chat_message(
             })
         ));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(&state).await?;
     let rooms = match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
         Ok(rooms) => rooms,
         Err(e) => {
@@ -294,10 +294,6 @@ pub async fn handle_send_chat_message(
         user,
     ).await {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -531,7 +527,6 @@ pub async fn handle_fetch_recent_messages(
     match crate::utils::bridge::fetch_bridge_messages(
         &args.platform,
         state,
-        user_id,
         start_time,
         false,
     ).await {

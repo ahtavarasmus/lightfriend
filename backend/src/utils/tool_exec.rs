@@ -73,8 +73,8 @@ pub async fn get_weather(
     };
     
     // Get user settings
-    let settings = state.user_core.get_user_settings(user_id).map_err(|e| format!("Failed to get user settings: {}", e))?;
-    let user_info= state.user_core.get_user_info(user_id).map_err(|e| format!("Failed to get user settings: {}", e))?;
+    let settings = state.user_core.get_user_settings().map_err(|e| format!("Failed to get user settings: {}", e))?;
+    let user_info= state.user_core.get_user_info().map_err(|e| format!("Failed to get user settings: {}", e))?;
     let user_timezone = user_info.timezone;
     
     // First, get coordinates using Geoapify

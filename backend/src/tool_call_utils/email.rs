@@ -162,10 +162,6 @@ pub async fn handle_send_email(
         user,
     ).await {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -354,10 +350,6 @@ pub async fn handle_respond_to_email(
         user,
     ).await {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -441,7 +433,7 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
     let user_id_clone = user_id.clone();
 
     // Fetch the latest 20 emails with full content
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false, false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, true, Some(20), false, false).await {
         Ok(emails) => {
             if emails.is_empty() {
                 return "No emails found".to_string();

@@ -90,7 +90,7 @@ async fn connect_instagram_with_retry(
                  
                     // Reinitialize client (bypass cache since we're recovering from an error)
                     tracing::debug!("Reinitializing client for user {}", user_id);
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(&state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -190,7 +190,7 @@ pub async fn start_instagram_connection(
     tracing::debug!("🚀 Starting Instagram connection process for user {}", auth_user.user_id);
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -278,7 +278,7 @@ pub async fn get_instagram_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking Instagram status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| {
             tracing::error!("Failed to get Instagram bridge status: {}", e);
             (
@@ -361,7 +361,7 @@ async fn monitor_instagram_connection(
                                     created_at: Some(current_time),
                                 };
                                 tracing::debug!("Deleting existing bridge record for Instagram");
-                                state.user_repository.delete_bridge(user_id, "instagram")?;
+                                state.user_repository.delete_bridge("instagram")?;
                                 tracing::debug!("Creating new connected bridge record for Instagram");
                                 state.user_repository.create_bridge(new_bridge)?;
                                 // Add client to app state and start sync
@@ -417,7 +417,7 @@ async fn monitor_instagram_connection(
                             ];
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ Instagram connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_bridge(user_id, "instagram")?;
+                                state.user_repository.delete_bridge("instagram")?;
                                 return Err(anyhow!("Instagram connection failed: {}", content));
                             }
                         }
@@ -430,7 +430,7 @@ async fn monitor_instagram_connection(
     }
     // If we reach here, connection timed out
     tracing::error!("Instagram connection timed out for user {} after 3 minutes", user_id);
-    state.user_repository.delete_bridge(user_id, "instagram")?;
+    state.user_repository.delete_bridge("instagram")?;
     Err(anyhow!("Instagram connection timed out after 3 minutes"))
 }
 pub async fn resync_instagram(
@@ -439,7 +439,7 @@ pub async fn resync_instagram(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("🔄 Starting Instagram resync process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| {
             tracing::error!("Failed to get Instagram bridge: {}", e);
             (
@@ -454,7 +454,7 @@ pub async fn resync_instagram(
         ));
     };
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -519,7 +519,7 @@ pub async fn disconnect_instagram(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("🔌 Starting Instagram disconnection process for user {}", auth_user.user_id);
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| {
             tracing::error!("Failed to get Instagram bridge: {}", e);
             (
@@ -534,7 +534,7 @@ pub async fn disconnect_instagram(
         })));
     };
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -574,7 +574,7 @@ pub async fn disconnect_instagram(
     }
     // Delete the bridge record
     tracing::debug!("Deleting Instagram bridge record for user {}", auth_user.user_id);
-    state.user_repository.delete_bridge(auth_user.user_id, "instagram")
+    state.user_repository.delete_bridge("instagram")
         .map_err(|e| {
             tracing::error!("Failed to delete Instagram bridge: {}", e);
             (
@@ -583,7 +583,7 @@ pub async fn disconnect_instagram(
             )
         })?;
     // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
+    let has_active_bridges = state.user_repository.has_active_bridges()
         .map_err(|e| {
             tracing::error!("Failed to check active bridges: {}", e);
             (

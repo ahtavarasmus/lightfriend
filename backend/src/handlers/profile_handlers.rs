@@ -54,32 +54,17 @@ pub struct SubscriptionInfo {
 #[derive(Serialize)]
 pub struct ProfileResponse {
     id: i32,
-    email: String,
     phone_number: String,
     nickname: Option<String>,
-    verified: bool,
-    time_to_live: i32,
-    time_to_delete: bool,
     credits: f32,
-    notify: bool,
     info: Option<String>,
     preferred_number: Option<String>,
-    charge_when_under: bool,
-    charge_back_to: Option<f32>,
-    stripe_payment_method_id: Option<String>,
     timezone: Option<String>,
     timezone_auto: Option<bool>,
-    sub_tier: Option<String>,
     credits_left: f32,
-    discount: bool,
     agent_language: String,
     notification_type: Option<String>,
-    sub_country: Option<String>,
     save_context: Option<i32>,
-    days_until_billing: Option<i32>,
-    digests_reserved: i32,
-    pairing_code: Option<String>,
-    server_ip: Option<String>,
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
     openrouter_api_key: Option<String>,
@@ -89,7 +74,6 @@ pub struct ProfileResponse {
     location: Option<String>,
     nearby_places: Option<String>,
     phone_number_country: Option<String>,
-    server_key: Option<String>, 
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -99,27 +83,26 @@ pub async fn get_profile(
     auth_user: AuthUser,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get user profile and settings from database
-    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
+    let user = state.user_core.get_user().map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
     match user {
         Some(user) => {
-            // TODO can be removed in the future
             let mut phone_country = user.phone_number_country.clone();
             if phone_country.is_none() {
-                match set_user_phone_country(&state, user.id, &user.phone_number).await {
+                match set_user_phone_country(&state, &user.phone_number).await {
                     Ok(c) => phone_country = c,
                     Err(e) => {
                         tracing::error!("Failed to set phone country: {}", e);
                     }
                 }
             }
-            let user_settings = state.user_core.get_user_settings(auth_user.user_id).map_err(|e| (
+            let user_settings = state.user_core.get_user_settings().map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
-            let user_info = state.user_core.get_user_info(auth_user.user_id).map_err(|e| (
+            let user_info = state.user_core.get_user_info().map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
@@ -128,7 +111,7 @@ pub async fn get_profile(
                                                     .unwrap()
                                                     .as_secs() as i32;
             // Get current digest settings
-            let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+            let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests()
                 .map_err(|e| {
                     tracing::error!("Failed to get digest settings: {}", e);
                     (
@@ -141,19 +124,9 @@ pub async fn get_profile(
                 .iter()
                 .filter(|&&x| x.is_some())
                 .count() as i32;
-            let ttl = user.time_to_live.unwrap_or(0);
-            let time_to_delete = current_time > ttl;
-            let days_until_billing: Option<i32> = user.next_billing_date_timestamp.map(|date| {
-                let current_time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-                (date - current_time) / (24 * 60 * 60)
-            });
-            let digests_reserved = current_count * days_until_billing.unwrap_or(30);
             // Fetch Twilio credentials and mask them
-            let (twilio_sid, twilio_token) = match state.user_core.get_twilio_credentials(auth_user.user_id) {
-                Ok((sid, token)) => {
+            let (twilio_sid, twilio_token, _) = match state.user_core.get_twilio_credentials() {
+                Ok((sid, token, _)) => {
                     let masked_sid = if sid.len() >= 4 {
                         format!("...{}", &sid[sid.len() - 4..])
                     } else {
@@ -164,9 +137,9 @@ pub async fn get_profile(
                     } else {
                         "...".to_string()
                     };
-                    (Some(masked_sid), Some(masked_token))
+                    (Some(masked_sid), Some(masked_token), Some(""))
                 },
-                Err(_) => (None, None),
+                Err(_) => (None, None, None),
             };
             // Fetch Textbee credentials and mask them
             let (textbee_device_id, textbee_api_key) = match state.user_core.get_textbee_credentials(auth_user.user_id) {
@@ -196,21 +169,6 @@ pub async fn get_profile(
                 },
                 Err(_) => None,
             };
-            // Determine country based on phone number
-            let phone_number = user.phone_number.clone();
-            let country = if phone_number.starts_with("+1") {
-                "US".to_string()
-            } else if phone_number.starts_with("+358") {
-                "FI".to_string()
-            } else if phone_number.starts_with("+31") {
-                "NL".to_string()
-            } else if phone_number.starts_with("+44") {
-                "UK".to_string()
-            } else if phone_number.starts_with("+61") {
-                "AU".to_string()
-            } else {
-                "Other".to_string()
-            };
             // Get critical notification info
             let critical_info = state.user_core.get_critical_notification_info(auth_user.user_id).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -218,7 +176,7 @@ pub async fn get_profile(
             ))?;
             let estimated_critical_monthly = critical_info.estimated_monthly_price;
             // Get priority notification info
-            let priority_info = state.user_core.get_priority_notification_info(auth_user.user_id).map_err(|e| (
+            let priority_info = state.user_core.get_priority_notification_info().map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
@@ -226,9 +184,9 @@ pub async fn get_profile(
             // Calculate digest estimated monthly cost
             let estimated_digest_monthly = if current_count > 0 {
                 let active_count_f = current_count as f32;
-                let cost_per_digest = if country == "US" {
+                let cost_per_digest = if phone_country == Some("US".to_string()) {
                     0.5
-                } else if country == "Other" {
+                } else if phone_country == Some("Other".to_string()) {
                     0.0
                 } else {
                     0.30
@@ -241,32 +199,17 @@ pub async fn get_profile(
             let estimated_monitoring_cost = estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
             Ok(Json(ProfileResponse {
                 id: user.id,
-                email: user.email,
                 phone_number: user.phone_number,
                 nickname: user.nickname,
-                verified: user.verified,
-                time_to_live: ttl,
-                time_to_delete: time_to_delete,
                 credits: user.credits,
-                notify: user_settings.notify,
                 info: user_info.info,
                 preferred_number: user.preferred_number,
-                charge_when_under: user.charge_when_under,
-                charge_back_to: user.charge_back_to,
-                stripe_payment_method_id: user.stripe_payment_method_id,
                 timezone: user_info.timezone,
                 timezone_auto: user_settings.timezone_auto,
-                sub_tier: user.sub_tier,
                 credits_left: user.credits_left,
-                discount: user.discount,
                 agent_language: user_settings.agent_language,
                 notification_type: user_settings.notification_type,
-                sub_country: user_settings.sub_country,
                 save_context: user_settings.save_context,
-                days_until_billing: days_until_billing,
-                digests_reserved: digests_reserved,
-                pairing_code: user_settings.server_instance_id,
-                server_ip: user_settings.server_ip,
                 twilio_sid: twilio_sid,
                 twilio_token: twilio_token,
                 openrouter_api_key: openrouter_api_key,
@@ -276,7 +219,6 @@ pub async fn get_profile(
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
                 phone_number_country: phone_country,
-                server_key: user_settings.server_key,
             }))
         }
         None => Err((
@@ -303,7 +245,7 @@ pub async fn update_preferred_number(
     Json(request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user and settings to check their subscription status
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state.user_core.get_user()
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -313,39 +255,16 @@ pub async fn update_preferred_number(
             Json(json!({"error": "User not found"}))
         ))?;
 
-    let preferred_number = if user.discount_tier.is_some() {
-        // If user has a discount_tier, get their dedicated number from environment
-        let env_var_name = format!("TWILIO_USER_PHONE_NUMBER_{}", auth_user.user_id);
-        std::env::var(&env_var_name).map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("No dedicated phone number found for user {}", auth_user.user_id)}))
-        ))?
-    } else {
-        // If no discount_tier, validate the requested number is allowed
-        let allowed_numbers = vec![
-            std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
-            std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
-            std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
-            std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-        ];
-        
-        if !allowed_numbers.contains(&request.preferred_number) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid preferred number. Must be one of the allowed Twilio numbers"}))
-            ));
-        }
-        request.preferred_number.clone()
-    };
+    // TODO this should only be used when user uses their own twilio number. 
 
     // Update preferred number
-    state.user_core.update_preferred_number(auth_user.user_id, &preferred_number)
+    state.user_core.update_preferred_number(&request.preferred_number)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
 
-    println!("Updated preferred number to: {}", preferred_number);
+    println!("Updated preferred number to: {}", request.preferred_number);
     Ok(Json(json!({
         "message": "Preferred number updated successfully"
     })))
@@ -405,7 +324,7 @@ use serde_json::Value;
 use std::env;
 
 
-pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_number: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+pub async fn set_user_phone_country(state: &Arc<AppState>, phone_number: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let ca_area_codes: Vec<String> = vec![
         "+1204".to_string(),
         "+1226".to_string(),
@@ -786,9 +705,9 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
     println!("country: {:#?}", country);
 
     if let Some(ref c) = country {
-        state.user_core.update_phone_number_country(user_id, Some(c))?;
+        state.user_core.update_phone_number_country(Some(c))?;
     } else {
-        state.user_core.update_phone_number_country(user_id, None)?;
+        state.user_core.update_phone_number_country(None)?;
     }
 
     Ok(country)
@@ -848,7 +767,7 @@ pub async fn update_profile(
                 ));
             }
             // Set phone country after update
-            if let Err(e) = set_user_phone_country(&state, auth_user.user_id, &update_req.phone_number).await {
+            if let Err(e) = set_user_phone_country(&state, &update_req.phone_number).await {
                 tracing::error!("Failed to set phone country after profile update: {}", e);
                 // Continue anyway, as it's non-critical
             }
@@ -938,8 +857,6 @@ pub struct DigestsResponse {
     morning_digest_time: Option<String>,
     day_digest_time: Option<String>,
     evening_digest_time: Option<String>,
-    amount_affordable_with_messages: i32,
-    amount_affordable_with_messages_and_credits: i32,
 }
 
 #[derive(Deserialize)]
@@ -955,7 +872,7 @@ pub async fn get_digests(
     auth_user: AuthUser,
 ) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get current digest settings
-    let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+    let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests()
         .map_err(|e| {
             tracing::error!("Failed to get digest settings: {}", e);
             (
@@ -970,37 +887,9 @@ pub async fn get_digests(
         .filter(|&&x| x.is_some())
         .count();
 
-    // Get next billing date
-    let mut next_billing_date = state.user_core.get_next_billing_date(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get next billing date: {}", e)}))
-        ))?;
-
-    // If no next billing date found, fetch it from Stripe
-    if next_billing_date.is_none() {
-        if let Ok(Json(response)) = crate::handlers::stripe_handlers::fetch_next_billing_date(
-            State(state.clone()),
-            auth_user.clone(),
-            Path(auth_user.user_id)
-        ).await {
-            if let Some(date) = response.get("next_billing_date").and_then(|v| v.as_i64()) {
-                next_billing_date = Some(date as i32);
-            }
-        }
-    }
-
-    // Calculate days until next billing
-    let days_until_billing = next_billing_date.map(|date| {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        (date - current_time) / (24 * 60 * 60)
-    }).unwrap_or(30); // Default to 30 days if we can't calculate
 
     // Get user for credit check
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state.user_core.get_user()
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to get user: {}", e)}))
@@ -1010,47 +899,10 @@ pub async fn get_digests(
             Json(json!({"error": "User not found"}))
         ))?;
 
-    // Calculate credits needed per digest
-    let credits_needed_per_digest = days_until_billing as i32;
-
-    // Calculate available slots (max 3 - current)
-    let available_slots = 3 - current_count as i32;
-
-    // Calculate how many additional digests user can afford with credits_left
-    let affordable_with_credits_left = if available_slots > 0 {
-        let max_affordable = (user.credits_left / credits_needed_per_digest as f32).floor() as i32;
-        std::cmp::min(max_affordable, available_slots)
-    } else {
-        0
-    };
-
-    // Calculate how many additional digests user can afford with total credits
-    let affordable_with_total_credits = if available_slots > 0 {
-        let mut max_affordable = 0;
-        for additional in 1..=available_slots {
-            let credits_needed = additional * credits_needed_per_digest;
-            if crate::utils::usage::check_user_credits(
-                &state,
-                &user,
-                "digest",
-                Some(credits_needed)
-            ).await.is_ok() {
-                max_affordable = additional;
-            } else {
-                break;
-            }
-        }
-        max_affordable
-    } else {
-        0
-    };
-
     Ok(Json(DigestsResponse {
         morning_digest_time,
         day_digest_time,
         evening_digest_time,
-        amount_affordable_with_messages: affordable_with_credits_left,
-        amount_affordable_with_messages_and_credits: affordable_with_total_credits,
     }))
 }
 
@@ -1060,7 +912,7 @@ pub async fn update_digests(
     Json(request): Json<UpdateDigestsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get current digest settings
-    let (current_morning, current_day, current_evening) = state.user_core.get_digests(auth_user.user_id)
+    let (current_morning, current_day, current_evening) = state.user_core.get_digests()
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to get current digest settings: {}", e)}))
@@ -1167,7 +1019,6 @@ pub async fn get_critical_settings(
     }
 }
 
-
 pub async fn update_proactive_agent_on(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -1193,7 +1044,7 @@ pub async fn get_proactive_agent_on(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<ProactiveAgentEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_proactive_agent_on(auth_user.user_id) {
+    match state.user_core.get_proactive_agent_on() {
         Ok(enabled) => {
             Ok(Json(ProactiveAgentEnabledResponse{
                 enabled,
@@ -1208,55 +1059,4 @@ pub async fn get_proactive_agent_on(
         }
     }
 }
-
-pub async fn delete_user(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    axum::extract::Path(user_id): axum::extract::Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Deleting user: {}", auth_user.user_id);
-
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "You can only delete your own account unless you're an admin"}))
-        ));
-    }
-    
-    // First verify the user exists
-    match state.user_core.find_by_id(user_id) {
-        Ok(Some(_)) => {
-            println!("user exists");
-            // User exists, proceed with deletion
-            match state.user_core.delete_user(user_id) {
-                Ok(_) => {
-                    tracing::info!("Successfully deleted user {}", user_id);
-                    Ok(Json(json!({"message": "User deleted successfully"})))
-                },
-                Err(e) => {
-                    tracing::error!("Failed to delete user {}: {}", user_id, e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Failed to delete user: {}", e)}))
-                    ))
-                }
-            }
-        },
-        Ok(None) => {
-            tracing::warn!("Attempted to delete non-existent user {}", user_id);
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ))
-        },
-        Err(e) => {
-            tracing::error!("Database error while checking user {}: {}", user_id, e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))
-        }
-    }
-}
-
 

@@ -34,7 +34,7 @@ pub async fn send_instagram_message(
     Json(request): Json<SendInstagramMessageRequest>,
 ) -> Result<Json<SendInstagramMessageResponse>, String> {
     // Get bridge info first to verify Instagram is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Instagram bridge not found".to_string())?;
     tracing::info!("Found Instagram bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
@@ -64,7 +64,7 @@ pub async fn test_fetch_instagram_messages(
     auth_user: AuthUser,
 ) -> Result<Json<InstagramMessagesResponse>, String> {
     // Get bridge info first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Instagram bridge not found".to_string())?;
     tracing::info!("Found Instagram bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
@@ -76,7 +76,7 @@ pub async fn test_fetch_instagram_messages(
     let start_time = (now - chrono::Duration::hours(24)).timestamp();
     let end_time = now.timestamp()+1000000;
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
-    match crate::utils::bridge::fetch_bridge_messages("instagram", &state, auth_user.user_id, start_time, false).await {
+    match crate::utils::bridge::fetch_bridge_messages("instagram", &state, start_time, false).await {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
          
@@ -132,7 +132,7 @@ pub async fn test_fetch_instagram_messages(
             tracing::error!("Error fetching messages: {}", e);
          
             // Try to fall back to the older fetch_instagram_messages method
-            match fetch_bridge_messages("instagram", &state, auth_user.user_id, start_time, false).await {
+            match fetch_bridge_messages("instagram", &state, start_time, false).await {
                 Ok(fallback_messages) => {
                     tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
                     Ok(Json(InstagramMessagesResponse { messages: fallback_messages }))
@@ -153,7 +153,7 @@ pub async fn search_instagram_rooms_handler(
     Json(request): Json<SearchInstagramRoomsRequest>,
 ) -> Result<Json<SearchInstagramRoomsResponse>, String> {
     // Get bridge info first to verify Instagram is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "instagram")
+    let bridge = state.user_repository.get_bridge("instagram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Instagram bridge not found".to_string())?;
     if bridge.status != "connected" {

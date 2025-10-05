@@ -85,7 +85,7 @@ async fn connect_telegram_with_retry(
                     sleep(RETRY_DELAY).await;
                     
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(&state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -262,7 +262,7 @@ pub async fn start_telegram_connection(
 
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -357,7 +357,7 @@ pub async fn get_telegram_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking Telegram status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state.user_repository.get_bridge("telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge status: {}", e);
             (
@@ -443,7 +443,7 @@ async fn monitor_telegram_connection(
                                     data: None,
                                     created_at: Some(current_time),
                                 };
-                                state.user_repository.delete_bridge(user_id, "telegram")?;
+                                state.user_repository.delete_bridge("telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
                                 // Add client to app state and start sync
@@ -502,7 +502,7 @@ async fn monitor_telegram_connection(
                             ];
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ Telegram connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_bridge(user_id, "telegram")?;
+                                state.user_repository.delete_bridge("telegram")?;
                                 return Err(anyhow!("Telegram connection failed: {}", content));
                             }
                         }
@@ -514,7 +514,7 @@ async fn monitor_telegram_connection(
         sleep(Duration::from_secs(5)).await; // Increase to 5 seconds for stability
     }
 
-    state.user_repository.delete_bridge(user_id, "telegram")?;
+    state.user_repository.delete_bridge("telegram")?;
     Err(anyhow!("Telegram connection timed out after 10 minutes"))
 }
 
@@ -525,7 +525,7 @@ pub async fn resync_telegram(
     println!("🔄 Starting Telegram resync process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state.user_repository.get_bridge("telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge: {}", e);
             (
@@ -542,7 +542,7 @@ pub async fn resync_telegram(
     };
 
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -635,7 +635,7 @@ pub async fn disconnect_telegram(
     tracing::debug!("🔌 Starting Telegram disconnection process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state.user_repository.get_bridge("telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge: {}", e);
             (
@@ -651,7 +651,7 @@ pub async fn disconnect_telegram(
     };
 
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    let client = matrix_auth::get_cached_client(&state)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -706,7 +706,7 @@ pub async fn disconnect_telegram(
     }
 
     // Delete the bridge record
-    state.user_repository.delete_bridge(auth_user.user_id, "telegram")
+    state.user_repository.delete_bridge("telegram")
         .map_err(|e| {
             tracing::error!("Failed to delete Telegram bridge: {}", e);
             (

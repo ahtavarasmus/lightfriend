@@ -92,7 +92,7 @@ pub async fn fetch_imap_previews(
     axum::extract::Query(params): axum::extract::Query<FetchEmailsQuery>,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("Starting IMAP preview fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false, false).await {
+    match fetch_emails_imap(&state, true, params.limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
           
@@ -137,7 +137,7 @@ pub async fn fetch_full_imap_emails(
         limit = Some(5);
         testing = true;
     }
-    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
+    match fetch_emails_imap(&state, false, limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
           
@@ -199,7 +199,7 @@ pub async fn respond_to_email(
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = match state
         .user_repository
-        .get_imap_credentials(auth_user.user_id)
+        .get_imap_credentials()
     {
         Ok(Some(creds)) => creds,
         Ok(None) => return Err((
@@ -452,22 +452,21 @@ pub async fn fetch_single_imap_email(
 }
 pub async fn fetch_emails_imap(
     state: &AppState,
-    user_id: i32,
     preview_only: bool,
     limit: Option<u32>,
     unprocessed: bool,
     unread_only: bool,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
-    tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}",
-        user_id, preview_only, limit, unprocessed);
+    tracing::debug!("Starting fetch_emails_imap for user with preview_only: {}, limit: {:?}, unprocessed: {}",
+        preview_only, limit, unprocessed);
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
         .user_repository
-        .get_imap_credentials(user_id)
+        .get_imap_credentials()
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
         .ok_or_else(|| ImapError::NoConnection)?;
     // Add logging for debugging (remove in production)
-    tracing::debug!("Fetching IMAP emails for user {} with email {}", user_id, email);
+    tracing::debug!("Fetching IMAP emails for user with email {}", email);
     // Set up TLS
     let tls = TlsConnector::builder()
         .build()
@@ -499,7 +498,7 @@ pub async fn fetch_emails_imap(
         let uid = message.uid.unwrap_or(0).to_string();
       
         // Check if email is already processed using repository method
-        let is_processed = state.user_repository.is_email_processed(user_id, &uid)
+        let is_processed = state.user_repository.is_email_processed(&uid)
             .map_err(|e| ImapError::FetchError(format!("Failed to check email processed status: {}", e)))?;
       
         // Skip processed emails if unprocessed is true
@@ -590,7 +589,7 @@ pub async fn fetch_emails_imap(
             let snippet = clean_content.chars().take(200).collect::<String>();
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
-            let user_timezone = state.user_core.get_user_info(user_id)
+            let user_timezone = state.user_core.get_user_info()
                 .ok()
                 .and_then(|info| info.timezone);
           
@@ -616,7 +615,7 @@ pub async fn fetch_emails_imap(
             });
         // Mark email as processed if unprocessed is true
         if unprocessed {
-            match state.user_repository.mark_email_as_processed(user_id, &uid) {
+            match state.user_repository.mark_email_as_processed(&uid) {
                 Ok(_) => {
                     tracing::info!("Marked email {} as processed", uid);
                 }
@@ -643,7 +642,7 @@ pub async fn fetch_single_email_imap(
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
         .user_repository
-        .get_imap_credentials(user_id)
+        .get_imap_credentials()
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
         .ok_or(ImapError::NoConnection)?;
     // Set up TLS
@@ -835,7 +834,7 @@ pub async fn fetch_single_email_imap(
     imap_session
         .logout()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
-    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_core.get_user_info(user_id)
+    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_core.get_user_info()
         .ok()
         .and_then(|info| info.timezone)));
     Ok(ImapEmail {
@@ -867,7 +866,7 @@ pub async fn send_email(
     // Get user's email credentials (assuming same as IMAP for SMTP)
     let (email, password, imap_server, _) = match state
         .user_repository
-        .get_imap_credentials(auth_user.user_id)
+        .get_imap_credentials()
     {
         Ok(Some(creds)) => creds,
         Ok(None) => return Err((

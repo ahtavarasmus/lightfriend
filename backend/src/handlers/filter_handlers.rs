@@ -236,7 +236,7 @@ pub async fn get_priority_senders(
     auth_user: AuthUser
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Fetching priority senders for user {}", auth_user.user_id);
-    let senders = state.user_repository.get_priority_senders_all(auth_user.user_id)
+    let senders = state.user_repository.get_priority_senders_all()
         .map_err(|e| {
             tracing::error!("Failed to fetch priority senders for user {}: {}", auth_user.user_id, e);
             (
@@ -244,9 +244,9 @@ pub async fn get_priority_senders(
                 Json(json!({"error": format!("Database error: {}", e)}))
             )
         })?;
-    let info = state.user_core.get_priority_notification_info(auth_user.user_id)
+    let info = state.user_core.get_priority_notification_info()
         .map_err(|e| {
-            tracing::error!("Failed to fetch priority info for user {}: {}", auth_user.user_id, e);
+            tracing::error!("Failed to fetch priority info for user: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))

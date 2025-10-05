@@ -205,7 +205,6 @@ pub async fn google_tasks_callback(
 
     // Store the connection in the database
     if let Err(e) = state.user_repository.create_google_tasks_connection(
-        user_id,
         access_token,
         refresh_token.as_ref().map(|s| s.as_str()),
         expires_in,
@@ -232,7 +231,7 @@ pub async fn delete_google_tasks_connection(
     tracing::info!("Received request to delete Google Tasks connection");
 
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_google_tasks_tokens(auth_user.user_id) {
+    let tokens = match state.user_repository.get_google_tasks_tokens() {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::info!("No tokens found to revoke for user {}", auth_user.user_id);
@@ -282,7 +281,7 @@ pub async fn delete_google_tasks_connection(
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_google_tasks_connection(auth_user.user_id) {
+    match state.user_repository.delete_google_tasks_connection() {
         Ok(_) => {
             tracing::info!("Successfully deleted Google Tasks connection for user {}", auth_user.user_id);
             Ok(Json(json!({
@@ -306,7 +305,7 @@ pub async fn refresh_google_tasks_token(
     tracing::info!("Received request to refresh Google Tasks token");
 
     // Get the stored tokens
-    let tokens = match state.user_repository.get_google_tasks_tokens(auth_user.user_id) {
+    let tokens = match state.user_repository.get_google_tasks_tokens() {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::error!("No Google Tasks connection found for user {}", auth_user.user_id);
@@ -353,7 +352,6 @@ pub async fn refresh_google_tasks_token(
 
     // Update the access token in the database
     if let Err(e) = state.user_repository.update_google_tasks_access_token(
-        auth_user.user_id,
         new_access_token,
         expires_in,
     ) {

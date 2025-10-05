@@ -33,7 +33,7 @@ pub async fn get_uber_options(
         input.target_address
     );
 
-    let tokens = state.user_repository.get_uber_tokens(auth_user.user_id);
+    let tokens = state.user_repository.get_uber_tokens();
     let access_token = match tokens {
         Ok(Some((access, _))) => access,
         Ok(None) => {

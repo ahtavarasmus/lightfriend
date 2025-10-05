@@ -6,17 +6,9 @@ use std::fmt::Debug;
 #[derive(Insertable)]
 #[diesel(table_name = users)]
 pub struct NewUser {
-    pub email: String,
-    pub password_hash: String,
     pub phone_number: String,
-    pub time_to_live: i32,
-    pub verified: bool,
     pub credits: f32,
     pub credits_left: f32,
-    pub charge_when_under: bool,
-    pub waiting_checks_count: i32,
-    pub discount: bool,
-    pub sub_tier: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]

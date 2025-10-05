@@ -21,7 +21,7 @@ use crate::{
     },
     schema::{
         users, usage_logs, 
-        waiting_checks, priority_senders, keywords, 
+        waiting_checks, priority_senders, keywords, bridges,
     },
     DbPool,
 };
@@ -255,14 +255,13 @@ impl UserRepository {
 
     pub fn get_imap_credentials(
         &self,
-        user_id: i32,
     ) -> Result<Option<(String, String, Option<String>, Option<i32>)>, diesel::result::Error> {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Get the active IMAP connection for the user
         let imap_conn = imap_connection::table
-            .filter(imap_connection::user_id.eq(user_id))
+            .filter(imap_connection::user_id.eq(1))
             .filter(imap_connection::status.eq("active"))
             .first::<crate::models::user_models::ImapConnection>(&mut conn)
             .optional()?;
@@ -293,11 +292,11 @@ impl UserRepository {
     }
 
     // log the usage. activity_type either 'call' or 'sms', or the new 'notification'
-    pub fn log_usage(&self, user_id: i32, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
+    pub fn log_usage(&self, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let user = users::table
-            .find(user_id)
+            .find(1)
             .first::<User>(&mut conn)?;
 
         let current_time = std::time::SystemTime::now()
@@ -305,6 +304,7 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
+        let user_id = 1;
         let new_log = NewUsageLog {
             user_id,
             sid,
@@ -404,20 +404,20 @@ impl UserRepository {
     }
 
     // Fetch the ongoing usage log for a user
-    pub fn get_ongoing_usage(&self, user_id: i32) -> Result<Option<crate::models::user_models::UsageLog>, DieselError> {
+    pub fn get_ongoing_usage(&self) -> Result<Option<crate::models::user_models::UsageLog>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let ongoing_log = usage_logs::table
-            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::user_id.eq(1))
             .filter(usage_logs::status.eq("ongoing"))
             .first::<crate::models::user_models::UsageLog>(&mut conn)
             .optional()?;
         Ok(ongoing_log)
     }
 
-    pub fn update_usage_log_fields(&self, user_id: i32, sid: &str, status: &str, success: bool, reason: &str, call_duration: Option<i32>) -> Result<(), DieselError> {
+    pub fn update_usage_log_fields(&self, sid: &str, status: &str, success: bool, reason: &str, call_duration: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)
-            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::user_id.eq(1))
             .filter(usage_logs::sid.eq(sid))
             .set((
                 usage_logs::success.eq(success),
@@ -561,17 +561,17 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn get_priority_senders_all(&self, user_id: i32) -> Result<Vec<PrioritySender>, DieselError> {
+    pub fn get_priority_senders_all(&self) -> Result<Vec<PrioritySender>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         priority_senders::table
-            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::user_id.eq(1))
             .load::<PrioritySender>(&mut conn)
     }
 
-    pub fn get_priority_senders(&self, user_id: i32, service_type: &str) -> Result<Vec<PrioritySender>, DieselError> {
+    pub fn get_priority_senders(&self, service_type: &str) -> Result<Vec<PrioritySender>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         priority_senders::table
-            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::user_id.eq(1))
             .filter(priority_senders::service_type.eq(service_type))
             .load::<PrioritySender>(&mut conn)
     }
@@ -603,24 +603,24 @@ impl UserRepository {
             .load::<Keyword>(&mut conn)
     }
 
-    pub fn has_active_google_calendar(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn has_active_google_calendar(&self) -> Result<bool, DieselError> {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = google_calendar::table
-            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::user_id.eq(1))
             .filter(google_calendar::status.eq("active"))
             .first::<crate::models::user_models::GoogleCalendar>(&mut conn)
             .optional()?;
 
         Ok(connection.is_some())
     }
-    pub fn get_google_calendar_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+    pub fn get_google_calendar_tokens(&self) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = google_calendar::table
-            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::user_id.eq(1))
             .filter(google_calendar::status.eq("active"))
             .first::<crate::models::user_models::GoogleCalendar>(&mut conn)
             .optional()?;
@@ -653,14 +653,13 @@ impl UserRepository {
             
             Ok(Some((access_token, refresh_token)))
         } else {
-            tracing::info!("No active calendar connection found for user {}", user_id);
+            tracing::info!("No active calendar connection found for user");
             Ok(None)
         }
     }
 
     pub fn update_google_calendar_access_token(
         &self,
-        user_id: i32,
         new_access_token: &str,
         expires_in: i32,
     ) -> Result<(), DieselError> {
@@ -676,7 +675,7 @@ impl UserRepository {
             .as_secs() as i32;
 
         diesel::update(google_calendar::table)
-            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::user_id.eq(1))
             .filter(google_calendar::status.eq("active"))
             .set((
                 google_calendar::encrypted_access_token.eq(encrypted_access_token),
@@ -688,12 +687,12 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_google_calendar_connection(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn delete_google_calendar_connection(&self) -> Result<(), DieselError> {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(google_calendar::table)
-            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::user_id.eq(1))
             .execute(&mut conn)?;
 
         Ok(())
@@ -711,12 +710,12 @@ impl UserRepository {
         Ok(user_ids)
     }
 
-    pub fn has_active_google_tasks(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn has_active_google_tasks(&self) -> Result<bool, DieselError> {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = google_tasks::table
-            .filter(google_tasks::user_id.eq(user_id))
+            .filter(google_tasks::user_id.eq(1))
             .filter(google_tasks::status.eq("active"))
             .first::<crate::models::user_models::GoogleTasks>(&mut conn)
             .optional()?;
@@ -724,11 +723,11 @@ impl UserRepository {
         Ok(connection.is_some())
     }
 
-    pub fn has_active_uber(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn has_active_uber(&self) -> Result<bool, DieselError> {
         use crate::schema::uber;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let connection = uber::table
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .filter(uber::status.eq("active"))
             .first::<crate::models::user_models::Uber>(&mut conn)
             .optional()?;
@@ -737,7 +736,6 @@ impl UserRepository {
 
     pub fn create_uber_connection(
         &self,
-        user_id: i32,
         access_token: &str,
         refresh_token: Option<&str>,
         expires_in: i32,
@@ -756,7 +754,7 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
         let new_connection = NewUber {
-            user_id,
+            user_id: 1,
             encrypted_access_token,
             encrypted_refresh_token,
             expires_in,
@@ -767,7 +765,7 @@ impl UserRepository {
         };
         // First, delete any existing connections for this user
         diesel::delete(uber::table)
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .execute(&mut conn)?;
         // Then insert the new connection
         diesel::insert_into(uber::table)
@@ -776,11 +774,11 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn get_uber_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+    pub fn get_uber_tokens(&self) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::uber;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let connection = uber::table
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .filter(uber::status.eq("active"))
             .first::<crate::models::user_models::Uber>(&mut conn)
             .optional()?;
@@ -809,25 +807,25 @@ impl UserRepository {
             };
             Ok(Some((access_token, refresh_token)))
         } else {
-            tracing::info!("No active Uber connection found for user {}", user_id);
+            tracing::info!("No active Uber connection found for user");
             Ok(None)
         }
     }
 
-    pub fn delete_uber_connection(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn delete_uber_connection(&self) -> Result<(), DieselError> {
         use crate::schema::uber;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::delete(uber::table)
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .execute(&mut conn)?;
         Ok(())
     }
 
-    pub fn get_uber_token_info(&self, user_id: i32) -> Result<Option<(String, String, i32, i32)>, DieselError> {
+    pub fn get_uber_token_info(&self) -> Result<Option<(String, String, i32, i32)>, DieselError> {
         use crate::schema::uber;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let connection = uber::table
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .filter(uber::status.eq("active"))
             .first::<crate::models::user_models::Uber>(&mut conn)
             .optional()?;
@@ -856,14 +854,13 @@ impl UserRepository {
             };
             Ok(Some((access_token, refresh_token, connection.expires_in, connection.last_update)))
         } else {
-            tracing::info!("No active Uber connection found for user {}", user_id);
+            tracing::info!("No active Uber connection found for user");
             Ok(None)
         }
     }
 
     pub fn update_uber_access_token(
         &self,
-        user_id: i32,
         new_access_token: &str,
         expires_in: i32,
     ) -> Result<(), DieselError> {
@@ -876,7 +873,7 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
         diesel::update(uber::table)
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .filter(uber::status.eq("active"))
             .set((
                 uber::encrypted_access_token.eq(encrypted_access_token),
@@ -889,7 +886,6 @@ impl UserRepository {
 
     pub fn update_uber_refresh_token(
         &self,
-        user_id: i32,
         new_refresh_token: &str,
     ) -> Result<(), DieselError> {
         use crate::schema::uber;
@@ -897,7 +893,7 @@ impl UserRepository {
         let encrypted_refresh_token = encrypt(new_refresh_token)
             .map_err(|_| DieselError::RollbackTransaction)?;
         diesel::update(uber::table)
-            .filter(uber::user_id.eq(user_id))
+            .filter(uber::user_id.eq(1))
             .filter(uber::status.eq("active"))
             .set(
                 uber::encrypted_refresh_token.eq(encrypted_refresh_token),
@@ -907,12 +903,12 @@ impl UserRepository {
     }
 
 
-    pub fn get_google_tasks_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+    pub fn get_google_tasks_tokens(&self) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = google_tasks::table
-            .filter(google_tasks::user_id.eq(user_id))
+            .filter(google_tasks::user_id.eq(1))
             .filter(google_tasks::status.eq("active"))
             .first::<crate::models::user_models::GoogleTasks>(&mut conn)
             .optional()?;
@@ -942,7 +938,6 @@ impl UserRepository {
 
     pub fn update_google_tasks_access_token(
         &self,
-        user_id: i32,
         new_access_token: &str,
         expires_in: i32,
     ) -> Result<(), DieselError> {
@@ -958,7 +953,7 @@ impl UserRepository {
             .as_secs() as i32;
 
         diesel::update(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
+            .filter(google_tasks::user_id.eq(1))
             .filter(google_tasks::status.eq("active"))
             .set((
                 google_tasks::encrypted_access_token.eq(encrypted_access_token),
@@ -970,12 +965,12 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_google_tasks_connection(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn delete_google_tasks_connection(&self) -> Result<(), DieselError> {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
+            .filter(google_tasks::user_id.eq(1))
             .execute(&mut conn)?;
 
         Ok(())
@@ -983,7 +978,6 @@ impl UserRepository {
 
     pub fn create_google_tasks_connection(
         &self,
-        user_id: i32,
         access_token: &str,
         refresh_token: Option<&str>,
         expires_in: i32,
@@ -1005,7 +999,7 @@ impl UserRepository {
             .as_secs() as i32;
 
         let new_connection = NewGoogleTasks {
-            user_id,
+            user_id: 1,
             encrypted_access_token,
             encrypted_refresh_token,
             expires_in,
@@ -1017,7 +1011,7 @@ impl UserRepository {
 
         // First, delete any existing connections for this user
         diesel::delete(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
+            .filter(google_tasks::user_id.eq(1))
             .execute(&mut conn)?;
 
         // Then insert the new connection
@@ -1028,7 +1022,7 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str, device_id: &str, password: &str) -> Result<(), DieselError> {
+    pub fn set_matrix_credentials(&self, username: &str, access_token: &str, device_id: &str, password: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the access token before storing
@@ -1039,7 +1033,7 @@ impl UserRepository {
         let encrypted_password = crate::utils::encryption::encrypt(password)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
-        diesel::update(users::table.find(user_id))
+        diesel::update(users::table.find(1))
             .set((
                 users::matrix_username.eq(username),
                 users::encrypted_matrix_access_token.eq(encrypted_token),
@@ -1050,14 +1044,14 @@ impl UserRepository {
 
         Ok(())
     }
-    pub fn set_matrix_device_id_and_access_token(&self, user_id: i32, access_token: &str, device_id: &str) -> Result<(), DieselError> {
+    pub fn set_matrix_device_id_and_access_token(&self, access_token: &str, device_id: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the access token before storing
         let encrypted_token = crate::utils::encryption::encrypt(access_token)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
-        diesel::update(users::table.find(user_id))
+        diesel::update(users::table.find(1))
             .set((
                 users::encrypted_matrix_access_token.eq(encrypted_token),
                 users::matrix_device_id.eq(device_id),
@@ -1068,11 +1062,11 @@ impl UserRepository {
     }
 
 
-    pub fn update_bridge_last_seen_online(&self, user_id: i32, service_type: &str, last_seen_online: i32) -> Result<usize, DieselError> {
+    pub fn update_bridge_last_seen_online(&self, service_type: &str, last_seen_online: i32) -> Result<usize, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let rows = diesel::update(bridges::table)
-            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::user_id.eq(1))
             .filter(bridges::bridge_type.eq(service_type))
             .set(bridges::last_seen_online.eq(Some(last_seen_online)))
             .execute(&mut conn)?;
@@ -1091,12 +1085,12 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_bridge(&self, user_id: i32, service: &str) -> Result<(), DieselError> {
+    pub fn delete_bridge(&self, service: &str) -> Result<(), DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(bridges::table)
-            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::user_id.eq(1))
             .filter(bridges::bridge_type.eq(service))
             .execute(&mut conn)?;
 
@@ -1104,12 +1098,12 @@ impl UserRepository {
     }
 
 
-    pub fn get_bridge(&self, user_id: i32, service: &str) -> Result<Option<Bridge>, DieselError> {
+    pub fn get_bridge(&self, service: &str) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::user_id.eq(1))
             .filter(bridges::bridge_type.eq(service))
             .first::<Bridge>(&mut conn)
             .optional()?;
@@ -1117,12 +1111,12 @@ impl UserRepository {
         println!("bridge: {:#?}", bridge);
         Ok(bridge)
     }
-    pub fn get_bridge_by_room_id(&self, user_id: i32, room_id: String, service: &str) -> Result<Option<Bridge>, DieselError> {
+    pub fn get_bridge_by_room_id(&self, room_id: String, service: &str) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::user_id.eq(1))
             .filter(bridges::room_id.eq(Some(room_id)))
             .filter(bridges::bridge_type.eq(service))
             .first::<Bridge>(&mut conn)
@@ -1131,37 +1125,24 @@ impl UserRepository {
         Ok(bridge)
     }
 
-    pub fn has_active_bridges(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn has_active_bridges(&self) -> Result<bool, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let count = bridges::table
-            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::user_id.eq(1))
             .filter(bridges::status.eq("connected"))
             .count()
             .get_result::<i64>(&mut conn)?;
         Ok(count > 0)
     }
 
-    pub fn get_active_signal_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+    pub fn get_active_bridge_connection(&self, service_type: &str) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("signal"))
-            .filter(bridges::status.eq("connected"))
-            .first::<Bridge>(&mut conn)
-            .optional()?;
-
-        Ok(bridge)
-    }
-    pub fn get_active_whatsapp_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::user_id.eq(1))
+            .filter(bridges::bridge_type.eq(service_type))
             .filter(bridges::status.eq("connected"))
             .first::<Bridge>(&mut conn)
             .optional()?;
@@ -1169,19 +1150,6 @@ impl UserRepository {
         Ok(bridge)
     }
 
-    pub fn get_active_telegram_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("telegram"))
-            .filter(bridges::status.eq("connected"))
-            .first::<Bridge>(&mut conn)
-            .optional()?;
-
-        Ok(bridge)
-    }
     
     pub fn get_users_with_matrix_bridge_connections(&self) -> Result<Vec<i32>, DieselError> {
         use crate::schema::bridges;
@@ -1209,14 +1177,14 @@ impl UserRepository {
 
 
     // Mark an email as processed
-    pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
+    pub fn mark_email_as_processed(&self, email_uid: &str) -> Result<(), DieselError> {
         use crate::schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // First check if the email is already processed
-        let already_processed = self.is_email_processed(user_id, email_uid)?;
+        let already_processed = self.is_email_processed(email_uid)?;
         if already_processed {
-            tracing::debug!("Email {} for user {} is already marked as processed", email_uid, user_id);
+            tracing::debug!("Email {} for user is already marked as processed", email_uid);
             return Ok(());
         }
 
@@ -1226,7 +1194,7 @@ impl UserRepository {
             .as_secs() as i32;
 
         let new_processed_email = crate::models::user_models::NewProcessedEmail {
-            user_id,
+            user_id: 1,
             email_uid: email_uid.to_string(),
             processed_at: current_time,
         };
@@ -1236,23 +1204,23 @@ impl UserRepository {
             .execute(&mut conn)
         {
             Ok(_) => {
-                tracing::debug!("Successfully marked email {} as processed for user {}", email_uid, user_id);
+                tracing::debug!("Successfully marked email {} as processed for user", email_uid);
                 Ok(())
             }
             Err(e) => {
-                tracing::error!("Failed to mark email {} as processed for user {}: {}", email_uid, user_id, e);
+                tracing::error!("Failed to mark email {} as processed for user: {}", email_uid, e);
                 Err(e)
             }
         }
     }
 
     // Check if an email is processed
-    pub fn is_email_processed(&self, user_id: i32, email_uid: &str) -> Result<bool, DieselError> {
+    pub fn is_email_processed(&self, email_uid: &str) -> Result<bool, DieselError> {
         use crate::schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let processed = processed_emails::table
-            .filter(processed_emails::user_id.eq(user_id))
+            .filter(processed_emails::user_id.eq(1))
             .filter(processed_emails::email_uid.eq(email_uid))
             .first::<crate::models::user_models::ProcessedEmail>(&mut conn)
             .optional()?;

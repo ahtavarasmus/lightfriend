@@ -212,34 +212,8 @@ pub async fn elevenlabs_webhook(
     println!("User ID: {:?}", user_id);
     // Your webhook processing logic here
 
-    // Get user_id from query params
-    let user_id_str = match user_id {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing user_id query parameter"
-                }))
-            ));
-        }
-    };
-
-    // Convert String to i32
-    let user_id: i32 = match user_id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid user_id format, must be an integer"
-                }))
-            ));
-        }
-    };
-
     // Fetch user from user_repository
-    let user = match state.user_core.find_by_id(user_id) {
+    let user = match state.user_core.get_user() {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -259,18 +233,8 @@ pub async fn elevenlabs_webhook(
             ));
         }
     };
-    match state.user_repository.get_ongoing_usage(user_id) {
+    match state.user_repository.get_ongoing_usage() {
         Ok(Some(usage)) => {
-            // Handle the ongoing usage log
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "voice", Some(call_duration_secs)) {
-                eprintln!("Failed to deduct user credits: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to deduct user credits"
-                    }))
-                ));
-            }
 
             let success = match call_successful.as_str() {
                 "success" => true,
@@ -280,7 +244,6 @@ pub async fn elevenlabs_webhook(
 
             // Update the usage log with final values
             if let Err(e) = state.user_repository.update_usage_log_fields(
-                user_id,
                 &usage.sid.unwrap_or_default(),
                 "done",
                 success,
@@ -308,7 +271,7 @@ pub async fn elevenlabs_webhook(
             let end_epoch = now_dt.timestamp() as i32;        // keep “end” as ‘now’
 
             let call_start = crate::models::user_models::NewMessageHistory {
-                user_id,
+                user_id: 1,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
                 encrypted_content: format!("[CALL_START] {}", start_rfc3339),
@@ -319,7 +282,7 @@ pub async fn elevenlabs_webhook(
             };
 
             let call_end = crate::models::user_models::NewMessageHistory {
-                user_id,
+                user_id: 1,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
                 encrypted_content: format!("[CALL_SUMMARY] {}", call_summary),
@@ -328,10 +291,6 @@ pub async fn elevenlabs_webhook(
                 tool_calls_json: None,
                 created_at: end_epoch,
             };
-
-            if user_id == 1 {
-                println!("adding call summary to message history: {:#?}", call_end);
-            }
 
             if let Err(e) = state.user_repository.create_message_history(&call_start) {
                 error!("Failed to create message history: {}", e);
@@ -354,7 +313,7 @@ pub async fn elevenlabs_webhook(
             }
         },
         Ok(None) => {
-            error!("No ongoing usage found for user {}", user_id);
+            error!("No ongoing usage found for user");
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({
