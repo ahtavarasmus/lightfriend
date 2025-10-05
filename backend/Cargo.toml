@@ -4,23 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-roxmltree = "0.20.0"
-quick-xml = "0.38.0"
-mime_guess = "2.0"
+mime_guess = "2.0" # for image downloading
 image = "0.24"  # For image processing
 quircs = "0.10"  # For QR code scanning
 lettre = { version = "0.10", features = ["smtp-transport", "tokio1", "tokio1-native-tls"] }
-resend-rs = "0.14"
-strsim = "0.11.1"
-governor = "0.6"  # For rate limiting
+strsim = "0.11.1" # for simlarity matching on chat names
 nonzero_ext = "0.3"  # For NonZeroU32
 dashmap = "5.5"  # For concurrent hash map to store per-user limits
 anyhow = "1.0"
-mail-parser = "0.10"
 imap = "2.4"
 native-tls = "0.2"
 regex = "1.10.3"
-quoted_printable = "0.4"
 time = "0.3"
 sha1 = "0.10"
 tokio-cron-scheduler = "0.9"
@@ -38,33 +32,22 @@ dotenvy = "0.15"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
-bcrypt = "0.10"
 jsonwebtoken = "8.1"
 rand = "0.8.5"
 reqwest = { version = "0.12", features = ["multipart", "json"] }
-hound = "3.5"
 base64 = "0.21.7"
-rusqlite = { version = "0.35.0", features = ["bundled"] }  # Auto-compiles SQLite
-sentry = "0.36.0"
-once_cell = "1.20.3"
 openai-api-rs = "5.2.6"
 sha2 = "0.10"
 hmac = "0.12"
-hyper = { version = "1", features = ["server", "http1"] }
 bytes = "1.10.0"
-http-body-util = "0.1"
-openssl = "0.10"
 url = "2"
 hex = "0.4"
 uuid = { version = "1.4", features = ["v4"] }  # For generating unique IDs if needed
-async-stripe = { version = "0.36", features = ["runtime-tokio-hyper"] }
-ring = "0.17" # For encryption
 aes-gcm = "0.10.3" # for encryption
 urlencoding = "2.1.0"
 oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
 tower = "0.4"
-mockall = "0.11"
 matrix-sdk = { version = "0.13.0", features = ["sqlite"] }
-lazy_static = "1.4.0"
 thiserror = "1.0"
+mail-parser = "0.10"

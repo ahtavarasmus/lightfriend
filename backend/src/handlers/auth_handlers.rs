@@ -13,7 +13,6 @@ use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation}
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use std::num::NonZeroU32;
-use governor::{Quota, RateLimiter};
 use std::env;
 
 use crate::{

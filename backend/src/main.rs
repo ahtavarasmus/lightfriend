@@ -9,8 +9,6 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 use std::collections::HashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
-use dashmap::DashMap;
-use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -26,7 +24,6 @@ use tower_http::services::ServeDir;
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;
 use std::sync::Arc;
-use sentry;
 mod handlers {
     pub mod auth_middleware;
     pub mod auth_dtos;
@@ -97,7 +94,7 @@ mod jobs {
 use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use handlers::{
-    auth_handlers, self_host_handlers, profile_handlers,
+    self_host_handlers, profile_handlers,
     google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
@@ -118,29 +115,16 @@ pub struct AppState {
     google_tasks_oauth_client: GoogleOAuthClient,
     uber_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
-    login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
-    password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
-    phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    phone_verify_otps: DashMap<String, (String, u64)>,
     pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
 }
 pub fn validate_env() {
     let required_vars = [
-        "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
-        "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "AUS_PHONE",
-        "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
-        "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
-        "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
+        "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL",
+        "ENVIRONMENT", "FRONTEND_URL",
         "SERVER_URL",
-        "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID",
-        "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
-        "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
+        "ENCRYPTION_KEY", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH",
     ];
     for var in required_vars.iter() {
@@ -150,10 +134,6 @@ pub fn validate_env() {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
-        release: sentry::release_name!(),
-        ..Default::default()
-    }));
     use tracing_subscriber::{fmt, EnvFilter};
    
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
@@ -215,15 +195,8 @@ async fn main() {
         google_tasks_oauth_client,
         uber_oauth_client,
         session_store: session_store.clone(),
-        login_limiter: DashMap::new(),
-        password_reset_limiter: DashMap::new(),
-        password_reset_verify_limiter: DashMap::new(),
-        phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
         matrix_clients,
-        phone_verify_limiter: DashMap::new(),
-        phone_verify_verify_limiter: DashMap::new(),
-        password_reset_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
     });
     let twilio_routes = Router::new()
@@ -232,13 +205,11 @@ async fn main() {
     let textbee_routes = Router::new()
         .route("/api/sms/textbee-server", post(twilio_sms::handle_textbee_sms));
         // textbee requests are validated using device_id and phone number combo
-    let elevenlabs_free_routes = Router::new()
+    let elevenlabs_routes = Router::new()
+        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
-        .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
-    let elevenlabs_routes = Router::new()
-        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/calendar/create", get(elevenlabs::handle_calendar_event_creation))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
@@ -370,9 +341,8 @@ async fn main() {
         .merge(protected_routes)
         .merge(auth_built_in_webhook_routes)
         .merge(textbee_routes)
-        .merge(twilio_routes) // More general routes last
+        .merge(twilio_routes)
         .merge(elevenlabs_routes)
-        .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         // Serve static files (robots.txt, sitemap.xml) at the root
