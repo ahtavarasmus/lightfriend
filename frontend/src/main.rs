@@ -6,7 +6,6 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 mod config;
 mod profile {
-    pub mod stripe;
     pub mod billing_credits;
     pub mod billing_payments;
     pub mod billing_models;

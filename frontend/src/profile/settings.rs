@@ -14,7 +14,6 @@ const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
 #[derive(Serialize)]
 struct UpdateProfileRequest {
-    email: String,
     phone_number: String,
     nickname: String,
     info: String,
@@ -188,7 +187,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
                         .json(&UpdateProfileRequest {
-                            email: (*email).clone(),
                             phone_number: (*phone_number).clone(),
                             nickname: (*nickname).clone(),
                             info: (*info).clone(),
