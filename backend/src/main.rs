@@ -146,7 +146,7 @@ pub fn validate_env() {
     let required_vars = [
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "AUS_PHONE", "GB_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
+        "AUS_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
         "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
@@ -193,17 +193,17 @@ async fn main() {
         .expect("Failed to create pool");
     let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
-    let server_url_oauth = std::env::var("SERVER_URL_OAUTH").expect("SERVER_URL_OAUTH must be set");
-    let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").expect("GOOGLE_CALENDAR_CLIENT_ID must be set");
-    let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
+    let server_url_oauth = std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").unwrap_or_else(|_| "default-client-id-for-testing".to_string());
+    let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").unwrap_or_else(|_| "default-secret-for-testing".to_string());
     let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
         .set_client_secret(ClientSecret::new(client_secret.clone()))
         .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/calendar/callback", server_url_oauth)).expect("Invalid redirect URL"));
-    let uber_url_oauth = std::env::var("UBER_API_URL").expect("UBER_API_URL must be set");
-    let uber_client_id = std::env::var("UBER_CLIENT_ID").expect("UBER_CLIENT_ID must be set");
-    let uber_client_secret = std::env::var("UBER_CLIENT_SECRET").expect("UBER_CLIENT_SECRET must be set");
+    let uber_url_oauth = std::env::var("UBER_API_URL").unwrap_or_else(|_| "https://login.uber.com".to_string());
+    let uber_client_id = std::env::var("UBER_CLIENT_ID").unwrap_or_else(|_| "default-uber-client-id-for-testing".to_string());
+    let uber_client_secret = std::env::var("UBER_CLIENT_SECRET").unwrap_or_else(|_| "default-uber-secret-for-testing".to_string());
     let uber_oauth_client = BasicClient::new(ClientId::new(uber_client_id))
         .set_client_secret(ClientSecret::new(uber_client_secret))
         .set_auth_uri(AuthUrl::new(format!("{}/oauth/v2/authorize", uber_url_oauth)).expect("Invalid auth URL"))
@@ -298,8 +298,8 @@ async fn main() {
         .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
         .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
         .route("/api/phone-verify/verify", post(auth_handlers::verify_phone_verify))
-        .route("/api/self-hosted/signup", post(self_host_handlers::self_hosted_signup))
         .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login))
+        .route("/api/check-creds", post(self_host_handlers::update_server_key_main))
         .route("/api/self-hosting-status", get(self_host_handlers::self_hosted_status))
         .route("/api/check-pairing", post(self_host_handlers::check_pairing))
         .route("/api/self-host-ping", post(self_host_handlers::self_host_ping))
@@ -451,7 +451,7 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS, axum::http::Method::DELETE])
-                .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").expect("FRONTEND_URL must be set").parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
+                .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string()).parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,
@@ -485,6 +485,6 @@ async fn main() {
     };
     validate_env();
     tracing::info!("Starting server on port {}", port);
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
     axum::serve(listener, app.into_make_service()).await.unwrap();
 }

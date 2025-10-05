@@ -245,6 +245,7 @@ diesel::table! {
         proactive_agent_on -> Bool,
         notify_about_calls -> Bool,
         action_on_critical_message -> Nullable<Text>,
+        server_key -> Nullable<Text>,
     }
 }
 

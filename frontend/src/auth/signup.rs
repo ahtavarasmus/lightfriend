@@ -616,6 +616,7 @@ pub mod password_reset {
         }
     }
 }
+
 pub mod register {
     use yew::prelude::*;
     use web_sys::HtmlInputElement;
@@ -637,17 +638,8 @@ pub mod register {
         phone_number: String,
     }
     #[derive(Serialize)]
-    pub struct SelfHostedSignupRequest {
-        pairing_code: String,
-        password: Option<String>,
-    }
-    #[derive(PartialEq)]
-    enum SelfHostedSignupStep {
-        PairingCode,
-        CreatePassword,
-    }
-    #[derive(Serialize)]
     pub struct SelfHostedLoginRequest {
+        email: String,
         password: String,
     }
     #[derive(Deserialize)]
@@ -672,97 +664,25 @@ pub mod register {
         let email = use_state(String::new);
         let password = use_state(String::new);
         let phone_number = use_state(String::new);
-        let pairing_code = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let email_valid = use_state(|| true); // Track email validity
         let terms_accepted = use_state(|| false); // Track terms acceptance
-        let signup_step = use_state(|| SelfHostedSignupStep::PairingCode);
-        let self_hosted_signup = {
-            let pairing_code = pairing_code.clone();
-            let password = password.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-            let signup_step = signup_step.clone();
-           
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let pairing_code = (*pairing_code).clone();
-                let password = (*password).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-                let signup_step = signup_step.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post(&format!("{}/api/self-hosted/signup", config::get_backend_url()))
-                        .json(&SelfHostedSignupRequest {
-                            pairing_code: pairing_code.clone(),
-                            password: if *signup_step == SelfHostedSignupStep::CreatePassword { Some(password) } else { None },
-                        })
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(resp) => {
-                            if resp.ok() {
-                                match resp.json::<RegisterResponse>().await {
-                                    Ok(resp) => {
-                                        if *signup_step == SelfHostedSignupStep::PairingCode {
-                                            // If we're in the first step, move to password creation
-                                            error_setter.set(None);
-                                            success_setter.set(Some("Pairing code verified. Please create a password.".to_string()));
-                                            signup_step.set(SelfHostedSignupStep::CreatePassword);
-                                        } else {
-                                            // If we're in the password creation step, complete the setup
-                                            let window = web_sys::window().unwrap();
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                if storage.set_item("token", &resp.token).is_ok() {
-                                                    error_setter.set(None);
-                                                    success_setter.set(Some("Setup complete! Redirecting...".to_string()));
-                                                   
-                                                    let window_clone = window.clone();
-                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                        gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                                        let _ = window_clone.location().set_href("/");
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
-                                    }
-                                }
-                            } else {
-                                match resp.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("An unknown error occurred".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
         let self_hosted_login = {
+            let email = email.clone();
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-           
+          
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
+                let email = (*email).clone();
                 let password = (*password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/self-hosted/login", config::get_backend_url()))
-                        .json(&SelfHostedLoginRequest { password })
+                        .json(&SelfHostedLoginRequest { email: email.clone(), password })
                         .unwrap()
                         .send()
                         .await
@@ -776,7 +696,7 @@ pub mod register {
                                             if storage.set_item("token", &resp.token).is_ok() {
                                                 error_setter.set(None);
                                                 success_setter.set(Some(resp.message));
-                                               
+                                              
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
                                                     gloo_timers::future::TimeoutFuture::new(1_000).await;
@@ -813,7 +733,7 @@ pub mod register {
             let phone_number = phone_number.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-           
+          
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
@@ -849,7 +769,7 @@ pub mod register {
                                             if storage.set_item("token", &resp.token).is_ok() {
                                                 error_setter.set(None);
                                                 success_setter.set(Some(resp.message));
-                                               
+                                              
                                                 // Redirect to pricing page after a short delay
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
@@ -885,189 +805,134 @@ pub mod register {
             <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
                 <style>
                 {r#".login-container,
-.register-container {
-    background: rgba(30, 30, 30, 0.7); /* Darker container */
-    border: 1px solid rgba(30, 144, 255, 0.1);
-    border-radius: 16px;
-    padding: 3rem;
-    width: 100%;
-    max-width: 480px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-.login-container h1,
-.register-container h1 {
-    font-size: 2rem;
-    margin-bottom: 1.5rem;
-    text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-@media (max-width: 768px) {
-    .login-container,
-    .register-container {
-        padding: 2rem;
-        margin: 1rem;
-    }
-}
-.auth-redirect {
-    margin-top: 2rem;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
-    font-size: 0.9rem;
-}
-.auth-redirect a {
-    color: #1E90FF;
-    text-decoration: none;
-    transition: color 0.3s ease;
-    margin-left: 0.25rem;
-}
-.auth-redirect a:hover {
-    color: #7EB2FF;
-    text-decoration: underline;
-}
-/* Custom checkbox styling */
-#terms-checkbox-container {
-    margin: 15px 0;
-}
-#terms-checkbox-container label {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    cursor: pointer;
-    font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.8);
-    line-height: 1.4;
-}
-#terms-checkbox-container input[type="checkbox"] {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    width: 1px !important;
-    height: 1px !important;
-    border: 2px solid rgba(30, 144, 255, 0.5) !important;
-    border-radius: 4px !important;
-    background: rgba(30, 30, 30, 0.7) !important;
-    cursor: pointer !important;
-    position: relative !important;
-    margin-top: 2px !important;
-    transition: all 0.2s ease !important;
-    display: inline-block !important;
-    vertical-align: middle !important;
-    transform: scale(0.6) !important;
-    transform-origin: left center !important;
-}
-#terms-checkbox-container input[type="checkbox"]:checked {
-    background: #1E90FF !important;
-    border-color: #1E90FF !important;
-}
-#terms-checkbox-container input[type="checkbox"]:checked::after {
-    content: "✓" !important;
-    position: absolute !important;
-    color: white !important;
-    font-size: 30px !important;
-    left: 2px !important;
-    top: -1px !important;
-    display: block !important;
-}
-#terms-checkbox-container input[type="checkbox"]:hover {
-    border-color: #1E90FF !important;
-}
-#terms-checkbox-container a {
-    color: #1E90FF;
-    text-decoration: none;
-    transition: color 0.3s ease;
-}
-#terms-checkbox-container a:hover {
-    color: #7EB2FF;
-    text-decoration: underline;
-}
-.hero-background {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100vh;
-        background-image: url('/assets/rain.gif');
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        opacity: 1;
-        z-index: -2;
-        pointer-events: none;
-    }
-    .hero-background::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 50%;
-        background: linear-gradient(to bottom,
-            rgba(26, 26, 26, 0) 0%,
-            rgba(26, 26, 26, 1) 100%
-        );
-    }"#}
+                    .register-container {
+                        background: rgba(30, 30, 30, 0.7); /* Darker container */
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        padding: 3rem;
+                        width: 100%;
+                        max-width: 480px;
+                        backdrop-filter: blur(10px);
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                    }
+                    .login-container h1,
+                    .register-container h1 {
+                        font-size: 2rem;
+                        margin-bottom: 1.5rem;
+                        text-align: center;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                    }
+                    @media (max-width: 768px) {
+                        .login-container,
+                        .register-container {
+                            padding: 2rem;
+                            margin: 1rem;
+                        }
+                    }
+                    .auth-redirect {
+                        margin-top: 2rem;
+                        text-align: center;
+                        color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+                        font-size: 0.9rem;
+                    }
+                    .auth-redirect a {
+                        color: #1E90FF;
+                        text-decoration: none;
+                        transition: color 0.3s ease;
+                        margin-left: 0.25rem;
+                    }
+                    .auth-redirect a:hover {
+                        color: #7EB2FF;
+                        text-decoration: underline;
+                    }
+                    /* Custom checkbox styling */
+                    #terms-checkbox-container {
+                        margin: 15px 0;
+                    }
+                    #terms-checkbox-container label {
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 12px;
+                        cursor: pointer;
+                        font-size: 0.9em;
+                        color: rgba(255, 255, 255, 0.8);
+                        line-height: 1.4;
+                    }
+                    #terms-checkbox-container input[type="checkbox"] {
+                        appearance: none !important;
+                        -webkit-appearance: none !important;
+                        width: 1px !important;
+                        height: 1px !important;
+                        border: 2px solid rgba(30, 144, 255, 0.5) !important;
+                        border-radius: 4px !important;
+                        background: rgba(30, 30, 30, 0.7) !important;
+                        cursor: pointer !important;
+                        position: relative !important;
+                        margin-top: 2px !important;
+                        transition: all 0.2s ease !important;
+                        display: inline-block !important;
+                        vertical-align: middle !important;
+                        transform: scale(0.6) !important;
+                        transform-origin: left center !important;
+                    }
+                    #terms-checkbox-container input[type="checkbox"]:checked {
+                        background: #1E90FF !important;
+                        border-color: #1E90FF !important;
+                    }
+                    #terms-checkbox-container input[type="checkbox"]:checked::after {
+                        content: "✓" !important;
+                        position: absolute !important;
+                        color: white !important;
+                        font-size: 30px !important;
+                        left: 2px !important;
+                        top: -1px !important;
+                        display: block !important;
+                    }
+                    #terms-checkbox-container input[type="checkbox"]:hover {
+                        border-color: #1E90FF !important;
+                    }
+                    #terms-checkbox-container a {
+                        color: #1E90FF;
+                        text-decoration: none;
+                        transition: color 0.3s ease;
+                    }
+                    #terms-checkbox-container a:hover {
+                        color: #7EB2FF;
+                        text-decoration: underline;
+                    }
+                    .hero-background {
+                            position: fixed;
+                            top: 0;
+                            left: 0;
+                            width: 100%;
+                            height: 100vh;
+                            background-image: url('/assets/rain.gif');
+                            background-size: cover;
+                            background-position: center;
+                            background-repeat: no-repeat;
+                            opacity: 1;
+                            z-index: -2;
+                            pointer-events: none;
+                        }
+                        .hero-background::after {
+                            content: '';
+                            position: absolute;
+                            bottom: 0;
+                            left: 0;
+                            width: 100%;
+                            height: 50%;
+                            background: linear-gradient(to bottom,
+                                rgba(26, 26, 26, 0) 0%,
+                                rgba(26, 26, 26, 1) 100%
+                            );
+                        }"#}
                 </style>
                 <div class="hero-background"></div>
                 <div class="register-container">
                     {
                         match props.self_hosting_status {
-                            SelfHostingStatus::SelfHostedSignup => html! {
-                                <>
-                                    <h1>{"Self-Hosted Setup"}</h1>
-                                    {
-                                        if let Some(error_message) = (*error).as_ref() {
-                                            html! {
-                                                <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                                    {error_message}
-                                                </div>
-                                            }
-                                        } else if let Some(success_message) = (*success).as_ref() {
-                                            html! {
-                                                <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                                    {success_message}
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                    <form onsubmit={self_hosted_signup}>
-                                        {
-                                            if *signup_step == SelfHostedSignupStep::PairingCode {
-                                                html! {
-                                                    <>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Pairing Code"
-                                                            onchange={let pairing_code = pairing_code.clone(); move |e: Event| {
-                                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                                pairing_code.set(input.value());
-                                                            }}
-                                                        />
-                                                        <button type="submit">{"Verify Pairing Code"}</button>
-                                                    </>
-                                                }
-                                            } else {
-                                                html! {
-                                                    <>
-                                                        <input
-                                                            type="password"
-                                                            placeholder="Create Password"
-                                                            onchange={let password = password.clone(); move |e: Event| {
-                                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                                password.set(input.value());
-                                                            }}
-                                                        />
-                                                        <button type="submit">{"Complete Setup"}</button>
-                                                    </>
-                                                }
-                                            }
-                                        }
-                                    </form>
-                                </>
-                            },
                             SelfHostingStatus::SelfHostedLogin => html! {
                                 <>
                                     <h1>{"Self-Hosted Login"}</h1>
@@ -1089,6 +954,14 @@ pub mod register {
                                         }
                                     }
                                     <form onsubmit={self_hosted_login}>
+                                        <input
+                                            type="email"
+                                            placeholder="Email"
+                                            onchange={let email = email.clone(); move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                email.set(input.value());
+                                            }}
+                                        />
                                         <input
                                             type="password"
                                             placeholder="Password"

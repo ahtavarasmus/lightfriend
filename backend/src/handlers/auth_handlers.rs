@@ -8,22 +8,18 @@ use axum::{
 };
 use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api::twilio_sms;
 use serde_json::json;
-use jsonwebtoken::{encode, Header, EncodingKey};
+use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use std::num::NonZeroU32;
 use governor::{Quota, RateLimiter};
-use rand::distributions::Alphanumeric;
-use uuid::Uuid;
 use std::env;
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
     message: String,
 }
-
 
 use crate::{
     handlers::auth_dtos::{LoginRequest, RegisterRequest, UserResponse, NewUser},
@@ -125,7 +121,6 @@ pub async fn login(
             Json(json!({"error": "Too many login attempts, try again later"})),
         ));
     }
-    
 
     let user = match state.user_core.find_by_email(&login_req.email) {
         Ok(Some(user)) => user,
@@ -144,88 +139,10 @@ pub async fn login(
     };
    
     match bcrypt::verify(&login_req.password, &user.password_hash) {
-        Ok(valid) => {
-            println!("Password verification result: {}", valid);
-            if valid {
-                println!("Password verified successfully, generating tokens");
-                // Generate access token (short-lived)
-                let access_token = encode(
-                    &Header::default(),
-                    &json!({
-                        "sub": user.id,
-                        "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
-                        "type": "access"
-                    }),
-                    &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-                        .expect("JWT_SECRET_KEY must be set in environment")
-                        .as_bytes()),
-                ).map_err(|_| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Token generation failed"}))
-                ))?;
-                println!("Access token generated successfully");
-
-                // Generate refresh token (long-lived)
-                let refresh_token = encode(
-                    &Header::default(),
-                    &json!({
-                        "sub": user.id,
-                        "exp": (Utc::now() + Duration::days(7)).timestamp(),
-                        "type": "refresh"
-                    }),
-                    &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
-                        .expect("JWT_REFRESH_KEY must be set in environment")
-                        .as_bytes()),
-                ).map_err(|_| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Token generation failed"}))
-                ))?;
-                println!("Refresh token generated successfully");
-                
-                // Create response with HttpOnly cookies
-                let mut response = Response::new(
-                    axum::body::Body::from(
-                        Json(json!({"message": "Login successful", "token": access_token})).to_string()
-                    )
-                );
-                println!("Created base response");
-                
-                let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
-                response.headers_mut().insert(
-                    "Set-Cookie",
-                    format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
-                        .parse()
-                        .unwrap(),
-                );
-                println!("Added access token cookie");
-                
-                response.headers_mut().insert(
-                    "Set-Cookie",
-                    format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
-                        .parse()
-                        .unwrap(),
-                );
-                println!("Added refresh token cookie");
-                
-                // Set content type header
-                response.headers_mut().insert(
-                    "Content-Type",
-                    "application/json".parse().unwrap()
-                );
-                println!("Added content type header");
-
-                println!("Returning successful response");
-                Ok(response)
-            } else {
-                println!("Password verification failed");
-                Err((
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Invalid credentials"}))
-                ))
-            }
+        Ok(true) => {
+            generate_tokens_and_response(user.id)
         }
-        Err(err) => {
-            println!("Password verification error occurred: {:?}", err);
+        _ => {
             Err((
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid credentials"}))
@@ -684,7 +601,7 @@ pub async fn register(
     println!("User registered successfully, setting preferred number");
    
     // Get the newly created user to get their ID
-    let mut user = state.user_core.find_by_email(&reg_req.email)
+    let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))
@@ -710,65 +627,53 @@ pub async fn register(
         })?;
         println!("Preferred number set successfully, generating tokens");
     }
-    // Refresh user if needed (e.g., after updates), but since we just set fields, can reuse or refetch if User model needs reloading
-    // Generate access token (short-lived)
-    let access_token = encode(
-        &Header::default(),
-        &json!({
-            "sub": user.id,
-            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
-            "type": "access"
-        }),
-        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
+    generate_tokens_and_response(user.id)
+}
+
+pub async fn refresh_token(
+    State(state): State<Arc<AppState>>,
+    headers: reqwest::header::HeaderMap,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let refresh_token = match headers.get("cookie") {
+        Some(cookie_header) => {
+            let cookies = cookie_header.to_str().unwrap_or("");
+            cookies.split(';').find(|c| c.trim().starts_with("refresh_token="))
+                .and_then(|c| c.split('=').nth(1))
+                .map(|t| t.to_string())
+                .ok_or((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Missing refresh token"}))
+                ))?
+        }
+        None => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Missing cookies"}))
+            ));
+        }
+    };
+
+    // Validate refresh token
+    let validation = Validation::default();
+    let token_data = decode::<serde_json::Value>(
+        &refresh_token,
+        &DecodingKey::from_secret(env::var("JWT_REFRESH_KEY").expect("JWT_REFRESH_KEY must be set").as_ref()),
+        &validation,
     ).map_err(|_| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": "Token generation failed"}))
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "Invalid refresh token"}))
     ))?;
-    // Generate refresh token (long-lived)
-    let refresh_token = encode(
-        &Header::default(),
-        &json!({
-            "sub": user.id,
-            "exp": (Utc::now() + Duration::days(7)).timestamp(),
-            "type": "refresh"
-        }),
-        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
-            .expect("JWT_REFRESH_KEY must be set in environment")
-            .as_bytes()),
-    ).map_err(|_| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": "Token generation failed"}))
-    ))?;
-    // Create response with HttpOnly cookies
-    let mut response = Response::new(
-        axum::body::Body::from(
-            Json(json!({
-                "message": "User registered and logged in successfully! Redirecting...",
-                "token": access_token
-            })).to_string()
-        )
-    );
-    let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
-    response.headers_mut().insert(
-        "Set-Cookie",
-        format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
-            .parse()
-            .unwrap(),
-    );
-    response.headers_mut().insert(
-        "Set-Cookie",
-        format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
-            .parse()
-            .unwrap(),
-    );
-    response.headers_mut().insert(
-        "Content-Type",
-        "application/json".parse().unwrap()
-    );
-    println!("Registration and login completed successfully");
-    Ok(response)
+
+    let user_id: i32 = token_data.claims["sub"].as_i64().unwrap_or(0) as i32;
+    if user_id == 0 {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid user in token"}))
+        ));
+    }
+
+    // Optional: Rotate refresh token by generating a new one
+    generate_tokens_and_response(user_id)
 }
 
 pub async fn testing_handler(
@@ -797,4 +702,61 @@ pub async fn testing_handler(
     }
 }
 
+pub fn generate_tokens_and_response(user_id: i32) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // Generate access token (short-lived)
+    let access_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user_id,
+            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+            "type": "access"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
 
+    // Generate refresh token (long-lived)
+    let refresh_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user_id,
+            "exp": (Utc::now() + Duration::days(7)).timestamp(),
+            "type": "refresh"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
+            .expect("JWT_REFRESH_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
+
+    // Create response with HttpOnly cookies
+    let mut response = Response::new(
+        axum::body::Body::from(
+            Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string()
+        )
+    );
+    let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+    response.headers_mut().insert(
+        "Content-Type",
+        "application/json".parse().unwrap()
+    );
+    Ok(response)
+}

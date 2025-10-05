@@ -1,0 +1,76 @@
+# Build stage
+FROM rust:1.85-slim as builder
+
+# Install system deps for OpenSSL linking (early to avoid cache issues)
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev libssl3 build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Set paths for aarch64 multiarch OpenSSL (fixes libdir detection)
+ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+ENV OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
+ENV OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu
+
+# Low-memory Cargo flags (serial jobs, no LTO for RAM savings)
+ENV CARGO_BUILD_JOBS=1
+ENV RUSTFLAGS="-C codegen-units=16 -C lto=off -C opt-level=2"
+
+# Copy manifests first for dep caching
+COPY Cargo.toml Cargo.lock* ./
+
+# Dummy main.rs for dep resolution (binary crate like Axum)
+RUN mkdir -p src && \
+    echo 'fn main() { println!("dummy build"); }' > src/main.rs
+
+# Install deps only (caches target/ for next layers)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release
+
+# Copy real source (overwrites dummy)
+COPY src ./src
+
+    # Full build with real code (uses cached deps)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release && \
+    cp /app/target/release/backend /tmp/backend
+
+# Debug: Inspect the output
+RUN ls -la /app/target/release/
+RUN if [ -f /app/target/release/backend ]; then \
+      echo "Binary found!"; \
+      file /app/target/release/backend; \
+      stat /app/target/release/backend; \
+    else \
+      echo "Binary NOT found!"; \
+      find /app/target -name "backend" -type f || true; \
+    fi
+
+# Runtime stage
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /tmp/backend /usr/local/bin/backend
+
+# Copy static files (if any)
+COPY static ./static
+
+# Public env defaults (overridable via compose/Coolify)
+ENV ENVIRONMENT=staging
+ENV DATABASE_URL=/app/data/database.db
+ENV FRONTEND_URL=http://localhost
+ENV SERVER_URL_OAUTH=http://localhost:3000
+ENV GOOGLE_CALENDAR_CLIENT_ID=default-client-id-for-testing
+ENV GOOGLE_CALENDAR_CLIENT_SECRET=default-secret-for-testing
+ENV UBER_API_URL=https://login.uber.com
+ENV UBER_CLIENT_ID=default-uber-client-id-for-testing
+ENV UBER_CLIENT_SECRET=default-uber-secret-for-testing
+
+RUN mkdir -p /app/data
+VOLUME /app/data
+
+EXPOSE 3100
+CMD ["backend"]

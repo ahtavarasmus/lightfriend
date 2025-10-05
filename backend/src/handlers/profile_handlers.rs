@@ -89,6 +89,7 @@ pub struct ProfileResponse {
     location: Option<String>,
     nearby_places: Option<String>,
     phone_number_country: Option<String>,
+    server_key: Option<String>, 
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -275,6 +276,7 @@ pub async fn get_profile(
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
                 phone_number_country: phone_country,
+                server_key: user_settings.server_key,
             }))
         }
         None => Err((

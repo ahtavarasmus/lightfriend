@@ -849,6 +849,20 @@ impl UserCore {
         Ok(())
     }
 
+    pub fn update_server_key(&self, user_id: i32, server_key: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::server_key.eq(server_key))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn update_server_ip(&self, user_id: i32, server_ip: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

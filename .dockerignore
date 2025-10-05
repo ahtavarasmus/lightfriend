@@ -1,0 +1,15 @@
+# Rust build artifacts (prevents xattr issues)
+**/target/
+.cargo/
+
+# Frontend builds
+**/dist/
+
+# General ignores
+.git
+.gitignore
+README.md
+docker-compose.yaml  # Or .yml
+notes-for-matrix-bridges.md
+LICENSE
+data/

@@ -491,6 +491,7 @@ pub struct UserSettings {
     pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
     pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
     pub action_on_critical_message: Option<String>, // "ask_sender", "ask_sender_exclude_family", "notify_family", or None and "notify_all" are the same
+    pub server_key: Option<String>, // for self hosted instance to make calls to main lightfriend server. is generated when user logs in to their instance
 }
 
 #[derive(Insertable)]

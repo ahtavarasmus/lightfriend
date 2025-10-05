@@ -19,7 +19,7 @@ pub struct NewUser {
     pub sub_tier: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,

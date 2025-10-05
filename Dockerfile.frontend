@@ -1,0 +1,14 @@
+FROM rust:1.75-slim as builder
+RUN apt-get update && apt-get install -y trunk binaryen && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+# Copy Cargo files first for caching
+COPY Cargo.toml Cargo.lock* ./
+# Dummy src/lib.rs for dep resolution (Yew/Trunk common)
+RUN mkdir -p src && echo "fn main() {}" > src/lib.rs
+RUN cargo check --release  # Faster than build for deps
+# Copy real source
+COPY src ./src
+# Copy Trunk config and HTML
+COPY index.html Trunk.toml* ./
+RUN trunk build --release
+# dist/ is now in /app/dist

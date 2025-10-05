@@ -98,7 +98,6 @@ use crate::profile::billing_models::UserProfile;
 use gloo_net::http::Request;
 #[derive(Clone, PartialEq)]
 pub enum SelfHostingStatus {
-    SelfHostedSignup,
     SelfHostedLogin,
     Normal,
 }
@@ -146,7 +145,7 @@ pub enum Route {
     ReadMoreAccidentallyGuide,
 }
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
-    if matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+    if matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
         return match routes {
             Route::SelfHosted => {
                 info!("Rendering Self Hosted page");
@@ -581,7 +580,7 @@ pub fn nav(props: &NavProps) -> Html {
                 <div class={menu_class}>
                     <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
                     {
-                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
                             html! {
                                 <>
                                     <div onclick={close_menu.clone()}>
@@ -610,7 +609,7 @@ pub fn nav(props: &NavProps) -> Html {
                             html! {
                                 <>
                                     {
-                                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+                                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
                                             html! {
                                                 <div onclick={close_menu.clone()}>
                                                     <Link<Route> to={Route::Billing} classes="nav-profile-link">
@@ -667,10 +666,6 @@ fn App() -> Html {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&status) {
                             if let Some(status_value) = json.get("status").and_then(|s| s.as_str()) {
                                 match status_value {
-                                    "self-hosted-signup" => {
-                                        info!("Setting status to SelfHostedSignup");
-                                        self_hosting_status.set(SelfHostingStatus::SelfHostedSignup)
-                                    },
                                     "self-hosted-login" => {
                                         info!("Setting status to SelfHostedLogin");
                                         self_hosting_status.set(SelfHostingStatus::SelfHostedLogin)
