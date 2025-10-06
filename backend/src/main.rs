@@ -248,7 +248,6 @@ async fn main() {
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
-        .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
         .route("/api/profile/digests", post(profile_handlers::update_digests))
         .route("/api/profile/digests", get(profile_handlers::get_digests))
         .route("/api/profile/critical", post(profile_handlers::update_critical_settings))

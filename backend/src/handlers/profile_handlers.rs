@@ -67,7 +67,6 @@ pub struct ProfileResponse {
     save_context: Option<i32>,
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
-    openrouter_api_key: Option<String>,
     textbee_device_id: Option<String>,
     textbee_api_key: Option<String>,
     estimated_monitoring_cost: f32,
@@ -125,8 +124,8 @@ pub async fn get_profile(
                 .filter(|&&x| x.is_some())
                 .count() as i32;
             // Fetch Twilio credentials and mask them
-            let (twilio_sid, twilio_token, _) = match state.user_core.get_twilio_credentials() {
-                Ok((sid, token, _)) => {
+            let (twilio_sid, twilio_token) = match state.user_core.get_twilio_credentials() {
+                Ok((Some(sid), Some(token), _, _)) => {
                     let masked_sid = if sid.len() >= 4 {
                         format!("...{}", &sid[sid.len() - 4..])
                     } else {
@@ -137,9 +136,9 @@ pub async fn get_profile(
                     } else {
                         "...".to_string()
                     };
-                    (Some(masked_sid), Some(masked_token), Some(""))
+                    (Some(masked_sid), Some(masked_token))
                 },
-                Err(_) => (None, None, None),
+                _ => (None, None),
             };
             // Fetch Textbee credentials and mask them
             let (textbee_device_id, textbee_api_key) = match state.user_core.get_textbee_credentials(auth_user.user_id) {
@@ -157,17 +156,6 @@ pub async fn get_profile(
                     (Some(masked_id), Some(masked_key))
                 },
                 Err(_) => (None, None),
-            };
-            let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id) {
-                Ok(key) => {
-                    let masked_key= if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
-                    } else {
-                        "...".to_string()
-                    };
-                    Some(masked_key)
-                },
-                Err(_) => None,
             };
             // Get critical notification info
             let critical_info = state.user_core.get_critical_notification_info(auth_user.user_id).map_err(|e| (
@@ -212,7 +200,6 @@ pub async fn get_profile(
                 save_context: user_settings.save_context,
                 twilio_sid: twilio_sid,
                 twilio_token: twilio_token,
-                openrouter_api_key: openrouter_api_key,
                 textbee_device_id: textbee_device_id,
                 textbee_api_key: textbee_api_key,
                 estimated_monitoring_cost,
@@ -271,33 +258,6 @@ pub async fn update_preferred_number(
 }
 
 
-
-pub async fn update_notify(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(user_id): Path<i32>,
-    Json(request): Json<NotifyCreditsRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-    // Check if user is modifying their own settings or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "You can only modify your own settings unless you're an admin"}))
-        ));
-    }
-
-    // Update notify preference
-    state.user_core.update_notify(user_id, request.notify)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
-
-    Ok(Json(json!({
-        "message": "Notification preference updated successfully"
-    })))
-}
 
 pub async fn update_timezone(
     State(state): State<Arc<AppState>>,

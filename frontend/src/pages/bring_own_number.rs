@@ -198,6 +198,10 @@ pub struct TwilioHostedInstructionsProps {
     #[prop_or_default]
     pub twilio_token: Option<String>,
     #[prop_or_default]
+    pub server_url: Option<String>,
+    #[prop_or_default]
+    pub messaging_service_sid: Option<String>,
+    #[prop_or_default]
     pub textbee_api_key: Option<String>,
     #[prop_or_default]
     pub textbee_device_id: Option<String>,
@@ -251,6 +255,7 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                             <option value="bo" selected={*selected_country == "bo"}>{"BO"}</option>
                             <option value="br" selected={*selected_country == "br"}>{"BR"}</option>
                             <option value="ca" selected={*selected_country == "ca"}>{"CA"}</option>
+                            <option value="us" selected={*selected_country == "us"}>{"US"}</option>
                             <option value="ch" selected={*selected_country == "ch"}>{"CH"}</option>
                             <option value="cl" selected={*selected_country == "cl"}>{"CL"}</option>
                             <option value="co" selected={*selected_country == "co"}>{"CO"}</option>
@@ -717,6 +722,11 @@ struct InstructionsProps {
     on_sid_change: Callback<Event>,
     auth_token: UseStateHandle<String>,
     on_token_change: Callback<Event>,
+    server_url: UseStateHandle<String>,
+    on_server_url_change: Callback<Event>,
+    messaging_service_sid: UseStateHandle<String>,
+    on_messaging_sid_change: Callback<Event>,
+    selected_country: UseStateHandle<String>,
     on_save_creds: Callback<MouseEvent>,
     creds_save_status: UseStateHandle<Option<Result<(), String>>>,
     open_modal: Callback<String>,
@@ -735,12 +745,29 @@ fn instructions_component(props: &InstructionsProps) -> Html {
     let on_sid_change = props.on_sid_change.clone();
     let auth_token = props.auth_token.clone();
     let on_token_change = props.on_token_change.clone();
+    let server_url = props.server_url.clone();
+    let on_server_url_change = props.on_server_url_change.clone();
+    let messaging_service_sid = props.messaging_service_sid.clone();
+    let on_messaging_sid_change = props.on_messaging_sid_change.clone();
+    let selected_country = props.selected_country.clone();
     let on_save_creds = props.on_save_creds.clone();
     let creds_save_status = props.creds_save_status.clone();
     let can_edit = props.can_edit;
     let is_phone_valid = props.is_phone_valid;
     let is_sid_valid = props.is_sid_valid;
     let is_token_valid = props.is_token_valid;
+    let is_server_url_valid = {
+        let val = &*server_url;
+        !val.is_empty() && (val.starts_with("http://") || val.starts_with("https://")) && !val.starts_with("...")
+    };
+    let is_messaging_sid_valid = {
+        if *selected_country == "us" {
+            let val = &*messaging_service_sid;
+            !val.is_empty() && val.len() == 34 && val.starts_with("MG") && val[2..].chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
+        } else {
+            true
+        }
+    };
     html! {
         <>
             <div class="instruction-block">
@@ -855,10 +882,42 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                             />
                         </div>
                     </div>
+                    <div class="input-field">
+                        <label for="server-url">{"Server URL:"}</label>
+                        <div class="input-with-button">
+                            <input
+                                type="url"
+                                id="server-url"
+                                placeholder="https://your-server.com"
+                                value={(*server_url).clone()}
+                                onchange={on_server_url_change.clone()}
+                                disabled={!can_edit}
+                            />
+                        </div>
+                    </div>
+                    { if *selected_country == "us" {
+                        html! {
+                            <div class="input-field">
+                                <label for="messaging-sid">{"Twilio Messaging Service SID (required for US due to A2P):"}</label>
+                                <div class="input-with-button">
+                                    <input
+                                        type="text"
+                                        id="messaging-sid"
+                                        placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                        value={(*messaging_service_sid).clone()}
+                                        onchange={on_messaging_sid_change.clone()}
+                                        disabled={!can_edit}
+                                    />
+                                </div>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }}
                     <button
-                        class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
+                        class={classes!("save-button", if !(is_sid_valid && is_token_valid && is_server_url_valid && is_messaging_sid_valid) || !can_edit { "invalid" } else { "" })}
                         onclick={on_save_creds.clone()}
-                        disabled={!can_edit || !(is_sid_valid && is_token_valid)}
+                        disabled={!can_edit || !(is_sid_valid && is_token_valid && is_server_url_valid && is_messaging_sid_valid)}
                     >
                         {"Save"}
                     </button>
@@ -1145,6 +1204,8 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     let phone_number = use_state(|| props.twilio_phone.clone().unwrap_or_default());
     let account_sid = use_state(|| props.twilio_sid.clone().unwrap_or_default());
     let auth_token = use_state(|| props.twilio_token.clone().unwrap_or_default());
+    let server_url = use_state(|| props.server_url.clone().unwrap_or_default());
+    let messaging_service_sid = use_state(|| props.messaging_service_sid.clone().unwrap_or_default());
     let textbee_api_key = use_state(|| props.textbee_api_key.clone().unwrap_or_default());
     let textbee_device_id = use_state(|| props.textbee_device_id.clone().unwrap_or_default());
     let phone_save_status = use_state(|| None::<Result<(), String>>);
@@ -1154,10 +1215,12 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         let phone_number = phone_number.clone();
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
+        let server_url = server_url.clone();
+        let messaging_service_sid = messaging_service_sid.clone();
         let textbee_api_key = textbee_api_key.clone();
         let textbee_device_id = textbee_device_id.clone();
         use_effect_with_deps(
-            move |(new_phone, new_sid, new_token, new_textbee_key, new_textbee_id)| {
+            move |(new_phone, new_sid, new_token, new_server_url, new_messaging_sid, new_textbee_key, new_textbee_id)| {
                 if let Some(phone) = new_phone {
                     if phone != &*phone_number {
                         phone_number.set(phone.clone());
@@ -1171,6 +1234,16 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                 if let Some(token) = new_token {
                     if token != &*auth_token {
                         auth_token.set(token.clone());
+                    }
+                }
+                if let Some(url) = new_server_url {
+                    if url != &*server_url {
+                        server_url.set(url.clone());
+                    }
+                }
+                if let Some(sid) = new_messaging_sid {
+                    if sid != &*messaging_service_sid {
+                        messaging_service_sid.set(sid.clone());
                     }
                 }
                 if let Some(key) = new_textbee_key {
@@ -1189,6 +1262,8 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                 props.twilio_phone.clone(),
                 props.twilio_sid.clone(),
                 props.twilio_token.clone(),
+                props.server_url.clone(),
+                props.messaging_service_sid.clone(),
                 props.textbee_api_key.clone(),
                 props.textbee_device_id.clone(),
             ),
@@ -1213,6 +1288,20 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         Callback::from(move |e: Event| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
             auth_token.set(input.value());
+        })
+    };
+    let on_server_url_change = {
+        let server_url = server_url.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            server_url.set(input.value());
+        })
+    };
+    let on_messaging_sid_change = {
+        let messaging_service_sid = messaging_service_sid.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            messaging_service_sid.set(input.value());
         })
     };
     let on_textbee_key_change = {
@@ -1291,10 +1380,16 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     let on_save_creds = {
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
+        let server_url = server_url.clone();
+        let messaging_service_sid = messaging_service_sid.clone();
+        let selected_country = selected_country.clone();
         let creds_save_status = creds_save_status.clone();
         Callback::from(move |_: MouseEvent| {
             let account_sid = account_sid.clone();
             let auth_token = auth_token.clone();
+            let server_url = server_url.clone();
+            let messaging_service_sid = messaging_service_sid.clone();
+            let selected_country = selected_country.clone();
             let creds_save_status = creds_save_status.clone();
             let sid_val = (*account_sid).clone();
             if sid_val.len() != 34 || !sid_val.starts_with("AC") || !sid_val[2..].chars().all(|c| c.is_ascii_hexdigit()) || sid_val.starts_with("...") {
@@ -1305,6 +1400,19 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             if token_val.len() != 32 || !token_val.chars().all(|c| c.is_ascii_hexdigit()) || token_val.starts_with("...") {
                 creds_save_status.set(Some(Err("Invalid Auth Token format".to_string())));
                 return;
+            }
+            let server_url_val = (*server_url).clone();
+            if server_url_val.is_empty() || ! (server_url_val.starts_with("http://") || server_url_val.starts_with("https://")) || server_url_val.starts_with("...") {
+                creds_save_status.set(Some(Err("Invalid Server URL format".to_string())));
+                return;
+            }
+            let country = (*selected_country).clone();
+            if country == "us" {
+                let msg_sid_val = (*messaging_service_sid).clone();
+                if msg_sid_val.len() != 34 || !msg_sid_val.starts_with("MG") || !msg_sid_val[2..].chars().all(|c| c.is_ascii_hexdigit()) || msg_sid_val.starts_with("...") {
+                    creds_save_status.set(Some(Err("Invalid Messaging Service SID format".to_string())));
+                    return;
+                }
             }
             creds_save_status.set(None);
             spawn_local(async move {
@@ -1318,7 +1426,9 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                         .header("Authorization", &format!("Bearer {}", token))
                         .json(&json!({
                             "account_sid": *account_sid,
-                            "auth_token": *auth_token
+                            "auth_token": *auth_token,
+                            "server_url": *server_url,
+                            "messaging_service_sid": if *selected_country == "us" { Some((*messaging_service_sid).clone()) } else { None }
                         }))
                         .unwrap()
                         .send()
@@ -1589,6 +1699,11 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     on_sid_change={on_sid_change.clone()}
                     auth_token={auth_token.clone()}
                     on_token_change={on_token_change.clone()}
+                    server_url={server_url.clone()}
+                    on_server_url_change={on_server_url_change.clone()}
+                    messaging_service_sid={messaging_service_sid.clone()}
+                    on_messaging_sid_change={on_messaging_sid_change.clone()}
+                    selected_country={selected_country.clone()}
                     on_save_creds={on_save_creds.clone()}
                     creds_save_status={creds_save_status.clone()}
                     open_modal={open_modal.clone()}

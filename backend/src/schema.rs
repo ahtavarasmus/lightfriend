@@ -154,21 +154,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    temp_variables (id) {
-        id -> Integer,
-        user_id -> Integer,
-        confirm_send_event_type -> Text,
-        confirm_send_event_recipient -> Nullable<Text>,
-        confirm_send_event_subject -> Nullable<Text>,
-        confirm_send_event_content -> Nullable<Text>,
-        confirm_send_event_start_time -> Nullable<Text>,
-        confirm_send_event_duration -> Nullable<Text>,
-        confirm_send_event_id -> Nullable<Text>,
-        confirm_send_event_image_url -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
     uber (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -219,33 +204,21 @@ diesel::table! {
     user_settings (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
-        notify -> Bool,
         notification_type -> Nullable<Text>,
         timezone_auto -> Nullable<Bool>,
         agent_language -> Text,
-        sub_country -> Nullable<Text>,
         save_context -> Nullable<Integer>,
         morning_digest -> Nullable<Text>,
         day_digest -> Nullable<Text>,
         evening_digest -> Nullable<Text>,
-        number_of_digests_locked -> Integer,
         critical_enabled -> Nullable<Text>,
-        encrypted_twilio_account_sid -> Nullable<Text>,
-        encrypted_twilio_auth_token -> Nullable<Text>,
-        encrypted_openrouter_api_key -> Nullable<Text>,
         server_url -> Nullable<Text>,
-        encrypted_geoapify_key -> Nullable<Text>,
-        encrypted_pirate_weather_key -> Nullable<Text>,
-        server_instance_id -> Nullable<Text>,
-        server_instance_last_ping_timestamp -> Nullable<Integer>,
-        server_ip -> Nullable<Text>,
         encrypted_textbee_device_id -> Nullable<Text>,
         encrypted_textbee_api_key -> Nullable<Text>,
         elevenlabs_phone_number_id -> Nullable<Text>,
         proactive_agent_on -> Bool,
         notify_about_calls -> Bool,
         action_on_critical_message -> Nullable<Text>,
-        server_key -> Nullable<Text>,
     }
 }
 
@@ -261,9 +234,11 @@ diesel::table! {
         matrix_device_id -> Nullable<Text>,
         credits_left -> Float,
         encrypted_matrix_password -> Nullable<Text>,
-        confirm_send_event -> Nullable<Text>,
         phone_number_country -> Nullable<Text>,
         twilio_messaging_service_sid -> Nullable<Text>,
+        twilio_account_sid -> Nullable<Text>,
+        twilio_auth_token -> Nullable<Text>,
+        server_url -> Nullable<Text>,
     }
 }
 
@@ -285,7 +260,6 @@ diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
-diesel::joinable!(temp_variables -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
@@ -304,7 +278,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     priority_senders,
     processed_emails,
     task_notifications,
-    temp_variables,
     uber,
     usage_logs,
     user_info,

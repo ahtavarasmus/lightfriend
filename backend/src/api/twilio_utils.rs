@@ -278,8 +278,8 @@ pub async fn validate_twilio_signature(
 
     let auth_token: String;
     let url: String;
-        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
-            Ok((_, Some(token), _, Some(server_url), _, _)) => {
+        (auth_token, url) = match state.user_core.get_twilio_credentials() {
+            Ok((_, Some(token), Some(server_url), _)) => {
                 tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
                 (token, server_url)
             },
@@ -332,10 +332,14 @@ pub async fn validate_twilio_signature(
 pub async fn delete_twilio_message_media(
     state: &Arc<AppState>,
     media_sid: &str,
-    user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
+    let (account_sid, auth_token ) = match state.user_core.get_twilio_credentials() {
+        Ok((Some(account_sid), Some(token), _, _)) => (account_sid, token),
+        _ => {
+            return Err("didn't find twilio credentials, can't delete a message".into());
+        },
+    };
     let client = Client::new();
 
     let response = client
@@ -390,11 +394,15 @@ use tokio::time::sleep;
 pub async fn delete_twilio_message(
     state: &Arc<AppState>,
     message_sid: &str,
-    user: &User,
 ) -> Result<(), Box<dyn Error>> {
     tracing::debug!("deleting incoming message");
 
-    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
+    let (account_sid, auth_token ) = match state.user_core.get_twilio_credentials() {
+        Ok((Some(account_sid), Some(token), _, _)) => (account_sid, token),
+        _ => {
+            return Err("didn't find twilio credentials, can't delete a message".into());
+        },
+    };
     let client = Client::new();
 
     // Wait 1-2 minutes to avoid 'resource not complete' errors
@@ -447,7 +455,7 @@ pub async fn send_conversation_message(
         tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
     }
 
-    let running_environment= env::var("ENVIRONMENT")
+    let running_environment = env::var("ENVIRONMENT")
             .map_err(|_| "ENVIRONMENT not set")?;
     if running_environment == "development".to_string() {
         println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
@@ -477,22 +485,15 @@ pub async fn send_conversation_message(
     // If TextBee not set up or failed, fall back to Twilio
 
     // Twilio send logic
-    let (account_sid, auth_token, _) = state.user_core.get_twilio_credentials()?;
+    let (account_sid, auth_token, messaging_sid) = match state.user_core.get_twilio_credentials() {
+        Ok((Some(account_sid), Some(token), _, messaging_sid)) => (account_sid, token, messaging_sid),
+        _ => {
+            return Err("didn't find twilio credentials, can't send a message".into());
+        },
+    };
     let client = Client::new();
 
-    // Get or set country
-    let mut country = user.phone_number_country.clone();
-
-    // Determine From strategy
-    let mut use_messaging_service = false;
-    let mut from_number = user.preferred_number.clone().unwrap_or_default();
-
-    if let Some(c) = country {
-        match c.as_str() {
-            "US" => use_messaging_service = true,
-            _ => use_messaging_service = false,
-        }
-    }
+    let from_number = user.preferred_number.clone().unwrap_or_default();
 
     // Build form_data
     let mut form_data = vec![
@@ -500,10 +501,8 @@ pub async fn send_conversation_message(
         ("Body", body),
     ];
 
-    let sid = env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
-    let sid_str = sid.as_str();
-    if use_messaging_service {
-        form_data.push(("MessagingServiceSid", sid_str));
+    if let Some(ref mssid) = messaging_sid {
+        form_data.push(("MessagingServiceSid", mssid.as_str()));
     } else {
         form_data.push(("From", from_number.as_str()));
     }
@@ -551,7 +550,7 @@ pub async fn send_conversation_message(
 
     tracing::info!("going into deleting handler for the sent message");
     spawn(async move {
-        if let Err(e) = delete_twilio_message(&state_clone, &msg_sid, &user_clone).await {
+        if let Err(e) = delete_twilio_message(&state_clone, &msg_sid).await {
             tracing::error!("Failed to delete message {}: {}", msg_sid, e);
         }
     });

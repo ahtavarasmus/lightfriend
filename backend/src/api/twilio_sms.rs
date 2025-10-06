@@ -15,8 +15,8 @@ use axum::{
     Json,
 };
 use crate::tool_call_utils::utils::{
-    ChatMessage, create_openai_client, create_eval_tools, create_clarify_tools,
-    ClarifyResponse, EvalResponse,
+    ChatMessage, create_openai_client, create_eval_tools,
+    EvalResponse,
 };
 use chrono::Utc;
 
@@ -139,23 +139,6 @@ pub async fn handle_incoming_sms(
     Form(payload): Form<TwilioWebhookPayload>,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
-
-    // Check for STOP command
-    if payload.body.trim().to_uppercase() == "STOP" {
-        if let Ok(Some(user)) = state.user_core.find_by_phone_number(&payload.from) {
-            if let Err(e) = state.user_core.update_notify(user.id, false) {
-                tracing::error!("Failed to update notify status: {}", e);
-            } else {
-                return (
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "You have been unsubscribed from notifications.".to_string(),
-                    })
-                );
-            }
-        }
-    }
 
     // Process SMS in the background
     tokio::spawn(async move {
@@ -443,7 +426,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(&state, &media_sid, &user).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(&state, &media_sid).await {
                     Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                     Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -1459,7 +1442,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     tracing::debug!("going into deleting the incoming message handler");
     tokio::spawn(async move {
-        if let Err(e) = crate::api::twilio_utils::delete_twilio_message(&state_clone, &msg_sid, &user_clone).await {
+        if let Err(e) = crate::api::twilio_utils::delete_twilio_message(&state_clone, &msg_sid).await {
             tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);
         }
     });

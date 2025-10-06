@@ -14,7 +14,6 @@ use crate::schema::google_tasks;
 use crate::schema::task_notifications;
 use crate::schema::calendar_notifications;
 use crate::schema::user_settings;
-use crate::schema::temp_variables;
 use crate::schema::message_history;
 use crate::schema::user_info;
 use crate::schema::uber;
@@ -35,9 +34,11 @@ pub struct User {
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
-    pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
     pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
     pub twilio_messaging_service_sid: Option<String>,
+    pub twilio_account_sid: Option<String>,
+    pub twilio_auth_token: Option<String>,
+    pub server_url: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
@@ -67,37 +68,6 @@ pub struct NewUserInfo {
     pub nearby_places: Option<String>,
     pub recent_contacts: Option<String>,
 }
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = temp_variables)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct TempVariable {
-    pub id: i32,
-    pub user_id: i32,
-    pub confirm_send_event_type: String, // 'whatsapp', 'calendar' or 'email'
-    pub confirm_send_event_recipient: Option<String>, 
-    pub confirm_send_event_subject: Option<String>,
-    pub confirm_send_event_content: Option<String>,
-    pub confirm_send_event_start_time: Option<String>,
-    pub confirm_send_event_duration: Option<String>,
-    pub confirm_send_event_id: Option<String>,
-    pub confirm_send_event_image_url: Option<String>,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = temp_variables)]
-pub struct NewTempVariable {
-    pub user_id: i32,
-    pub confirm_send_event_type: String,
-    pub confirm_send_event_recipient: Option<String>,
-    pub confirm_send_event_subject: Option<String>,
-    pub confirm_send_event_content: Option<String>,
-    pub confirm_send_event_start_time: Option<String>,
-    pub confirm_send_event_duration: Option<String>,
-    pub confirm_send_event_id: Option<String>,
-    pub confirm_send_event_image_url: Option<String>,
-}
-
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = task_notifications)]
@@ -196,7 +166,7 @@ pub struct NewEmailJudgment {
 #[diesel(table_name = bridges)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Bridge {
-    pub id: Option<i32>, // Assuming auto-incrementing primary key
+    pub id: Option<i32>, 
     pub user_id: i32,
     pub bridge_type: String, // whatsapp, telegram
     pub status: String, // connected, disconnected
@@ -449,46 +419,31 @@ pub struct NewKeyword {
 pub struct UserSettings {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub notify: bool, // if user wants to be notified about new features to lightfriend (not related to notifications)
     pub notification_type: Option<String>, // "call" or "sms"(sms is default when none) // "call" also sends notification as sms
     pub timezone_auto: Option<bool>,
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
-    pub sub_country: Option<String>, // "US", "FI", "UK", "AU"
     pub save_context: Option<i32>, // how many messages to save in context or None if nothing is saved
     pub morning_digest: Option<String>, // whether and when to send user morning digest noti, time is in UTC as rfc
     pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
     pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
-    pub number_of_digests_locked: i32, // if user wants to change some of the digests for base messages we can lock some digests
     pub critical_enabled: Option<String>, // whether to inform users about their critical messages immediately and by which way ("sms" or "call")
-    pub encrypted_twilio_account_sid: Option<String>, // for self hosted instance
-    pub encrypted_twilio_auth_token: Option<String>, // for self hosted instance
-    pub encrypted_openrouter_api_key: Option<String>, // for self hosted instance
     pub server_url: Option<String>, // for self hosted instance
-    pub encrypted_geoapify_key: Option<String>, // for self hosted instance
-    pub encrypted_pirate_weather_key: Option<String>, // for self hosted instance
-    pub server_instance_id: Option<String>, // for self hosted instance (field for pairing code and instance id)
-    pub server_instance_last_ping_timestamp: Option<i32>, // for self hosted instance (used to allow only a single instance ping per day)
-    pub server_ip: Option<String>, // for self hosted instance
     pub encrypted_textbee_device_id: Option<String>,
     pub encrypted_textbee_api_key: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
     pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
     pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
     pub action_on_critical_message: Option<String>, // "ask_sender", "ask_sender_exclude_family", "notify_family", or None and "notify_all" are the same
-    pub server_key: Option<String>, // for self hosted instance to make calls to main lightfriend server. is generated when user logs in to their instance
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = user_settings)]
 pub struct NewUserSettings {
     pub user_id: i32,
-    pub notify: bool,
     pub notification_type: Option<String>,
     pub timezone_auto: Option<bool>,
     pub agent_language: String,
-    pub sub_country: Option<String>,
     pub save_context: Option<i32>,
-    pub number_of_digests_locked: i32,
     pub critical_enabled: Option<String>,
     pub proactive_agent_on: bool,
     pub notify_about_calls: bool, 

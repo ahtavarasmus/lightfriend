@@ -3,18 +3,14 @@ use diesel::sql_types::Text;
 use diesel::result::Error as DieselError;
 use std::error::Error;
 use crate::{
-    models::user_models::{User, UserSettings, UserInfo, NewUserInfo, NewUserSettings, TempVariable, NewTempVariable},
-    schema::{users, user_settings, temp_variables, user_info},
+    models::user_models::{User, UserSettings, UserInfo, NewUserInfo, NewUserSettings},
+    schema::{users, user_settings,  user_info},
     DbPool,
 };
 
 use diesel::dsl::sql;
 use diesel::sql_types::BigInt;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-sql_function! {
-    fn lower(x: Text) -> Text;
-}
 
 pub struct UserCore {
     pool: DbPool
@@ -124,13 +120,10 @@ impl UserCore {
             None => {
                 let new_settings = NewUserSettings {
                     user_id,
-                    notify: true,
                     notification_type: None,
                     timezone_auto: None,
                     agent_language: "en".to_string(),
-                    sub_country: None,
                     save_context: Some(5),
-                    number_of_digests_locked: 0,
                     critical_enabled: Some("sms".to_string()),
                     proactive_agent_on: true,
                     notify_about_calls: true,
@@ -164,13 +157,10 @@ impl UserCore {
         if !settings_exist {
             let new_settings = NewUserSettings {
                 user_id,
-                notify: true,
                 notification_type: None,
                 timezone_auto: None,
                 agent_language: "en".to_string(),
-                sub_country: None,
                 save_context: Some(5),
-                number_of_digests_locked: 0,
                 critical_enabled: Some("sms".to_string()),
                 proactive_agent_on: true,
                 notify_about_calls: true,
@@ -208,22 +198,6 @@ impl UserCore {
         diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
             .set(user_info::lockbox_password_vault.eq(new_password))
             .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_sub_country(&self, user_id: i32, country: Option<&str>) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist()?;
-
-        // Update the settings
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::sub_country.eq(country))
-            .execute(&mut conn)?;
-
-
         Ok(())
     }
 
@@ -302,22 +276,6 @@ impl UserCore {
         })
     }
 
-    // Update user's notify preference in user_settings
-    pub fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist()?;
-
-        // Update the settings
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::notify.eq(notify))
-            .execute(&mut conn)?;
-
-
-        Ok(())
-    }
 
     pub fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -643,76 +601,59 @@ impl UserCore {
         })
     }
 
-
-    pub fn get_openrouter_api_key(&self, user_id: i32) -> Result<String, Box<dyn Error>> {
-        use crate::schema::user_settings;
+    pub fn get_twilio_credentials(&self) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>), Box<dyn Error>> {
+        use crate::schema::users;
         use crate::utils::encryption::decrypt;
-        
+       
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+       
         // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(
-                user_settings::encrypted_openrouter_api_key,
-            )
-            .first::<Option<String>>(&mut conn)?;
-
-        match settings {
-            Some(encrypted_openrouter_api_key) => {
-                let openrouter_api_key= decrypt(&encrypted_openrouter_api_key)?;
-                Ok(openrouter_api_key)
-            },
-            _ => Err("Openrouter api key not found".into())
-        }
-    }
-
-    pub fn get_twilio_credentials(&self) -> Result<(String, String, String), Box<dyn Error>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::decrypt;
-        
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(1))
+        let settings = users::table
+            .find(1)
             .select((
-                user_settings::encrypted_twilio_account_sid,
-                user_settings::encrypted_twilio_auth_token,
-                user_settings::server_url,
+                users::twilio_account_sid,
+                users::twilio_auth_token,
+                users::server_url,
+                users::twilio_messaging_service_sid,
             ))
-            .first::<(Option<String>, Option<String>, Option<String>)>(&mut conn)?;
-
-        match settings {
-            (Some(encrypted_account_sid), Some(encrypted_auth_token), Some(server_url)) => {
-                let account_sid = decrypt(&encrypted_account_sid)?;
-                let auth_token = decrypt(&encrypted_auth_token)?;
-                Ok((account_sid, auth_token, server_url))
-            },
-            _ => Err("Twilio credentials not found".into())
-        }
+            .first::<(Option<String>, Option<String>, Option<String>, Option<String>)>(&mut conn)?;
+        
+        let (encrypted_account_sid, encrypted_auth_token, server_url, messaging_service_sid) = settings;
+        let account_sid = encrypted_account_sid.map(|s| decrypt(&s)).transpose()?;
+        let auth_token = encrypted_auth_token.map(|s| decrypt(&s)).transpose()?;
+        Ok((account_sid, auth_token, server_url, messaging_service_sid))
     }
 
-
-    pub fn update_twilio_credentials(&self, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
-        use crate::schema::user_settings;
+    pub fn update_twilio_credentials(&self, account_sid: Option<&str>, auth_token: Option<&str>, server_url: Option<&str>, messaging_service_sid: Option<&str>) -> Result<(), Box<dyn Error>> {
+        use crate::schema::users;
         use crate::utils::encryption::encrypt;
+     
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_account_sid = account_sid.map(|s| encrypt(s)).transpose()?;
+        let encrypted_auth_token = auth_token.map(|s| encrypt(s)).transpose()?;
+        diesel::update(users::table.find(1))
+            .set((
+                users::twilio_account_sid.eq(encrypted_account_sid),
+                users::twilio_auth_token.eq(encrypted_auth_token),
+                users::server_url.eq(server_url),
+                users::twilio_messaging_service_sid.eq(messaging_service_sid),
+            ))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
+    pub fn update_server_url(&self, server_url: &str) -> Result<(), Box<dyn Error>> {
+        use crate::schema::user_settings;
         
         // Ensure user settings exist
         self.ensure_user_settings_exist()?;
-
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let encrypted_account_sid = encrypt(account_sid)?;
-        let encrypted_auth_token = encrypt(auth_token)?;
-
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(1)))
             .set((
-                user_settings::encrypted_twilio_account_sid.eq(encrypted_account_sid.clone()),
-                user_settings::encrypted_twilio_auth_token.eq(encrypted_auth_token.clone()),
+                user_settings::server_url.eq(server_url.clone()),
             ))
             .execute(&mut conn)?;
-
         Ok(())
     }
 
@@ -762,6 +703,7 @@ impl UserCore {
 
         Ok(())
     }
+
     pub fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -778,7 +720,6 @@ impl UserCore {
         Ok(number)
     }
 
-
     pub fn set_elevenlabs_phone_number_id(&self, user_id: i32, phone_number_id: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -792,78 +733,6 @@ impl UserCore {
             .execute(&mut conn)?;
 
         Ok(())
-    }
-
-
-    pub fn set_server_instance_id(&self, user_id: i32, server_instance_id: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist()?;
-
-        // Update the server_instance_id
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_instance_id.eq(Some(server_instance_id)))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    // for self hosted instance
-    pub fn update_instance_id_to_self_hosted(&self, server_instance_id: &str) -> Result<(), DieselError> {
-        use crate::schema::{users, user_settings};
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Get the first user from the users table
-        let first_user = users::table
-            .order(users::id.asc())
-            .first::<User>(&mut conn)?;
-
-        // Ensure user settings exist for this user
-        self.ensure_user_settings_exist()?;
-
-        // Update the server_instance_id for this user
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(first_user.id)))
-            .set(user_settings::server_instance_id.eq(Some(server_instance_id)))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // for self hosted instance
-    pub fn get_settings_for_tier3(
-        &self,
-    ) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-        use crate::schema::{users, user_settings};
-        use crate::utils::encryption::decrypt;
-        
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Find the first user(should be only one)
-        let tier3_user = users::table
-            .first::<User>(&mut conn)?;
-            
-        // Get their settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(tier3_user.id))
-            .select((
-                user_settings::encrypted_twilio_account_sid,
-                user_settings::encrypted_twilio_auth_token,
-                user_settings::encrypted_openrouter_api_key,
-                user_settings::server_url,
-                user_settings::encrypted_geoapify_key,
-                user_settings::encrypted_pirate_weather_key,
-            ))
-            .first::<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(&mut conn)?;
-            
-        match settings {
-            (Some(encrypted_account_sid), Some(encrypted_auth_token), openrouter_api_key, server_url, geoapify_key, pirate_key) => {
-                let account_sid = decrypt(&encrypted_account_sid).ok();
-                let auth_token = decrypt(&encrypted_auth_token).ok();
-                Ok((account_sid, auth_token, openrouter_api_key, server_url, geoapify_key, pirate_key))
-            },
-            _ => Ok((None, None, None, None, None, None))
-        }
     }
 }
 

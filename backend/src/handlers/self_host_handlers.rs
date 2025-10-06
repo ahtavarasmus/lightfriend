@@ -9,60 +9,9 @@ use axum::{
     http::StatusCode,
 };
 
-use rand::Rng;
 use serde_json::json;
-use jsonwebtoken::{encode, Header, EncodingKey};
-use chrono::{Duration, Utc};
-use std::num::NonZeroU32;
-use rand::distributions::Alphanumeric;
-use std::env;
 use serde::{Deserialize, Serialize};
 use crate::handlers::auth_handlers::generate_tokens_and_response;
-
-#[derive(Deserialize)]
-pub struct SelfHostPingRequest {
-    instance_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct PairingVerificationRequest {
-    pairing_code: String,
-    server_instance_id: String,
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct PairingVerificationResponse {
-    valid: bool,
-    number: String,
-    message: String,
-}
-
-#[derive(Deserialize)]
-pub struct SelfHostedSignupRequest {
-    pairing_code: String,
-    password: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct SelfHostedLoginRequest {
-    password: String,
-}
-
-#[derive(Serialize)]
-pub struct GeneratePairingCodeResponse {
-    pairing_code: String,
-}
-
-#[derive(Serialize)]
-pub struct SelfHostedStatusResponse {
-    status: String,
-}
-
-
-#[derive(Deserialize)]
-pub struct UpdateServerIpRequest {
-    server_ip: String,
-}
 
 #[derive(Deserialize)]
 pub struct UpdateTwilioPhoneRequest {
@@ -73,6 +22,8 @@ pub struct UpdateTwilioPhoneRequest {
 pub struct UpdateTwilioCredsRequest {
     account_sid: String,
     auth_token: String,
+    server_url: Option<String>,
+    messaging_service_sid: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,7 +41,7 @@ pub async fn update_twilio_phone(
         Ok(_) => {
             tracing::debug!("Successfully updated Twilio phone for user: {}", auth_user.user_id);
 
-            if let Ok((account_sid, auth_token, _)) = state.user_core.get_twilio_credentials() {
+            if let Ok((Some(account_sid), Some(auth_token), _, _)) = state.user_core.get_twilio_credentials() {
                 let phone = req.twilio_phone.clone();
                 let user_id = auth_user.user_id;
                 let state_clone = state.clone();
@@ -123,8 +74,17 @@ pub async fn update_twilio_creds(
     auth_user: AuthUser,
     Json(req): Json<UpdateTwilioCredsRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    let user_opt = match state.user_core.get_user() {
-        Ok(opt) => opt,
+    let user = match state.user_core.get_user() {
+        Ok(Some(opt)) => {
+            opt
+        },
+        Ok(None) => {
+            tracing::error!("User not found: {}", auth_user.user_id);
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ));
+        },
         Err(e) => {
             tracing::error!("Failed to fetch user: {}", e);
             return Err((
@@ -134,18 +94,7 @@ pub async fn update_twilio_creds(
         }
     };
 
-    let user = match user_opt {
-        Some(u) => u,
-        None => {
-            tracing::error!("User not found: {}", auth_user.user_id);
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ));
-        }
-    };
-
-    match state.user_core.update_twilio_credentials(&req.account_sid, &req.auth_token) {
+    match state.user_core.update_twilio_credentials(Some(req.account_sid.as_str()), Some(req.auth_token.as_str()), req.server_url.as_deref(), req.messaging_service_sid.as_deref()) {
         Ok(_) => {
             tracing::debug!("Successfully updated Twilio credentials for user: {}", auth_user.user_id);
 
@@ -209,6 +158,7 @@ struct CheckCredsResponse {
     messaging_service_sid: Option<String>,
     twilio_account_sid: Option<String>,
     twilio_auth_token: Option<String>,
+    server_url: Option<String>,
 }
 
 pub async fn self_hosted_login(
@@ -245,7 +195,7 @@ pub async fn self_hosted_login(
     let main_phone_number = check_data.phone_number;
     println!("Credentials verified successfully for main user_id: {}", check_data.user_id);
     let user = match state.user_core.get_user() {
-        Ok(Some(mut u)) => u,
+        Ok(Some(u)) => u,
         Ok(None) => {
             // Create new user
             let new_user = NewUser {
@@ -281,19 +231,25 @@ pub async fn self_hosted_login(
         }
     };
 
+    match state.user_core.update_twilio_credentials(
+        check_data.twilio_account_sid.as_deref(), 
+        check_data.twilio_auth_token.as_deref(), 
+        check_data.server_url.as_deref(), 
+        check_data.messaging_service_sid.as_deref()
+    ) {
+        Ok(_) => tracing::debug!("Successfully updated Twilio credentials for user"),
+        Err(e) => tracing::error!("Failed to update Twilio credentials: {}", e),
+    }
+
+    match state.user_core.update_preferred_number(check_data.preferred_number.as_str()) {
+        Ok(_) => tracing::debug!("Successfully updated Twilio phone for user"),
+        Err(e) => tracing::error!("Failed to update Twilio phone: {}", e),
+    }
+
     // Set phone country
     if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(&state, &user.phone_number).await {
         tracing::error!("Failed to set phone country during self-hosted login: {}", e);
         // Proceed anyway
     }
     generate_tokens_and_response(user.id)
-}
-
-
-fn generate_api_key(length: usize) -> String {
-    rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
-        .take(length)
-        .map(char::from)
-        .collect()
 }

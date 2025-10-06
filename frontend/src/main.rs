@@ -13,28 +13,10 @@ mod profile {
     pub mod settings;
     pub mod timezone_detector;
 }
-mod blog {
-    pub mod switch_to_dumbphone;
-    pub mod read_books_accidentally;
-}
 mod pages {
     pub mod home;
-    pub mod landing;
-    pub mod money;
     pub mod termsprivacy;
     pub mod proactive;
-    pub mod faq;
-    pub mod supported_countries;
-    pub mod twilio_self_host_instructions;
-    pub mod llm_self_host_instructions;
-    pub mod voice_self_host_instructions;
-    pub mod server_self_host_instructions;
-    pub mod self_host_instructions;
-    pub mod setup_costs;
-    pub mod bring_own_number;
-    pub mod lightphone3_whatsapp_guide;
-    pub mod blog;
-    pub mod change_log;
 }
 mod components {
     pub mod notification;
@@ -60,459 +42,72 @@ mod connections {
 }
 mod auth {
     pub mod connect;
-    pub mod verify;
     pub mod signup;
     pub mod oauth_flow;
 }
-mod admin {
-    pub mod dashboard;
-    pub mod usage;
-}
 use pages::{
     home::Home,
-    faq::Faq,
-    supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    money::UnifiedPricing,
-    self_host_instructions::SelfHostInstructions,
-    bring_own_number::TwilioHostedInstructions,
-    lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
-    blog::Blog,
-    change_log::Changelog,
-};
-use blog::{
-    switch_to_dumbphone::SwitchToDumbphoneGuide,
-    read_books_accidentally::ReadMoreAccidentallyGuide,
 };
 use auth::{
-    signup::register::Register,
     signup::login::Login,
-    signup::password_reset::PasswordReset,
-    verify::Verify,
 };
 use profile::profile::Billing;
-use admin::dashboard::AdminDashboard;
 use crate::profile::billing_models::UserProfile;
-use gloo_net::http::Request;
-#[derive(Clone, PartialEq)]
-pub enum SelfHostingStatus {
-    SelfHostedLogin,
-    Normal,
-}
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
-    #[at("/self-hosted")]
-    SelfHosted,
-    #[at("/password-reset")]
-    PasswordReset,
-    #[at("/faq")]
-    Faq,
-    #[at("/blog")]
-    Blog,
-    #[at("/updates")]
-    Changelog,
-    #[at("/host-instructions")]
-    SelfHostInstructions,
-    #[at("/supported-countries")]
-    SupportedCountries,
-    #[at("/bring-own-number")]
-    TwilioHostedInstructions,
     #[at("/")]
     Home,
     #[at("/login")]
     Login,
-    #[at("/register")]
-    Register,
-    #[at("/admin")]
-    Admin,
     #[at("/billing")]
     Billing,
-    #[at("/verify")]
-    Verify,
     #[at("/terms")]
     Terms,
     #[at("/privacy")]
     Privacy,
-    #[at("/pricing")]
-    Pricing,
-    #[at("/light-phone-3-whatsapp-guide")]
-    LightPhone3WhatsappGuide,
-    #[at("/how-to-switch-to-dumbphone")]
-    SwitchToDumbphoneGuide,
-    #[at("/how-to-read-more-accidentally")]
-    ReadMoreAccidentallyGuide,
 }
-fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
-    if matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-        return match routes {
-            Route::SelfHosted => {
-                info!("Rendering Self Hosted page");
-                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
-            },
-            _ => {
-                html! { <Redirect<Route> to={Route::SelfHosted} /> }
-            }
-        };
-    }
-    match routes {
-        Route::SelfHosted => {
-            if !logged_in {
-                info!("Rendering Self Hosted page");
-                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
-            } else {
-                html! { <Redirect<Route> to={Route::Home} /> }
-            }
-        },
-        Route::PasswordReset => {
-            info!("Rendering Password Reset page");
-            html! { <PasswordReset /> }
-        },
-        Route::Faq => {
-            info!("Rendering FAQ page");
-            html! { <Faq /> }
-        },
-        Route::Blog => {
-            info!("Rendering Blog page");
-            html! { <Blog /> }
-        },
-        Route::Changelog => {
-            info!("Rendering Changelog page");
-            html! { <Changelog /> }
-        },
-        Route::SelfHostInstructions => {
-            info!("Rendering Self Host Instructions page");
-            html! { <SelfHostInstructionsWrapper /> }
-        },
-        Route::SupportedCountries => {
-            info!("Rendering SupportedCountries page");
-            html! { <SupportedCountries/> }
-        },
-        Route::TwilioHostedInstructions => {
-            info!("Rendering TwilioHostedInstructions page");
-            html! { <TwilioHostedInstructionsWrapper /> }
-        },
-        Route::Home => {
-            info!("Rendering Home page");
-            html! { <Home /> }
-        },
-        Route::Login => {
+fn switch(routes: Route, logged_in: bool) -> Html {
+    if !logged_in {
+        if routes == Route::Login {
             info!("Rendering Login page");
             html! { <Login /> }
-        },
-        Route::Register => {
-            info!("Rendering Register page");
-            html! { <Register /> }
-        },
-        Route::Admin => {
-            info!("Rendering Admin page");
-            html! { <AdminDashboard /> }
-        },
-        Route::Billing => {
-            info!("Rendering Billing page");
-            html! { <Billing /> }
-        },
-        Route::Verify => {
-            info!("Rendering Verify page");
-            html! { <Verify /> }
-        },
-        Route::Terms => {
-            info!("Rendering Terms page");
-            html! { <TermsAndConditions /> }
-        },
-        Route::Privacy => {
-            info!("Rendering Privacy page");
-            html! { <PrivacyPolicy /> }
-        },
-        Route::Pricing => {
-            info!("Rendering Pricing page");
-            html! { <PricingWrapper /> }
-        },
-        Route::LightPhone3WhatsappGuide => {
-            info!("Rendering LightPhone3WhatsappGuide page");
-            html! { <LightPhone3WhatsappGuide /> }
-        },
-        Route::SwitchToDumbphoneGuide => {
-            info!("Rendering SwitchToDumbphoneGuide page");
-            html! { <SwitchToDumbphoneGuide /> }
-        },
-        Route::ReadMoreAccidentallyGuide => {
-            info!("Rendering ReadMoreAccidentallyGuide page");
-            html! { <ReadMoreAccidentallyGuide /> }
-        },
-    }
-}
-#[function_component(TwilioHostedInstructionsWrapper)]
-pub fn twilio_hosted_instructions_wrapper() -> Html {
-    let profile_data = use_state(|| None::<UserProfile>);
-   
-    {
-        let profile_data = profile_data.clone();
-       
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Some(token) = window()
-                    .and_then(|w| w.local_storage().ok())
-                    .flatten()
-                    .and_then(|storage| storage.get_item("token").ok())
-                    .flatten()
-                {
-                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                        .header("Authorization", &format!("Bearer {}", token))
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if let Ok(profile) = response.json::<UserProfile>().await {
-                                profile_data.set(Some(profile));
-                            }
-                        }
-                        Err(_) => {}
-                    }
-                }
-            });
-           
-            || ()
-        }, ());
-    }
-    if let Some(profile) = (*profile_data).as_ref() {
-        html! {
-            <TwilioHostedInstructions
-                is_logged_in={true}
-                sub_tier={profile.sub_tier.clone()}
-                twilio_phone={profile.preferred_number.clone()}
-                twilio_sid={profile.twilio_sid.clone()}
-                twilio_token={profile.twilio_token.clone()}
-                textbee_api_key={profile.textbee_api_key.clone()}
-                textbee_device_id={profile.textbee_device_id.clone()}
-                country={profile.sub_country.clone()}
-            />
+        } else {
+            html! { <Redirect<Route> to={Route::Login} /> }
         }
     } else {
-        html! {
-            <TwilioHostedInstructions
-                is_logged_in={false}
-                sub_tier={None::<String>}
-                twilio_phone={None::<String>}
-                twilio_sid={None::<String>}
-                twilio_token={None::<String>}
-                textbee_api_key={None::<String>}
-                textbee_device_id={None::<String>}
-                country={None::<String>}
-            />
-        }
-    }
-}
-#[function_component(SelfHostInstructionsWrapper)]
-pub fn self_host_instructions_wrapper() -> Html {
-    let profile_data = use_state(|| None::<UserProfile>);
-   
-    {
-        let profile_data = profile_data.clone();
-       
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Some(token) = window()
-                    .and_then(|w| w.local_storage().ok())
-                    .flatten()
-                    .and_then(|storage| storage.get_item("token").ok())
-                    .flatten()
-                {
-                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                        .header("Authorization", &format!("Bearer {}", token))
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if let Ok(profile) = response.json::<UserProfile>().await {
-                                profile_data.set(Some(profile));
-                            }
-                        }
-                        Err(_) => {}
-                    }
-                }
-            });
-           
-            || ()
-        }, ());
-    }
-    if let Some(profile) = (*profile_data).as_ref() {
-        html! {
-            <SelfHostInstructions
-                is_logged_in={true}
-                sub_tier={profile.sub_tier.clone()}
-                user_id={profile.id.clone().to_string()}
-                server_ip={profile.server_ip.clone()}
-                twilio_phone={profile.preferred_number.clone()}
-                twilio_sid={profile.twilio_sid.clone()}
-                twilio_token={profile.twilio_token.clone()}
-                textbee_api_key={profile.textbee_api_key.clone()}
-                textbee_device_id={profile.textbee_device_id.clone()}
-                openrouter_api_key={profile.openrouter_api_key.clone()}
-            />
-        }
-    } else {
-        html! {
-            <SelfHostInstructions
-                is_logged_in={false}
-                sub_tier={None::<String>}
-                user_id={None::<String>}
-                server_ip={None::<String>}
-                twilio_phone={None::<String>}
-                twilio_sid={None::<String>}
-                twilio_token={None::<String>}
-                textbee_api_key={None::<String>}
-                textbee_device_id={None::<String>}
-                openrouter_api_key={None::<String>}
-            />
-        }
-    }
-}
-
-use serde_json::Value;
-use std::collections::HashMap;
-
-#[function_component(PricingWrapper)]
-pub fn pricing_wrapper() -> Html {
-    let profile_data = use_state(|| None::<UserProfile>);
-    let selected_country = use_state(|| "US".to_string());
-    let country_name = use_state(|| String::new());
-    let ip_country_name = use_state(|| String::new());
-    let is_logged_in = use_state(|| false);
-
-    let country_map: HashMap<String, String> = [
-        ("US".to_string(), "United States".to_string()),
-        ("CA".to_string(), "Canada".to_string()),
-        ("FI".to_string(), "Finland".to_string()),
-        ("NL".to_string(), "Netherlands".to_string()),
-        ("UK".to_string(), "United Kingdom".to_string()),
-        ("AU".to_string(), "Australia".to_string()),
-        ("Other".to_string(), "Other".to_string()),
-    ].iter().cloned().collect();
-
-    {
-        let selected_country = selected_country.clone();
-        let country_name = country_name.clone();
-        let ip_country_name = ip_country_name.clone();
-        let is_logged_in = is_logged_in.clone();
-        let profile_data = profile_data.clone();
-        let country_map = country_map.clone();
-
-        use_effect_with_deps(move |_| {
-            if let Some(window) = web_sys::window() {
-                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+        match routes {
+            Route::Login => {
+                html! { <Redirect<Route> to={Route::Home} /> }
             }
-
-            wasm_bindgen_futures::spawn_local(async move {
-                let mut ip_code = "Other".to_string();
-                let mut ip_name = "your country".to_string();
-
-                if let Ok(resp) = Request::get("https://ipapi.co/json/").send().await {
-                    if let Ok(json) = resp.json::<Value>().await {
-                        if let Some(code) = json.get("country_code").and_then(|v| v.as_str()) {
-                            ip_code = code.to_uppercase();
-                        }
-                        if let Some(name) = json.get("country_name").and_then(|v| v.as_str()) {
-                            ip_name = name.to_string();
-                        }
-                    }
-                }
-
-                ip_country_name.set(ip_name.clone());
-
-                let known_countries = ["US", "CA", "FI", "NL", "UK", "AU"];
-                if !known_countries.contains(&ip_code.as_str()) {
-                    ip_code = "Other".to_string();
-                }
-
-                selected_country.set(ip_code.clone());
-                country_name.set(if ip_code == "Other" { ip_name.clone() } else { country_map.get(&ip_code).cloned().unwrap_or(ip_name.clone()) });
-
-                let token_opt = window()
-                    .and_then(|w| w.local_storage().ok())
-                    .flatten()
-                    .and_then(|storage| storage.get_item("token").ok())
-                    .flatten();
-
-                if let Some(token) = token_opt {
-                    if let Ok(response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                        .header("Authorization", &format!("Bearer {}", token))
-                        .send()
-                        .await
-                    {
-                        if let Ok(profile) = response.json::<UserProfile>().await {
-                            profile_data.set(Some(profile.clone()));
-                            is_logged_in.set(true);
-
-                            let phone_country = profile.phone_number_country.unwrap_or("US".to_string());
-                            selected_country.set(phone_country.clone());
-
-                            let full_name = country_map.get(&phone_country).cloned().unwrap_or(phone_country.clone());
-                            country_name.set(full_name);
-
-                            if phone_country == "Other" {
-                                country_name.set(ip_name.clone());
-                            }
-                        } else {
-                            is_logged_in.set(false);
-                        }
-                    } else {
-                        is_logged_in.set(false);
-                    }
-                } else {
-                    is_logged_in.set(false);
-                }
-            });
-
-            || ()
-        }, ());
-    }
-
-    let on_country_change = if !*is_logged_in {
-        let selected_country = selected_country.clone();
-        let country_name = country_name.clone();
-        let ip_country_name = ip_country_name.clone();
-        let country_map = country_map.clone();
-        Some(Callback::from(move |e: Event| {
-            if let Some(target) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
-                let value = target.value();
-                selected_country.set(value.clone());
-                let new_name = if value == "Other" {
-                    (*ip_country_name).clone()
-                } else {
-                    country_map.get(&value).cloned().unwrap_or(value.clone())
-                };
-                country_name.set(new_name);
+            Route::Home => {
+                info!("Rendering Home page");
+                html! { <Home /> }
             }
-        }))
-    } else {
-        None
-    };
-
-    html! {
-        <UnifiedPricing
-            user_id={profile_data.as_ref().map(|p| p.id).unwrap_or(0)}
-            user_email={profile_data.as_ref().map(|p| p.email.clone()).unwrap_or("".to_string())}
-            sub_tier={profile_data.as_ref().and_then(|p| p.sub_tier.clone())}
-            is_logged_in={*is_logged_in}
-            phone_number={profile_data.as_ref().and_then(|p| Some(p.phone_number.clone()))}
-            verified={profile_data.as_ref().map(|p| p.verified).unwrap_or(false)}
-            selected_country={(*selected_country).clone()}
-            country_name={(*country_name).clone()}
-            on_country_change={on_country_change}
-        />
+            Route::Billing => {
+                info!("Rendering Billing page");
+                html! { <Billing /> }
+            }
+            Route::Terms => {
+                info!("Rendering Terms page");
+                html! { <TermsAndConditions /> }
+            }
+            Route::Privacy => {
+                info!("Rendering Privacy page");
+                html! { <PrivacyPolicy /> }
+            }
+        }
     }
 }
-
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
     pub logged_in: bool,
     pub on_logout: Callback<()>,
-    pub self_hosting_status: SelfHostingStatus,
 }
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
-    let NavProps { logged_in, on_logout, self_hosting_status } = props;
+    let NavProps { logged_in, on_logout } = props;
     let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
     {
@@ -520,22 +115,22 @@ pub fn nav(props: &NavProps) -> Html {
         use_effect_with_deps(move |_| {
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
-           
+          
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
                 is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
-           
+          
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                 .unwrap();
-           
+          
             move || {
                 window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                     .unwrap();
             }
         }, ());
     }
-   
+  
     let handle_logout = {
         let on_logout = on_logout.clone();
         Callback::from(move |_| {
@@ -578,48 +173,17 @@ pub fn nav(props: &NavProps) -> Html {
                 </button>
                 <div class={menu_class}>
                     <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
-                    {
-                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-                            html! {
-                                <>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Faq} classes="nav-link">
-                                            {"FAQ"}
-                                        </Link<Route>>
-                                    </div>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Blog} classes="nav-link">
-                                            {"Blog"}
-                                        </Link<Route>>
-                                    </div>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Pricing} classes="nav-link">
-                                            {"Pricing"}
-                                        </Link<Route>>
-                                    </div>
-                                </>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
+                    <>
+                    </>
                     {
                         if *logged_in {
                             html! {
                                 <>
-                                    {
-                                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-                                            html! {
-                                                <div onclick={close_menu.clone()}>
-                                                    <Link<Route> to={Route::Billing} classes="nav-profile-link">
-                                                        {"Billing"}
-                                                    </Link<Route>>
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Billing} classes="nav-profile-link">
+                                            {"Billing"}
+                                        </Link<Route>>
+                                    </div>
                                     <button onclick={
                                         let close = close_menu.clone();
                                         let logout = handle_logout.clone();
@@ -650,44 +214,6 @@ pub fn nav(props: &NavProps) -> Html {
 #[function_component]
 fn App() -> Html {
     let logged_in = use_state(|| is_logged_in());
-    let self_hosting_status = use_state(|| SelfHostingStatus::Normal);
-    {
-        let self_hosting_status = self_hosting_status.clone();
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                info!("Fetching self-hosting status...");
-                if let Ok(response) = Request::get(&format!("{}/api/self-hosting-status", config::get_backend_url()))
-                    .send()
-                    .await
-                {
-                    if let Ok(status) = response.text().await {
-                        info!("Received self-hosting status: {}", status);
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&status) {
-                            if let Some(status_value) = json.get("status").and_then(|s| s.as_str()) {
-                                match status_value {
-                                    "self-hosted-login" => {
-                                        info!("Setting status to SelfHostedLogin");
-                                        self_hosting_status.set(SelfHostingStatus::SelfHostedLogin)
-                                    },
-                                    _ => {
-                                        info!("Setting status to Normal");
-                                        self_hosting_status.set(SelfHostingStatus::Normal)
-                                    },
-                                }
-                            } else {
-                                self_hosting_status.set(SelfHostingStatus::Normal)
-                            }
-                        } else {
-                            self_hosting_status.set(SelfHostingStatus::Normal)
-                        }
-                    }
-                } else {
-                    info!("Failed to fetch self-hosting status");
-                }
-            });
-            || ()
-        }, ());
-    }
     let handle_logout = {
         Callback::from(move |_| {
             if let Some(window) = window() {
@@ -701,8 +227,8 @@ fn App() -> Html {
     html! {
         <>
             <BrowserRouter>
-                <Nav logged_in={*logged_in} on_logout={handle_logout} self_hosting_status={(*self_hosting_status).clone()} />
-                <Switch<Route> render={move |routes| switch(routes, &self_hosting_status, *logged_in)} />
+                <Nav logged_in={*logged_in} on_logout={handle_logout} />
+                <Switch<Route> render={move |routes| switch(routes, *logged_in)} />
             </BrowserRouter>
         </>
     }

@@ -22,17 +22,6 @@ pub struct LoginResponse {
     pub token: String,
 }
 
-#[derive(Deserialize, Clone)]
-pub struct RegisterRequest {
-    pub email: String,
-    pub password: String,
-    pub phone_number: String,
-}
-
-#[derive(Serialize)]
-pub struct RegisterResponse {
-    pub message: String,
-}
 
 #[derive(Debug, Serialize)]
 pub struct UserResponse {
