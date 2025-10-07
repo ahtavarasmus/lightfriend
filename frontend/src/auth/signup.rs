@@ -1,6 +1,5 @@
 pub mod login {
     use yew::prelude::*;
-    use web_sys::HtmlInputElement;
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
@@ -12,9 +11,8 @@ pub mod login {
     use gloo_console::log;
 
     #[derive(Serialize)]
-    pub struct LoginRequest {
-        email: String,
-        password: String,
+    pub struct TokenRequest {
+        token: String,
     }
 
     #[derive(Deserialize)]
@@ -29,78 +27,91 @@ pub mod login {
 
     #[function_component]
     pub fn Login() -> Html {
-        let email = use_state(String::new);
-        let password = use_state(String::new);
+        let token = use_search_param("token".to_string());
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
+        let is_loading = use_state(|| false);
 
-        let onsubmit = {
-            let email = email.clone();
-            let password = password.clone();
+        // Auto-trigger login if token is present (runs on mount or param change)
+        {
+            let token = token.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let email = (*email).clone();
-                let password = (*password).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    log!("Attempting login for email: {}", &email);
-                    match Request::post(&format!("{}/api/self-hosted/login", config::get_backend_url()))
-                        .json(&LoginRequest { email, password })
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                log!("Login request successful, parsing response...");
-                                match response.json::<LoginResponse>().await {
-                                    Ok(resp) => {
-                                        let window = web_sys::window().unwrap();
-                                        if let Ok(Some(storage)) = window.local_storage() {
-                                            if storage.set_item("token", &resp.token).is_ok() {
-                                                log!("Token stored successfully in localStorage");
-                                                error_setter.set(None);
-                                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
-
-                                                // Redirect after a short delay to show the success message
-                                                let window_clone = window.clone();
-                                                wasm_bindgen_futures::spawn_local(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                                    let _ = window_clone.location().set_href("/");
-                                                });
+            let loading_setter = is_loading.clone();
+            use_effect_with_deps(
+                move |current_token| {
+                    if let Some(ref t) = *current_token {
+                        if !t.is_empty() {
+                            loading_setter.set(true);
+                            let error_setter = error_setter.clone();
+                            let success_setter = success_setter.clone();
+                            let loading_setter = loading_setter.clone();
+                            let token_str = t.clone();
+                            spawn_local(async move {
+                                log!("Auto-logging in with token: {}", &token_str[..8.min(token_str.len())]); // Partial log for security, handle short strings
+                                match Request::post(&format!("{}/api/self-hosted/login", config::get_backend_url()))
+                                    .json(&TokenRequest { token: token_str })
+                                    .unwrap()
+                                    .send()
+                                    .await
+                                {
+                                    Ok(response) => {
+                                        if response.ok() {
+                                            log!("Token login successful, parsing response...");
+                                            match response.json::<LoginResponse>().await {
+                                                Ok(resp) => {
+                                                    let window = web_sys::window().unwrap();
+                                                    if let Ok(Some(storage)) = window.local_storage() {
+                                                        if storage.set_item("token", &resp.token).is_ok() {
+                                                            log!("Token stored successfully");
+                                                            error_setter.set(None);
+                                                            success_setter.set(Some("Login successful! Redirecting...".to_string()));
+                                                            loading_setter.set(false);
+                                                            // Redirect after delay
+                                                            let window_clone = window.clone();
+                                                            spawn_local(async move {
+                                                                gloo_timers::future::TimeoutFuture::new(1_000).await;
+                                                                let _ = window_clone.location().set_href("/");
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    log!("Error parsing response: {}", e.to_string());
+                                                    error_setter.set(Some("Failed to parse response".to_string()));
+                                                    loading_setter.set(false);
+                                                }
                                             }
+                                        } else {
+                                            log!("Login failed with status: {}", response.status());
+                                            match response.json::<ErrorResponse>().await {
+                                                Ok(err_resp) => {
+                                                    log!("Server error: {}", &err_resp.error);
+                                                    error_setter.set(Some(err_resp.error));
+                                                }
+                                                Err(_) => {
+                                                    error_setter.set(Some("Login failed".to_string()));
+                                                }
+                                            }
+                                            loading_setter.set(false);
                                         }
                                     }
                                     Err(e) => {
-                                        log!("Error parsing login response:", e.to_string());
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                        log!("Network error: {}", e.to_string());
+                                        error_setter.set(Some(format!("Request failed: {}", e)));
+                                        loading_setter.set(false);
                                     }
                                 }
-                            } else {
-                                log!("Login request failed with status:", response.status());
-                                match response.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        log!("Server error response:", &error_response.error);
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Login failed".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log!("Network request failed:", e.to_string());
-                            error_setter.set(Some(format!("Request failed: {}", e)));
+                            });
                         }
                     }
-                });
-            })
-        };
+                    || ()
+                },
+                token,
+            );
+        }
+
+        let has_valid_token = token.as_deref().map_or(false, |t| !t.is_empty());
 
         html! {
             <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
@@ -129,6 +140,22 @@ pub mod login {
                     font-size: 0.9rem;
                     margin-bottom: 1.5rem;
                 }
+                .no-token-message {
+                    text-align: center;
+                    color: rgba(255, 255, 255, 0.7);
+                    font-size: 1rem;
+                    margin-bottom: 1rem;
+                }
+                .loading-spinner {
+                    display: inline-block;
+                    width: 20px;
+                    height: 20px;
+                    border: 3px solid rgba(255,255,255,.3);
+                    border-radius: 50%;
+                    border-top-color: #fff;
+                    animation: spin 1s ease-in-out infinite;
+                }
+                @keyframes spin { to { transform: rotate(360deg); } }
                 @media (max-width: 768px) {
                     .login-container {
                         padding: 2rem;
@@ -165,12 +192,22 @@ pub mod login {
                 <div class="hero-background"></div>
                 <div class="login-container">
                     <h1>{"Login"}</h1>
-                    <p>{"Login with same credentials as on lightfriend.ai"}</p>
+                    if !has_valid_token {
+                        <p class="no-token-message">
+                            {"Get your magic login link from "}
+                            <a href="https://lightfriend.ai" target="_blank" style="color: #7EB2FF;">{"lightfriend.ai"}</a>
+                            {" and click it to access your self-hosted instance."}
+                        </p>
+                    } else {
+                        <p>{"Verifying your magic link..."}</p>
+                    }
                     {
-                        if let Some(error_message) = (*error).as_ref() {
+                        if *is_loading {
+                            html! { <div style="text-align: center;"><span class="loading-spinner"></span> {" Logging in..."}</div> }
+                        } else if let Some(error_message) = (*error).as_ref() {
                             html! {
                                 <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                    {error_message}
+                                    {error_message} {" "} <a href="https://lightfriend.ai" target="_blank" style="color: #7EB2FF;">{"Request a new link"}</a>
                                 </div>
                             }
                         } else if let Some(success_message) = (*success).as_ref() {
@@ -183,25 +220,6 @@ pub mod login {
                             html! {}
                         }
                     }
-                    <form onsubmit={onsubmit}>
-                        <input
-                            type="email"
-                            placeholder="Email"
-                            onchange={let email = email.clone(); move |e: Event| {
-                                let input: HtmlInputElement = e.target_unchecked_into();
-                                email.set(input.value());
-                            }}
-                        />
-                        <input
-                            type="password"
-                            placeholder="Password"
-                            onchange={let password = password.clone(); move |e: Event| {
-                                let input: HtmlInputElement = e.target_unchecked_into();
-                                password.set(input.value());
-                            }}
-                        />
-                        <button type="submit">{"Login"}</button>
-                    </form>
                 </div>
             </div>
         }

@@ -145,12 +145,13 @@ pub async fn update_textbee_creds(
         }
     }
 }
-
 use reqwest::Client;
-use crate::handlers::auth_dtos::LoginRequest;
-// Add this struct for the check-creds response
+use axum::Json as AxumJson;
+use tracing;
+
+// Reuse or define this for the verify-token response (same as check-creds)
 #[derive(Deserialize, Serialize)]
-struct CheckCredsResponse {
+struct VerifyTokenResponse {
     user_id: String,
     phone_number: String,
     preferred_number: String,
@@ -161,39 +162,48 @@ struct CheckCredsResponse {
     server_url: Option<String>,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct TokenRequest {
+    token: String,
+}
+
 pub async fn self_hosted_login(
     State(state): State<Arc<AppState>>,
-    Json(login_req): Json<LoginRequest>,
-) -> Result<Response, (axum::http::StatusCode, Json<serde_json::Value>)> {
-    println!("Self-hosted login attempt for email: {}", login_req.email); // Debug log
-    // Define rate limit: 5 attempts per minute
-    // Verify credentials against main server
+    Json(token_req): Json<TokenRequest>,
+) -> Result<Response, (StatusCode, AxumJson<serde_json::Value>)> {
+    println!("Self-hosted token login attempt"); // No email to log for privacy
+
+    // Verify token against main server
     let client = Client::new();
-    let check_resp = client
-        .post("https://lightfriend.ai/api/profile/check-creds")
-        .json(&login_req)
+    let verify_resp = client
+        .post("https://lightfriend.ai/api/self-hosted/verify-token") // Assume this endpoint exists on main server
+        .json(&token_req)
         .send()
         .await
         .map_err(|_| (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Verification service unavailable"}))
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Verification service unavailable"}))
         ))?;
-    if !check_resp.status().is_success() {
-        println!("Credential check failed for email: [redacted]");
+
+    if !verify_resp.status().is_success() {
+        println!("Token verification failed");
         return Err((
-            axum::http::StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid credentials"}))
+            StatusCode::UNAUTHORIZED,
+            AxumJson(json!({"error": "Invalid or expired login link"}))
         ));
     }
-    let check_data: CheckCredsResponse = check_resp
+
+    let verify_data: VerifyTokenResponse = verify_resp
         .json()
         .await
         .map_err(|_| (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to process verification response"}))
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Failed to process verification response"}))
         ))?;
-    let main_phone_number = check_data.phone_number;
-    println!("Credentials verified successfully for main user_id: {}", check_data.user_id);
+
+    let main_phone_number = verify_data.phone_number;
+    println!("Token verified successfully for main user_id: {}", verify_data.user_id);
+
     let user = match state.user_core.get_user() {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -207,7 +217,7 @@ pub async fn self_hosted_login(
                 println!("User creation failed: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "User creation failed"})),
+                    AxumJson(json!({"error": "User creation failed"})),
                 )
             })?;
             println!("New self-hosted user created successfully");
@@ -215,35 +225,35 @@ pub async fn self_hosted_login(
             state.user_core.get_user()
                 .map_err(|e| (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
+                    AxumJson(json!({"error": format!("Failed to retrieve user: {}", e)}))
                 ))?
                 .ok_or_else(|| (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "User not found after creation"}))
+                    AxumJson(json!({"error": "User not found after creation"}))
                 ))?
         }
         Err(e) => {
             println!("Database error while checking for user id 1: {}", e);
             return Err((
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Database error"}))
             ));
         }
     };
 
-    match state.user_core.update_twilio_credentials(
-        check_data.twilio_account_sid.as_deref(), 
-        check_data.twilio_auth_token.as_deref(), 
-        check_data.server_url.as_deref(), 
-        check_data.messaging_service_sid.as_deref()
+    // Update Twilio creds (if present)
+    if let Err(e) = state.user_core.update_twilio_credentials(
+        verify_data.twilio_account_sid.as_deref(),
+        verify_data.twilio_auth_token.as_deref(),
+        verify_data.server_url.as_deref(),
+        verify_data.messaging_service_sid.as_deref()
     ) {
-        Ok(_) => tracing::debug!("Successfully updated Twilio credentials for user"),
-        Err(e) => tracing::error!("Failed to update Twilio credentials: {}", e),
+        tracing::error!("Failed to update Twilio credentials: {}", e);
     }
 
-    match state.user_core.update_preferred_number(check_data.preferred_number.as_str()) {
-        Ok(_) => tracing::debug!("Successfully updated Twilio phone for user"),
-        Err(e) => tracing::error!("Failed to update Twilio phone: {}", e),
+    // Update preferred number
+    if let Err(e) = state.user_core.update_preferred_number(verify_data.preferred_number.as_str()) {
+        tracing::error!("Failed to update preferred number: {}", e);
     }
 
     // Set phone country
@@ -251,5 +261,7 @@ pub async fn self_hosted_login(
         tracing::error!("Failed to set phone country during self-hosted login: {}", e);
         // Proceed anyway
     }
+
     generate_tokens_and_response(user.id)
 }
+

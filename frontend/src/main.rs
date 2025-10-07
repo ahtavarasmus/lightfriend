@@ -54,7 +54,6 @@ use auth::{
     signup::login::Login,
 };
 use profile::profile::Billing;
-use crate::profile::billing_models::UserProfile;
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
     #[at("/")]
@@ -115,22 +114,22 @@ pub fn nav(props: &NavProps) -> Html {
         use_effect_with_deps(move |_| {
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
-          
+         
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
                 is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
-          
+         
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                 .unwrap();
-          
+         
             move || {
                 window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                     .unwrap();
             }
         }, ());
     }
-  
+ 
     let handle_logout = {
         let on_logout = on_logout.clone();
         Callback::from(move |_| {
@@ -197,13 +196,7 @@ pub fn nav(props: &NavProps) -> Html {
                                 </>
                             }
                         } else {
-                            html! {
-                                <div onclick={close_menu.clone()}>
-                                    <Link<Route> to={Route::Login} classes="nav-login-button">
-                                        {"Login"}
-                                    </Link<Route>>
-                                </div>
-                            }
+                            html! {}
                         }
                     }
                 </div>
