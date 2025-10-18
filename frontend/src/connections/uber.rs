@@ -5,12 +5,12 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_net::http::Request;
 use crate::config;
+
 #[derive(Properties, PartialEq)]
 pub struct UberConnectProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
+
 #[function_component(UberConnect)]
 pub fn uber_connect(props: &UberConnectProps) -> Html {
     if props.user_id != 1 {
@@ -20,6 +20,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
     let uber_connected = use_state(|| false);
     let connecting_uber = use_state(|| false);
     let selected_status = use_state(|| String::new());
+
     // Check connection status on component mount
     {
         let uber_connected = uber_connected.clone();
@@ -55,6 +56,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             () // Empty tuple as dependencies since we want this to run only once on mount
         )
     }
+
     let onclick_uber = {
         let connecting_uber = connecting_uber.clone();
         let error = error.clone();
@@ -100,6 +102,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
+
     let onclick_delete_uber = {
         let uber_connected = uber_connected.clone();
         let error = error.clone();
@@ -133,6 +136,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
+
     let onclick_test_uber = {
         let error = error.clone();
         Callback::from(move |_: MouseEvent| {
@@ -165,6 +169,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
+
     let onchange_status = {
         let selected_status = selected_status.clone();
         Callback::from(move |e: Event| {
@@ -175,6 +180,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
+
     let onclick_update_status = {
         let selected_status = selected_status.clone();
         let error = error.clone();
@@ -218,32 +224,33 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
+
     html! {
         <div class="service-item">
             <div class="service-header">
-            <div class="service-name">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.svg" alt="Uber" width="24" height="24"/>
-            </div>
-            <button class="info-button" onclick={Callback::from(|_| {
-                if let Some(element) = web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|d| d.get_element_by_id("uber-info"))
-                {
-                    let display = element.get_attribute("style")
-                        .unwrap_or_else(|| "display: none".to_string());
-                  
-                    if display.contains("none") {
-                        let _ = element.set_attribute("style", "display: block");
-                    } else {
-                        let _ = element.set_attribute("style", "display: none");
+                <div class="service-name">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.svg" alt="Uber" width="24" height="24"/>
+                </div>
+                <button class="info-button" onclick={Callback::from(|_| {
+                    if let Some(element) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.get_element_by_id("uber-info"))
+                    {
+                        let display = element.get_attribute("style")
+                            .unwrap_or_else(|| "display: none".to_string());
+                     
+                        if display.contains("none") {
+                            let _ = element.set_attribute("style", "display: block");
+                        } else {
+                            let _ = element.set_attribute("style", "display: none");
+                        }
                     }
+                })}>
+                    {"ⓘ"}
+                </button>
+                if *uber_connected {
+                    <span class="service-status">{"Connected ✓"}</span>
                 }
-            })}>
-                {"ⓘ"}
-            </button>
-            if *uber_connected {
-                <span class="service-status">{"Connected ✓"}</span>
-            }
             </div>
             <p class="service-description">
                 {"Request and manage Uber rides through SMS or voice calls. This integration connects to your Uber account, allowing you to book rides and check status on the go."}
@@ -276,156 +283,65 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
                     <p class="security-recommendation">{"Note: Ride details are transmitted via SMS or voice calls. For sensitive information, consider using Uber app directly."}</p>
                 </div>
             </div>
-            {
-                if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
-                    html! {
-                        <>
-                            if *uber_connected {
-                                <div class="uber-controls">
-                                    <button
-                                        onclick={onclick_delete_uber}
-                                        class="disconnect-button"
-                                    >
-                                        {"Disconnect"}
-                                    </button>
-                                    {
-                                        if props.user_id == 1 {
-                                            html! {
-                                                <>
-                                                    <button
-                                                        onclick={onclick_test_uber}
-                                                        class="test-button"
-                                                    >
-                                                        {"Test Uber"}
-                                                    </button>
-                                                    <select class="test-select" onchange={onchange_status}>
-                                                        <option value="" selected={(*selected_status).is_empty()}>{"Change Ride Status"}</option>
-                                                        <option value="processing" selected={*selected_status == "processing"}>{"Processing"}</option>
-                                                        <option value="accepted" selected={*selected_status == "accepted"}>{"Accepted"}</option>
-                                                        <option value="arriving" selected={*selected_status == "arriving"}>{"Arriving"}</option>
-                                                        <option value="in_progress" selected={*selected_status == "in_progress"}>{"In Progress"}</option>
-                                                        <option value="completed" selected={*selected_status == "completed"}>{"Completed"}</option>
-                                                    </select>
-                                                    <button
-                                                        onclick={onclick_update_status}
-                                                        class="test-button"
-                                                    >
-                                                        {"Update Status"}
-                                                    </button>
-                                                </>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                </div>
-                            } else {
-                                <button
-                                    onclick={onclick_uber}
-                                    class="connect-button"
-                                >
-                                    if *connecting_uber {
-                                        {"Connecting..."}
-                                    } else {
-                                        {"Connect"}
-                                    }
-                                </button>
-                            }
-                            if let Some(err) = (*error).as_ref() {
-                                <div class="error-message">
-                                    {err}
-                                </div>
-                            }
-                        </>
-                    }
-                } else {
-                    html! {
-                        <>
-                        <div class="upgrade-prompt">
-                            <div class="upgrade-content">
-                                <h3>{"Upgrade to Enable Uber Integration"}</h3>
-                                <p>{"Uber integration is available for premium plan subscribers. Upgrade your plan to connect your Uber account and manage rides through SMS and voice calls."}</p>
-                                <a href="/pricing" class="upgrade-button">
-                                    {"View Pricing Plans"}
-                                </a>
-                            </div>
-                        </div>
-                        if *uber_connected {
-                            <div class="uber-controls">
-                                <button
-                                    onclick={onclick_delete_uber}
-                                    class="disconnect-button"
-                                >
-                                    {"Disconnect"}
-                                </button>
-                                {
-                                    if props.user_id == 1 {
-                                        html! {
-                                            <>
-                                                <button
-                                                    onclick={onclick_test_uber}
-                                                    class="test-button"
-                                                >
-                                                    {"Test Uber"}
-                                                </button>
-                                                <select class="test-select" onchange={onchange_status}>
-                                                    <option value="" selected={(*selected_status).is_empty()}>{"Change Ride Status"}</option>
-                                                    <option value="processing" selected={*selected_status == "processing"}>{"Processing"}</option>
-                                                    <option value="accepted" selected={*selected_status == "accepted"}>{"Accepted"}</option>
-                                                    <option value="arriving" selected={*selected_status == "arriving"}>{"Arriving"}</option>
-                                                    <option value="in_progress" selected={*selected_status == "in_progress"}>{"In Progress"}</option>
-                                                    <option value="completed" selected={*selected_status == "completed"}>{"Completed"}</option>
-                                                </select>
-                                                <button
-                                                    onclick={onclick_update_status}
-                                                    class="test-button"
-                                                >
-                                                    {"Update Status"}
-                                                </button>
-                                            </>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
+            <>
+                if *uber_connected {
+                    <div class="uber-controls">
+                        <button
+                            onclick={onclick_delete_uber}
+                            class="disconnect-button"
+                        >
+                            {"Disconnect"}
+                        </button>
+                        {
+                            if props.user_id == 1 {
+                                html! {
+                                    <>
+                                        <button
+                                            onclick={onclick_test_uber}
+                                            class="test-button"
+                                        >
+                                            {"Test Uber"}
+                                        </button>
+                                        <select class="test-select" onchange={onchange_status}>
+                                            <option value="" selected={(*selected_status).is_empty()}>{"Change Ride Status"}</option>
+                                            <option value="processing" selected={*selected_status == "processing"}>{"Processing"}</option>
+                                            <option value="accepted" selected={*selected_status == "accepted"}>{"Accepted"}</option>
+                                            <option value="arriving" selected={*selected_status == "arriving"}>{"Arriving"}</option>
+                                            <option value="in_progress" selected={*selected_status == "in_progress"}>{"In Progress"}</option>
+                                            <option value="completed" selected={*selected_status == "completed"}>{"Completed"}</option>
+                                        </select>
+                                        <button
+                                            onclick={onclick_update_status}
+                                            class="test-button"
+                                        >
+                                            {"Update Status"}
+                                        </button>
+                                    </>
                                 }
-                            </div>
+                            } else {
+                                html! {}
+                            }
                         }
-                        </>
-                    }
+                    </div>
+                } else {
+                    <button
+                        onclick={onclick_uber}
+                        class="connect-button"
+                    >
+                        if *connecting_uber {
+                            {"Connecting..."}
+                        } else {
+                            {"Connect"}
+                        }
+                    </button>
                 }
-            }
+                if let Some(err) = (*error).as_ref() {
+                    <div class="error-message">
+                        {err}
+                    </div>
+                }
+            </>
             <style>
-                {r#"
-                    .upgrade-prompt {
-                        padding: 20px;
-                        text-align: center;
-                        margin-top: 1rem;
-                    }
-                    .upgrade-content {
-                        max-width: 500px;
-                        margin: 0 auto;
-                    }
-                    .upgrade-content h3 {
-                        color: #1E90FF;
-                        margin-bottom: 1rem;
-                    }
-                    .upgrade-content p {
-                        color: #CCC;
-                        margin-bottom: 1.5rem;
-                    }
-                    .upgrade-button {
-                        display: inline-block;
-                        padding: 10px 20px;
-                        background-color: #1E90FF;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 5px;
-                        transition: background-color 0.3s;
-                    }
-                    .upgrade-button:hover {
-                        background-color: #1873CC;
-                    }
-                "#}
                 {r#"
                     .info-button {
                         background: none;

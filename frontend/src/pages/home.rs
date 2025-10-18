@@ -5,11 +5,26 @@ use gloo_net::http::Request;
 use crate::profile::billing_models::UserProfile;
 use crate::profile::settings::SettingsPage;
 use crate::auth::connect::Connect;
+use serde::Serialize;
 
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
     Personal,
+}
+
+#[derive(Serialize)]
+struct UpdateProfileRequest {
+    phone_number: String,
+    nickname: String,
+    info: String,
+    timezone: String,
+    timezone_auto: bool,
+    agent_language: String,
+    notification_type: Option<String>,
+    save_context: Option<i32>,
+    location: String,
+    nearby_places: String,
 }
 
 pub fn is_logged_in() -> bool {
@@ -30,34 +45,6 @@ pub fn MonthlyCredits(props: &Props) -> Html {
         <div class="credit-item" tabindex="0">
             <span class="credit-label">{"Monthly Message Quota"}</span>
             <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
-            {
-                if profile.digests_reserved > 0 {
-                    html! {
-                        <span class="credit-label">{" + ("}{profile.digests_reserved as i32}{" reserved for digests)"}</span>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-            {
-                if let Some(days) = profile.days_until_billing {
-                    html! {
-                        <span class="reset-timer">
-                            {
-                                if days == 0 {
-                                    "Resets today".to_string()
-                                } else if days == 1 {
-                                    "Resets in 1 day".to_string()
-                                } else {
-                                    format!("Resets in {} days", days)
-                                }
-                            }
-                        </span>
-                    }
-                } else {
-                    html! {}
-                }
-            }
             <div class="credit-tooltip">
                 {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 2 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
             </div>
@@ -74,8 +61,11 @@ pub struct Props {
 pub fn Home() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
     let error = use_state(|| None::<String>);
+    let success = use_state(|| None::<String>);
     let is_expanded = use_state(|| false);
     let active_tab = use_state(|| DashboardTab::Connections);
+    let phone_input = use_state(String::new);
+    let is_phone_editing = use_state(|| false);
     // Single profile fetch effect
     {
         let profile_data = profile_data.clone();
@@ -112,7 +102,8 @@ pub fn Home() -> Html {
                                     profile_data.set(Some(profile));
                                     error.set(None);
                                 }
-                                Err(_) => {
+                                Err(e) => {
+                                    web_sys::console::log_1(&format!("JSON parse error: {:?}", e).into());
                                     error.set(Some("Failed to parse profile data".to_string()));
                                 }
                             }
@@ -129,6 +120,100 @@ pub fn Home() -> Html {
             || ()
         }, ());
     }
+
+    let on_phone_save = {
+        let profile_data = profile_data.clone();
+        let phone_input = phone_input.clone();
+        let error = error.clone();
+        let success = success.clone();
+        let is_phone_editing = is_phone_editing.clone();
+        Callback::from(move |_| {
+            let profile_data = profile_data.clone();
+            let phone_input = phone_input.clone();
+            let error = error.clone();
+            let success = success.clone();
+            let is_phone_editing = is_phone_editing.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    if let Some(profile) = (*profile_data).as_ref() {
+                        match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .json(&UpdateProfileRequest {
+                                phone_number: (*phone_input).clone(),
+                                nickname: profile.nickname.clone().unwrap_or_default(),
+                                info: profile.info.clone().unwrap_or_default(),
+                                timezone: profile.timezone.clone().unwrap_or_else(|| String::from("UTC")),
+                                timezone_auto: profile.timezone_auto.unwrap_or(true),
+                                agent_language: profile.agent_language.clone(),
+                                notification_type: profile.notification_type.clone(),
+                                save_context: profile.save_context,
+                                location: profile.location.clone().unwrap_or_default(),
+                                nearby_places: profile.nearby_places.clone().unwrap_or_default(),
+                            })
+                            .expect("Failed to build request")
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.status() == 401 {
+                                    if let Some(window) = window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.remove_item("token");
+                                            let _ = window.location().set_href("/login");
+                                        }
+                                    }
+                                    return;
+                                } else if response.ok() {
+                                    // Refetch profile to get updated data
+                                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(refetch_response) => {
+                                            if let Ok(updated_profile) = refetch_response.json::<UserProfile>().await {
+                                                profile_data.set(Some(updated_profile));
+                                                success.set(Some("Phone number updated successfully".to_string()));
+                                                error.set(None);
+                                                is_phone_editing.set(false);
+                                                // Clear success after 3s
+                                                let success_clone = success.clone();
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(3000).await;
+                                                    success_clone.set(None);
+                                                });
+                                            } else {
+                                                error.set(Some("Failed to refetch updated profile".to_string()));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            error.set(Some("Failed to refetch profile".to_string()));
+                                        }
+                                    }
+                                } else {
+                                    error.set(Some("Failed to update phone number".to_string()));
+                                }
+                            }
+                            Err(_) => {
+                                error.set(Some("Failed to send request".to_string()));
+                            }
+                        }
+                    }
+                }
+            });
+        })
+    };
+
+    let on_phone_edit = {
+        let is_phone_editing = is_phone_editing.clone();
+        Callback::from(move |_| is_phone_editing.set(true))
+    };
+
     html! {
         <>
             <div class="dashboard-container">
@@ -139,13 +224,6 @@ pub fn Home() -> Html {
                         if let Some(profile) = (*profile_data).as_ref() {
                             html! {
                                 <div class="credits-grid">
-                                    {
-                                        if profile.days_until_billing.is_some() || profile.credits_left > 0.0 {
-                                            html! { <MonthlyCredits profile={profile.clone()} /> }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
                                     {
                                         if profile.credits > 0.00 {
                                             html! {
@@ -181,8 +259,59 @@ pub fn Home() -> Html {
                                     </div>
                                 </div>
                             }
+                        } else if profile.phone_number.is_empty() {
+                            html! {
+                                <div class="phone-setup">
+                                    {
+                                        if let Some(err) = (*error).as_ref() {
+                                            html! { <div class="message error-message">{err}</div> }
+                                        } else if let Some(suc) = (*success).as_ref() {
+                                            html! { <div class="message success-message">{suc}</div> }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    <div class="profile-field">
+                                        <span class="field-label">{"Phone Number (Required to start)"}</span>
+                                        {
+                                            if *is_phone_editing {
+                                                html! {
+                                                    <>
+                                                        <input
+                                                            type="tel"
+                                                            class="profile-input"
+                                                            value={(*phone_input).clone()}
+                                                            placeholder="+1234567890"
+                                                            onchange={let phone_input = phone_input.clone(); move |e: Event| {
+                                                                let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                                phone_input.set(input.value());
+                                                            }}
+                                                        />
+                                                        <button onclick={on_phone_save} class="edit-button confirming">{"Save Phone Number"}</button>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <>
+                                                        <span class="field-value not-configured">{"Not set"}</span>
+                                                        <button onclick={on_phone_edit} class="edit-button">{"Add Phone Number"}</button>
+                                                    </>
+                                                }
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                            }
                         } else {
-                            html! {}
+                            html! {
+                                <div class="phone-selector">
+                                    <div class="preferred-number-display">
+                                        <span class="preferred-number-label not-configured">
+                                            {"Phone number set, but lightfriend number not ready yet."}
+                                        </span>
+                                    </div>
+                                </div>
+                            }
                         }
                     } else {
                         html! {}
@@ -219,7 +348,7 @@ pub fn Home() -> Html {
                                 {
                                     if let Some(profile) = (*profile_data).as_ref() {
                                         html! {
-                                            <Connect user_id={profile.id} sub_tier={profile.sub_tier.clone()} discount={profile.discount} phone_number={profile.phone_number.clone()} estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}/>
+                                            <Connect user_id={profile.id} phone_number={profile.phone_number.clone()} estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}/>
                                         }
                                     } else {
                                         html! {}
@@ -236,22 +365,6 @@ pub fn Home() -> Html {
                                         <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
                                     </ul>
                                 </div>
-                                {
-                                    if let Some(profile) = (*profile_data).as_ref() {
-                                        if profile.sub_tier.is_some() {
-                                            html! {
-                                                <div class="subscriber-promo">
-                                                    <p>{"Subscribed users can get 20% off from Cold Turkey Blocker Pro with code LIGHTFRIEND"}</p>
-                                                    <a href="https://getcoldturkey.com" target="_blank" rel="noopener noreferrer">{"getcoldturkey.com"}</a>
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
                             </div>
                         },
                         DashboardTab::Personal => html! {
@@ -391,7 +504,7 @@ pub fn Home() -> Html {
                         border-radius: 6px;
                         margin-top: 0.5rem;
                     }
-                    .phone-selector {
+                    .phone-selector, .phone-setup {
                         margin: 1.5rem 0;
                     }
                     .preferred-number-display {
@@ -412,6 +525,20 @@ pub fn Home() -> Html {
                     }
                     .preferred-number-label.not-configured {
                         color: #ff4444;
+                    }
+                    .phone-setup {
+                        background: rgba(255, 68, 68, 0.05);
+                        border: 1px solid rgba(255, 68, 68, 0.2);
+                        border-radius: 8px;
+                        padding: 1.5rem;
+                        text-align: center;
+                    }
+                    .phone-setup .field-label {
+                        color: #ff4444;
+                        font-weight: 500;
+                    }
+                    .phone-setup .profile-input {
+                        margin-bottom: 1rem;
                     }
                     .phone-display {
                         margin: 2rem 0;
@@ -572,6 +699,75 @@ pub fn Home() -> Html {
                     .development-links a:hover::after {
                         transform: scaleX(1);
                         transform-origin: bottom left;
+                    }
+                    .profile-input {
+                        background: rgba(0, 0, 0, 0.2);
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        border-radius: 8px;
+                        padding: 0.75rem;
+                        color: #ffffff;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                        width: 100%;
+                        margin-bottom: 1rem;
+                    }
+                    .profile-input:focus {
+                        outline: none;
+                        border-color: rgba(30, 144, 255, 0.5);
+                        box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
+                    }
+                    .edit-button {
+                        background: linear-gradient(45deg, #1E90FF, #4169E1);
+                        color: white;
+                        border: none;
+                        padding: 0.75rem 1.5rem;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-top: 0.5rem;
+                    }
+                    .edit-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                    }
+                    .edit-button.confirming {
+                        background: linear-gradient(45deg, #4CAF50, #45a049);
+                    }
+                    .message {
+                        padding: 0.75rem;
+                        border-radius: 8px;
+                        margin-bottom: 1rem;
+                        text-align: center;
+                    }
+                    .error-message {
+                        background: rgba(255, 68, 68, 0.1);
+                        color: #ff4444;
+                        border: 1px solid rgba(255, 68, 68, 0.3);
+                    }
+                    .success-message {
+                        background: rgba(76, 175, 80, 0.1);
+                        color: #4CAF50;
+                        border: 1px solid rgba(76, 175, 80, 0.3);
+                    }
+                    .profile-field {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 0.5rem;
+                        margin-bottom: 1.5rem;
+                    }
+                    .field-label {
+                        font-size: 0.9rem;
+                        color: #999;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+                    .field-value {
+                        color: #fff;
+                        font-size: 1rem;
+                    }
+                    .field-value.not-configured {
+                        color: #ff4444;
                     }
                     @media (max-width: 768px) {
                         .status-section {

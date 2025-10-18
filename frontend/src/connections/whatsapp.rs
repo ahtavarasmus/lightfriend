@@ -6,26 +6,20 @@ use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
-
 #[derive(Deserialize, Clone, Debug)]
 struct WhatsappStatus {
     connected: bool,
     status: String,
     created_at: i32,
 }
-
 #[derive(Deserialize)]
 struct WhatsappConnectionResponse {
     pairing_code: String,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct WhatsappProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
-
 #[function_component(WhatsappConnect)]
 pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let connection_status = use_state(|| None::<WhatsappStatus>);
@@ -34,7 +28,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let is_connecting = use_state(|| false);
     let show_disconnect_modal = use_state(|| false);
     let is_disconnecting = use_state(|| false);
-
     // Function to fetch WhatsApp status
     let fetch_status = {
         let connection_status = connection_status.clone();
@@ -73,7 +66,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             }
         })
     };
-
     // Effect to fetch initial status
     {
         let fetch_status = fetch_status.clone();
@@ -82,7 +74,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             || ()
         }, ());
     }
-
     // Function to start WhatsApp connection
     let start_connection = {
         let is_connecting = is_connecting.clone();
@@ -110,12 +101,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         Ok(response) => {
                             // Debug: Log the response status
                             web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
-                           
+                          
                             match response.json::<WhatsappConnectionResponse>().await {
                                 Ok(connection_response) => {
                                     // Debug: Log that we received the verification code
                                     web_sys::console::log_1(&format!("Received verification code: {}", &connection_response.pairing_code).into());
-                                   
+                                  
                                     qr_code.set(Some(connection_response.pairing_code));
                                     error.set(None);
                                     // Start polling for status
@@ -189,7 +180,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             }
         })
     };
-
     // Function to disconnect WhatsApp
     let disconnect = {
         let connection_status = connection_status.clone();
@@ -234,7 +224,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             }
         })
     };
-
     html! {
         <div class="whatsapp-connect">
             <div class="service-header">
@@ -254,7 +243,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                       
+                      
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -282,7 +271,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use WhatsApp directly for sensitive communications."}</p>
                 </div>
             </div>
-           
+          
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
                     if status.connected {
@@ -578,23 +567,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     </div>
                                 }
                             } else {
-                                if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
-                                    <p class="service-description">
-                                        {"Send and receive WhatsApp messages through SMS or voice calls."}
-                                    </p>
-                                    <button onclick={start_connection} class="connect-button">
-                                        {"Connect WhatsApp"}
-                                    </button>
-                                } else {
-                                    <div class="upgrade-prompt">
-                                        <div class="upgrade-content">
-                                            <h3>{"Upgrade to Enable WhatsApp Integration"}</h3>
-                                            <a href="/pricing" class="upgrade-button">
-                                                {"View Pricing Plans"}
-                                            </a>
-                                        </div>
-                                    </div>
-                                }
+                                <p class="service-description">
+                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                </p>
+                                <button onclick={start_connection} class="connect-button">
+                                    {"Connect WhatsApp"}
+                                </button>
                             }
                     }
                 </div>
@@ -658,7 +636,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     .test-search-button:hover {
                         box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
                     }
-                   
+                  
                     .button-group {
                         display: flex;
                         flex-direction: column;
@@ -896,43 +874,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     .sync-indicator p {
                         margin: 0;
                         font-size: 0.9rem;
-                    }
-                    .upgrade-prompt {
-                        background: rgba(30, 144, 255, 0.05);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 12px;
-                        padding: 2rem;
-                        text-align: center;
-                        margin: 1rem 0;
-                    }
-                    .upgrade-content {
-                        max-width: 400px;
-                        margin: 0 auto;
-                    }
-                    .upgrade-content h3 {
-                        color: #1E90FF;
-                        margin-bottom: 1rem;
-                        font-size: 1.5rem;
-                    }
-                    .upgrade-content p {
-                        color: #BBB;
-                        margin-bottom: 1rem;
-                        line-height: 1.5;
-                    }
-                    .upgrade-button {
-                        display: inline-block;
-                        background: linear-gradient(45deg, #1E90FF, #4169E1);
-                        color: white;
-                        text-decoration: none;
-                        padding: 1rem 2rem;
-                        border-radius: 8px;
-                        font-weight: bold;
-                        transition: all 0.3s ease;
-                        margin-top: 1rem;
-                    }
-                    .upgrade-button:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                     }
                     .info-button {
                         background: none;

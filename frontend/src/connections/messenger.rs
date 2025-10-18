@@ -27,8 +27,6 @@ struct MessengerConnectionResponse {
 #[derive(Properties, PartialEq)]
 pub struct MessengerProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
 
 #[function_component(MessengerConnect)]

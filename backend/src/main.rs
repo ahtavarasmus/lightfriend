@@ -160,7 +160,7 @@ async fn main() {
         .expect("Failed to create pool");
     let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
-    let server_url_oauth = std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let server_url_oauth = std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3001".to_string());
     let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").unwrap_or_else(|_| "default-client-id-for-testing".to_string());
     let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").unwrap_or_else(|_| "default-secret-for-testing".to_string());
     let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
@@ -354,7 +354,7 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS, axum::http::Method::DELETE])
-                .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string()).parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
+                .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8090".to_string()).parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,
@@ -374,8 +374,8 @@ async fn main() {
     });
     use tokio::net::TcpListener;
     let port = match std::env::var("ENVIRONMENT").as_deref() {
-        Ok("staging") => 3100, // actually prod, but just saying staging
-        _ => 3000,
+        Ok("staging") => 3101, // actually prod, but just saying staging
+        _ => 3001,
     };
     validate_env();
     tracing::info!("Starting server on port {}", port);

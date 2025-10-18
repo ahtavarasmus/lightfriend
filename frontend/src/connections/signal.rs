@@ -6,22 +6,24 @@ use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
+
 #[derive(Deserialize, Clone, Debug)]
 struct SignalStatus {
     connected: bool,
     status: String,
     created_at: i32,
 }
+
 #[derive(Deserialize, Clone, Debug)]
 struct SignalConnectionResponse {
     qr_code_url: String,
 }
+
 #[derive(Properties, PartialEq)]
 pub struct SignalProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
+
 #[function_component(SignalConnect)]
 pub fn signal_connect(props: &SignalProps) -> Html {
     let connection_status = use_state(|| None::<SignalStatus>);
@@ -30,6 +32,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
     let is_connecting = use_state(|| false);
     let show_disconnect_modal = use_state(|| false);
     let is_disconnecting = use_state(|| false);
+
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -67,6 +70,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
             }
         })
     };
+
     {
         let fetch_status = fetch_status.clone();
         use_effect_with_deps(move |_| {
@@ -74,6 +78,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
             || ()
         }, ());
     }
+
     let start_connection = {
         let is_connecting = is_connecting.clone();
         let qr_link = qr_link.clone();
@@ -169,6 +174,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
             }
         })
     };
+
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -212,6 +218,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
             }
         })
     };
+
     html! {
         <div class="signal-connect">
             <div class="service-header">
@@ -511,23 +518,12 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                                 </div>
                             }
                         } else {
-                            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
-                                <p class="service-description">
-                                    {"Send and receive Signal messages through SMS or voice calls."}
-                                </p>
-                                <button onclick={start_connection} class="connect-button">
-                                    {"Start Auth"}
-                                </button>
-                            } else {
-                                <div class="upgrade-prompt">
-                                    <div class="upgrade-content">
-                                        <h3>{"Upgrade to Enable Signal Integration"}</h3>
-                                        <a href="/pricing" class="upgrade-button">
-                                            {"View Pricing Plans"}
-                                        </a>
-                                    </div>
-                                </div>
-                            }
+                            <p class="service-description">
+                                {"Send and receive Signal messages through SMS or voice calls."}
+                            </p>
+                            <button onclick={start_connection} class="connect-button">
+                                {"Start Auth"}
+                            </button>
                         }
                     }
                 </div>
@@ -742,35 +738,6 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                     }
                     .test-search-button:hover {
                         box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
-                    }
-                    .upgrade-prompt {
-                        background: rgba(0, 136, 204, 0.05);
-                        border: 1px solid rgba(0, 136, 204, 0.1);
-                        border-radius: 12px;
-                        padding: 1.8rem;
-                        text-align: center;
-                        margin: 0.8rem 0;
-                    }
-                    .upgrade-content h3 {
-                        color: #0088cc;
-                        margin-bottom: 1rem;
-                        font-size: 1.2rem;
-                    }
-                    .upgrade-button {
-                        display: inline-block;
-                        background: #0088cc;
-                        color: white;
-                        text-decoration: none;
-                        padding: 1rem 2rem;
-                        border-radius: 8px;
-                        font-weight: bold;
-                        transition: all 0.3s ease;
-                        margin-top: 1rem;
-                    }
-                    .upgrade-button:hover {
-                        background: #0077b3;
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
                     }
                     @keyframes spin {
                         to { transform: rotate(360deg); }

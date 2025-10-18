@@ -6,26 +6,29 @@ use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
+
 #[derive(Deserialize, Clone, Debug)]
 struct InstagramStatus {
     connected: bool,
     status: String,
     created_at: i32,
 }
+
 #[derive(Serialize)]
 struct InstagramLoginRequest {
     curl_paste: String,
 }
+
 #[derive(Deserialize, Clone, Debug)]
 struct InstagramConnectionResponse {
     message: String,
 }
+
 #[derive(Properties, PartialEq)]
 pub struct InstagramProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
+
 #[function_component(InstagramConnect)]
 pub fn instagram_connect(props: &InstagramProps) -> Html {
     let connection_status = use_state(|| None::<InstagramStatus>);
@@ -35,6 +38,7 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
     let is_disconnecting = use_state(|| false);
     let show_auth_form = use_state(|| false);
     let curl_paste = use_state(|| String::new());
+
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -93,6 +97,7 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             }
         })
     };
+
     {
         let fetch_status = fetch_status.clone();
         use_effect_with_deps(move |_| {
@@ -100,12 +105,14 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             || ()
         }, ());
     }
+
     let start_auth = {
         let show_auth_form = show_auth_form.clone();
         Callback::from(move |_| {
             show_auth_form.set(true);
         })
     };
+
     let submit_curl = {
         let is_connecting = is_connecting.clone();
         let error = error.clone();
@@ -234,6 +241,7 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             }
         })
     };
+
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -282,6 +290,7 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             }
         })
     };
+
     html! {
         <div class="instagram-connect">
             <div class="service-header">

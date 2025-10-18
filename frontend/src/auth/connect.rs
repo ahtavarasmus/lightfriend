@@ -18,8 +18,6 @@ use serde_json::Value;
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
     pub phone_number: String,
     pub estimated_monitoring_cost: f32,
 }
@@ -287,15 +285,15 @@ pub fn connect(props: &ConnectProps) -> Html {
     };
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
-            "calendar" => html! { <CalendarConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "tasks" => html! { <TasksConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "instagram" => html! { <InstagramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "messenger" => html! { <MessengerConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "calendar" => html! { <CalendarConnect user_id={props.user_id}/> },
+            "tasks" => html! { <TasksConnect user_id={props.user_id} /> },
+            "email" => html! { <EmailConnect user_id={props.user_id} /> },
+            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} /> },
+            "telegram" => html! { <TelegramConnect user_id={props.user_id} /> },
+            "signal" => html! { <SignalConnect user_id={props.user_id} /> },
+            "instagram" => html! { <InstagramConnect user_id={props.user_id} /> },
+            "messenger" => html! { <MessengerConnect user_id={props.user_id} /> },
+            "uber" => html! { <UberConnect user_id={props.user_id} /> },
             _ => html! {},
         }
     } else {

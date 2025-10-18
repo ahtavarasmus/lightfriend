@@ -235,10 +235,10 @@ diesel::table! {
         credits_left -> Float,
         encrypted_matrix_password -> Nullable<Text>,
         phone_number_country -> Nullable<Text>,
-        twilio_messaging_service_sid -> Nullable<Text>,
         twilio_account_sid -> Nullable<Text>,
         twilio_auth_token -> Nullable<Text>,
         server_url -> Nullable<Text>,
+        twilio_messaging_service_sid -> Nullable<Text>,
     }
 }
 

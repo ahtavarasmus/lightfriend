@@ -4,20 +4,21 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{MouseEvent, Event, HtmlInputElement};
 use crate::config;
+
 #[derive(Properties, PartialEq)]
 pub struct CalendarProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
     #[prop_or_default]
     pub on_connection_change: Option<Callback<bool>>,
 }
+
 #[function_component(CalendarConnect)]
 pub fn calendar_connect(props: &CalendarProps) -> Html {
     let error = use_state(|| None::<String>);
     let connecting = use_state(|| false);
     let calendar_connected = use_state(|| false);
     let all_calendars = use_state(|| false);
+
     // Check connection status on component mount
     {
         let calendar_connected = calendar_connected.clone();
@@ -58,6 +59,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             (),
         );
     }
+
     let onclick_calendar = {
         let connecting = connecting.clone();
         let error = error.clone();
@@ -132,6 +134,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             }
         })
     };
+
     let onclick_delete_calendar = {
         let calendar_connected = calendar_connected.clone();
         let error = error.clone();
@@ -175,6 +178,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             }
         })
     };
+
     html! {
         <div class="service-item">
             <div class="service-header">
@@ -189,7 +193,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                       
+                      
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -253,7 +257,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                 // Get current time for the test event
                                                 let now = web_sys::js_sys::Date::new_0();
                                                 let start_time = now.to_iso_string().as_string().unwrap();
-                                               
+                                              
                                                 let test_event = json!({
                                                     "start_time": start_time,
                                                     "duration_minutes": 30,
@@ -314,15 +318,15 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                 today_start.set_minutes(0);
                                                 today_start.set_seconds(0);
                                                 today_start.set_milliseconds(0);
-                                               
+                                              
                                                 today_end.set_hours(23);
                                                 today_end.set_minutes(59);
                                                 today_end.set_seconds(59);
                                                 today_end.set_milliseconds(999);
-                                               
+                                              
                                                 let start_time = today_start.to_iso_string().as_string().unwrap();
                                                 let end_time = today_end.to_iso_string().as_string().unwrap();
-                                               
+                                              
                                                 spawn_local(async move {
                                                     let url = format!(
                                                         "{}/api/calendar/events?start={}&end={}",
@@ -330,7 +334,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                         start_time,
                                                         end_time
                                                     );
-                                                   
+                                                  
                                                     match Request::get(&url)
                                                         .header("Authorization", &format!("Bearer {}", token))
                                                         .send()
@@ -368,43 +372,32 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         }
                     </div>
                 } else {
-                    if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
-                        <div class="calendar-connect-options">
-                            <label class="calendar-checkbox">
-                                <input
-                                    type="checkbox"
-                                    checked={*all_calendars}
-                                    onchange={
-                                        let all_calendars = all_calendars.clone();
-                                        Callback::from(move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            all_calendars.set(input.checked());
-                                        })
-                                    }
-                                />
-                                {"Access all calendars (including shared)"}
-                            </label>
-                            <button
-                                onclick={onclick_calendar}
-                                class="connect-button"
-                            >
-                                if *connecting {
-                                    {"Connecting..."}
-                                } else {
-                                    {"Connect"}
+                    <div class="calendar-connect-options">
+                        <label class="calendar-checkbox">
+                            <input
+                                type="checkbox"
+                                checked={*all_calendars}
+                                onchange={
+                                    let all_calendars = all_calendars.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        all_calendars.set(input.checked());
+                                    })
                                 }
-                            </button>
-                        </div>
-                    } else {
-                        <div class="upgrade-prompt">
-                            <div class="upgrade-content">
-                                <h3>{"Upgrade to Enable Calendar Integration"}</h3>
-                                <a href="/pricing" class="upgrade-button">
-                                    {"View Pricing Plans"}
-                                </a>
-                            </div>
-                        </div>
-                    }
+                            />
+                            {"Access all calendars (including shared)"}
+                        </label>
+                        <button
+                            onclick={onclick_calendar}
+                            class="connect-button"
+                        >
+                            if *connecting {
+                                {"Connecting..."}
+                            } else {
+                                {"Connect"}
+                            }
+                        </button>
+                    </div>
                 }
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
@@ -534,35 +527,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         font-size: 0.9rem;
                         padding-top: 1rem;
                         border-top: 1px solid rgba(30, 144, 255, 0.1);
-                    }
-                    .upgrade-prompt {
-                        background: rgba(30, 144, 255, 0.1);
-                        padding: 1.5rem;
-                        border-radius: 8px;
-                        text-align: center;
-                        margin-top: 1rem;
-                    }
-                    .upgrade-content h3 {
-                        color: #1E90FF;
-                        margin: 0 0 1rem 0;
-                        font-size: 1.2rem;
-                    }
-                    .upgrade-content p {
-                        color: #CCC;
-                        margin-bottom: 1.5rem;
-                        line-height: 1.5;
-                    }
-                    .upgrade-button {
-                        display: inline-block;
-                        background-color: #1E90FF;
-                        color: white;
-                        padding: 0.8rem 1.5rem;
-                        border-radius: 4px;
-                        text-decoration: none;
-                        transition: background-color 0.3s;
-                    }
-                    .upgrade-button:hover {
-                        background-color: #1873CC;
                     }
                     .calendar-connect-options {
                         display: flex;
@@ -852,35 +816,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                     }
                     .test-search-button:hover {
                         box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
-                    }
-                    .upgrade-prompt {
-                        background: rgba(0, 136, 204, 0.05);
-                        border: 1px solid rgba(0, 136, 204, 0.1);
-                        border-radius: 12px;
-                        padding: 1.8rem;
-                        text-align: center;
-                        margin: 0.8rem 0;
-                    }
-                    .upgrade-content h3 {
-                        color: #0088cc;
-                        margin-bottom: 1rem;
-                        font-size: 1.2rem;
-                    }
-                    .upgrade-button {
-                        display: inline-block;
-                        background: #0088cc;
-                        color: white;
-                        text-decoration: none;
-                        padding: 1rem 2rem;
-                        border-radius: 8px;
-                        font-weight: bold;
-                        transition: all 0.3s ease;
-                        margin-top: 1rem;
-                    }
-                    .upgrade-button:hover {
-                        background: #0077b3;
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
                     }
                     @keyframes spin {
                         to { transform: rotate(360deg); }

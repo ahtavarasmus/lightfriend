@@ -1,7 +1,7 @@
 [serve]
-port = 8080
+port = 8090
 [[proxy]]
-backend = "http://localhost:3000/api/"
+backend = "http://localhost:3001/api/"
 frontend = "/api/"
 [[copy]]
 source = "robots.txt"

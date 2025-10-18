@@ -35,10 +35,10 @@ pub struct User {
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
     pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
-    pub twilio_messaging_service_sid: Option<String>,
     pub twilio_account_sid: Option<String>,
     pub twilio_auth_token: Option<String>,
     pub server_url: Option<String>,
+    pub twilio_messaging_service_sid: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

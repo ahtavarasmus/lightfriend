@@ -4,12 +4,12 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_net::http::Request;
 use crate::config;
+
 #[derive(Properties, PartialEq)]
 pub struct EmailProps {
     pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
 }
+
 #[function_component(EmailConnect)]
 pub fn email_connect(props: &EmailProps) -> Html {
     let error = use_state(|| None::<String>);
@@ -20,6 +20,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
     let imap_server = use_state(|| String::new()); // For custom provider
     let imap_port = use_state(|| String::new()); // For custom provider
     let connected_email = use_state(|| None::<String>);
+
     // Predefined providers
     let providers = vec![
         ("gmail", "Gmail", "imap.gmail.com", "993"),
@@ -27,6 +28,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
         ("outlook", "Outlook", "imap-mail.outlook.com", "993"),
         ("custom", "Custom", "", ""), // Custom option with empty defaults
     ];
+
     // Check connection status on component mount
     {
         let imap_connected = imap_connected.clone();
@@ -66,6 +68,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
             (),
         );
     }
+
     // Handlers for input changes
     let onchange_imap_email = {
         let imap_email = imap_email.clone();
@@ -224,6 +227,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
             }
         })
     };
+
     html! {
         <div class="service-item">
             <div class="service-header">
@@ -238,7 +242,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                      
+                     
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -300,357 +304,329 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                 {" (requires 2FA)."}
             </p>
-            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
-                if *imap_connected {
-                    <div class="imap-controls">
-                        <button
-                            onclick={onclick_imap_disconnect}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect"}
-                        </button>
-                        // Test buttons for admin
-                        if props.user_id == 1 {
-                            <>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            if let Some(window) = web_sys::window() {
-                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                        spawn_local(async move {
-                                                            let request = Request::get(&format!("{}/api/imap/previews", config::get_backend_url()))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await;
-                                                            match request {
-                                                                Ok(response) => {
-                                                                    if response.status() == 200 {
-                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                            web_sys::console::log_1(&format!("IMAP previews: {:?}", data).into());
-                                                                        }
-                                                                    } else {
-                                                                        error.set(Some("Failed to fetch IMAP previews".to_string()));
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test IMAP Previews"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            if let Some(window) = web_sys::window() {
-                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                        spawn_local(async move {
-                                                            let request = Request::get(&format!("{}/api/imap/full_emails", config::get_backend_url()))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await;
-                                                            match request {
-                                                                Ok(response) => {
-                                                                    if response.status() == 200 {
-                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                            web_sys::console::log_1(&format!("IMAP full emails: {:?}", data).into());
-                                                                        }
-                                                                    } else {
-                                                                        error.set(Some("Failed to fetch full IMAP emails".to_string()));
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Full Emails"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            if let Some(window) = web_sys::window() {
-                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                        spawn_local(async move {
-                                                            let previews_request = Request::get(&format!("{}/api/imap/previews", config::get_backend_url()))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await;
-                                                            match previews_request {
-                                                                Ok(response) => {
-                                                                    if response.status() == 200 {
-                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                            if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
-                                                                                if let Some(first_message) = previews.first() {
-                                                                                    if let Some(id) = first_message.get("id").and_then(|i| i.as_str()) {
-                                                                                        let message_request = Request::get(&format!("{}/api/imap/message/{}", config::get_backend_url(), id))
-                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                            .send()
-                                                                                            .await;
-                                                                                        match message_request {
-                                                                                            Ok(msg_response) => {
-                                                                                                if msg_response.status() == 200 {
-                                                                                                    if let Ok(msg_data) = msg_response.json::<serde_json::Value>().await {
-                                                                                                        web_sys::console::log_1(&format!("IMAP single message: {:?}", msg_data).into());
-                                                                                                    }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to fetch single IMAP message".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                            Err(e) => {
-                                                                                                error.set(Some(format!("Network error: {}", e)));
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Single Message"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            if let Some(window) = web_sys::window() {
-                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                        spawn_local(async move {
-                                                            // First fetch previews to get the latest email ID
-                                                            let previews_request = Request::get(&format!("{}/api/imap/previews?limit=1", config::get_backend_url()))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await;
-                                                            match previews_request {
-                                                                Ok(response) => {
-                                                                    if response.status() == 200 {
-                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                            if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
-                                                                                if let Some(latest_email) = previews.first() {
-                                                                                    if let Some(id) = latest_email.get("id").and_then(|i| i.as_str()) {
-                                                                                        // Now send a test reply
-                                                                                        let reply_payload = json!({
-                                                                                            "email_id": id,
-                                                                                            "response_text": "This is a test reply from LightFriend!"
-                                                                                        });
-                                                                                        let reply_request = Request::post(&format!("{}/api/imap/reply", config::get_backend_url()))
-                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                            .header("Content-Type", "application/json")
-                                                                                            .json(&reply_payload)
-                                                                                            .unwrap()
-                                                                                            .send()
-                                                                                            .await;
-                                                                                        match reply_request {
-                                                                                            Ok(reply_response) => {
-                                                                                                if reply_response.status() == 200 {
-                                                                                                    web_sys::console::log_1(&"Successfully sent test reply".into());
-                                                                                                } else {
-                                                                                                    if let Ok(error_data) = reply_response.json::<serde_json::Value>().await {
-                                                                                                        error.set(Some(format!("Failed to send reply: {}",
-                                                                                                            error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
-                                                                                                    }
-                                                                                                }
-                                                                                            }
-                                                                                            Err(e) => {
-                                                                                                error.set(Some(format!("Network error while sending reply: {}", e)));
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    } else {
-                                                                        error.set(Some("Failed to fetch latest email".to_string()));
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Reply to Latest"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            if let Some(window) = web_sys::window() {
-                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                        spawn_local(async move {
-                                                            let payload = json!({
-                                                                "to": "rasmus@ahtava.com",
-                                                                "subject": "test email subject",
-                                                                "body": "testing body here"
-                                                            });
-                                                            let request = Request::post(&format!("{}/api/imap/send", config::get_backend_url()))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .header("Content-Type", "application/json")
-                                                                .json(&payload)
-                                                                .unwrap()
-                                                                .send()
-                                                                .await;
-                                                            match request {
-                                                                Ok(response) => {
-                                                                    if response.status() == 200 {
-                                                                        web_sys::console::log_1(&"Successfully sent test email".into());
-                                                                    } else {
-                                                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                                                            error.set(Some(format!("Failed to send email: {}",
-                                                                                error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
-                                                                        }
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Send Email"}
-                                </button>
-                            </>
-                        }
-                    </div>
-                } else {
-                    <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-                        <select
-                            onchange={onchange_imap_provider}
-                            style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444; appearance: none;"
-                        >
-                            { for providers.iter().map(|(id, name, _, _)| {
-                                html! {
-                                    <option value={id.to_string()} selected={*imap_provider == *id}>
-                                        {name}
-                                    </option>
-                                }
-                            })}
-                        </select>
-                        <input
-                            type="email"
-                            placeholder="Email address"
-                            value={(*imap_email).clone()}
-                            onchange={onchange_imap_email}
-                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                        />
-                        <input
-                            type="password"
-                            placeholder="Password or App Password"
-                            value={(*imap_password).clone()}
-                            onchange={onchange_imap_password}
-                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                        />
-                        if *imap_provider == "custom" {
-                            <>
-                                <input
-                                    type="text"
-                                    placeholder="IMAP Server (e.g., mail.privateemail.com)"
-                                    value={(*imap_server).clone()}
-                                    onchange={onchange_imap_server}
-                                    style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="IMAP Port (e.g., 993)"
-                                    value={(*imap_port).clone()}
-                                    onchange={onchange_imap_port}
-                                    style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                                />
-                            </>
-                        }
-                    </div>
+            if *imap_connected {
+                <div class="imap-controls">
                     <button
-                        onclick={onclick_imap_connect}
-                        class="connect-button"
-                        style="margin-top: 10px; padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                        onclick={onclick_imap_disconnect}
+                        class="disconnect-button"
                     >
-                        {"Connect"}
+                        {"Disconnect"}
                     </button>
-                }
+                    // Test buttons for admin
+                    if props.user_id == 1 {
+                        <>
+                            <button
+                                onclick={
+                                    let error = error.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        let error = error.clone();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                    spawn_local(async move {
+                                                        let request = Request::get(&format!("{}/api/imap/previews", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .send()
+                                                            .await;
+                                                        match request {
+                                                            Ok(response) => {
+                                                                if response.status() == 200 {
+                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                        web_sys::console::log_1(&format!("IMAP previews: {:?}", data).into());
+                                                                    }
+                                                                } else {
+                                                                    error.set(Some("Failed to fetch IMAP previews".to_string()));
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error.set(Some(format!("Network error: {}", e)));
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                class="test-button"
+                            >
+                                {"Test IMAP Previews"}
+                            </button>
+                            <button
+                                onclick={
+                                    let error = error.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        let error = error.clone();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                    spawn_local(async move {
+                                                        let request = Request::get(&format!("{}/api/imap/full_emails", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .send()
+                                                            .await;
+                                                        match request {
+                                                            Ok(response) => {
+                                                                if response.status() == 200 {
+                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                        web_sys::console::log_1(&format!("IMAP full emails: {:?}", data).into());
+                                                                    }
+                                                                } else {
+                                                                    error.set(Some("Failed to fetch full IMAP emails".to_string()));
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error.set(Some(format!("Network error: {}", e)));
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                class="test-button"
+                            >
+                                {"Test Full Emails"}
+                            </button>
+                            <button
+                                onclick={
+                                    let error = error.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        let error = error.clone();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                    spawn_local(async move {
+                                                        let previews_request = Request::get(&format!("{}/api/imap/previews", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .send()
+                                                            .await;
+                                                        match previews_request {
+                                                            Ok(response) => {
+                                                                if response.status() == 200 {
+                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                        if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
+                                                                            if let Some(first_message) = previews.first() {
+                                                                                if let Some(id) = first_message.get("id").and_then(|i| i.as_str()) {
+                                                                                    let message_request = Request::get(&format!("{}/api/imap/message/{}", config::get_backend_url(), id))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .send()
+                                                                                        .await;
+                                                                                    match message_request {
+                                                                                        Ok(msg_response) => {
+                                                                                            if msg_response.status() == 200 {
+                                                                                                if let Ok(msg_data) = msg_response.json::<serde_json::Value>().await {
+                                                                                                    web_sys::console::log_1(&format!("IMAP single message: {:?}", msg_data).into());
+                                                                                                }
+                                                                                            } else {
+                                                                                                error.set(Some("Failed to fetch single IMAP message".to_string()));
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error.set(Some(format!("Network error: {}", e)));
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                class="test-button"
+                            >
+                                {"Test Single Message"}
+                            </button>
+                            <button
+                                onclick={
+                                    let error = error.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        let error = error.clone();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                    spawn_local(async move {
+                                                        // First fetch previews to get the latest email ID
+                                                        let previews_request = Request::get(&format!("{}/api/imap/previews?limit=1", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .send()
+                                                            .await;
+                                                        match previews_request {
+                                                            Ok(response) => {
+                                                                if response.status() == 200 {
+                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                        if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
+                                                                            if let Some(latest_email) = previews.first() {
+                                                                                if let Some(id) = latest_email.get("id").and_then(|i| i.as_str()) {
+                                                                                    // Now send a test reply
+                                                                                    let reply_payload = json!({
+                                                                                        "email_id": id,
+                                                                                        "response_text": "This is a test reply from LightFriend!"
+                                                                                    });
+                                                                                    let reply_request = Request::post(&format!("{}/api/imap/reply", config::get_backend_url()))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .header("Content-Type", "application/json")
+                                                                                        .json(&reply_payload)
+                                                                                        .unwrap()
+                                                                                        .send()
+                                                                                        .await;
+                                                                                    match reply_request {
+                                                                                        Ok(reply_response) => {
+                                                                                            if reply_response.status() == 200 {
+                                                                                                web_sys::console::log_1(&"Successfully sent test reply".into());
+                                                                                            } else {
+                                                                                                if let Ok(error_data) = reply_response.json::<serde_json::Value>().await {
+                                                                                                    error.set(Some(format!("Failed to send reply: {}",
+                                                                                                        error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error while sending reply: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    error.set(Some("Failed to fetch latest email".to_string()));
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error.set(Some(format!("Network error: {}", e)));
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                class="test-button"
+                            >
+                                {"Test Reply to Latest"}
+                            </button>
+                            <button
+                                onclick={
+                                    let error = error.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        let error = error.clone();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                    spawn_local(async move {
+                                                        let payload = json!({
+                                                            "to": "rasmus@ahtava.com",
+                                                            "subject": "test email subject",
+                                                            "body": "testing body here"
+                                                        });
+                                                        let request = Request::post(&format!("{}/api/imap/send", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .header("Content-Type", "application/json")
+                                                            .json(&payload)
+                                                            .unwrap()
+                                                            .send()
+                                                            .await;
+                                                        match request {
+                                                            Ok(response) => {
+                                                                if response.status() == 200 {
+                                                                    web_sys::console::log_1(&"Successfully sent test email".into());
+                                                                } else {
+                                                                    if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                                                        error.set(Some(format!("Failed to send email: {}",
+                                                                            error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error.set(Some(format!("Network error: {}", e)));
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                class="test-button"
+                            >
+                                {"Test Send Email"}
+                            </button>
+                        </>
+                    }
+                </div>
+            } else {
+                <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                    <select
+                        onchange={onchange_imap_provider}
+                        style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444; appearance: none;"
+                    >
+                        { for providers.iter().map(|(id, name, _, _)| {
+                            html! {
+                                <option value={id.to_string()} selected={*imap_provider == *id}>
+                                    {name}
+                                </option>
+                            }
+                        })}
+                    </select>
+                    <input
+                        type="email"
+                        placeholder="Email address"
+                        value={(*imap_email).clone()}
+                        onchange={onchange_imap_email}
+                        style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                    />
+                    <input
+                        type="password"
+                        placeholder="Password or App Password"
+                        value={(*imap_password).clone()}
+                        onchange={onchange_imap_password}
+                        style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                    />
+                    if *imap_provider == "custom" {
+                        <>
+                            <input
+                                type="text"
+                                placeholder="IMAP Server (e.g., mail.privateemail.com)"
+                                value={(*imap_server).clone()}
+                                onchange={onchange_imap_server}
+                                style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                            />
+                            <input
+                                type="number"
+                                placeholder="IMAP Port (e.g., 993)"
+                                value={(*imap_port).clone()}
+                                onchange={onchange_imap_port}
+                                style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                            />
+                        </>
+                    }
+                </div>
+                <button
+                    onclick={onclick_imap_connect}
+                    class="connect-button"
+                    style="margin-top: 10px; padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                >
+                    {"Connect"}
+                </button>
+            }
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
                     {err}
                 </div>
             }
-        } else {
-            <div class="upgrade-prompt">
-                <div class="upgrade-content">
-                    <h3>{"Upgrade to Enable Email Integration"}</h3>
-                    <a href="/pricing" class="upgrade-button">
-                        {"View Pricing Plans"}
-                    </a>
-                </div>
-            </div>
-            {
-                if *imap_connected {
-                    html! {
-                    <div class="imap-controls">
-                        <button
-                            onclick={onclick_imap_disconnect}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect previous connection"}
-                        </button>
-                    </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-        }
             <style>
-
                 {r#"
                     .service-item {
                         background: rgba(0, 0, 0, 0.2);

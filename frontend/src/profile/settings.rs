@@ -33,7 +33,6 @@ pub struct SettingsPageProps {
 #[function_component]
 pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let user_profile = use_state(|| props.user_profile.clone());
-    let email = use_state(|| (*user_profile).email.clone());
     let phone_number = use_state(|| (*user_profile).phone_number.clone());
     let nickname = use_state(|| (*user_profile).nickname.clone().unwrap_or_default());
     let info = use_state(|| (*user_profile).info.clone().unwrap_or_default());
@@ -54,7 +53,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let navigator = use_navigator().unwrap();
     // Update local state when props change
     {
-        let email = email.clone();
         let phone_number = phone_number.clone();
         let nickname = nickname.clone();
         let info = info.clone();
@@ -68,7 +66,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let nearby_places = nearby_places.clone();
         use_effect_with_deps(move |props_profile| {
             info!("{}", &format!("Props notification type: {:?}", props_profile.notification_type));
-            email.set(props_profile.email.clone());
             phone_number.set(props_profile.phone_number.clone());
             nickname.set(props_profile.nickname.clone().unwrap_or_default());
             info.set(props_profile.info.clone().unwrap_or_default());
@@ -131,7 +128,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     );
  
     let on_edit = {
-        let email = email.clone();
         let phone_number = phone_number.clone();
         let nickname = nickname.clone();
         let info = info.clone();
@@ -149,7 +145,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let location = location.clone();
         let nearby_places = nearby_places.clone();
         Callback::from(move |_e: MouseEvent| {
-            let email = email.clone();
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
             let info = info.clone();
@@ -216,7 +211,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 // Create updated profile
                                 let updated_profile = UserProfile {
                                     id: (*user_profile).id,
-                                    email: (*email).clone(),
                                     phone_number: (*phone_number).clone(),
                                     nickname: Some((*nickname).clone()),
                                     info: Some((*info).clone()),
@@ -225,26 +219,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     timezone_auto: Some(*timezone_auto),
                                     agent_language: (*agent_language).clone(),
                                     notification_type: (*notification_type).clone(),
-                                    verified: (*user_profile).verified,
-                                    time_to_live: (*user_profile).time_to_live,
-                                    time_to_delete: (*user_profile).time_to_delete,
                                     credits: (*user_profile).credits,
-                                    charge_when_under: (*user_profile).charge_when_under,
-                                    charge_back_to: (*user_profile).charge_back_to,
-                                    stripe_payment_method_id: (*user_profile).stripe_payment_method_id.clone(),
-                                    sub_tier: (*user_profile).sub_tier.clone(),
                                     credits_left: (*user_profile).credits_left,
-                                    discount: (*user_profile).discount,
-                                    notify: (*user_profile).notify,
-                                    sub_country: (*user_profile).sub_country.clone(),
                                     save_context: Some(*save_context),
-                                    days_until_billing: (*user_profile).days_until_billing.clone(),
-                                    digests_reserved: (*user_profile).digests_reserved,
-                                    pairing_code: (*user_profile).pairing_code.clone(),
-                                    server_ip: (*user_profile).server_ip.clone(),
                                     twilio_sid: (*user_profile).twilio_sid.clone(),
                                     twilio_token: (*user_profile).twilio_token.clone(),
-                                    openrouter_api_key: (*user_profile).openrouter_api_key.clone(),
                                     textbee_device_id: (*user_profile).textbee_device_id.clone(),
                                     textbee_api_key: (*user_profile).textbee_api_key.clone(),
                                     estimated_monitoring_cost: (*user_profile).estimated_monitoring_cost,
@@ -273,7 +252,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     });
                                 }
                             } else {
-                                error.set(Some("Failed to update profile. Phone number/email already exists?".to_string()));
+                                error.set(Some("Failed to update profile. Phone number already exists?".to_string()));
                             }
                         }
                         Err(_) => {
@@ -318,38 +297,6 @@ let on_timezone_update = {
                 } else if let Some(success_msg) = (*success).as_ref() {
                     html! {
                         <div class="message success-message">{success_msg}</div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-         
-            {
-                if (*user_profile).sub_tier != Some("self_hosted".to_string()) {
-                    html! {
-                        <div class="profile-field">
-                            <span class="field-label">{"Email"}</span>
-                            {
-                                if *is_editing {
-                                    html! {
-                                        <input
-                                            type="email"
-                                            class="profile-input"
-                                            value={(*email).to_string()}
-                                            placeholder="your@email.com"
-                                            onchange={let email = email.clone(); move |e: Event| {
-                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                email.set(input.value());
-                                            }}
-                                        />
-                                    }
-                                } else {
-                                    html! {
-                                        <span class="field-value">{&(*user_profile).email}</span>
-                                    }
-                                }
-                            }
-                        </div>
                     }
                 } else {
                     html! {}
@@ -830,7 +777,7 @@ let on_timezone_update = {
     border-color: rgba(30, 144, 255, 0.5);
     box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
 }
-.profile-input[ type="text" ], .profile-input[ type="email" ], .profile-input[ type="tel" ] {
+.profile-input[ type="text" ], .profile-input[ type="tel" ] {
     height: auto;
 }
 textarea.profile-input {

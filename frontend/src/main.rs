@@ -6,10 +6,8 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 mod config;
 mod profile {
-    pub mod billing_credits;
     pub mod billing_payments;
     pub mod billing_models;
-    pub mod profile;
     pub mod settings;
     pub mod timezone_detector;
 }
@@ -53,15 +51,12 @@ use pages::{
 use auth::{
     signup::login::Login,
 };
-use profile::profile::Billing;
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
     #[at("/")]
     Home,
     #[at("/login")]
     Login,
-    #[at("/billing")]
-    Billing,
     #[at("/terms")]
     Terms,
     #[at("/privacy")]
@@ -83,10 +78,6 @@ fn switch(routes: Route, logged_in: bool) -> Html {
             Route::Home => {
                 info!("Rendering Home page");
                 html! { <Home /> }
-            }
-            Route::Billing => {
-                info!("Rendering Billing page");
-                html! { <Billing /> }
             }
             Route::Terms => {
                 info!("Rendering Terms page");
@@ -178,11 +169,6 @@ pub fn nav(props: &NavProps) -> Html {
                         if *logged_in {
                             html! {
                                 <>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Billing} classes="nav-profile-link">
-                                            {"Billing"}
-                                        </Link<Route>>
-                                    </div>
                                     <button onclick={
                                         let close = close_menu.clone();
                                         let logout = handle_logout.clone();

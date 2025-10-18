@@ -195,7 +195,7 @@ pub mod login {
                     if !has_valid_token {
                         <p class="no-token-message">
                             {"Get your magic login link from "}
-                            <a href="https://lightfriend.ai" target="_blank" style="color: #7EB2FF;">{"lightfriend.ai"}</a>
+                            <a href="https://lightfriend.ai" style="color: #7EB2FF;">{"lightfriend.ai"}</a>
                             {" and click it to access your self-hosted instance."}
                         </p>
                     } else {

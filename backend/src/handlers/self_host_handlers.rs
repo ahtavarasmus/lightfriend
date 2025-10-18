@@ -153,7 +153,6 @@ use tracing;
 #[derive(Deserialize, Serialize)]
 struct VerifyTokenResponse {
     user_id: String,
-    phone_number: String,
     preferred_number: String,
     phone_number_country: String,
     messaging_service_sid: Option<String>,
@@ -173,10 +172,15 @@ pub async fn self_hosted_login(
 ) -> Result<Response, (StatusCode, AxumJson<serde_json::Value>)> {
     println!("Self-hosted token login attempt"); // No email to log for privacy
 
+    let mut url = "https://lightfriend.ai/api/self-hosted/verify-token"; 
+    if std::env::var("ENVIRONMENT").expect("ENVIRONMENT not set") == "development" {
+        url = "http://localhost:3000/api/self-hosted/verify-token"; 
+    }
+
     // Verify token against main server
     let client = Client::new();
     let verify_resp = client
-        .post("https://lightfriend.ai/api/self-hosted/verify-token") // Assume this endpoint exists on main server
+        .post(url) // Assume this endpoint exists on main server
         .json(&token_req)
         .send()
         .await
@@ -201,9 +205,10 @@ pub async fn self_hosted_login(
             AxumJson(json!({"error": "Failed to process verification response"}))
         ))?;
 
-    let main_phone_number = verify_data.phone_number;
+    let main_phone_number = verify_data.preferred_number.clone();
     println!("Token verified successfully for main user_id: {}", verify_data.user_id);
 
+    let mut is_new_user = false;
     let user = match state.user_core.get_user() {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -230,6 +235,17 @@ pub async fn self_hosted_login(
                 .ok_or_else(|| (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     AxumJson(json!({"error": "User not found after creation"}))
+                ))?;
+            is_new_user = true;
+            // Refetch after setting flag
+            state.user_core.get_user()
+                .map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": format!("Failed to retrieve user after creation: {}", e)}))
+                ))?
+                .ok_or_else(|| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "User not found after creation"}))
                 ))?
         }
         Err(e) => {
@@ -241,19 +257,22 @@ pub async fn self_hosted_login(
         }
     };
 
-    // Update Twilio creds (if present)
-    if let Err(e) = state.user_core.update_twilio_credentials(
-        verify_data.twilio_account_sid.as_deref(),
-        verify_data.twilio_auth_token.as_deref(),
-        verify_data.server_url.as_deref(),
-        verify_data.messaging_service_sid.as_deref()
-    ) {
-        tracing::error!("Failed to update Twilio credentials: {}", e);
-    }
+    // Skip updates if existing user with id == 1
+    if !(user.id == 1 && !is_new_user) {
+        // Update Twilio creds (if present)
+        if let Err(e) = state.user_core.update_twilio_credentials(
+            verify_data.twilio_account_sid.as_deref(),
+            verify_data.twilio_auth_token.as_deref(),
+            verify_data.server_url.as_deref(),
+            verify_data.messaging_service_sid.as_deref()
+        ) {
+            tracing::error!("Failed to update Twilio credentials: {}", e);
+        }
 
-    // Update preferred number
-    if let Err(e) = state.user_core.update_preferred_number(verify_data.preferred_number.as_str()) {
-        tracing::error!("Failed to update preferred number: {}", e);
+        // Update preferred number
+        if let Err(e) = state.user_core.update_preferred_number(verify_data.preferred_number.as_str()) {
+            tracing::error!("Failed to update preferred number: {}", e);
+        }
     }
 
     // Set phone country
@@ -264,4 +283,3 @@ pub async fn self_hosted_login(
 
     generate_tokens_and_response(user.id)
 }
-
