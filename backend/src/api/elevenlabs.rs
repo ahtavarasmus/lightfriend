@@ -268,21 +268,6 @@ pub async fn fetch_assistant(
             let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold;
             let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
             let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
-            // log usage and start call
-            if let Err(e) = state.user_repository.log_usage(
-                Some(call_sid),
-                "call".to_string(),
-                None,
-                None,
-                None,
-                None,
-                Some("ongoing".to_string()),
-                Some(recharge_threshold_timestamp),
-                Some(zero_credits_timestamp),
-            ) {
-                tracing::error!("Failed to log call usage: {}", e);
-                // Continue execution even if logging fails
-            }
             // Fetch recent contacts for all platforms and combine into a single string
             let platforms = vec!["whatsapp", "telegram", "signal"];
             let mut all_contacts_str = String::new();

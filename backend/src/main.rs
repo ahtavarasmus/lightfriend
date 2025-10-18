@@ -85,7 +85,6 @@ mod models {
 mod repositories {
     pub mod user_core;
     pub mod user_repository;
-    pub mod connection_auth;
 }
 mod schema;
 mod jobs {

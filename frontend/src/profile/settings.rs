@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use log::{info, Level};
+use log::info;
 use web_sys::{HtmlInputElement, window};
 use yew_router::prelude::*;
 use crate::Route;
@@ -8,7 +8,7 @@ use crate::profile::timezone_detector::TimezoneDetector;
 use gloo_net::http::Request;
 use serde::Serialize;
 use wasm_bindgen_futures::spawn_local;
-use crate::profile::billing_models::UserProfile;
+use crate::profile::models::UserProfile;
 use web_sys::js_sys::encode_uri_component;
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;

@@ -291,41 +291,6 @@ impl UserRepository {
         Ok(())
     }
 
-    // log the usage. activity_type either 'call' or 'sms', or the new 'notification'
-    pub fn log_usage(&self, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let user = users::table
-            .find(1)
-            .first::<User>(&mut conn)?;
-
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let user_id = 1;
-        let new_log = NewUsageLog {
-            user_id,
-            sid,
-            activity_type,
-            credits,
-            created_at: current_time,
-            time_consumed,
-            success,
-            reason,
-            status,
-            recharge_threshold_timestamp,
-            zero_credits_timestamp,
-        };
-
-        diesel::insert_into(usage_logs::table)
-            .values(&new_log)
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-
     pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
 
         let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
@@ -339,68 +304,6 @@ impl UserRepository {
             .first::<User>(&mut conn)?;
         
         Ok(user.credits < charge_back_threshold)
-    }
-
-    pub fn get_usage_data(&self, user_id: i32, from_timestamp: i32) -> Result<Vec<UsageDataPoint>, DieselError> {
-        // Check if we're in development mode
-        if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()) != "development" {
-            // Generate example data for the last 30 days
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-            
-            let mut example_data = Vec::new();
-            let day_in_seconds = 24 * 60 * 60;
-            
-            // Generate random usage data for each day
-            for i in 0..30 {
-                let timestamp = now - (i * day_in_seconds);
-                if timestamp >= from_timestamp {
-                    // Random usage between 50 and 500
-                    let usage = rand::random::<f32>() % 451.00 + 50.00;
-                    example_data.push(UsageDataPoint {
-                        timestamp,
-                        credits: usage,
-                    });
-                    
-                    // Sometimes add multiple entries per day
-                    if rand::random::<f32>() > 0.7 {
-                        let credit_usage = rand::random::<f32>() % 301.00 + 20.00;
-                        example_data.push(UsageDataPoint {
-                            timestamp: timestamp + 3600, // 1 hour later
-                            credits: credit_usage,
-                        });
-                    }
-                }
-            }
-            
-            example_data.sort_by_key(|point| point.timestamp);
-            println!("returning example data");
-            return Ok(example_data);
-        }
-        println!("getting real usage data");
-        use crate::schema::usage_logs::dsl::*;
-        
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Query usage logs for the user within the time range
-        let usage_data = usage_logs
-            .filter(user_id.eq(user_id))
-            .filter(created_at.ge(from_timestamp))
-            .select((created_at, credits))
-            .order_by(created_at.asc())
-            .load::<(i32, Option<f32>)>(&mut conn)?
-            .into_iter()
-            .filter_map(|(timestamp, credit_amount)| {
-                credit_amount.map(|credit_value| UsageDataPoint {
-                    timestamp,
-                    credits: credit_value,
-                })
-            })
-            .collect();
-
-        Ok(usage_data)
     }
 
     // Fetch the ongoing usage log for a user

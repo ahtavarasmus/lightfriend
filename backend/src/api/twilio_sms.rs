@@ -15,8 +15,7 @@ use axum::{
     Json,
 };
 use crate::tool_call_utils::utils::{
-    ChatMessage, create_openai_client, create_eval_tools,
-    EvalResponse,
+    ChatMessage, create_openai_client
 };
 use chrono::Utc;
 
@@ -205,7 +204,6 @@ pub async fn process_sms(
                 let state_clone = state.clone();
                 let user_clone = user.clone();
                 let response_msg_clone = response_msg.clone();
-                let start_time_clone = start_time;
 
                 tokio::spawn(async move {
                     match crate::api::twilio_utils::send_conversation_message(
@@ -214,41 +212,10 @@ pub async fn process_sms(
                         None,
                         &user_clone
                     ).await {
-                        Ok(message_sid) => {
-                            // Log usage (similar to regular message)
-                            let processing_time_secs = start_time_clone.elapsed().as_secs();
-                            if let Err(e) = state_clone.user_repository.log_usage(
-                                Some(message_sid.clone()),
-                                "sms".to_string(),
-                                None,
-                                Some(processing_time_secs as i32),
-                                Some(true), // Assume success for cancel
-                                Some("cancel handling".to_string()),
-                                None,
-                                None,
-                                None,
-                            ) {
-                                tracing::error!("Failed to log SMS usage for cancel: {}", e);
-                            }
+                        Ok(_) => {
                         }
                         Err(e) => {
                             tracing::error!("Failed to send cancel response message: {}", e);
-                            // Log the failed attempt
-                            let processing_time_secs = start_time_clone.elapsed().as_secs();
-                            let error_status = format!("failed to send: {}", e);
-                            if let Err(log_err) = state_clone.user_repository.log_usage(
-                                None,
-                                "sms".to_string(),
-                                None,
-                                Some(processing_time_secs as i32),
-                                Some(false), // Mark as unsuccessful
-                                Some("cancel handling".to_string()),
-                                Some(error_status),
-                                None,
-                                None,
-                            ) {
-                                tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
-                            }
                         }
                     }
                 });
@@ -1345,24 +1312,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     };
 
-    // Perform evaluation
-    let (eval_result, eval_reason) = crate::tool_call_utils::utils::perform_evaluation(
-        &client,
-        &chat_messages,
-        &payload.body,
-        &final_response,
-        fail
-    ).await;
-
-    let mut final_response_with_notice = final_response.clone();
-
-    let mut final_eval: String = "".to_string();
-    if let Some(eval) = eval_reason {
-        final_eval = format!("success reason: {}", eval);
-    }
-
-    let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
-
     // Clean up old message history based on save_context setting
     let save_context = user_settings.save_context.unwrap_or(0);
     if let Err(e) = state.user_repository.delete_old_message_history(
@@ -1380,7 +1329,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     let assistant_message = crate::models::user_models::NewMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),
-        encrypted_content: final_response_with_notice.clone(),
+        encrypted_content: final_response.clone(),
         tool_name: None,
         tool_call_id: None,
         tool_calls_json: None,
@@ -1395,33 +1344,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
-        // Log the test usage without actually sending the message
-        if let Err(e) = state.user_repository.log_usage(
-            None,  // No message SID in test mode
-            "sms_test".to_string(),
-            None,
-            Some(processing_time_secs as i32),
-            Some(eval_result),
-            Some(final_eval),
-            None,
-            None,
-            None
-        ) {
-            tracing::error!("Failed to log test SMS usage: {}", e);
-        }
-
         return (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(TwilioResponse {
-                message: final_response_with_notice,
+                message: final_response,
             })
         );
     }
 
     // Extract filenames from the response and look up their media SIDs
     let mut media_sids = Vec::new();
-    let clean_response = final_response_with_notice.lines().filter_map(|line| {
+    let clean_response = final_response.lines().filter_map(|line| {
         // Look for lines that contain filenames from the media map
         MEDIA_SID_MAP.with(|map| {
             let map = map.borrow();
@@ -1438,7 +1372,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     let media_sid = media_sids.first();
     let state_clone = state.clone();
     let msg_sid = payload.message_sid.clone();
-    let user_clone = user.clone();
 
     tracing::debug!("going into deleting the incoming message handler");
     tokio::spawn(async move {
@@ -1455,21 +1388,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         &user
     ).await {
         Ok(message_sid) => {
-            // Log usage
-            if let Err(e) = state.user_repository.log_usage(
-                Some(message_sid.clone()),
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                Some(eval_result),
-                Some(final_eval.clone()),
-                None,
-                None,
-                None,
-            ) {
-                tracing::error!("Failed to log SMS usage: {}", e);
-            }
-
             (
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1480,21 +1398,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
         Err(e) => {
             tracing::error!("Failed to send conversation message: {}", e);
-            // Log the failed attempt with error message in status
-            let error_status = format!("failed to send: {}", e);
-            if let Err(log_err) = state.user_repository.log_usage(
-                None,
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                Some(false),  // Mark as unsuccessful
-                Some(final_eval),
-                Some(error_status),
-                None,
-                None,
-            ) {
-                tracing::error!("Failed to log SMS usage after send error: {}", log_err);
-            }
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],

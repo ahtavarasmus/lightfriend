@@ -6,8 +6,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 mod config;
 mod profile {
-    pub mod billing_payments;
-    pub mod billing_models;
+    pub mod models;
     pub mod settings;
     pub mod timezone_detector;
 }
@@ -41,7 +40,6 @@ mod connections {
 mod auth {
     pub mod connect;
     pub mod signup;
-    pub mod oauth_flow;
 }
 use pages::{
     home::Home,

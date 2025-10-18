@@ -2,7 +2,7 @@ use yew::prelude::*;
 use crate::config;
 use web_sys::window;
 use gloo_net::http::Request;
-use crate::profile::billing_models::UserProfile;
+use crate::profile::models::UserProfile;
 use crate::profile::settings::SettingsPage;
 use crate::auth::connect::Connect;
 use serde::Serialize;

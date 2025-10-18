@@ -1526,39 +1526,10 @@ pub async fn send_notification(
                         tracing::error!("Failed to store notification in history: {}", e);
                     }
 
-                    // Log successful call notification
-                    if let Err(e) = state.user_repository.log_usage(
-                        response.get("sid").and_then(|v| v.as_str()).map(String::from),
-                        content_type,
-                        None,
-                        None,
-                        Some(true),
-                        None,
-                        Some("completed".to_string()),
-                        None,
-                        None,
-                    ) {
-                        tracing::error!("Failed to log call notification usage: {}", e);
-                    }
                 }
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
                     println!("Failed to send call notification for user");
-                    
-                    // Log failed call notification
-                    if let Err(e) = state.user_repository.log_usage(
-                        None,
-                        content_type,
-                        None,
-                        None,
-                        Some(false),
-                        Some(format!("Failed to initiate call: {:?}", json_err)),
-                        Some("failed".to_string()),
-                        None,
-                        None,
-                    ) {
-                        tracing::error!("Failed to log failed call notification: {}", e);
-                    }
                 }
             }
         }
@@ -1591,39 +1562,10 @@ pub async fn send_notification(
                         tracing::error!("Failed to store notification in history: {}", e);
                     }
                     
-                    // Log successful SMS notification
-                    if let Err(e) = state.user_repository.log_usage(
-                        Some(response_sid),
-                        content_type,
-                        None,
-                        None,
-                        Some(true),
-                        None,
-                        Some("delivered".to_string()),
-                        None,
-                        None,
-                    ) {
-                        tracing::error!("Failed to log SMS notification usage: {}", e);
-                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to send notification: {}", e);
                     println!("Failed to send SMS notification for user");
-                    
-                    // Log failed SMS notification
-                    if let Err(log_err) = state.user_repository.log_usage(
-                        None,
-                        content_type,
-                        None,
-                        None,
-                        Some(false),
-                        Some(format!("Failed to send SMS: {}", e)),
-                        Some("failed".to_string()),
-                        None,
-                        None,
-                    ) {
-                        tracing::error!("Failed to log failed SMS notification: {}", log_err);
-                    }
                 }
             }
         }
