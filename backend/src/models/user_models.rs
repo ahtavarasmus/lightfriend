@@ -39,6 +39,7 @@ pub struct User {
     pub twilio_auth_token: Option<String>,
     pub server_url: Option<String>,
     pub twilio_messaging_service_sid: Option<String>,
+    pub tinfoil_api_key: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

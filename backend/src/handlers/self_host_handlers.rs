@@ -159,6 +159,7 @@ struct VerifyTokenResponse {
     twilio_account_sid: Option<String>,
     twilio_auth_token: Option<String>,
     server_url: Option<String>,
+    tinfoil_api_key: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -267,6 +268,8 @@ pub async fn self_hosted_login(
             verify_data.messaging_service_sid.as_deref()
         ) {
             tracing::error!("Failed to update Twilio credentials: {}", e);
+        }
+        if let Err(e) = state.user_core.update_tinfoil_key(verify_data.tinfoil_api_key.as_deref()) {
         }
 
         // Update preferred number

@@ -239,6 +239,7 @@ diesel::table! {
         twilio_auth_token -> Nullable<Text>,
         server_url -> Nullable<Text>,
         twilio_messaging_service_sid -> Nullable<Text>,
+        tinfoil_api_key -> Nullable<Text>,
     }
 }
 

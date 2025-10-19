@@ -24,10 +24,11 @@ pub fn create_openai_client(
 ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
 
     // TODO get the temp tinfoil api key from lightfriend.ai
+    let key = state.user_core.get_tinfoil_key().unwrap().unwrap();
 
     OpenAIClient::builder()
-        .with_endpoint("https://openrouter.ai/api/v1")
-        .with_api_key("".to_string())
+        .with_endpoint("https://inference.tinfoil.sh/v1/chat/completions") // TODO this may need to be just /v1/ and end there let's see
+        .with_api_key(key)
         .build()
         .map_err(|e| e.into())
 }

@@ -405,6 +405,38 @@ impl UserCore {
         Ok(proactive_agent_on)
     }
 
+
+    pub fn update_tinfoil_key(&self, key: Option<&str>) -> Result<(), Box<dyn Error>> {
+        use crate::schema::users;
+        use crate::utils::encryption::encrypt;
+     
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_key= key.map(|s| encrypt(s)).transpose()?;
+        diesel::update(users::table.find(1))
+            .set((
+                users::tinfoil_api_key.eq(encrypted_key),
+            ))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
+    pub fn get_tinfoil_key(&self) -> Result<Option<String>, Box<dyn Error>> {
+        use crate::schema::users;
+        use crate::utils::encryption::decrypt;
+       
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+       
+        // Get the user settings
+        let encrypted_key= users::table
+            .find(1)
+            .select(users::tinfoil_api_key)
+            .first::<Option<String>>(&mut conn)?;
+        
+        let key= encrypted_key.map(|s| decrypt(&s)).transpose()?;
+        Ok(key)
+    }
+
     pub fn update_call_notify(&self, user_id: i32, call_notify: bool) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -640,20 +672,6 @@ impl UserCore {
             ))
             .execute(&mut conn)?;
         
-        Ok(())
-    }
-
-    pub fn update_server_url(&self, server_url: &str) -> Result<(), Box<dyn Error>> {
-        use crate::schema::user_settings;
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist()?;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(1)))
-            .set((
-                user_settings::server_url.eq(server_url.clone()),
-            ))
-            .execute(&mut conn)?;
         Ok(())
     }
 
