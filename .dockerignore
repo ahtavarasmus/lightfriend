@@ -1,15 +1,58 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
 # Rust build artifacts (prevents xattr issues)
 **/target/
 .cargo/
+**/*.rs.bk
 
 # Frontend builds
 **/dist/
 
-# General ignores
-.git
-.gitignore
-README.md
-docker-compose.yaml  # Or .yml
-notes-for-matrix-bridges.md
-LICENSE
+# Development files
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database (shouldn't be in repo anyway)
+*.db
+*.db-shm
+*.db-wal
+database.db
+
+# Logs
+*.log
+logs/
+
+# Uploads (user data)
+uploads/
+
+# Matrix store
+matrix_store/
+
+# Secrets
+.env.secrets
+*.pem
+*.key
+
+# Coolify
+.coolify/
+
+# Docker
+docker-compose.override.yml
+
+# Temporary data directory
 data/

@@ -1,14 +1,32 @@
 FROM rust:1.75-slim as builder
-RUN apt-get update && apt-get install -y trunk binaryen && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
+
+# Install trunk and dependencies (Ubuntu/Debian compatible)
+RUN apt-get update && \
+    apt-get install -y wget binaryen && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add wasm target and install trunk
+RUN rustup target add wasm32-unknown-unknown && \
+    cargo install --locked trunk
+
+WORKDIR /app/frontend
+
 # Copy Cargo files first for caching
-COPY Cargo.toml Cargo.lock* ./
+COPY frontend/Cargo.toml frontend/Cargo.lock* ./
+
 # Dummy src/lib.rs for dep resolution (Yew/Trunk common)
 RUN mkdir -p src && echo "fn main() {}" > src/lib.rs
-RUN cargo check --release  # Faster than build for deps
+RUN cargo check --release
+
 # Copy real source
-COPY src ./src
-# Copy Trunk config and HTML
-COPY index.html Trunk.toml* ./
+COPY frontend/src ./src
+COPY frontend/index.html frontend/Trunk.toml* ./
+
+# Build the frontend
 RUN trunk build --release
-# dist/ is now in /app/dist
+
+# Copy dist to /app/dist for docker-compose volume mounting
+RUN mkdir -p /app/dist && cp -r dist/* /app/dist/
+
+# This is a build-only container - it exits after building
+CMD ["echo", "Frontend build complete"]

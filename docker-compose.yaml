@@ -3,42 +3,57 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: ../Dockerfile.backend
+      context: .
+      dockerfile: Dockerfile.backend
     environment:
-      - ENVIRONMENT=staging
-      - DATABASE_URL=/app/data/database.db
-      - FRONTEND_URL=${COOLIFY_FQDN:-http://localhost}
-      - SERVER_URL_OAUTH=${COOLIFY_FQDN:-http://localhost:3000}
+      # Only pass through Coolify's auto-injected URL (optional)
+      - COOLIFY_URL=${COOLIFY_URL:-}
     volumes:
       - data:/app/data
+      - uploads:/app/uploads
     networks:
       - app-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../Dockerfile.frontend
-    # No runtime; builds dist/ to volume
+      context: .
+      dockerfile: Dockerfile.frontend
+    volumes:
+      - frontend_dist:/app/dist
 
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
+      - "${PORT:-80}:80"
     volumes:
-      - frontend_dist:/usr/share/nginx/html:ro  # Mount built dist/
+      - frontend_dist:/usr/share/nginx/html:ro
       - ./backend/static:/usr/share/nginx/backend-static:ro
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   data:
-  frontend_dist:  # Captures /app/dist from build
+    driver: local
+  uploads:
+    driver: local
+  frontend_dist:
 
 networks:
   app-network:

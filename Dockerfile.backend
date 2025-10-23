@@ -1,24 +1,22 @@
 # Build stage
 FROM rust:1.85-slim as builder
 
-# Install system deps for OpenSSL linking (early to avoid cache issues)
+# Install system deps for OpenSSL linking + diesel CLI deps
 RUN apt-get update && \
-    apt-get install -y pkg-config libssl-dev libssl3 build-essential && \
+    apt-get install -y pkg-config libssl-dev build-essential libsqlite3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/backend
 
-# Set paths for aarch64 multiarch OpenSSL (fixes libdir detection)
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
-ENV OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
-ENV OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu
-
-# Low-memory Cargo flags (serial jobs, no LTO for RAM savings)
+# Low-memory Cargo flags (works on any architecture)
 ENV CARGO_BUILD_JOBS=1
 ENV RUSTFLAGS="-C codegen-units=16 -C lto=off -C opt-level=2"
 
-# Copy manifests first for dep caching
-COPY Cargo.toml Cargo.lock* ./
+# Install diesel_cli for migrations
+RUN cargo install diesel_cli --no-default-features --features sqlite
+
+# Copy backend manifests first for dep caching
+COPY backend/Cargo.toml backend/Cargo.lock* ./
 
 # Dummy main.rs for dep resolution (binary crate like Axum)
 RUN mkdir -p src && \
@@ -26,51 +24,51 @@ RUN mkdir -p src && \
 
 # Install deps only (caches target/ for next layers)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/backend/target \
     cargo build --release
 
-# Copy real source (overwrites dummy)
-COPY src ./src
+# Copy real backend source (overwrites dummy)
+COPY backend/src ./src
+COPY backend/diesel.toml ./
+COPY backend/migrations ./migrations
 
-    # Full build with real code (uses cached deps)
+# Full build with real code (uses cached deps)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/backend/target \
     cargo build --release && \
-    cp /app/target/release/backend /tmp/backend
-
-# Debug: Inspect the output
-RUN ls -la /app/target/release/
-RUN if [ -f /app/target/release/backend ]; then \
-      echo "Binary found!"; \
-      file /app/target/release/backend; \
-      stat /app/target/release/backend; \
-    else \
-      echo "Binary NOT found!"; \
-      find /app/target -name "backend" -type f || true; \
-    fi
+    cp /app/backend/target/release/backend /tmp/backend
 
 # Runtime stage
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+
+# Install runtime deps (Ubuntu/Debian compatible)
+RUN apt-get update && \
+    apt-get install -y ca-certificates libssl3 libsqlite3-0 wget openssl bash && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
+# Copy binary and diesel CLI from builder
 COPY --from=builder /tmp/backend /usr/local/bin/backend
+COPY --from=builder /usr/local/cargo/bin/diesel /usr/local/bin/diesel
 
-# Copy static files (if any)
-COPY static ./static
+# Copy static files, migrations, and diesel config
+COPY backend/static ./static
+COPY backend/migrations ./migrations
+COPY backend/diesel.toml ./diesel.toml
 
-# Public env defaults (overridable via compose/Coolify)
-ENV ENVIRONMENT=staging
-ENV DATABASE_URL=/app/data/database.db
-ENV FRONTEND_URL=http://localhost
-ENV SERVER_URL_OAUTH=http://localhost:3000
-ENV GOOGLE_CALENDAR_CLIENT_ID=default-client-id-for-testing
-ENV GOOGLE_CALENDAR_CLIENT_SECRET=default-secret-for-testing
-ENV UBER_API_URL=https://login.uber.com
-ENV UBER_CLIENT_ID=default-uber-client-id-for-testing
-ENV UBER_CLIENT_SECRET=default-uber-secret-for-testing
+# Copy init script
+COPY init.sh /usr/local/bin/init.sh
+RUN chmod +x /usr/local/bin/init.sh
 
-RUN mkdir -p /app/data
-VOLUME /app/data
+# Create data directories
+RUN mkdir -p /app/data /app/uploads
 
+# Set volumes for persistence
+VOLUME ["/app/data", "/app/uploads"]
+
+# Expose internal port
 EXPOSE 3100
-CMD ["backend"]
+
+# Use init script as entrypoint
+CMD ["/usr/local/bin/init.sh"]
