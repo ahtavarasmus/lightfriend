@@ -1529,3 +1529,14 @@ button[type="submit"].loading::after {
     }
 }
 
+/* Usage status indicator styles */
+.recommendation-link {
+    color: #7EB2FF;
+    text-decoration: underline;
+    font-size: 0.8rem;
+}
+
+.recommendation-link:hover {
+    color: #9ec5ff;
+}
+

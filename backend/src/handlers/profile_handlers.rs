@@ -77,6 +77,7 @@ pub struct ProfileResponse {
     nearby_places: Option<String>,
     phone_number_country: Option<String>,
     server_ip: Option<String>,
+    plan_type: Option<String>, // "monitor" or "digest"
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -239,6 +240,7 @@ pub async fn get_profile(
                 nearby_places: user_info.nearby_places,
                 phone_number_country: phone_country,
                 server_ip: user_settings.server_ip,
+                plan_type: user.plan_type,
             }))
         }
         None => Err((
@@ -253,67 +255,6 @@ pub async fn get_profile(
 pub struct NotifyCreditsRequest {
     notify: bool,
 }
-
-#[derive(Deserialize)]
-pub struct PreferredNumberRequest {
-    preferred_number: String,
-}
-
-pub async fn update_preferred_number(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<PreferredNumberRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Get user and settings to check their subscription status
-    let user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
-
-    let preferred_number = if user.discount_tier.is_some() {
-        // If user has a discount_tier, get their dedicated number from environment
-        let env_var_name = format!("TWILIO_USER_PHONE_NUMBER_{}", auth_user.user_id);
-        std::env::var(&env_var_name).map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("No dedicated phone number found for user {}", auth_user.user_id)}))
-        ))?
-    } else {
-        // If no discount_tier, validate the requested number is allowed
-        let allowed_numbers = vec![
-            std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
-            std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
-            std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
-            std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-        ];
-        
-        if !allowed_numbers.contains(&request.preferred_number) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid preferred number. Must be one of the allowed Twilio numbers"}))
-            ));
-        }
-        request.preferred_number.clone()
-    };
-
-    // Update preferred number
-    state.user_core.update_preferred_number(auth_user.user_id, &preferred_number)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
-
-    println!("Updated preferred number to: {}", preferred_number);
-    Ok(Json(json!({
-        "message": "Preferred number updated successfully"
-    })))
-}
-
-
 
 pub async fn update_notify(
     State(state): State<Arc<AppState>>,
@@ -506,30 +447,6 @@ pub async fn patch_profile_field(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
-        }
-        "preferred_number" => {
-            let value = if request.value.is_null() {
-                None
-            } else {
-                Some(request.value.as_str().ok_or_else(|| (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "preferred_number must be a string or null"}))
-                ))?)
-            };
-            match value {
-                Some(v) if !v.is_empty() => {
-                    state.user_core.update_preferred_number(user_id, v).map_err(|e| (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)}))
-                    ))?;
-                }
-                _ => {
-                    state.user_core.clear_preferred_number(user_id).map_err(|e| (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)}))
-                    ))?;
-                }
-            }
         }
         _ => {
             return Err((
@@ -899,10 +816,10 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
     ];
     let mut country: Option<String> = None;
 
-    println!("phone_number: {}, len: {}", phone_number, phone_number.len());
+    tracing::debug!("phone_number: {}, len: {}", phone_number, phone_number.len());
     if phone_number.starts_with("+1") {
         let area_code = phone_number.get(0..5).unwrap_or_default();
-        println!("Extracted area code: {}", area_code);
+        tracing::debug!("Extracted area code: {}", area_code);
         if ca_area_codes.contains(&area_code.to_string()) {
             country = Some("CA".to_string());
         } else if us_area_codes.contains(&area_code.to_string()) {
@@ -920,7 +837,7 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
         country = Some("Other".to_string()); // Or None if preferred
     }
 
-    println!("country: {:#?}", country);
+    tracing::debug!("country: {:#?}", country);
 
     if let Some(ref c) = country {
         state.user_core.update_phone_number_country(user_id, Some(c))?;
@@ -931,26 +848,95 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
     Ok(country)
 }
 
+/// Recalculate credits_left when user changes phone country
+/// Uses proportional transfer: preserves the percentage of monthly allowance remaining
+async fn recalculate_credits_for_country_change(
+    state: &Arc<AppState>,
+    user_id: i32,
+    old_country: Option<&str>,
+    new_country: Option<&str>,
+    old_credits_left: f32,
+    plan_type: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::api::twilio_availability::get_byot_pricing;
+
+    // Determine plan messages (40 for monitor, 120 for digest)
+    let plan_messages: f32 = match plan_type {
+        Some("digest") => 120.0,
+        _ => 40.0, // monitor or default
+    };
+
+    // Check if country is US/CA
+    let is_us_ca = |c: Option<&str>| matches!(c, Some("US") | Some("CA"));
+
+    // Get max credits for a country
+    // US/CA: credits_left is message count (200 for monitor-like, 400 for digest-like)
+    // Euro: credits_left is € value = plan_messages × 3 × sms_price × 1.3
+    let get_max_credits = async |country: Option<&str>| -> f32 {
+        if is_us_ca(country) {
+            // US/CA: message count
+            if plan_messages >= 120.0 { 400.0 } else { 200.0 }
+        } else if let Some(c) = country {
+            // Euro: € value based on SMS pricing
+            if let Ok(pricing) = get_byot_pricing(state, c).await {
+                if let Some(sms_price) = pricing.sms_price_per_segment {
+                    // Max credits = plan_messages × 3 segments × sms_price × 1.3 VAT
+                    return plan_messages * 3.0 * sms_price * 1.3;
+                }
+            }
+            // Fallback: assume €0.10 per segment
+            plan_messages * 3.0 * 0.10 * 1.3
+        } else {
+            // Unknown country fallback
+            plan_messages * 3.0 * 0.10 * 1.3
+        }
+    };
+
+    let old_max = get_max_credits(old_country).await;
+    let new_max = get_max_credits(new_country).await;
+
+    if old_max <= 0.0 || new_max <= 0.0 {
+        tracing::warn!("Invalid max credits: old={}, new={}", old_max, new_max);
+        return Ok(());
+    }
+
+    // Calculate ratio of remaining allowance (capped at 1.0)
+    let ratio = (old_credits_left / old_max).min(1.0);
+
+    // Apply ratio to new country's max
+    let new_credits_left = new_max * ratio;
+
+    tracing::info!(
+        "Credit recalculation: user={}, old_country={:?}, new_country={:?}, \
+         old_credits={:.2}, old_max={:.2}, ratio={:.2}, new_credits={:.2}",
+        user_id, old_country, new_country, old_credits_left, old_max, ratio, new_credits_left
+    );
+
+    // Update credits_left
+    state.user_repository.update_user_credits_left(user_id, new_credits_left)?;
+
+    Ok(())
+}
 
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Updating profile with notification type: {:?}", update_req.notification_type);
+    tracing::debug!("Updating profile with notification type: {:?}", update_req.notification_type);
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {
-        println!("Invalid email format: {}", update_req.email);
+        tracing::debug!("Invalid email format: {}", update_req.email);
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid email format"}))
         ));
     }
-   
+
     let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
     if !phone_regex.is_match(&update_req.phone_number) {
-        println!("Invalid phone number format: {}", update_req.phone_number);
+        tracing::debug!("Invalid phone number format: {}", update_req.phone_number);
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
@@ -964,6 +950,20 @@ pub async fn update_profile(
             Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"}))
         ));
     }
+
+    // Get user's current data BEFORE updating (for credit recalculation)
+    let current_user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+    let old_country = current_user.phone_number_country.clone();
+    let old_credits_left = current_user.credits_left;
+
     match state.user_core.update_profile(
         auth_user.user_id,
         &update_req.email,
@@ -986,9 +986,27 @@ pub async fn update_profile(
                 ));
             }
             // Set phone country after update
-            if let Err(e) = set_user_phone_country(&state, auth_user.user_id, &update_req.phone_number).await {
-                tracing::error!("Failed to set phone country after profile update: {}", e);
-                // Continue anyway, as it's non-critical
+            let new_country = match set_user_phone_country(&state, auth_user.user_id, &update_req.phone_number).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Failed to set phone country after profile update: {}", e);
+                    None
+                }
+            };
+
+            // Recalculate credits if country changed and user has credits_left
+            if old_country != new_country && old_credits_left > 0.0 && current_user.sub_tier.is_some() {
+                if let Err(e) = recalculate_credits_for_country_change(
+                    &state,
+                    auth_user.user_id,
+                    old_country.as_deref(),
+                    new_country.as_deref(),
+                    old_credits_left,
+                    current_user.plan_type.as_deref(),
+                ).await {
+                    tracing::error!("Failed to recalculate credits after country change: {}", e);
+                    // Continue anyway, user keeps their credits
+                }
             }
         }, Err(DieselError::NotFound) => {
             return Err((
@@ -1155,11 +1173,11 @@ pub async fn update_critical_settings(
     auth_user: AuthUser,
     Json(request): Json<UpdateCriticalRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received update_critical_settings request: enabled={:?}, call_notify={:?}, action={:?}",
+    tracing::debug!("Received update_critical_settings request: enabled={:?}, call_notify={:?}, action={:?}",
         request.enabled, request.call_notify, request.action_on_critical_message);
 
     if let Some(enabled) = request.enabled {
-        println!("Updating critical_enabled to: {:?}", enabled);
+        tracing::debug!("Updating critical_enabled to: {:?}", enabled);
         if let Err(e) = state.user_core.update_critical_enabled(auth_user.user_id, enabled) {
             tracing::error!("Failed to update critical enabled setting: {}", e);
             return Err((
@@ -1275,7 +1293,7 @@ pub async fn delete_user(
     // First verify the user exists
     match state.user_core.find_by_id(user_id) {
         Ok(Some(_)) => {
-            println!("user exists");
+            tracing::debug!("user exists");
             // User exists, proceed with deletion
             match state.user_core.delete_user(user_id) {
                 Ok(_) => {

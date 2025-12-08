@@ -6,11 +6,41 @@ use yew_router::components::Link;
 use crate::utils::api::Api;
 use web_sys::{window, HtmlInputElement, UrlSearchParams};
 use serde_json::{json, Value};
+use serde::Deserialize;
 use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
 use crate::profile::settings::SettingsPage;
+use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
 use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
+
+#[derive(Deserialize)]
+struct TotpStatusResponse {
+    enabled: bool,
+}
+
+/// Usage projection response from backend (for simplified status display)
+#[derive(Clone, PartialEq, Deserialize)]
+struct UsageProjectionResponse {
+    plan_type: Option<String>,
+    status: String,
+    usage_percentage: f32,
+    usage_percentage_display: String,
+    overage_days_remaining: Option<i32>,
+    estimated_monthly_extra_cost: Option<f32>,
+    recommendation: Option<UsageRecommendation>,
+    overage_credits: f32,
+    has_auto_topup: bool,
+    days_until_billing: Option<i32>,
+    is_example_data: bool,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct UsageRecommendation {
+    message: String,
+    action_type: String,
+    action_link: Option<String>,
+}
 
 fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
     html! {
@@ -60,7 +90,8 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
-    Personal,
+    Billing,
+    Settings,
 }
 
 pub fn is_logged_in() -> bool {
@@ -106,41 +137,131 @@ fn MagicLinkSection(props: &MagicLinkProps) -> Html {
     }
 }
 
-#[derive(Properties, PartialEq)]
-struct MonthlyCreditsProps {
-    pub profile: UserProfile,
+/// Usage status indicator component - compact inline display
+#[derive(Properties, PartialEq, Clone)]
+struct UsageStatusIndicatorProps {
+    pub data: Option<UsageProjectionResponse>,
+    pub loading: bool,
+    pub on_details_click: Callback<()>,
 }
 
 #[function_component]
-fn MonthlyCredits(props: &MonthlyCreditsProps) -> Html {
-    let profile = &props.profile;
+fn UsageStatusIndicator(props: &UsageStatusIndicatorProps) -> Html {
+    let on_details = props.on_details_click.clone();
+
+    if props.loading {
+        return html! {
+            <span style="color: #999; font-size: 0.85rem;">{"..."}</span>
+        };
+    }
+
+    let Some(data) = props.data.clone() else {
+        return html! {};
+    };
+
+    // Determine status color based on percentage and overage buffer
+    let days_buffer = data.overage_days_remaining.unwrap_or(0);
+    let status_color = if data.has_auto_topup {
+        "#4ade80" // green - auto top-up covers overage
+    } else if data.usage_percentage > 100.0 {
+        // Over quota - check overage credits buffer
+        if days_buffer > 90 {
+            "#4ade80" // green - credits cover 3+ months
+        } else if days_buffer > 60 {
+            "#fbbf24" // yellow - credits cover 2-3 months
+        } else {
+            "#f87171" // red - credits cover less than 2 months
+        }
+    } else if data.usage_percentage > 95.0 {
+        "#fbbf24" // yellow - warning
+    } else {
+        "#4ade80" // green - on track
+    };
+
+    // Format percentage - change "used" to "projected"
+    let percentage = data.usage_percentage_display.replace("used", "projected");
+
+    // Secondary info based on percentage (warn at 95%+)
+    let secondary_info = if data.usage_percentage > 95.0 {
+        if data.has_auto_topup {
+            data.estimated_monthly_extra_cost.map(|cost| format!("~{:.0}EUR extra/mo", cost))
+        } else if data.overage_credits > 0.0 {
+            data.overage_days_remaining.map(|days| {
+                if days <= 1 { "credits low".to_string() } else { format!("~{} days buffer", days) }
+            })
+        } else {
+            None
+        }
+    } else if data.overage_credits > 0.0 {
+        Some(format!("{:.2}EUR buffer", data.overage_credits))
+    } else {
+        None
+    };
+
     html! {
-        <div class="credit-item" tabindex="0">
-            <span class="credit-label">{"Monthly Message Quota"}</span>
-            <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
+        <span style="display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;">
+            <span style={format!("color: {}; font-weight: 600;", status_color)}>
+                {
+                    if data.has_auto_topup {
+                        "OK" // auto top-up covers any overage
+                    } else if data.usage_percentage > 100.0 {
+                        // Over quota - check overage credits buffer
+                        if days_buffer > 90 {
+                            "OK" // credits cover 3+ months
+                        } else if days_buffer > 60 {
+                            "!" // credits cover 2-3 months
+                        } else {
+                            "!!" // credits cover less than 2 months
+                        }
+                    } else if data.usage_percentage > 95.0 {
+                        "!"
+                    } else {
+                        "OK"
+                    }
+                }
+            </span>
+            <span style="color: #aaa; font-size: 0.85rem;">{percentage}</span>
             {
-                if let Some(days) = profile.days_until_billing {
+                if let Some(ref info) = secondary_info {
                     html! {
-                        <span class="reset-timer">
-                            {
-                                if days == 0 {
-                                    "Resets today".to_string()
-                                } else if days == 1 {
-                                    "Resets in 1 day".to_string()
-                                } else {
-                                    format!("Resets in {} days", days)
-                                }
-                            }
+                        <span style="color: #777; font-size: 0.8rem;">{format!("({})", info)}</span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if data.is_example_data {
+                    html! {
+                        <span style="color: #666; font-size: 0.75rem; font-style: italic;">{"est."}</span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(ref rec) = data.recommendation {
+                    html! {
+                        <span style="color: #7EB2FF; font-size: 0.8rem;">
+                            {format!("- {}", match rec.action_type.as_str() {
+                                "reduce_digests" => "reduce digests",
+                                "upgrade_plan" => "upgrade plan",
+                                "enable_topup" => "enable top-up",
+                                _ => "see billing",
+                            })}
                         </span>
                     }
                 } else {
                     html! {}
                 }
             }
-            <div class="credit-tooltip">
-                {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 2 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
-            </div>
-        </div>
+            <a href="#" onclick={Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                on_details.emit(());
+            })} style="color: #7EB2FF; text-decoration: none; font-size: 0.8rem;">
+                {"details"}
+            </a>
+        </span>
     }
 }
 
@@ -157,6 +278,48 @@ pub fn Home() -> Html {
     let magic_link = use_state(|| None::<String>);
     let magic_error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
+    let totp_enabled = use_state(|| None::<bool>);
+    let banner_dismissed = use_state(|| {
+        window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .and_then(|s| s.get_item("twofa_banner_dismissed").ok().flatten())
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    });
+
+    // Usage status data - lifted to Home to prevent re-fetching on tab change
+    let usage_data = use_state(|| None::<UsageProjectionResponse>);
+    let usage_loading = use_state(|| true);
+
+    // Refetch usage data callback - can be called when switching to Billing tab
+    let refetch_usage = {
+        let usage_data = usage_data.clone();
+        let usage_loading = usage_loading.clone();
+        Callback::from(move |_: ()| {
+            let usage_data = usage_data.clone();
+            let usage_loading = usage_loading.clone();
+            spawn_local(async move {
+                if let Ok(resp) = Api::get("/api/pricing/usage-projection").send().await {
+                    if resp.ok() {
+                        if let Ok(data) = resp.json::<UsageProjectionResponse>().await {
+                            usage_data.set(Some(data));
+                        }
+                    }
+                }
+                usage_loading.set(false);
+            });
+        })
+    };
+
+    // Fetch usage data once on mount
+    {
+        let refetch_usage = refetch_usage.clone();
+        use_effect_with_deps(move |_| {
+            refetch_usage.emit(());
+            || ()
+        }, ());
+    }
+
     let refetch_profile = {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
@@ -230,27 +393,23 @@ pub fn Home() -> Html {
     };
 
     // Check for OAuth success parameters
+    // Handle URL query params for success messages and tab switching
     {
         let success = success.clone();
+        let active_tab = active_tab.clone();
+        let navigator = navigator.clone();
         use_effect_with_deps(move |_| {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
-                let success_message = if params.get("tesla").as_deref() == Some("success") {
-                    Some("Tesla account connected successfully!")
-                } else if params.get("uber").as_deref() == Some("success") {
-                    Some("Uber account connected successfully!")
-                } else if params.get("google_calendar").as_deref() == Some("success") {
-                    Some("Google Calendar connected successfully!")
-                } else if params.get("google_tasks").as_deref() == Some("success") {
-                    Some("Google Tasks connected successfully!")
-                } else {
-                    None
-                };
+                // Check for subscription success - redirect to set-password page
+                if params.get("subscription").as_deref() == Some("success") {
+                    navigator.push(&Route::SetPassword);
+                } else if params.get("subscription").as_deref() == Some("canceled") {
+                    // Check for subscription canceled - show on Billing tab
+                    success.set(Some("Subscription canceled successfully.".to_string()));
+                    active_tab.set(DashboardTab::Billing);
 
-                if let Some(message) = success_message {
-                    success.set(Some(message.to_string()));
-
-                    // Clean up the URL after showing the message
+                    // Clean up the URL
                     if let Some(window) = window() {
                         if let Ok(history) = window.history() {
                             let _ = history.replace_state_with_url(
@@ -258,6 +417,47 @@ pub fn Home() -> Html {
                                 "",
                                 Some("/")
                             );
+                        }
+                    }
+                } else if params.has("billing") {
+                    // Check for billing tab param (for returning from Stripe portal, etc.)
+                    active_tab.set(DashboardTab::Billing);
+
+                    // Clean up the URL
+                    if let Some(window) = window() {
+                        if let Ok(history) = window.history() {
+                            let _ = history.replace_state_with_url(
+                                &wasm_bindgen::JsValue::NULL,
+                                "",
+                                Some("/")
+                            );
+                        }
+                    }
+                } else {
+                    let success_message = if params.get("tesla").as_deref() == Some("success") {
+                        Some("Tesla account connected successfully!")
+                    } else if params.get("uber").as_deref() == Some("success") {
+                        Some("Uber account connected successfully!")
+                    } else if params.get("google_calendar").as_deref() == Some("success") {
+                        Some("Google Calendar connected successfully!")
+                    } else if params.get("google_tasks").as_deref() == Some("success") {
+                        Some("Google Tasks connected successfully!")
+                    } else {
+                        None
+                    };
+
+                    if let Some(message) = success_message {
+                        success.set(Some(message.to_string()));
+
+                        // Clean up the URL after showing the message
+                        if let Some(window) = window() {
+                            if let Ok(history) = window.history() {
+                                let _ = history.replace_state_with_url(
+                                    &wasm_bindgen::JsValue::NULL,
+                                    "",
+                                    Some("/")
+                                );
+                            }
                         }
                     }
                 }
@@ -341,6 +541,26 @@ pub fn Home() -> Html {
             || ()
         }, ());
     }
+    // Fetch TOTP status when authenticated
+    {
+        let totp_enabled = totp_enabled.clone();
+        let auth_status = auth_status.clone();
+        use_effect_with_deps(move |auth| {
+            if **auth == Some(true) {
+                let totp_enabled = totp_enabled.clone();
+                spawn_local(async move {
+                    if let Ok(resp) = Api::get("/api/totp/status").send().await {
+                        if resp.ok() {
+                            if let Ok(status) = resp.json::<TotpStatusResponse>().await {
+                                totp_enabled.set(Some(status.enabled));
+                            }
+                        }
+                    }
+                });
+            }
+            || ()
+        }, auth_status);
+    }
     // Render based on authentication status
     match *auth_status {
         None => {
@@ -357,17 +577,49 @@ pub fn Home() -> Html {
             // Not authenticated - show landing page
             html! { <Landing /> }
         }
-        Some(true) if !*user_verified => {
-            // Authenticated but not verified - redirect to verify page
-            navigator.push(&Route::Verify);
-            html! {}
-        }
         Some(true) => {
-            // Authenticated and verified - show dashboard
+            // Authenticated - show dashboard
+            let on_dismiss_banner = {
+                let banner_dismissed = banner_dismissed.clone();
+                Callback::from(move |_: MouseEvent| {
+                    banner_dismissed.set(true);
+                    if let Some(w) = window() {
+                        if let Ok(Some(storage)) = w.local_storage() {
+                            let _ = storage.set_item("twofa_banner_dismissed", "true");
+                        }
+                    }
+                })
+            };
+            let on_setup_2fa = {
+                let active_tab = active_tab.clone();
+                Callback::from(move |e: MouseEvent| {
+                    e.prevent_default();
+                    active_tab.set(DashboardTab::Settings);
+                })
+            };
         html! {
             <>
                 <div class="dashboard-container">
                     <h1 class="panel-title">{"Dashboard"}</h1>
+                    {
+                        if *totp_enabled == Some(false) && !*banner_dismissed {
+                            html! {
+                                <div class="twofa-banner">
+                                    <div class="twofa-banner-content">
+                                        <span class="twofa-banner-text">
+                                            {"Secure your account with two-factor authentication. "}
+                                            <a onclick={on_setup_2fa}>{"Set up 2FA"}</a>
+                                        </span>
+                                    </div>
+                                    <button class="twofa-banner-dismiss" onclick={on_dismiss_banner}>
+                                        {"✕"}
+                                    </button>
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                     {
                         if let Some(success_msg) = (*success).as_ref() {
                             html! {
@@ -388,89 +640,55 @@ pub fn Home() -> Html {
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
                                 if profile.sub_tier.as_deref() != Some("tier 3") {
+                                    let active_tab_for_usage = active_tab.clone();
+                                    let refetch_usage_for_details = refetch_usage.clone();
                                     html! {
                                         <div class="credits-info">
-                                            <div class="credits-grid">
-                                                {
-                                                    if let Some(ref _tier) = profile.sub_tier {
-                                                        html! {
-                                                            <>
+                                            {
+                                                if profile.sub_tier.is_some() {
+                                                    // Subscribed user - compact info row
+                                                    html! {
+                                                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                                            // Phone number row
+                                                            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                                                <span style="color: #888; font-size: 0.85rem;">{"Number:"}</span>
                                                                 {
-                                                                    if profile.days_until_billing.is_some() || profile.credits_left > 0.0 {
-                                                                        html! { <MonthlyCredits profile={profile.clone()} /> }
-                                                                    } else {
-                                                                        html! {}
-                                                                    }
-                                                                }
-                                                                {
-                                                                    if profile.credits > 0.00 {
+                                                                    if let Some(num) = &profile.preferred_number {
                                                                         html! {
-                                                                            <div class="credit-item" tabindex="0">
-                                                                                <span class="credit-label">{"Overage Credits"}</span>
-                                                                                <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
-                                                                                <div class="credit-tooltip">
-                                                                                    {"Your overage credits. Check how they are used in the pricing page under 'Message Costs (Credits)'."}
-                                                                                </div>
-                                                                            </div>
+                                                                            <span style="color: #7EB2FF; font-weight: 500;">{num}</span>
                                                                         }
                                                                     } else {
-                                                                        html! {}
-                                                                    }
-                                                                }
-                                                                <div class="credit-item" tabindex="0">
-                                                                    <span class="credit-label">{"Lightfriend's Number"}</span>
-                                                                    {
-                                                                        if let Some(num) = &profile.preferred_number {
-                                                                            html! {
-                                                                                <span class="credit-value" style="color: #7EB2FF;">{num}</span>
-                                                                            }
-                                                                        } else {
-                                                                            html! {
-                                                                                <span class="credit-value" style="color: #ff4444;">{"No number configured"}</span>
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    <div class="credit-tooltip">
-                                                                        {"Your lightfriend's phone number for receiving messages."}
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        }
-                                                    } else {
-                                                        html! {
-                                                            <>
-                                                                {
-                                                                    if profile.days_until_billing.is_some() || profile.credits_left > 0.0 {
-                                                                        html! { <MonthlyCredits profile={profile.clone()} /> }
-                                                                    } else {
-                                                                        html! {}
-                                                                    }
-                                                                }
-                                                                {
-                                                                    if profile.credits > 0.00 {
                                                                         html! {
-                                                                            <div class="credit-item" tabindex="0">
-                                                                                <span class="credit-label">{"Overage Credits"}</span>
-                                                                                <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
-                                                                                <div class="credit-tooltip">
-                                                                                    {"Your overage credits. Check how they are used in the pricing page under 'Message Costs (Credits)'."}
-                                                                                </div>
-                                                                            </div>
+                                                                            <span style="color: #ff4444;">{"Not configured"}</span>
                                                                         }
-                                                                    } else {
-                                                                        html! {}
                                                                     }
                                                                 }
-                                                                <div class="subscription-promo">
-                                                                    <Link<Route> to={Route::Pricing} classes="promo-link">
-                                                                        {"Subscribe to start →"}
-                                                                    </Link<Route>>
-                                                                </div>
-                                                            </>
-                                                        }
+                                                            </div>
+                                                            // Usage status row
+                                                            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                                                <span style="color: #888; font-size: 0.85rem;">{"Usage:"}</span>
+                                                                <UsageStatusIndicator
+                                                                    data={(*usage_data).clone()}
+                                                                    loading={*usage_loading}
+                                                                    on_details_click={Callback::from(move |_| {
+                                                                        active_tab_for_usage.set(DashboardTab::Billing);
+                                                                        refetch_usage_for_details.emit(());
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                } else {
+                                                    // Non-subscribed user - show subscribe prompt
+                                                    html! {
+                                                        <div class="subscription-promo">
+                                                            <Link<Route> to={Route::Pricing} classes="promo-link">
+                                                                {"Subscribe to start ->"}
+                                                            </Link<Route>>
+                                                        </div>
                                                     }
                                                 }
-                                            </div>
+                                            }
                                         </div>
                                     }
                                 } else {
@@ -567,13 +785,26 @@ pub fn Home() -> Html {
                                                 {"Connections"}
                                             </button>
                                             <button
-                                                class={classes!("tab-button", (*active_tab == DashboardTab::Personal).then(|| "active"))}
+                                                class={classes!("tab-button", (*active_tab == DashboardTab::Billing).then(|| "active"))}
                                                 onclick={{
                                                     let active_tab = active_tab.clone();
-                                                    Callback::from(move |_| active_tab.set(DashboardTab::Personal))
+                                                    let refetch_usage = refetch_usage.clone();
+                                                    Callback::from(move |_| {
+                                                        active_tab.set(DashboardTab::Billing);
+                                                        refetch_usage.emit(());
+                                                    })
                                                 }}
                                             >
-                                                {"Personal"}
+                                                {"Billing"}
+                                            </button>
+                                            <button
+                                                class={classes!("tab-button", (*active_tab == DashboardTab::Settings).then(|| "active"))}
+                                                onclick={{
+                                                    let active_tab = active_tab.clone();
+                                                    Callback::from(move |_| active_tab.set(DashboardTab::Settings))
+                                                }}
+                                            >
+                                                {"Settings"}
                                             </button>
                                         </div>
                                         {
@@ -625,8 +856,23 @@ pub fn Home() -> Html {
                                                         }
                                                     </div>
                                                 },
-                                                DashboardTab::Personal => html! {
-                                                    <div class="personal-tab">
+                                                DashboardTab::Billing => html! {
+                                                    <div class="billing-tab">
+                                                        {
+                                                            if let Some(profile) = (*profile_data).as_ref() {
+                                                                html! {
+                                                                    <BillingPage user_profile={profile.clone()} />
+                                                                }
+                                                            } else {
+                                                                html! {
+                                                                    <div class="loading-profile">{"Loading billing..."}</div>
+                                                                }
+                                                            }
+                                                        }
+                                                    </div>
+                                                },
+                                                DashboardTab::Settings => html! {
+                                                    <div class="settings-tab">
                                                         {
                                                             if let Some(profile) = (*profile_data).as_ref() {
                                                                 html! {
@@ -676,6 +922,44 @@ pub fn Home() -> Html {
                 </div>
                 <style>
                     {r#"
+                        .twofa-banner {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            background: rgba(30, 144, 255, 0.1);
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            border-radius: 8px;
+                            padding: 0.75rem 1rem;
+                            margin-bottom: 1.5rem;
+                        }
+                        .twofa-banner-content {
+                            display: flex;
+                            align-items: center;
+                            gap: 0.75rem;
+                        }
+                        .twofa-banner-text {
+                            color: #ccc;
+                            font-size: 0.9rem;
+                        }
+                        .twofa-banner-text a {
+                            color: #1E90FF;
+                            cursor: pointer;
+                            text-decoration: none;
+                        }
+                        .twofa-banner-text a:hover {
+                            text-decoration: underline;
+                        }
+                        .twofa-banner-dismiss {
+                            background: transparent;
+                            border: none;
+                            color: #666;
+                            cursor: pointer;
+                            font-size: 1rem;
+                            padding: 0.25rem;
+                        }
+                        .twofa-banner-dismiss:hover {
+                            color: #999;
+                        }
                         .status-section {
                             display: flex;
                             align-items: center;
@@ -812,6 +1096,19 @@ pub fn Home() -> Html {
                             font-size: 1.1rem;
                             font-weight: 500;
                         }
+                        .credit-equivalents {
+                            color: #888;
+                            font-size: 0.75rem;
+                            margin-top: 0.25rem;
+                            text-align: center;
+                            line-height: 1.3;
+                        }
+                        .credit-equivalents-main {
+                            color: #7EB2FF;
+                            font-size: 0.9rem;
+                            text-align: center;
+                            line-height: 1.4;
+                        }
                         .reset-timer {
                             display: block;
                             color: #999;
@@ -908,6 +1205,9 @@ pub fn Home() -> Html {
                         }
                         .tab-button:hover {
                             color: #7EB2FF;
+                        }
+                        .connections-tab, .billing-tab, .settings-tab {
+                            min-height: 400px;
                         }
                         .feature-status {
                             margin-top: 3rem;

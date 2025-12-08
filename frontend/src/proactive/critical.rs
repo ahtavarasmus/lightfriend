@@ -259,24 +259,8 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "AU" => "$",
         _ => "$",
     };
-    let sms_extra: Html = match country {
-        "US" => html! { <span>{" (1/2 Message)"}</span> },
-        "FI" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
-        "NL" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
-        "UK" => html! { <span>{format!(" (£{:.2} per message)", 0.15)}</span> },
-        "AU" => html! { <span>{format!(" (${:.2} per message)", 0.15)}</span> },
-        "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
-        _ => html! {},
-    };
-    let call_extra: Html = match country {
-        "US" => html! { <span>{" (1/2 Message)"}</span> },
-        "FI" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
-        "NL" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
-        "UK" => html! { <span>{format!(" (£{:.2} per call)", 0.15)}</span> },
-        "AU" => html! { <span>{format!(" (${:.2} per call)", 0.15)}</span> },
-        "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
-        _ => html! {},
-    };
+    let sms_extra: Html = html! {};
+    let call_extra: Html = html! {};
     let toggle_message_info = {
         let show_message_info = show_message_info.clone();
         Callback::from(move |_| show_message_info.set(!*show_message_info))
@@ -571,17 +555,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                     }}
                 </div>
                 <div class="flow-description">
-                    {if country == "US" {
-                        format!(
-                            "Instant alerts for urgent items. Usage: ~{:.1}/day, est. cost: {:.2} Messages/month",
-                            *average_critical, *estimated_price / 0.5
-                        )
-                    } else {
-                        format!(
-                            "Instant alerts for urgent items. Usage: ~{:.1}/day, est. cost: {}{:.2}/month",
-                            *average_critical, currency, *estimated_price
-                        )
-                    }}
+                    {"Instant alerts for urgent items."}
                 </div>
             </div>
             <div class="critical-option">

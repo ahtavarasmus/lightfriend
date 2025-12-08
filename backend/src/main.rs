@@ -47,6 +47,7 @@ mod handlers {
     pub mod google_tasks;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
+    pub mod bridge_auth_common;
     pub mod signal_auth;
     pub mod signal_handlers;
     pub mod telegram_auth;
@@ -61,6 +62,8 @@ mod handlers {
     pub mod tesla_auth;
     pub mod google_maps;
     pub mod totp_handlers;
+    pub mod pricing_handlers;
+    pub mod webauthn_handlers;
 }
 mod utils {
     pub mod encryption;
@@ -74,6 +77,9 @@ mod utils {
     pub mod subaccount_lifecycle;
     pub mod notification_utils;
     pub mod tesla_keys;
+    pub mod country;
+    pub mod webauthn_config;
+    pub mod email;
 }
 mod proactive {
     pub mod utils;
@@ -95,6 +101,7 @@ mod api {
     pub mod elevenlabs_webhook;
     pub mod twilio_availability;
     pub mod tesla;
+    pub mod twilio_pricing;
 }
 mod error;
 mod models {
@@ -106,6 +113,7 @@ mod repositories {
     pub mod user_subscriptions;
     pub mod connection_auth;
     pub mod totp_repository;
+    pub mod webauthn_repository;
 }
 mod schema;
 mod jobs {
@@ -114,6 +122,7 @@ mod jobs {
 use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use repositories::totp_repository::TotpRepository;
+use repositories::webauthn_repository::WebauthnRepository;
 use handlers::{
     auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
     admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
@@ -151,7 +160,9 @@ pub struct AppState {
     phone_verify_otps: DashMap<String, (String, u64)>,
     pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
     totp_repository: Arc<TotpRepository>,
+    webauthn_repository: Arc<WebauthnRepository>,
     pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
+    session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
 }
 pub fn validate_env() {
     let required_vars = [
@@ -207,6 +218,7 @@ async fn main() {
     let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
+    let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
     let server_url_oauth = std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url = std::env::var("SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").unwrap_or_else(|_| "default-client-id-for-testing".to_string());
@@ -268,7 +280,9 @@ async fn main() {
         password_reset_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
+        webauthn_repository,
         pending_totp_logins: DashMap::new(),
+        session_to_token: DashMap::new(),
     });
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
@@ -327,8 +341,20 @@ async fn main() {
         .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
         .route("/api/phone-verify/verify", post(auth_handlers::verify_phone_verify))
         .route("/api/country-info", post(twilio_handlers::get_country_info))
+        .route("/api/pricing/notification-only", get(handlers::pricing_handlers::get_notification_only_countries_pricing))
+        .route("/api/pricing/euro-countries", get(handlers::pricing_handlers::get_euro_countries_pricing))
+        .route("/api/pricing/byot/{country_code}", get(handlers::pricing_handlers::get_byot_country_pricing))
         .route("/api/tier3/check-availability", get(self_host_handlers::check_tier3_availability))
-        .route("/api/totp/verify", post(handlers::totp_handlers::verify_login));
+        .route("/api/totp/verify", post(handlers::totp_handlers::verify_login))
+        // WebAuthn public routes (for login flow)
+        .route("/api/webauthn/login/start", post(handlers::webauthn_handlers::login_start))
+        .route("/api/webauthn/verify-login", post(handlers::webauthn_handlers::verify_login))
+        // Magic link and guest checkout routes (subscribe-first flow)
+        .route("/api/stripe/guest-checkout", post(stripe_handlers::create_guest_checkout))
+        .route("/api/auth/magic/{token}", get(auth_handlers::validate_magic_link))
+        .route("/api/auth/session-token/{session_id}", get(auth_handlers::get_token_from_session))
+        .route("/api/auth/set-password", post(auth_handlers::set_password_from_magic_link))
+        .route("/api/waitlist", post(auth_handlers::add_to_waitlist));
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
         .route("/testing", post(auth_handlers::testing_handler))
@@ -339,6 +365,7 @@ async fn main() {
         .route("/api/admin/broadcast-email", post(admin_handlers::broadcast_email))
         .route("/api/admin/usage-logs", get(admin_handlers::get_usage_logs))
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
+        .route("/api/admin/plan-type/{user_id}/{plan_type}", post(admin_handlers::update_plan_type))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
         .route("/api/admin/test-sms", post(admin_handlers::test_sms))
         .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
@@ -354,6 +381,15 @@ async fn main() {
         .route("/api/totp/disable", post(handlers::totp_handlers::disable))
         .route("/api/totp/status", get(handlers::totp_handlers::get_status))
         .route("/api/totp/backup-codes/regenerate", post(handlers::totp_handlers::regenerate_backup_codes))
+        // WebAuthn routes (passkeys)
+        .route("/api/webauthn/status", get(handlers::webauthn_handlers::get_status))
+        .route("/api/webauthn/passkeys", get(handlers::webauthn_handlers::list_passkeys))
+        .route("/api/webauthn/register/start", post(handlers::webauthn_handlers::register_start))
+        .route("/api/webauthn/register/finish", post(handlers::webauthn_handlers::register_finish))
+        .route("/api/webauthn/authenticate/start", post(handlers::webauthn_handlers::authenticate_start))
+        .route("/api/webauthn/authenticate/finish", post(handlers::webauthn_handlers::authenticate_finish))
+        .route("/api/webauthn/passkey", delete(handlers::webauthn_handlers::delete_passkey))
+        .route("/api/webauthn/passkey/rename", patch(handlers::webauthn_handlers::rename_passkey))
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/field", patch(profile_handlers::patch_profile_field))
@@ -361,10 +397,12 @@ async fn main() {
         .route("/api/profile/magic-link", get(self_host_handlers::get_magic_link))
         .route("/api/profile/twilio-phone", post(self_host_handlers::update_twilio_phone))
         .route("/api/profile/twilio-creds", post(self_host_handlers::update_twilio_creds))
+        .route("/api/profile/twilio-creds", delete(self_host_handlers::clear_twilio_creds))
         .route("/api/profile/textbee-creds", post(self_host_handlers::update_textbee_creds))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
-        .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
+        .route("/api/pricing/dashboard-credits", get(handlers::pricing_handlers::get_dashboard_credits))
+        .route("/api/pricing/usage-projection", get(handlers::pricing_handlers::get_usage_projection))
         .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
         .route("/api/profile/digests", post(profile_handlers::update_digests))
         .route("/api/profile/digests", get(profile_handlers::get_digests))

@@ -6,7 +6,9 @@ pub mod login {
     use yew_router::prelude::*;
     use crate::Route;
     use crate::config;
+    use crate::utils::webauthn;
     use gloo_console::log;
+
     #[derive(Serialize)]
     pub struct LoginRequest {
         email: String,
@@ -16,6 +18,15 @@ pub mod login {
     pub struct LoginResponse {
         token: String,
     }
+    // New 2FA response format
+    #[derive(Deserialize)]
+    struct TwoFaRequiredResponse {
+        requires_2fa: bool,
+        totp_enabled: bool,
+        webauthn_enabled: bool,
+        login_token: String,
+    }
+    // Legacy TOTP response (for backwards compatibility)
     #[derive(Deserialize)]
     struct TotpRequiredResponse {
         requires_totp: bool,
@@ -27,29 +38,47 @@ pub mod login {
         code: String,
         is_backup_code: bool,
     }
+    #[derive(Serialize)]
+    struct WebAuthnLoginStartRequest {
+        login_token: String,
+    }
+    #[derive(Serialize)]
+    struct WebAuthnVerifyRequest {
+        login_token: String,
+        response: serde_json::Value,
+    }
     #[derive(Deserialize)]
     struct ErrorResponse {
         error: String,
     }
+
     #[function_component]
     pub fn Login() -> Html {
-        let email= use_state(String::new);
+        let email = use_state(String::new);
         let password = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
-        // TOTP states
-        let totp_required = use_state(|| false);
-        let totp_token = use_state(String::new);
+        // 2FA states
+        let requires_2fa = use_state(|| false);
+        let totp_enabled = use_state(|| false);
+        let webauthn_enabled = use_state(|| false);
+        let login_token = use_state(String::new);
         let totp_code = use_state(String::new);
         let use_backup_code = use_state(|| false);
         let is_verifying = use_state(|| false);
+        let show_totp_form = use_state(|| false); // Which 2FA method is currently shown
+        let webauthn_supported = use_state(|| webauthn::is_webauthn_supported());
+
         let onsubmit = {
             let email = email.clone();
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-            let totp_required = totp_required.clone();
-            let totp_token = totp_token.clone();
+            let requires_2fa = requires_2fa.clone();
+            let totp_enabled = totp_enabled.clone();
+            let webauthn_enabled = webauthn_enabled.clone();
+            let login_token = login_token.clone();
+            let show_totp_form = show_totp_form.clone();
 
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
@@ -57,10 +86,14 @@ pub mod login {
                 let password = (*password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
-                let totp_required = totp_required.clone();
-                let totp_token = totp_token.clone();
+                let requires_2fa = requires_2fa.clone();
+                let totp_enabled = totp_enabled.clone();
+                let webauthn_enabled = webauthn_enabled.clone();
+                let login_token = login_token.clone();
+                let show_totp_form = show_totp_form.clone();
+
                 wasm_bindgen_futures::spawn_local(async move {
-                    println!("Attempting login for email: {}", &email);
+                    log!("Attempting login for email:", &email);
                     match Request::post(&format!("{}/api/login", config::get_backend_url()))
                         .credentials(web_sys::RequestCredentials::Include)
                         .json(&LoginRequest { email, password })
@@ -70,13 +103,32 @@ pub mod login {
                     {
                         Ok(response) => {
                             if response.ok() {
-                                // Check if TOTP is required
+                                // Check if 2FA is required
                                 if let Ok(text) = response.text().await {
-                                    if text.contains("requires_totp") {
+                                    // Try new 2FA format first
+                                    if text.contains("requires_2fa") {
+                                        if let Ok(resp) = serde_json::from_str::<TwoFaRequiredResponse>(&text) {
+                                            if resp.requires_2fa {
+                                                requires_2fa.set(true);
+                                                totp_enabled.set(resp.totp_enabled);
+                                                webauthn_enabled.set(resp.webauthn_enabled);
+                                                login_token.set(resp.login_token);
+                                                // Default to TOTP form if both are enabled and webauthn not supported
+                                                // Otherwise prefer WebAuthn
+                                                show_totp_form.set(!resp.webauthn_enabled || (resp.totp_enabled && !webauthn::is_webauthn_supported()));
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    // Try legacy TOTP format
+                                    else if text.contains("requires_totp") {
                                         if let Ok(totp_resp) = serde_json::from_str::<TotpRequiredResponse>(&text) {
                                             if totp_resp.requires_totp {
-                                                totp_required.set(true);
-                                                totp_token.set(totp_resp.totp_token);
+                                                requires_2fa.set(true);
+                                                totp_enabled.set(true);
+                                                webauthn_enabled.set(false);
+                                                login_token.set(totp_resp.totp_token);
+                                                show_totp_form.set(true);
                                                 return;
                                             }
                                         }
@@ -87,8 +139,6 @@ pub mod login {
                                 error_setter.set(None);
                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
 
-                                // Force a full page reload to ensure cookies are properly loaded
-                                // Increase delay to ensure cookies are saved
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
                                     gloo_timers::future::TimeoutFuture::new(2_000).await;
@@ -117,7 +167,7 @@ pub mod login {
         };
         // TOTP verification handler
         let on_totp_verify = {
-            let totp_token = totp_token.clone();
+            let login_token = login_token.clone();
             let totp_code = totp_code.clone();
             let use_backup_code = use_backup_code.clone();
             let error_setter = error.clone();
@@ -126,7 +176,7 @@ pub mod login {
 
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
-                let token = (*totp_token).clone();
+                let token = (*login_token).clone();
                 let code = (*totp_code).clone();
                 let is_backup = *use_backup_code;
                 let error_setter = error_setter.clone();
@@ -181,6 +231,133 @@ pub mod login {
                 });
             })
         };
+        // WebAuthn verification handler
+        let on_webauthn_verify = {
+            let login_token = login_token.clone();
+            let error_setter = error.clone();
+            let success_setter = success.clone();
+            let is_verifying = is_verifying.clone();
+
+            Callback::from(move |_: MouseEvent| {
+                let token = (*login_token).clone();
+                let error_setter = error_setter.clone();
+                let success_setter = success_setter.clone();
+                let is_verifying = is_verifying.clone();
+
+                is_verifying.set(true);
+                error_setter.set(None);
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    // Step 1: Get WebAuthn options from server
+                    let options_result = match Request::post(&format!("{}/api/webauthn/login/start", config::get_backend_url()))
+                        .credentials(web_sys::RequestCredentials::Include)
+                        .json(&WebAuthnLoginStartRequest {
+                            login_token: token.clone(),
+                        })
+                        .unwrap()
+                        .send()
+                        .await
+                    {
+                        Ok(resp) if resp.ok() => {
+                            match resp.json::<serde_json::Value>().await {
+                                Ok(json) => {
+                                    // The backend returns { "options": { "publicKey": { ... } } }
+                                    // Extract the inner "options" field for the WebAuthn API
+                                    if let Some(opts) = json.get("options") {
+                                        Ok(opts.clone())
+                                    } else {
+                                        // Fallback: maybe the response is already the options directly
+                                        Ok(json)
+                                    }
+                                },
+                                Err(e) => Err(format!("Failed to parse options: {:?}", e)),
+                            }
+                        }
+                        Ok(resp) => {
+                            let err = resp.json::<ErrorResponse>().await
+                                .map(|e| e.error)
+                                .unwrap_or_else(|_| format!("Server error: {}", resp.status()));
+                            Err(err)
+                        }
+                        Err(e) => Err(format!("Network error: {:?}", e)),
+                    };
+
+                    let options = match options_result {
+                        Ok(o) => o,
+                        Err(e) => {
+                            error_setter.set(Some(e));
+                            is_verifying.set(false);
+                            return;
+                        }
+                    };
+
+                    // Step 2: Get credential from browser
+                    let credential = match webauthn::get_credential(&options).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error_setter.set(Some(format!("WebAuthn error: {}", e)));
+                            is_verifying.set(false);
+                            return;
+                        }
+                    };
+
+                    // Step 3: Verify with server
+                    match Request::post(&format!("{}/api/webauthn/verify-login", config::get_backend_url()))
+                        .credentials(web_sys::RequestCredentials::Include)
+                        .json(&WebAuthnVerifyRequest {
+                            login_token: token,
+                            response: credential,
+                        })
+                        .unwrap()
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                log!("WebAuthn verification successful");
+                                error_setter.set(None);
+                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
+
+                                let window = web_sys::window().unwrap();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    gloo_timers::future::TimeoutFuture::new(2_000).await;
+                                    let _ = window.location().set_href("/");
+                                });
+                            } else {
+                                match response.json::<ErrorResponse>().await {
+                                    Ok(error_response) => {
+                                        error_setter.set(Some(error_response.error));
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Authentication failed".to_string()));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error_setter.set(Some(format!("Request failed: {}", e)));
+                        }
+                    }
+                    is_verifying.set(false);
+                });
+            })
+        };
+
+        // Toggle between TOTP and WebAuthn
+        let on_switch_to_totp = {
+            let show_totp_form = show_totp_form.clone();
+            Callback::from(move |_: MouseEvent| {
+                show_totp_form.set(true);
+            })
+        };
+
+        let on_switch_to_webauthn = {
+            let show_totp_form = show_totp_form.clone();
+            Callback::from(move |_: MouseEvent| {
+                show_totp_form.set(false);
+            })
+        };
+
         // Toggle backup code mode
         let on_toggle_backup = {
             let use_backup_code = use_backup_code.clone();
@@ -190,18 +367,21 @@ pub mod login {
                 totp_code.set(String::new());
             })
         };
-        // Cancel TOTP and go back to login
-        let on_cancel_totp = {
-            let totp_required = totp_required.clone();
-            let totp_token = totp_token.clone();
+
+        // Cancel 2FA and go back to login
+        let on_cancel_2fa = {
+            let requires_2fa = requires_2fa.clone();
+            let login_token = login_token.clone();
             let totp_code = totp_code.clone();
             let use_backup_code = use_backup_code.clone();
             let error_setter = error.clone();
+            let show_totp_form = show_totp_form.clone();
             Callback::from(move |_: MouseEvent| {
-                totp_required.set(false);
-                totp_token.set(String::new());
+                requires_2fa.set(false);
+                login_token.set(String::new());
                 totp_code.set(String::new());
                 use_backup_code.set(false);
+                show_totp_form.set(false);
                 error_setter.set(None);
             })
         };
@@ -335,7 +515,7 @@ pub mod login {
             </style>
             <div class="hero-background"></div>
             <div class="login-container">
-                <h1>{if *totp_required { "Two-Factor Authentication" } else { "Login" }}</h1>
+                <h1>{if *requires_2fa { "Two-Factor Authentication" } else { "Login" }}</h1>
                 {
                     if let Some(error_message) = (*error).as_ref() {
                         html! {
@@ -354,48 +534,99 @@ pub mod login {
                     }
                 }
                 {
-                    if *totp_required {
-                        html! {
-                            <>
-                                <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 20px; text-align: center;">
-                                    {if *use_backup_code {
-                                        "Enter one of your backup codes"
-                                    } else {
-                                        "Enter the 6-digit code from your authenticator app"
-                                    }}
-                                </p>
-                                <form onsubmit={on_totp_verify}>
-                                    <input
-                                        type="text"
-                                        placeholder={if *use_backup_code { "Backup code" } else { "000000" }}
-                                        maxlength={if *use_backup_code { "10" } else { "6" }}
-                                        value={(*totp_code).clone()}
-                                        style="text-align: center; font-size: 1.5rem; letter-spacing: 0.5rem;"
-                                        oninput={let totp_code = totp_code.clone(); let use_backup = *use_backup_code; move |e: InputEvent| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            let value = if use_backup {
-                                                input.value()
-                                            } else {
-                                                input.value().chars().filter(|c| c.is_numeric()).collect::<String>()
-                                            };
-                                            totp_code.set(value);
+                    if *requires_2fa {
+                        // 2FA is required - show either WebAuthn or TOTP form
+                        if *show_totp_form {
+                            // Show TOTP form
+                            html! {
+                                <>
+                                    <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 20px; text-align: center;">
+                                        {if *use_backup_code {
+                                            "Enter one of your backup codes"
+                                        } else {
+                                            "Enter the 6-digit code from your authenticator app"
                                         }}
-                                    />
-                                    <button type="submit" disabled={*is_verifying}>
-                                        {if *is_verifying { "Verifying..." } else { "Verify" }}
+                                    </p>
+                                    <form onsubmit={on_totp_verify}>
+                                        <input
+                                            type="text"
+                                            placeholder={if *use_backup_code { "Backup code" } else { "000000" }}
+                                            maxlength={if *use_backup_code { "10" } else { "6" }}
+                                            value={(*totp_code).clone()}
+                                            style="text-align: center; font-size: 1.5rem; letter-spacing: 0.5rem;"
+                                            oninput={let totp_code = totp_code.clone(); let use_backup = *use_backup_code; move |e: InputEvent| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                let value = if use_backup {
+                                                    input.value()
+                                                } else {
+                                                    input.value().chars().filter(|c| c.is_numeric()).collect::<String>()
+                                                };
+                                                totp_code.set(value);
+                                            }}
+                                        />
+                                        <button type="submit" disabled={*is_verifying}>
+                                            {if *is_verifying { "Verifying..." } else { "Verify" }}
+                                        </button>
+                                    </form>
+                                    <div class="auth-redirect">
+                                        <a href="#" onclick={on_toggle_backup} style="color: #1E90FF; text-decoration: none;">
+                                            {if *use_backup_code { "Use authenticator code instead" } else { "Use backup code instead" }}
+                                        </a>
+                                    </div>
+                                    {
+                                        if *webauthn_enabled && *webauthn_supported {
+                                            html! {
+                                                <div class="auth-redirect">
+                                                    <a href="#" onclick={on_switch_to_webauthn.clone()} style="color: #1E90FF; text-decoration: none;">
+                                                        {"Use passkey instead"}
+                                                    </a>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    <div class="auth-redirect">
+                                        <a href="#" onclick={on_cancel_2fa.clone()} style="color: rgba(255, 255, 255, 0.6); text-decoration: none;">
+                                            {"Back to login"}
+                                        </a>
+                                    </div>
+                                </>
+                            }
+                        } else {
+                            // Show WebAuthn form
+                            html! {
+                                <>
+                                    <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 20px; text-align: center;">
+                                        {"Use your passkey to complete login"}
+                                    </p>
+                                    <button
+                                        onclick={on_webauthn_verify}
+                                        disabled={*is_verifying}
+                                        style="width: 100%; padding: 1rem; font-size: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
+                                    >
+                                        {if *is_verifying { "Verifying..." } else { "Authenticate with Passkey" }}
                                     </button>
-                                </form>
-                                <div class="auth-redirect">
-                                    <a href="#" onclick={on_toggle_backup} style="color: #1E90FF; text-decoration: none;">
-                                        {if *use_backup_code { "Use authenticator code instead" } else { "Use backup code instead" }}
-                                    </a>
-                                </div>
-                                <div class="auth-redirect">
-                                    <a href="#" onclick={on_cancel_totp} style="color: rgba(255, 255, 255, 0.6); text-decoration: none;">
-                                        {"Back to login"}
-                                    </a>
-                                </div>
-                            </>
+                                    {
+                                        if *totp_enabled {
+                                            html! {
+                                                <div class="auth-redirect">
+                                                    <a href="#" onclick={on_switch_to_totp.clone()} style="color: #1E90FF; text-decoration: none;">
+                                                        {"Use authenticator app instead"}
+                                                    </a>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    <div class="auth-redirect">
+                                        <a href="#" onclick={on_cancel_2fa} style="color: rgba(255, 255, 255, 0.6); text-decoration: none;">
+                                            {"Back to login"}
+                                        </a>
+                                    </div>
+                                </>
+                            }
                         }
                     } else {
                         html! {

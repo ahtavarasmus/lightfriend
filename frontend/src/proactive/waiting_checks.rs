@@ -189,24 +189,8 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
     } else {
         "Other"
     };
-    let sms_extra: Html = match country {
-        "US" => html! { <span class="price-note">{" (1/2 Message per notification)"}</span> },
-        "FI" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.15)}</span> },
-        "NL" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.15)}</span> },
-        "UK" => html! { <span class="price-note">{format!(" (£{:.2} per notification)", 0.15)}</span> },
-        "AU" => html! { <span class="price-note">{format!(" (${:.2} per notification)", 0.15)}</span> },
-        "Other" => html! { <span class="price-note">{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per notification)"}</span> },
-        _ => html! {},
-    };
-    let call_extra: Html = match country {
-        "US" => html! { <span class="price-note">{" (1 Message per notification)"}</span> },
-        "FI" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.70)}</span> },
-        "NL" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.45)}</span> },
-        "UK" => html! { <span class="price-note">{format!(" (£{:.2} per notification)", 0.20)}</span> },
-        "AU" => html! { <span class="price-note">{format!(" (${:.2} per notification)", 0.20)}</span> },
-        "Other" => html! { <span class="price-note">{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per notification)"}</span> },
-        _ => html! {},
-    };
+    let sms_extra: Html = html! {};
+    let call_extra: Html = html! {};
     html! {
         <>
             <style>

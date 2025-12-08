@@ -130,6 +130,26 @@ pub async fn update_twilio_creds(
     }
 }
 
+/// Clear BYOT Twilio credentials (manual removal)
+pub async fn clear_twilio_creds(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.clear_twilio_credentials(auth_user.user_id) {
+        Ok(_) => {
+            tracing::info!("Successfully cleared BYOT credentials for user: {}", auth_user.user_id);
+            Ok(StatusCode::OK)
+        },
+        Err(e) => {
+            tracing::error!("Failed to clear BYOT credentials: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to clear BYOT credentials"}))
+            ))
+        }
+    }
+}
+
 pub async fn update_textbee_creds(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

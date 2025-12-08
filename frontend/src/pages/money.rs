@@ -8,6 +8,566 @@ use serde_json::Value;
 use serde::Deserialize;
 use std::collections::HashMap;
 use crate::utils::api::Api;
+
+/// Check if a country is notification-only (receives SMS from US number, dynamic pricing)
+fn is_notification_only_country(country: &str) -> bool {
+    matches!(country, "DE" | "FR" | "ES" | "IT" | "PT" | "BE" | "AT" | "CH" | "PL" | "CZ" | "SE" | "DK" | "NO" | "IE" | "NZ")
+}
+
+/// Check if country has local number (can receive inbound calls)
+fn is_local_number_country(country: &str) -> bool {
+    matches!(country, "FI" | "NL" | "UK" | "AU")
+}
+
+/// Message equivalent display that fetches real pricing from backend
+#[derive(Properties, PartialEq)]
+pub struct MessageEquivalentProps {
+    pub plan_messages: i32,  // 50 or 150 (the "messages" in the plan)
+    pub country: String,
+}
+
+#[function_component(MessageEquivalentDisplay)]
+pub fn message_equivalent_display(props: &MessageEquivalentProps) -> Html {
+    let current_view = use_state(|| 0usize);
+    let pricing = use_state(|| None::<ByotPricingResponse>);
+    let loading = use_state(|| true);
+
+    // Fetch pricing for this country
+    {
+        let pricing = pricing.clone();
+        let loading = loading.clone();
+        let country = props.country.clone();
+        use_effect_with_deps(move |country| {
+            let country = country.clone();
+            // Set loading state immediately when country changes
+            loading.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
+                if let Ok(resp) = response {
+                    if resp.ok() {
+                        if let Ok(data) = resp.json::<ByotPricingResponse>().await {
+                            pricing.set(Some(data));
+                        }
+                    }
+                }
+                loading.set(false);
+            });
+            || ()
+        }, country);
+    }
+
+    let is_local = is_local_number_country(&props.country);
+    let is_notification_only = is_notification_only_country(&props.country);
+
+    // Calculate equivalents based on actual pricing
+    let views: Vec<String> = if let Some(ref p) = *pricing {
+        if let Some(sms_price) = p.costs.sms_per_segment {
+            // Credits = 3 × sms_price × plan_messages
+            let total_credits = 3.0 * sms_price * (props.plan_messages as f32);
+
+            // Normal response = 3 segments
+            let normal_responses = (total_credits / (3.0 * sms_price)).floor() as i32;
+
+            // Notification = 1.5 segments
+            let notifications = (total_credits / (1.5 * sms_price)).floor() as i32;
+
+            // Digest = 3 segments (same as response)
+            let digests = (total_credits / (3.0 * sms_price)).floor() as i32;
+
+            // Voice outbound (if available)
+            let voice_calls = p.costs.voice_outbound_per_min
+                .map(|v| (total_credits / v).floor() as i32);
+
+            // Inbound voice (if local number country)
+            let inbound_mins = if is_local {
+                p.costs.voice_inbound_per_min.map(|v| (total_credits / v).floor() as i32)
+            } else {
+                None
+            };
+
+            let mut v = Vec::new();
+
+            // Only show responses for countries that can reply (not notification-only)
+            if !is_notification_only {
+                v.push(format!("{} responses", normal_responses));
+            }
+
+            v.push(format!("{} notifications", notifications));
+            v.push(format!("{} digests", digests));
+
+            if let Some(vc) = voice_calls {
+                v.push(format!("{} voice mins out", vc));
+            }
+
+            if let Some(im) = inbound_mins {
+                v.push(format!("{} voice mins in", im));
+            }
+
+            v
+        } else {
+            vec![format!("{} messages", props.plan_messages)]
+        }
+    } else {
+        vec![format!("{} messages", props.plan_messages)]
+    };
+
+    let total_views = views.len();
+    let is_loading = *loading;
+
+    let onclick = {
+        let current_view = current_view.clone();
+        let loading = loading.clone();
+        Callback::from(move |_: MouseEvent| {
+            // Only cycle if not loading
+            if !*loading {
+                current_view.set((*current_view + 1) % total_views);
+            }
+        })
+    };
+
+    let css = r#"
+    .message-equivalent {
+        cursor: pointer;
+        padding: 0.5rem 0.75rem;
+        background: rgba(30, 144, 255, 0.1);
+        border: 1px solid rgba(30, 144, 255, 0.3);
+        border-radius: 8px;
+        transition: all 0.2s ease;
+        text-align: center;
+        user-select: none;
+    }
+    .message-equivalent:hover {
+        background: rgba(30, 144, 255, 0.2);
+        border-color: rgba(30, 144, 255, 0.5);
+    }
+    .message-equivalent .value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #7EB2FF;
+    }
+    .message-equivalent .hint {
+        font-size: 0.75rem;
+        color: #888;
+        margin-top: 0.25rem;
+    }
+    .message-equivalent.loading .value {
+        color: #888;
+    }
+    .message-equivalent.loading {
+        cursor: default;
+    }
+    "#;
+
+    let display_value = if is_loading {
+        format!("{} messages", props.plan_messages)
+    } else {
+        views.get(*current_view).cloned().unwrap_or_else(|| format!("{} messages", props.plan_messages))
+    };
+
+    let hint_text = if is_loading {
+        "loading pricing..."
+    } else {
+        "tap to see equivalents"
+    };
+
+    html! {
+        <>
+            <style>{css}</style>
+            <div class={classes!("message-equivalent", if is_loading { "loading" } else { "" })} onclick={onclick}>
+                <div class="value">{display_value}</div>
+                <div class="hint">{hint_text}</div>
+            </div>
+        </>
+    }
+}
+
+/// BYOT pricing response from backend
+#[derive(Clone, PartialEq, Deserialize)]
+struct ByotPricingResponse {
+    country_code: String,
+    country_name: String,
+    has_local_numbers: bool,
+    monthly_number_cost: Option<f32>,
+    costs: ByotMessageCosts,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct ByotMessageCosts {
+    sms_per_segment: Option<f32>,
+    notification: Option<f32>,
+    normal_response: Option<f32>,
+    digest: Option<f32>,
+    voice_outbound_per_min: Option<f32>,
+    voice_inbound_per_min: Option<f32>,
+}
+
+#[function_component(ByotPricingDisplay)]
+pub fn byot_pricing_display() -> Html {
+    let selected_country = use_state(|| "DE".to_string());
+    let pricing = use_state(|| None::<ByotPricingResponse>);
+    let loading = use_state(|| true);
+    let error = use_state(|| None::<String>);
+
+    {
+        let pricing = pricing.clone();
+        let loading = loading.clone();
+        let error = error.clone();
+        let country = (*selected_country).clone();
+        use_effect_with_deps(move |country| {
+            let country = country.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                loading.set(true);
+                error.set(None);
+                let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
+                match response {
+                    Ok(resp) if resp.ok() => {
+                        match resp.json::<ByotPricingResponse>().await {
+                            Ok(data) => pricing.set(Some(data)),
+                            Err(_) => error.set(Some("Failed to parse pricing".to_string())),
+                        }
+                    }
+                    Ok(_) => error.set(Some("Country not supported".to_string())),
+                    Err(e) => error.set(Some(format!("Failed to fetch: {}", e))),
+                }
+                loading.set(false);
+            });
+            || ()
+        }, country);
+    }
+
+    let on_country_change = {
+        let selected_country = selected_country.clone();
+        Callback::from(move |e: Event| {
+            let target: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            selected_country.set(target.value());
+        })
+    };
+
+    let css = r#"
+    .byot-pricing {
+        background: rgba(30, 144, 255, 0.05);
+        border: 1px solid rgba(30, 144, 255, 0.2);
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .byot-pricing h4 {
+        color: #7EB2FF;
+        font-size: 1rem;
+        margin: 0 0 0.75rem 0;
+        text-align: center;
+    }
+    .byot-pricing-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+    .byot-pricing-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.25rem 0;
+        font-size: 0.85rem;
+    }
+    .byot-pricing-item .label {
+        color: #b0b0b0;
+    }
+    .byot-pricing-item .value {
+        color: #7EB2FF;
+        font-weight: 500;
+    }
+    .byot-monthly {
+        text-align: center;
+        padding: 0.5rem;
+        background: rgba(30, 144, 255, 0.1);
+        border-radius: 8px;
+        margin-bottom: 0.75rem;
+    }
+    .byot-monthly .value {
+        font-size: 1.1rem;
+        color: #7EB2FF;
+        font-weight: 600;
+    }
+    .byot-monthly .label {
+        font-size: 0.75rem;
+        color: #888;
+    }
+    .byot-loading, .byot-error {
+        text-align: center;
+        padding: 1rem;
+        color: #888;
+    }
+    .byot-error {
+        color: #ff6b6b;
+    }
+    .byot-country-selector {
+        margin-bottom: 0.75rem;
+    }
+    .byot-country-selector select {
+        width: 100%;
+        padding: 0.5rem;
+        background: rgba(30, 30, 30, 0.9);
+        border: 1px solid rgba(30, 144, 255, 0.3);
+        border-radius: 6px;
+        color: #e0e0e0;
+        font-size: 0.85rem;
+        cursor: pointer;
+    }
+    .byot-country-selector select:focus {
+        outline: none;
+        border-color: rgba(30, 144, 255, 0.6);
+    }
+    "#;
+
+    let current_country = (*selected_country).clone();
+
+    html! {
+        <>
+            <style>{css}</style>
+            <div class="byot-pricing">
+                <h4>{"Twilio Pricing Preview"}</h4>
+                <div class="byot-country-selector">
+                    <select onchange={on_country_change} value={current_country.clone()}>
+                        <optgroup label="Europe">
+                            <option value="DE" selected={current_country == "DE"}>{"Germany"}</option>
+                            <option value="FR" selected={current_country == "FR"}>{"France"}</option>
+                            <option value="ES" selected={current_country == "ES"}>{"Spain"}</option>
+                            <option value="IT" selected={current_country == "IT"}>{"Italy"}</option>
+                            <option value="BE" selected={current_country == "BE"}>{"Belgium"}</option>
+                            <option value="AT" selected={current_country == "AT"}>{"Austria"}</option>
+                            <option value="CH" selected={current_country == "CH"}>{"Switzerland"}</option>
+                            <option value="SE" selected={current_country == "SE"}>{"Sweden"}</option>
+                            <option value="NO" selected={current_country == "NO"}>{"Norway"}</option>
+                            <option value="DK" selected={current_country == "DK"}>{"Denmark"}</option>
+                            <option value="IE" selected={current_country == "IE"}>{"Ireland"}</option>
+                            <option value="PT" selected={current_country == "PT"}>{"Portugal"}</option>
+                            <option value="PL" selected={current_country == "PL"}>{"Poland"}</option>
+                            <option value="CZ" selected={current_country == "CZ"}>{"Czech Republic"}</option>
+                            <option value="GR" selected={current_country == "GR"}>{"Greece"}</option>
+                            <option value="HU" selected={current_country == "HU"}>{"Hungary"}</option>
+                            <option value="RO" selected={current_country == "RO"}>{"Romania"}</option>
+                            <option value="SK" selected={current_country == "SK"}>{"Slovakia"}</option>
+                            <option value="BG" selected={current_country == "BG"}>{"Bulgaria"}</option>
+                            <option value="HR" selected={current_country == "HR"}>{"Croatia"}</option>
+                            <option value="SI" selected={current_country == "SI"}>{"Slovenia"}</option>
+                            <option value="LT" selected={current_country == "LT"}>{"Lithuania"}</option>
+                            <option value="LV" selected={current_country == "LV"}>{"Latvia"}</option>
+                            <option value="EE" selected={current_country == "EE"}>{"Estonia"}</option>
+                            <option value="LU" selected={current_country == "LU"}>{"Luxembourg"}</option>
+                            <option value="MT" selected={current_country == "MT"}>{"Malta"}</option>
+                            <option value="CY" selected={current_country == "CY"}>{"Cyprus"}</option>
+                            <option value="IS" selected={current_country == "IS"}>{"Iceland"}</option>
+                        </optgroup>
+                        <optgroup label="Asia-Pacific">
+                            <option value="NZ" selected={current_country == "NZ"}>{"New Zealand"}</option>
+                            <option value="JP" selected={current_country == "JP"}>{"Japan"}</option>
+                            <option value="KR" selected={current_country == "KR"}>{"South Korea"}</option>
+                            <option value="SG" selected={current_country == "SG"}>{"Singapore"}</option>
+                            <option value="HK" selected={current_country == "HK"}>{"Hong Kong"}</option>
+                            <option value="TW" selected={current_country == "TW"}>{"Taiwan"}</option>
+                            <option value="MY" selected={current_country == "MY"}>{"Malaysia"}</option>
+                            <option value="TH" selected={current_country == "TH"}>{"Thailand"}</option>
+                            <option value="PH" selected={current_country == "PH"}>{"Philippines"}</option>
+                            <option value="ID" selected={current_country == "ID"}>{"Indonesia"}</option>
+                            <option value="VN" selected={current_country == "VN"}>{"Vietnam"}</option>
+                            <option value="IN" selected={current_country == "IN"}>{"India"}</option>
+                            <option value="PK" selected={current_country == "PK"}>{"Pakistan"}</option>
+                            <option value="BD" selected={current_country == "BD"}>{"Bangladesh"}</option>
+                            <option value="LK" selected={current_country == "LK"}>{"Sri Lanka"}</option>
+                        </optgroup>
+                        <optgroup label="Americas">
+                            <option value="MX" selected={current_country == "MX"}>{"Mexico"}</option>
+                            <option value="BR" selected={current_country == "BR"}>{"Brazil"}</option>
+                            <option value="AR" selected={current_country == "AR"}>{"Argentina"}</option>
+                            <option value="CL" selected={current_country == "CL"}>{"Chile"}</option>
+                            <option value="CO" selected={current_country == "CO"}>{"Colombia"}</option>
+                            <option value="PE" selected={current_country == "PE"}>{"Peru"}</option>
+                            <option value="VE" selected={current_country == "VE"}>{"Venezuela"}</option>
+                            <option value="EC" selected={current_country == "EC"}>{"Ecuador"}</option>
+                            <option value="CR" selected={current_country == "CR"}>{"Costa Rica"}</option>
+                            <option value="PA" selected={current_country == "PA"}>{"Panama"}</option>
+                            <option value="PR" selected={current_country == "PR"}>{"Puerto Rico"}</option>
+                        </optgroup>
+                        <optgroup label="Middle East">
+                            <option value="IL" selected={current_country == "IL"}>{"Israel"}</option>
+                            <option value="AE" selected={current_country == "AE"}>{"UAE"}</option>
+                            <option value="SA" selected={current_country == "SA"}>{"Saudi Arabia"}</option>
+                            <option value="QA" selected={current_country == "QA"}>{"Qatar"}</option>
+                            <option value="KW" selected={current_country == "KW"}>{"Kuwait"}</option>
+                            <option value="BH" selected={current_country == "BH"}>{"Bahrain"}</option>
+                            <option value="OM" selected={current_country == "OM"}>{"Oman"}</option>
+                            <option value="JO" selected={current_country == "JO"}>{"Jordan"}</option>
+                            <option value="TR" selected={current_country == "TR"}>{"Turkey"}</option>
+                        </optgroup>
+                        <optgroup label="Africa">
+                            <option value="ZA" selected={current_country == "ZA"}>{"South Africa"}</option>
+                            <option value="NG" selected={current_country == "NG"}>{"Nigeria"}</option>
+                            <option value="KE" selected={current_country == "KE"}>{"Kenya"}</option>
+                            <option value="EG" selected={current_country == "EG"}>{"Egypt"}</option>
+                            <option value="GH" selected={current_country == "GH"}>{"Ghana"}</option>
+                            <option value="MA" selected={current_country == "MA"}>{"Morocco"}</option>
+                            <option value="TN" selected={current_country == "TN"}>{"Tunisia"}</option>
+                            <option value="TZ" selected={current_country == "TZ"}>{"Tanzania"}</option>
+                            <option value="UG" selected={current_country == "UG"}>{"Uganda"}</option>
+                        </optgroup>
+                    </select>
+                </div>
+                if *loading {
+                    <div class="byot-loading">{"Loading..."}</div>
+                } else if let Some(err) = (*error).as_ref() {
+                    <div class="byot-error">{err}</div>
+                } else if let Some(data) = (*pricing).as_ref() {
+                    <>
+                        if let Some(monthly) = data.monthly_number_cost {
+                            <div class="byot-monthly">
+                                <div class="value">{format!("${:.2}/mo", monthly)}</div>
+                                <div class="label">{"Phone number"}</div>
+                            </div>
+                        }
+                        <div class="byot-pricing-grid">
+                            if let Some(p) = data.costs.notification {
+                                <div class="byot-pricing-item">
+                                    <span class="label">{"Notification"}</span>
+                                    <span class="value">{format!("${:.3}", p)}</span>
+                                </div>
+                            }
+                            if let Some(p) = data.costs.normal_response {
+                                <div class="byot-pricing-item">
+                                    <span class="label">{"Response"}</span>
+                                    <span class="value">{format!("${:.3}", p)}</span>
+                                </div>
+                            }
+                            if let Some(p) = data.costs.digest {
+                                <div class="byot-pricing-item">
+                                    <span class="label">{"Digest"}</span>
+                                    <span class="value">{format!("${:.3}", p)}</span>
+                                </div>
+                            }
+                            if let Some(p) = data.costs.voice_outbound_per_min {
+                                <div class="byot-pricing-item">
+                                    <span class="label">{"Voice/min"}</span>
+                                    <span class="value">{format!("${:.3}", p)}</span>
+                                </div>
+                            }
+                        </div>
+                        if !data.has_local_numbers {
+                            <p style="font-size: 0.75rem; color: #888; margin-top: 0.5rem; text-align: center;">
+                                {"No local number in this country"}
+                            </p>
+                        }
+                    </>
+                }
+            </div>
+        </>
+    }
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct CountryPricing {
+    country_code: String,
+    country_name: String,
+    sms_price: f32,
+    voice_price: f32,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct NotificationPricingResponse {
+    countries: Vec<CountryPricing>,
+    formula_note: String,
+}
+
+#[function_component(NotificationPricingTable)]
+fn notification_pricing_table() -> Html {
+    let pricing = use_state(|| None::<NotificationPricingResponse>);
+    let loading = use_state(|| true);
+
+    {
+        let pricing = pricing.clone();
+        let loading = loading.clone();
+        use_effect_with_deps(move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                let response = Api::get("/api/pricing/notification-only").send().await;
+                if let Ok(resp) = response {
+                    if let Ok(data) = resp.json::<NotificationPricingResponse>().await {
+                        pricing.set(Some(data));
+                    }
+                }
+                loading.set(false);
+            });
+            || ()
+        }, ());
+    }
+
+    let table_css = r#"
+    .notification-pricing-table {
+        margin-top: 1.5rem;
+    }
+    .notification-pricing-table h3 {
+        color: #7EB2FF;
+        font-size: 1.3rem;
+        margin-bottom: 1rem;
+    }
+    .notification-pricing-table table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0;
+    }
+    .notification-pricing-table th,
+    .notification-pricing-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(30, 144, 255, 0.15);
+    }
+    .notification-pricing-table th {
+        color: #7EB2FF;
+        font-weight: 600;
+    }
+    .notification-pricing-table td {
+        color: #e0e0e0;
+    }
+    .notification-pricing-table tr:hover {
+        background: rgba(30, 144, 255, 0.05);
+    }
+    .formula-note {
+        color: #999;
+        font-size: 0.85rem;
+        margin-top: 1rem;
+        font-style: italic;
+    }
+    "#;
+
+    html! {
+        <div class="notification-pricing-table">
+            <style>{table_css}</style>
+            <h3>{"Country Pricing"}</h3>
+            if *loading {
+                <p>{"Loading prices..."}</p>
+            } else if let Some(data) = (*pricing).as_ref() {
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{"Country"}</th>
+                            <th>{"SMS Price"}</th>
+                            <th>{"Voice (per min)"}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        { for data.countries.iter().map(|c| html! {
+                            <tr>
+                                <td>{&c.country_name}</td>
+                                <td>{format!("€{:.2}", c.sms_price)}</td>
+                                <td>{format!("€{:.2}", c.voice_price)}</td>
+                            </tr>
+                        })}
+                    </tbody>
+                </table>
+                <p class="formula-note">{&data.formula_note}</p>
+            } else {
+                <p>{"Unable to load pricing"}</p>
+            }
+        </div>
+    }
+}
+
 #[derive(Deserialize, Clone)]
 struct UserProfile {
     id: i32,
@@ -49,6 +609,8 @@ pub struct CheckoutButtonProps {
     pub user_email: String,
     pub subscription_type: String,
     pub selected_country: String,
+    #[prop_or_default]
+    pub plan_type: Option<String>,
 }
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
@@ -56,6 +618,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_email = props.user_email.clone();
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
+    let plan_type = props.plan_type.clone();
 
     // Check if subscriptions are blocked
     let subscriptions_blocked = false;
@@ -64,12 +627,14 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
+        let plan_type = plan_type.clone();
 
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
             let selected_country = selected_country.clone();
+            let plan_type = plan_type.clone();
 
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
@@ -85,7 +650,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 let endpoint = format!("/api/stripe/unified-subscription-checkout/{}", user_id);
-                let request_body = json!({
+                let mut request_body = json!({
                     "subscription_type": match subscription_type.as_str() {
                         "hosted" => "Hosted",
                         "guaranteed" => "Guaranteed",
@@ -93,6 +658,9 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     },
                     "trial_days": if selected_country == "US" || selected_country == "CA" { 7 } else { 0 },
                 });
+                if let Some(pt) = plan_type {
+                    request_body["plan_type"] = json!(pt);
+                }
                 let response = Api::post(&endpoint)
                     .header("Content-Type", "application/json")
                     .body(request_body.to_string())
@@ -180,6 +748,114 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         </>
     }
 }
+
+#[derive(Deserialize)]
+struct GuestCheckoutResponse {
+    url: String,
+}
+
+#[derive(Properties, PartialEq)]
+pub struct GuestCheckoutButtonProps {
+    pub subscription_type: String,
+    pub selected_country: String,
+    #[prop_or_default]
+    pub plan_type: Option<String>,
+}
+
+#[function_component(GuestCheckoutButton)]
+pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
+    let loading = use_state(|| false);
+    let error = use_state(|| None::<String>);
+    let subscription_type = props.subscription_type.clone();
+    let selected_country = props.selected_country.clone();
+    let plan_type = props.plan_type.clone();
+
+    let onclick = {
+        let loading = loading.clone();
+        let error = error.clone();
+        let subscription_type = subscription_type.clone();
+        let selected_country = selected_country.clone();
+        let plan_type = plan_type.clone();
+
+        Callback::from(move |e: web_sys::MouseEvent| {
+            e.prevent_default();
+            let loading = loading.clone();
+            let error = error.clone();
+            let subscription_type = subscription_type.clone();
+            let selected_country = selected_country.clone();
+            let plan_type = plan_type.clone();
+
+            loading.set(true);
+            error.set(None);
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut body = json!({
+                    "subscription_type": match subscription_type.as_str() {
+                        "hosted" => "Hosted",
+                        _ => &subscription_type
+                    },
+                    "selected_country": selected_country
+                });
+                if let Some(pt) = plan_type {
+                    body["plan_type"] = json!(pt);
+                }
+                match Api::post("/api/stripe/guest-checkout")
+                    .json(&body)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.ok() {
+                            match response.json::<GuestCheckoutResponse>().await {
+                                Ok(checkout_response) => {
+                                    if let Some(window) = window() {
+                                        let _ = window.location().set_href(&checkout_response.url);
+                                    }
+                                }
+                                Err(_) => {
+                                    loading.set(false);
+                                    error.set(Some("Failed to parse checkout response".to_string()));
+                                }
+                            }
+                        } else {
+                            loading.set(false);
+                            error.set(Some("Failed to create checkout session".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        loading.set(false);
+                        error.set(Some(format!("Request failed: {}", e)));
+                    }
+                }
+            });
+        })
+    };
+
+    let button_text = if *loading {
+        "Loading..."
+    } else {
+        "Get Started"
+    };
+
+    html! {
+        <>
+            if let Some(err) = (*error).as_ref() {
+                <div style="color: #ff6b6b; font-size: 0.85rem; margin-bottom: 0.5rem; text-align: center;">
+                    {err}
+                </div>
+            }
+            <button
+                class="iq-button signup-button"
+                onclick={onclick}
+                disabled={*loading}
+            >
+                <b>{button_text}</b>
+            </button>
+        </>
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct Addon {
     pub id: String,
@@ -201,6 +877,8 @@ pub struct PricingCardProps {
     pub is_popular: bool,
     pub is_premium: bool,
     pub is_trial: bool,
+    #[prop_or(false)]
+    pub is_euro_trial: bool,
     pub user_id: i32,
     pub user_email: String,
     pub is_logged_in: bool,
@@ -211,15 +889,14 @@ pub struct PricingCardProps {
     pub coming_soon: bool,
     pub hosted_prices: HashMap<String, f64>,
     #[prop_or_default]
+    pub plan_type: Option<String>,
+    #[prop_or_default]
     pub children: Children,
 }
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
-    let price_text = if props.subscription_type == "hosted" {
-        format!("{}{:.2}", props.currency, props.price / 30.00) // Normal pricing for other plans
-    } else {
-        format!("{}{:.2}", props.currency, props.price)
-    };
+    // Always show monthly price
+    let price_text = format!("{}{:.0}", props.currency, props.price);
     let effective_tier = if props.subscription_type == "hosted" {
         "tier 2".to_string()
     } else {
@@ -245,24 +922,19 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     user_email={props.user_email.clone()}
                     subscription_type={props.subscription_type.clone()}
                     selected_country={props.selected_country.clone()}
+                    plan_type={props.plan_type.clone()}
                 />
             }
         }
     } else {
-        let subscription_type = props.subscription_type.clone();
-        let onclick = Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            let subscription_type = subscription_type.clone();
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    let _ = storage.set_item("selected_plan", &subscription_type);
-                    let _ = window.location().set_href("/register");
-                }
-            }
-        });
-        html! { <button onclick={onclick} class="iq-button signup-button"><b>{"Get Started"}</b></button> }
+        html! {
+            <GuestCheckoutButton
+                subscription_type={props.subscription_type.clone()}
+                selected_country={props.selected_country.clone()}
+                plan_type={props.plan_type.clone()}
+            />
+        }
     };
-    let image_url = "/assets/hosted-image.png";
     let card_css = r#"
     .learn-more-section {
         text-align: center;
@@ -379,35 +1051,16 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         font-weight: 500;
         z-index: 4;
     }
-    .header-background {
-        position: relative;
-        height: 350px;
-        background-size: cover;
-        background-position: center;
-        display: flex;
-        align-items: center;
+    .card-header {
+        padding: 1.5rem 2rem;
         text-align: center;
-        justify-content: center;
-        border-top-left-radius: 24px;
-        border-top-right-radius: 24px;
+        border-bottom: 1px solid rgba(30, 144, 255, 0.15);
     }
-    .header-background::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.3);
-        border-top-left-radius: 24px;
-        border-top-right-radius: 24px;
-    }
-    .header-background h3 {
-        color: #ffffff;
-        font-size: 2rem;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-        z-index: 1;
+    .card-header h3 {
+        color: #7EB2FF;
+        font-size: 1.8rem;
         margin: 0;
+        font-weight: 700;
     }
     .card-content {
         padding: 1.5rem 2.5rem 2.5rem;
@@ -566,10 +1219,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         .pricing-card {
             min-width: 0;
             width: 100%;
-            padding: 1rem;
-        }
-        .header-background {
-            height: 200px;
+            padding: 0;
         }
         .card-content {
             padding: 1rem;
@@ -608,20 +1258,20 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
             {
                 if props.is_popular {
                     html! { <div class="popular-tag">{"Most Popular"}</div> }
-                } else if props.is_premium {
-                    html! { <div class="premium-tag">{"Money Back Guarantee"}</div> }
                 } else {
                     html! {}
                 }
             }
             {
                 if props.is_trial {
-                    html! { <div class="trial-tag">{"Explore 7 Days for Free"}</div> }
+                    html! { <div class="trial-tag">{"7-Day Free Trial"}</div> }
+                } else if props.is_euro_trial {
+                    html! { <div class="trial-tag">{"€10 for 7-Day Trial"}</div> }
                 } else {
                     html! {}
                 }
             }
-            <div class="header-background" style={format!("background-image: url({});", image_url)}>
+            <div class="card-header">
                 <h3>{props.plan_name.clone()}</h3>
             </div>
             <div class="card-content">
@@ -630,17 +1280,13 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <div class="price">
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
-                    { if props.subscription_type == "hosted" {
+                    { if props.is_trial {
                         html! {
-                            <p class="billing-note">
-                                {if props.is_trial {"First 7 days for free, then "} else {""} }{format!("billed monthly at {}{:.2}", props.currency, props.price)}
-                            </p>
+                            <p class="billing-note">{"First 7 days free"}</p>
                         }
-                    } else if props.subscription_type == "guaranteed" {
+                    } else if props.is_euro_trial {
                         html! {
-                            <p class="billing-note">
-                                {format!("Billed monthly at {}{:.2}", props.currency, props.price)}
-                            </p>
+                            <p class="billing-note">{"7-day trial for €10"}</p>
                         }
                     } else {
                         html! {}
@@ -657,14 +1303,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
                         { if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
-                            html! { <li>{"Required: Bring your own number and unlock service in whatever country you're in. Checkout the guide below."}</li> }
-                        } else if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && ["FI", "NL", "UK", "AU"].contains(&props.selected_country.as_str()) {
-                            html! {
-                                <>
-                                    <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li>
-                                    <li>{"Get 10€ free credits on signup - buy more when needed."}</li>
-                                </>
-                            }
+                            html! { <li>{"Bring your own number. See the guide below."}</li> }
                         } else { html! {} }}
                     </ul>
                 </div>
@@ -694,6 +1333,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
         "US" => "400 Messages per month included".to_string(),
         "CA" => "400 Messages per month included".to_string(),
         "FI" | "NL" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
+        c if is_notification_only_country(c) => "Notification service via US number - prepaid credits".to_string(),
         _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
     };
     let feature_css = r#"
@@ -768,6 +1408,39 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
 #[function_component(CreditPricing)]
 pub fn credit_pricing(props: &FeatureListProps) -> Html {
     let country = &props.selected_country;
+    let pricing = use_state(|| None::<ByotPricingResponse>);
+    let loading = use_state(|| true);
+
+    // Fetch pricing for this country
+    {
+        let pricing = pricing.clone();
+        let loading = loading.clone();
+        let country = country.clone();
+        use_effect_with_deps(move |country| {
+            let country = country.clone();
+            // Skip fetch for US/CA/Other
+            if country != "US" && country != "CA" && country != "Other" {
+                let pricing = pricing.clone();
+                let loading = loading.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    loading.set(true);
+                    let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
+                    if let Ok(resp) = response {
+                        if resp.ok() {
+                            if let Ok(data) = resp.json::<ByotPricingResponse>().await {
+                                pricing.set(Some(data));
+                            }
+                        }
+                    }
+                    loading.set(false);
+                });
+            } else {
+                loading.set(false);
+            }
+            || ()
+        }, country);
+    }
+
     let credit_css = r#"
     .credit-pricing {
         max-width: 1000px;
@@ -782,7 +1455,12 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
     .credit-pricing h2 {
         color: #7EB2FF;
         font-size: 2rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .credit-pricing .subtitle {
+        color: #888;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
     }
     .credit-pricing p {
         color: #e0e0e0;
@@ -806,6 +1484,10 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
     .credit-pricing a:hover {
         text-decoration: underline;
     }
+    .credit-pricing .loading {
+        color: #888;
+        font-style: italic;
+    }
     @media (max-width: 968px) {
         .credit-pricing {
             padding: 1.5rem;
@@ -814,6 +1496,10 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
         }
     }
     "#;
+
+    // VAT multiplier for overage credits
+    const OVERAGE_MULTIPLIER: f32 = 1.3;
+
     if country == "Other" {
         html! {
             <div class="credit-pricing">
@@ -823,38 +1509,69 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
                 <a href="/bring-own-number">{"See Setup Guide and Prices"}</a>
             </div>
         }
+    } else if country == "US" || country == "CA" {
+        // US/CA has messages included, no overage section needed
+        html! {}
+    } else if *loading {
+        html! {
+            <div class="credit-pricing">
+                <style>{credit_css}</style>
+                <h2>{"Overage Credits"}</h2>
+                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
+                <p class="loading">{"Loading pricing..."}</p>
+            </div>
+        }
+    } else if let Some(ref p) = *pricing {
+        // Calculate overage prices with 1.3x VAT multiplier
+        let notification_price = p.costs.notification.map(|n| n * OVERAGE_MULTIPLIER);
+        let response_price = p.costs.normal_response.map(|r| r * OVERAGE_MULTIPLIER);
+        let digest_price = p.costs.digest.map(|d| d * OVERAGE_MULTIPLIER);
+        let voice_out_price = p.costs.voice_outbound_per_min.map(|v| v * OVERAGE_MULTIPLIER);
+        let voice_in_price = p.costs.voice_inbound_per_min.map(|v| v * OVERAGE_MULTIPLIER);
+
+        let is_local = is_local_number_country(country);
+        let is_notification_only = is_notification_only_country(country);
+
+        html! {
+            <div class="credit-pricing">
+                <style>{credit_css}</style>
+                <h2>{"Overage Credits"}</h2>
+                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
+                <p>{"Your plan includes prepaid credits each month. If you use them all, you can purchase more at these rates:"}</p>
+                <ul>
+                    if let Some(noti) = notification_price {
+                        <li>{format!("Notification: €{:.2} each", noti)}</li>
+                    }
+                    if let Some(resp) = response_price {
+                        if is_notification_only {
+                            <li>{format!("Response message: €{:.2} each (pricing basis)", resp)}</li>
+                        } else {
+                            <li>{format!("Response message: €{:.2} each", resp)}</li>
+                        }
+                    }
+                    if let Some(digest) = digest_price {
+                        <li>{format!("Daily digest: €{:.2} each", digest)}</li>
+                    }
+                    if let Some(voice_out) = voice_out_price {
+                        <li>{format!("Voice call (outbound): €{:.2}/min", voice_out)}</li>
+                    }
+                    if is_local {
+                        if let Some(voice_in) = voice_in_price {
+                            <li>{format!("Voice call (inbound): €{:.2}/min", voice_in)}</li>
+                        }
+                    }
+                </ul>
+            </div>
+        }
     } else {
-        let currency = if country == "US" || country == "CA" { "$" } else { "€" };
-        let (msg_cost, voice_sec_cost, noti_msg_cost, noti_call_cost) = match country.as_str() {
-            "US" => (0.075, 0.0033, 0.075, 0.15),
-            "CA" => (0.075, 0.0033, 0.075, 0.15),
-            "FI" => (0.30, 0.005, 0.15, 0.70),
-            "NL" => (0.30, 0.005, 0.15, 0.45),
-            "UK" => (0.30, 0.005, 0.15, 0.20),
-            "AU" => (0.30, 0.005, 0.15, 0.20),
-            _ => (0.0, 0.0, 0.0, 0.0),
-        };
-        let voice_min_cost = voice_sec_cost * 60.0;
-        if country != "US" && country != "CA" {
-            html! {
-                <div class="credit-pricing">
-                    <style>{credit_css}</style>
-                    <h2>{"Message Costs (Credits)"}</h2>
-                    <p>{"Credits work like this: Buy them ahead with money. Use them for texts, calls, and notifications. Buy more when low."}</p>
-                    <p>{"It's easy. For example, add $10 in credits. Then send texts until used up."}</p>
-                    <p>{"You can set filters for what sends notifications. This way, no surprise costs."}</p>
-                    <p>{"Costs for each:"}</p>
-                    <ul>
-                        <li>{"Text message: "}{currency}{format!("{:.2}", msg_cost)}{" each"}</li>
-                        <li>{"Voice call per minute: "}{currency}{format!("{:.2}", voice_min_cost)}{" (or "}{currency}{format!("{:.4}", voice_sec_cost)}{" per second)"}</li>
-                        <li>{"Notification text: "}{currency}{format!("{:.2}", noti_msg_cost)}{" each"}</li>
-                        <li>{"Notification call: "}{currency}{format!("{:.2}", noti_call_cost)}{" each"}</li>
-                        <li>{"Daily summary: "}{currency}{format!("{:.2}", msg_cost)}</li>
-                    </ul>
-                </div>
-            }
-        } else {
-            html! {}
+        // Fallback if pricing fetch failed
+        html! {
+            <div class="credit-pricing">
+                <style>{credit_css}</style>
+                <h2>{"Overage Credits"}</h2>
+                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
+                <p>{"Your plan includes prepaid credits each month. Exact overage pricing varies by country."}</p>
+            </div>
         }
     }
 }
@@ -867,6 +1584,22 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("NL".to_string(), 19.00),
         ("UK".to_string(), 19.00),
         ("AU".to_string(), 19.00),
+        // Notification-only countries (same price as FI/NL/UK/AU)
+        ("DE".to_string(), 19.00),
+        ("FR".to_string(), 19.00),
+        ("ES".to_string(), 19.00),
+        ("IT".to_string(), 19.00),
+        ("PT".to_string(), 19.00),
+        ("BE".to_string(), 19.00),
+        ("AT".to_string(), 19.00),
+        ("CH".to_string(), 19.00),
+        ("PL".to_string(), 19.00),
+        ("CZ".to_string(), 19.00),
+        ("SE".to_string(), 19.00),
+        ("DK".to_string(), 19.00),
+        ("NO".to_string(), 19.00),
+        ("IE".to_string(), 19.00),
+        ("NZ".to_string(), 19.00),
         ("Other".to_string(), 19.00),
     ]);
     let guaranteed_prices: HashMap<String, f64> = HashMap::from([
@@ -1370,12 +2103,34 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <div class="country-selector">
                                 <label for="country">{"Select your country: "}</label>
                                 <select id="country" onchange={on_change}>
-                                    { for ["US", "CA", "FI", "NL", "UK", "AU", "Other"]
-                                        .iter()
-                                        .map(|&c| html! {
-                                            <option value={c} selected={props.selected_country == c}>{c}</option>
-                                        })
-                                    }
+                                    <optgroup label="Full Service (local number)">
+                                        <option value="US" selected={props.selected_country == "US"}>{"United States"}</option>
+                                        <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
+                                        <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
+                                        <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
+                                        <option value="UK" selected={props.selected_country == "UK"}>{"United Kingdom"}</option>
+                                        <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
+                                    </optgroup>
+                                    <optgroup label="Notification Only (US number)">
+                                        <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
+                                        <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
+                                        <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
+                                        <option value="IT" selected={props.selected_country == "IT"}>{"Italy"}</option>
+                                        <option value="PT" selected={props.selected_country == "PT"}>{"Portugal"}</option>
+                                        <option value="BE" selected={props.selected_country == "BE"}>{"Belgium"}</option>
+                                        <option value="AT" selected={props.selected_country == "AT"}>{"Austria"}</option>
+                                        <option value="CH" selected={props.selected_country == "CH"}>{"Switzerland"}</option>
+                                        <option value="PL" selected={props.selected_country == "PL"}>{"Poland"}</option>
+                                        <option value="CZ" selected={props.selected_country == "CZ"}>{"Czech Republic"}</option>
+                                        <option value="SE" selected={props.selected_country == "SE"}>{"Sweden"}</option>
+                                        <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
+                                        <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
+                                        <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
+                                        <option value="NZ" selected={props.selected_country == "NZ"}>{"New Zealand"}</option>
+                                    </optgroup>
+                                    <optgroup label="Other">
+                                        <option value="Other" selected={props.selected_country == "Other"}>{"Other (bring your own number)"}</option>
+                                    </optgroup>
                                 </select>
                             </div>
                         }
@@ -1388,26 +2143,149 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             }
             <h2 class="section-title">{"Plans"}</h2>
             <div class="pricing-grid">
-                <PricingCard
-                    plan_name={"Hosted Plan"}
-                    best_for={"Full-featured cloud service ready to go. Reclaim 2-4 hours per day* for just"}
-                    price={*hosted_total_price}
-                    currency={if props.selected_country == "US" || props.selected_country == "CA" { "$" } else { "€" }}
-                    period={"/day"}
-                    features={hosted_features.clone()}
-                    subscription_type={"hosted"}
-                    is_popular={true}
-                    is_premium={false}
-                    is_trial={props.selected_country == "US" || props.selected_country == "CA"}
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={props.selected_country.clone()}
-                    coming_soon={false}
-                    hosted_prices={hosted_prices.clone()}
-                />
+                {
+                    if props.selected_country == "US" || props.selected_country == "CA" {
+                        // US/CA: Show single Hosted Plan with messages included
+                        html! {
+                            <PricingCard
+                                plan_name={"Hosted Plan"}
+                                best_for={"Full-featured cloud service ready to go. Reclaim 2-4 hours per day* for just"}
+                                price={*hosted_total_price}
+                                currency={"$"}
+                                period={"/day"}
+                                features={hosted_features.clone()}
+                                subscription_type={"hosted"}
+                                is_popular={true}
+                                is_premium={false}
+                                is_trial={true}
+                                user_id={props.user_id}
+                                user_email={props.user_email.clone()}
+                                is_logged_in={props.is_logged_in}
+                                verified={props.verified}
+                                sub_tier={props.sub_tier.clone()}
+                                selected_country={props.selected_country.clone()}
+                                coming_soon={false}
+                                hosted_prices={hosted_prices.clone()}
+                            />
+                        }
+                    } else if props.selected_country == "Other" {
+                        // Other countries: BYOT Plan (bring your own Twilio)
+                        let byot_features = vec![
+                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
+                            Feature { text: "All features included".to_string(), sub_items: vec![] },
+                            Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
+                        ];
+                        html! {
+                            <PricingCard
+                                plan_name={"BYOT Plan"}
+                                best_for={"Bring Your Own Twilio. Full service, you handle messaging costs."}
+                                price={19.0}
+                                currency={"€"}
+                                period={"/month"}
+                                features={byot_features}
+                                subscription_type={"hosted"}
+                                is_popular={true}
+                                is_premium={false}
+                                is_trial={false}
+                                user_id={props.user_id}
+                                user_email={props.user_email.clone()}
+                                is_logged_in={props.is_logged_in}
+                                verified={props.verified}
+                                sub_tier={props.sub_tier.clone()}
+                                selected_country={props.selected_country.clone()}
+                                coming_soon={false}
+                                hosted_prices={hosted_prices.clone()}
+                            >
+                                <ByotPricingDisplay />
+                            </PricingCard>
+                        }
+                    } else {
+                        // Euro countries: Show Monitor and Digest plans
+                        // Both plans have ALL features - they only differ in prepaid message count
+                        let is_local_number_country = matches!(props.selected_country.as_str(), "FI" | "NL" | "UK" | "AU");
+
+                        let base_features: Vec<Feature> = if is_local_number_country {
+                            vec![
+                                Feature { text: "Local phone number included".to_string(), sub_items: vec![] },
+                                Feature { text: "All features included".to_string(), sub_items: vec![] },
+                            ]
+                        } else {
+                            // Notification-only countries
+                            vec![
+                                Feature { text: "Notifications from US number".to_string(), sub_items: vec!["Texting back may cost extra".to_string()] },
+                                Feature { text: "All features included".to_string(), sub_items: vec![] },
+                            ]
+                        };
+
+                        let mut monitor_features = base_features.clone();
+                        monitor_features.push(Feature { text: "Go off-grid knowing critical alerts reach you".to_string(), sub_items: vec![] });
+
+                        let mut digest_features = base_features;
+                        digest_features.push(Feature { text: "Eliminates FOMO - stay caught up without checking".to_string(), sub_items: vec![] });
+
+                        let selected_country_clone = props.selected_country.clone();
+                        let selected_country_clone2 = props.selected_country.clone();
+
+                        html! {
+                            <>
+                                <PricingCard
+                                    plan_name={"Monitor Plan"}
+                                    best_for={"Peace of mind. Get alerted to what matters, ignore the rest."}
+                                    price={29.0}
+                                    currency={"€"}
+                                    period={"/month"}
+                                    features={monitor_features}
+                                    subscription_type={"hosted"}
+                                    is_popular={false}
+                                    is_premium={false}
+                                    is_trial={false}
+                                    is_euro_trial={true}
+                                    user_id={props.user_id}
+                                    user_email={props.user_email.clone()}
+                                    is_logged_in={props.is_logged_in}
+                                    verified={props.verified}
+                                    sub_tier={props.sub_tier.clone()}
+                                    selected_country={props.selected_country.clone()}
+                                    coming_soon={false}
+                                    hosted_prices={hosted_prices.clone()}
+                                    plan_type={Some("monitor".to_string())}
+                                >
+                                    <MessageEquivalentDisplay
+                                        plan_messages={30}
+                                        country={selected_country_clone}
+                                    />
+                                </PricingCard>
+                                <PricingCard
+                                    plan_name={"Digest Plan"}
+                                    best_for={"Stay informed without the urge to check. Regular updates keep you ahead."}
+                                    price={49.0}
+                                    currency={"€"}
+                                    period={"/month"}
+                                    features={digest_features}
+                                    subscription_type={"hosted"}
+                                    is_popular={true}
+                                    is_premium={false}
+                                    is_trial={false}
+                                    is_euro_trial={true}
+                                    user_id={props.user_id}
+                                    user_email={props.user_email.clone()}
+                                    is_logged_in={props.is_logged_in}
+                                    verified={props.verified}
+                                    sub_tier={props.sub_tier.clone()}
+                                    selected_country={props.selected_country.clone()}
+                                    coming_soon={false}
+                                    hosted_prices={hosted_prices.clone()}
+                                    plan_type={Some("digest".to_string())}
+                                >
+                                    <MessageEquivalentDisplay
+                                        plan_messages={120}
+                                        country={selected_country_clone2}
+                                    />
+                                </PricingCard>
+                            </>
+                        }
+                    }
+                }
                 /*
                 <PricingCard
                     plan_name={"Guaranteed Plan"}
@@ -1455,12 +2333,37 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK/NL, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 30 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
-                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
-                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
-                               </details>
+                                    <summary>{"What's the difference between Monitor and Digest?"}</summary>
+                                    <p>{"Monitor is for critical notifications only - you get 30 credits and cannot buy more. Digest includes 120 credits with the ability to top up when needed, perfect for daily summaries and regular use."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"How do credits work?"}</summary>
+                                    <p>{"Different message types cost different amounts: notifications cost less than responses, which cost less than digests. The exact pricing is shown above based on your country's SMS rates. Digest plan users can purchase additional credits when needed."}</p>
+                                </details>
+                                </>
+                            }
+                        } else if is_notification_only_country(&props.selected_country) {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 30 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"What's the difference between Monitor and Digest?"}</summary>
+                                    <p>{"Monitor is for critical notifications only - you get 30 credits and cannot buy more. Digest includes 120 credits with the ability to top up when needed, perfect for daily summaries and regular use."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"How do credits work?"}</summary>
+                                    <p>{"Different message types cost different amounts: notifications cost less than digests. Voice calls also use credits. The exact pricing is shown above based on your country's SMS rates. Digest plan users can purchase additional credits when needed."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"Can I bring my own phone number?"}</summary>
+                                    <p>{"Yes! If you want a local number for two-way messaging, you can use the BYOT (Bring Your Own Twilio) plan. This lets you set up your own Twilio account and pay messaging costs directly to them."}</p>
+                                </details>
                                 </>
                             }
                         } else {
@@ -1468,11 +2371,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Messages or phone number are not included. Checkout the guide on how to bring your own Number from the pricing card. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
-                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
-                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
+                                    <summary>{"What is BYOT?"}</summary>
+                                    <p>{"Bring Your Own Twilio lets you create a Twilio account, get a phone number for your country, and connect it to Lightfriend. You pay Twilio directly for messaging - we provide the AI assistant service."}</p>
                                 </details>
                                 </>
                             }
@@ -1480,11 +2383,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     }
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
-                        <p>{"Available globally. US/CA everything is included. FI/UK/AU/NL include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
+                        <p>{"Available globally. US/CA has everything included. FI/UK/AU/NL include a local number. Other European countries receive messages from a US number. For other countries, you can use BYOT to bring your own number."}</p>
                     </details>
                     <details>
-                        <summary>{"Why do the plan offering differ per country?"}</summary>
-                        <p>{"Different countries have vastly different SMS costs - in the US and Canada, messages cost about 10x less, while in other countries they can cost up to $1 per message. To keep pricing fair and affordable, messages are included only in US/CA plans. For other countries, you can buy message credits as needed, giving you more control over costs."}</p>
+                        <summary>{"Why do plan offerings differ per country?"}</summary>
+                        <p>{"SMS costs vary dramatically by country - US/Canada is about 10x cheaper than Europe. We structure plans to keep pricing fair: US/CA gets messages included, while other countries get credits that account for local SMS rates."}</p>
                     </details>
                 </div>
             </div>

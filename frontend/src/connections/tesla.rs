@@ -72,6 +72,31 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
     let last_refresh_time: UseStateHandle<Option<String>> = use_state(|| None);
     let last_refresh_epoch: UseStateHandle<Rc<RefCell<f64>>> = use_state(|| Rc::new(RefCell::new(0.0)));
 
+    // Auto-hide command result after 10 seconds
+    {
+        let command_result_for_effect = command_result.clone();
+        let command_result_for_dep = command_result.clone();
+        use_effect_with_deps(
+            move |result: &Option<String>| {
+                if result.is_some() {
+                    let command_result = command_result_for_effect.clone();
+                    let window = web_sys::window().unwrap();
+                    let timeout_callback = Closure::wrap(Box::new(move || {
+                        command_result.set(None);
+                    }) as Box<dyn Fn()>);
+
+                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                        timeout_callback.as_ref().unchecked_ref(),
+                        10000, // 10 seconds
+                    );
+                    timeout_callback.forget();
+                }
+                || ()
+            },
+            (*command_result_for_dep).clone(),
+        );
+    }
+
     // Check Tesla connection status on mount
     {
         let tesla_connected = tesla_connected.clone();
@@ -411,7 +436,9 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                             // Check if document is now visible using web_sys::js_sys::Reflect
                             if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                                 if let Ok(hidden) = web_sys::js_sys::Reflect::get(&doc, &"hidden".into()) {
-                                    if hidden == false {
+                                    // Convert JsValue to bool - hidden is false when tab is visible
+                                    let is_hidden = hidden.as_bool().unwrap_or(true);
+                                    if !is_hidden {
                                         // Check if at least 30 seconds passed since last refresh
                                         let now = web_sys::js_sys::Date::new_0().get_time();
                                         let last_epoch = *last_refresh_epoch.borrow();
@@ -1395,13 +1422,30 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                                         font-size: 14px;
                                         cursor: pointer;
                                         opacity: {if *battery_loading { \"0.6\" } else { \"1\" }};
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 6px;
                                     "
                                 >
-                                    {if *battery_loading { "🔄" } else { "🔄 Refresh" }}
+                                    {if *battery_loading {
+                                        html! { <><i class="fas fa-spinner fa-spin"></i>{" Refreshing..."}</> }
+                                    } else {
+                                        html! { <><i class="fas fa-sync-alt"></i>{" Refresh"}</> }
+                                    }}
                                 </button>
                                 // Last refresh timestamp
                                 {
-                                    if let Some(time) = (*last_refresh_time).clone() {
+                                    if *battery_loading {
+                                        html! {
+                                            <span style="
+                                                color: #7EB2FF;
+                                                font-size: 12px;
+                                                margin-left: 10px;
+                                            ">
+                                                {"Loading..."}
+                                            </span>
+                                        }
+                                    } else if let Some(time) = (*last_refresh_time).clone() {
                                         html! {
                                             <span style="
                                                 color: #666;

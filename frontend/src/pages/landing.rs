@@ -1,12 +1,22 @@
 use crate::components::notification::AnimationComponent;
 use crate::Route;
+use crate::utils::api::Api;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::components::Link;
+use web_sys::HtmlInputElement;
+use serde_json::json;
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
+
+    // Waitlist form state
+    let waitlist_email = use_state(String::new);
+    let waitlist_loading = use_state(|| false);
+    let waitlist_success = use_state(|| false);
+    let waitlist_error = use_state(|| None::<String>);
+
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(
@@ -424,6 +434,88 @@ pub fn landing() -> Html {
                         <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
                     <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
+                    <div class="waitlist-section">
+                        <p class="waitlist-intro">{"Not ready yet? Get updates when new features launch:"}</p>
+                        {
+                            if *waitlist_success {
+                                html! {
+                                    <p class="waitlist-success">{"Thanks! We'll keep you posted."}</p>
+                                }
+                            } else {
+                                let waitlist_email_clone = waitlist_email.clone();
+                                let waitlist_loading_clone = waitlist_loading.clone();
+                                let waitlist_success_clone = waitlist_success.clone();
+                                let waitlist_error_clone = waitlist_error.clone();
+                                let on_submit = Callback::from(move |e: SubmitEvent| {
+                                    e.prevent_default();
+                                    let email = (*waitlist_email_clone).clone();
+                                    let loading = waitlist_loading_clone.clone();
+                                    let success = waitlist_success_clone.clone();
+                                    let error = waitlist_error_clone.clone();
+
+                                    if email.is_empty() || !email.contains('@') {
+                                        error.set(Some("Please enter a valid email".to_string()));
+                                        return;
+                                    }
+
+                                    loading.set(true);
+                                    error.set(None);
+
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        match Api::post("/api/waitlist")
+                                            .json(&json!({ "email": email }))
+                                            .unwrap()
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                loading.set(false);
+                                                if response.ok() {
+                                                    success.set(true);
+                                                } else {
+                                                    error.set(Some("Could not join waitlist. Try again.".to_string()));
+                                                }
+                                            }
+                                            Err(_) => {
+                                                loading.set(false);
+                                                error.set(Some("Network error. Please try again.".to_string()));
+                                            }
+                                        }
+                                    });
+                                });
+
+                                let on_email_change = {
+                                    let waitlist_email = waitlist_email.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        waitlist_email.set(input.value());
+                                    })
+                                };
+
+                                html! {
+                                    <form class="waitlist-form" onsubmit={on_submit}>
+                                        <input
+                                            type="email"
+                                            placeholder="your@email.com"
+                                            class="waitlist-input"
+                                            onchange={on_email_change}
+                                            disabled={*waitlist_loading}
+                                        />
+                                        <button type="submit" class="waitlist-button" disabled={*waitlist_loading}>
+                                            {if *waitlist_loading { "Joining..." } else { "Get Updates" }}
+                                        </button>
+                                        {
+                                            if let Some(err) = (*waitlist_error).as_ref() {
+                                                html! { <p class="waitlist-error">{err}</p> }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                    </form>
+                                }
+                            }
+                        }
+                    </div>
                     <div class="development-links">
                         <p>{"Source code on "}
                             <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
@@ -1288,6 +1380,83 @@ pub fn landing() -> Html {
         .section-intro {
             padding: 1.5rem;
             margin-top: 2rem;
+        }
+    }
+    .waitlist-section {
+        margin-top: 2.5rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(30, 144, 255, 0.1);
+    }
+    .waitlist-intro {
+        color: #888;
+        font-size: 1rem;
+        margin-bottom: 1rem;
+    }
+    .waitlist-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+        align-items: center;
+    }
+    .waitlist-input {
+        padding: 0.75rem 1rem;
+        border: 1px solid rgba(30, 144, 255, 0.3);
+        border-radius: 8px;
+        background: rgba(30, 30, 30, 0.7);
+        color: #fff;
+        font-size: 1rem;
+        min-width: 200px;
+        flex: 1;
+        max-width: 300px;
+    }
+    .waitlist-input:focus {
+        outline: none;
+        border-color: #1E90FF;
+        box-shadow: 0 0 10px rgba(30, 144, 255, 0.2);
+    }
+    .waitlist-input::placeholder {
+        color: #666;
+    }
+    .waitlist-button {
+        padding: 0.75rem 1.5rem;
+        background: linear-gradient(45deg, #1E90FF, #4169E1);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .waitlist-button:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+    }
+    .waitlist-button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+    }
+    .waitlist-success {
+        color: #4ecdc4;
+        font-size: 1rem;
+    }
+    .waitlist-error {
+        color: #ff6b6b;
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+        width: 100%;
+        text-align: center;
+    }
+    @media (max-width: 768px) {
+        .waitlist-form {
+            flex-direction: column;
+        }
+        .waitlist-input {
+            width: 100%;
+            max-width: none;
+        }
+        .waitlist-button {
+            width: 100%;
         }
     }
     .development-links {

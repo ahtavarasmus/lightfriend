@@ -62,7 +62,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let email_original = use_state(|| (*user_profile).email.clone());
     let phone_number = use_state(|| (*user_profile).phone_number.clone());
     let phone_number_original = use_state(|| (*user_profile).phone_number.clone());
-    let preferred_number = use_state(|| (*user_profile).preferred_number.clone());
     let nickname = use_state(|| (*user_profile).nickname.clone().unwrap_or_default());
     let nickname_original = use_state(|| (*user_profile).nickname.clone().unwrap_or_default());
     let info = use_state(|| (*user_profile).info.clone().unwrap_or_default());
@@ -87,7 +86,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let agent_language_save_state = use_state(|| FieldSaveState::Idle);
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let save_context_save_state = use_state(|| FieldSaveState::Idle);
-    let preferred_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
     let show_email_confirm = use_state(|| false);
@@ -103,7 +101,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let email_original = email_original.clone();
         let phone_number = phone_number.clone();
         let phone_number_original = phone_number_original.clone();
-        let preferred_number = preferred_number.clone();
         let nickname = nickname.clone();
         let nickname_original = nickname_original.clone();
         let info = info.clone();
@@ -123,7 +120,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             email_original.set(props_profile.email.clone());
             phone_number.set(props_profile.phone_number.clone());
             phone_number_original.set(props_profile.phone_number.clone());
-            preferred_number.set(props_profile.preferred_number.clone());
             nickname.set(props_profile.nickname.clone().unwrap_or_default());
             nickname_original.set(props_profile.nickname.clone().unwrap_or_default());
             info.set(props_profile.info.clone().unwrap_or_default());
@@ -616,59 +612,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         })
     };
 
-    // Preferred number change handler
-    let on_preferred_number_change = {
-        let preferred_number = preferred_number.clone();
-        let save_state = preferred_number_save_state.clone();
-        let user_profile = user_profile.clone();
-        let on_profile_update = props.on_profile_update.clone();
-        Callback::from(move |e: Event| {
-            let select: HtmlInputElement = e.target_unchecked_into();
-            let new_val = select.value();
-            let value = if new_val.is_empty() { None } else { Some(new_val.clone()) };
-            preferred_number.set(value.clone());
-            let save_state = save_state.clone();
-            let user_profile = user_profile.clone();
-            let on_profile_update = on_profile_update.clone();
-            save_state.set(FieldSaveState::Saving);
-            spawn_local(async move {
-                let json_value = if new_val.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::Value::String(new_val.clone())
-                };
-                let request = PatchFieldRequest {
-                    field: "preferred_number".to_string(),
-                    value: json_value
-                };
-                match Api::patch("/api/profile/field")
-                    .json(&request)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        let mut profile = (*user_profile).clone();
-                        profile.preferred_number = value;
-                        on_profile_update.emit(profile);
-                        save_state.set(FieldSaveState::Success);
-                        let save_state_clone = save_state.clone();
-                        spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                            save_state_clone.set(FieldSaveState::Idle);
-                        });
-                    }
-                    Ok(_) => {
-                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                    }
-                    Err(_) => {
-                        save_state.set(FieldSaveState::Error("Network error".to_string()));
-                    }
-                }
-            });
-        })
-    };
-
     // Email blur handler - shows confirmation dialog
     let on_email_blur = {
         let email = email.clone();
@@ -1043,47 +986,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         onblur={on_phone_blur.clone()}
                     />
                     {render_save_indicator(&*phone_save_state)}
-                </div>
-            </div>
-
-            // Preferred Number field
-            <div class="profile-field">
-                <span class="field-label">{"Preferred Number"}</span>
-                <div class="field-input-container">
-                    <select
-                        class="profile-input"
-                        value={(*preferred_number).clone().unwrap_or_default()}
-                        onchange={on_preferred_number_change.clone()}
-                    >
-                        <option value="">{ "None" }</option>
-                        <option value="+358454901522">{"Finland"}</option>
-                        <option value="+18153684737">{"USA"}</option>
-                        <option value="+61489260976">{"Australia"}</option>
-                        <option value="+447383240344">{"UK"}</option>
-                        <option value="+12892066453">{"Canada"}</option>
-                        <option value="+3197010207742">{"Netherlands"}</option>
-                        {
-                            if let Some(current) = (*preferred_number).clone() {
-                                if !current.is_empty() && !(
-                                    current == "+358454901522" ||
-                                    current == "+18153684737" ||
-                                    current == "+61489260976" ||
-                                    current == "+447383240344" ||
-                                    current == "+12892066453" ||
-                                    current == "+3197010207742"
-                                ) {
-                                    html! {
-                                        <option value={current.clone()}>{ format!("Custom: {}", current) }</option>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
-                    </select>
-                    {render_save_indicator(&*preferred_number_save_state)}
                 </div>
             </div>
 

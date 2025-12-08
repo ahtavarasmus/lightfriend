@@ -4,14 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-plotters = "0.3"
-plotters-canvas = "0.3"
-stylist = { version = "0.12", features = ["yew_integration", "parser"] }
 urlencoding = "2.1.0"
 chrono = { version = "0.4", features = ["wasmbind", "serde"] }
 yew = { version = "0.20", features = ["csr"] }
-tracing = "0.1"
-tracing-wasm = "0.2"
 console_error_panic_hook = "0.1"
 yew-router = "0.17"
 wasm-bindgen = "0.2"
@@ -24,8 +19,16 @@ web-sys = { version = "0.3", features = [
     "Element",
     "Navigator",
     "Clipboard",
-    "Window"
+    "Window",
+    "CredentialsContainer",
+    "PublicKeyCredential",
+    "PublicKeyCredentialCreationOptions",
+    "PublicKeyCredentialRequestOptions",
+    "AuthenticatorAttestationResponse",
+    "AuthenticatorAssertionResponse",
+    "AuthenticatorResponse",
 ] }
+js-sys = "0.3"
 gloo-net = "0.2"
 gloo-timers = { version = "0.2", features = ["futures"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,5 +38,4 @@ gloo-console = "0.2"
 log = "0.4"
 console_log = "1.0"
 serde-wasm-bindgen = "0.6.5"
-yew-hooks = "0.2"
 chrono-tz = "0.10.2"

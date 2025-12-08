@@ -37,6 +37,79 @@ pub struct BuyCreditsRequest {
 #[derive(Deserialize)]
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
+    /// For euro countries: "monitor" (€29/50 msgs) or "digest" (€59/150 msgs)
+    pub plan_type: Option<String>,
+}
+
+/// Calculate euro credit allocation for Monitor/Digest plans based on user's country pricing.
+///
+/// Uses dynamic Twilio pricing when available, falls back to €0.39/message otherwise.
+/// Sends admin email notification when fallback pricing is used.
+///
+/// # Arguments
+/// * `state` - Application state for database/pricing access
+/// * `country_code` - User's phone number country code (e.g., "FI", "DE")
+/// * `message_count` - Number of messages the plan includes (50 for Monitor, 150 for Digest)
+/// * `plan_name` - Plan name for logging ("Monitor" or "Digest")
+///
+/// # Returns
+/// The euro value to allocate as credits_left (message_count × price_per_message)
+async fn calculate_euro_credit_allocation(
+    state: &Arc<AppState>,
+    country_code: &str,
+    message_count: f32,
+    plan_name: &str,
+) -> f32 {
+    use crate::api::twilio_pricing::get_euro_country_pricing;
+
+    // Fallback price: €0.39 per regular message (0.10 × 3 segments × 1.3 margin)
+    const FALLBACK_REGULAR_MSG_PRICE: f32 = 0.39;
+
+    match get_euro_country_pricing(state, country_code).await {
+        Ok(pricing) => {
+            let allocation = message_count * pricing.regular_message_price;
+            tracing::info!(
+                "{} plan credit allocation for {}: {} messages × €{:.3}/msg = €{:.2}",
+                plan_name, country_code, message_count, pricing.regular_message_price, allocation
+            );
+            allocation
+        }
+        Err(e) => {
+            let fallback_allocation = message_count * FALLBACK_REGULAR_MSG_PRICE;
+            tracing::warn!(
+                "Failed to get pricing for {}, using fallback: {} - allocating €{:.2}",
+                country_code, e, fallback_allocation
+            );
+
+            // Send admin notification about fallback usage
+            let subject = format!("Pricing Fallback Used - {} Plan", plan_name);
+            let message = format!(
+                "Dynamic Twilio pricing lookup failed for country '{}' during {} plan subscription.\n\n\
+                Error: {}\n\n\
+                Fallback pricing used: €{:.2}/message\n\
+                Allocated credits: €{:.2} (~{} messages)\n\n\
+                Consider checking:\n\
+                1. Twilio pricing API availability\n\
+                2. Country code validity\n\
+                3. Network connectivity",
+                country_code, plan_name, e, FALLBACK_REGULAR_MSG_PRICE, fallback_allocation, message_count as i32
+            );
+
+            // Spawn email notification (don't block the webhook)
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::utils::notification_utils::send_admin_alert(
+                    &state_clone,
+                    &subject,
+                    &message,
+                ).await {
+                    tracing::error!("Failed to send admin alert about pricing fallback: {}", e);
+                }
+            });
+
+            fallback_allocation
+        }
+    }
 }
 
 pub async fn create_unified_subscription_checkout(
@@ -45,7 +118,7 @@ pub async fn create_unified_subscription_checkout(
     Path(user_id): Path<i32>,
     Json(body): Json<SubscriptionCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_subscription_checkout for user_id: {}", user_id);
+    tracing::debug!("Starting create_subscription_checkout for user_id: {}", user_id);
 
     // Check if new subscriptions are blocked
     if let Ok(blocked) = std::env::var("BLOCK_NEW_SUBSCRIPTIONS") {
@@ -65,14 +138,14 @@ pub async fn create_unified_subscription_checkout(
         .user_core
         .find_by_id(user_id)
         .map_err(|e| {
-            println!("Database error when finding user: {}", e);
+            tracing::error!("Database error when finding user: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Failed to verify user"})),
             )
         })?
         .ok_or_else(|| {
-            println!("User not found: {}", user_id);
+            tracing::debug!("User not found: {}", user_id);
             (
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "User not found"})),
@@ -80,14 +153,14 @@ pub async fn create_unified_subscription_checkout(
         })?;
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
-        println!("STRIPE_SECRET_KEY not found in environment");
+        tracing::error!("STRIPE_SECRET_KEY not found in environment");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Stripe configuration error"})),
         )
     })?;
     let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
+    tracing::debug!("Stripe client initialized");
     // Get or create Stripe customer
     let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
         Ok(Some(id)) => id,
@@ -120,7 +193,7 @@ pub async fn create_unified_subscription_checkout(
             ..Default::default()
         },
     ).await.map_err(|e| {
-        println!("Error fetching existing subscriptions: {:?}", e);
+        tracing::error!("Error fetching existing subscriptions: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to check existing subscriptions"})),
@@ -129,26 +202,33 @@ pub async fn create_unified_subscription_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     // Select price ID based on subscription type and user's phone number country
     let country = user.phone_number_country.as_deref().unwrap_or("OTHER");
-    println!("country: {}", country);
+    tracing::debug!("country: {}", country);
+
+    // Import euro plan country check
+    use crate::utils::country::is_euro_plan_country;
+
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
                 std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
-            } else if country == "FI" {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
-            } else if country == "UK" {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
-            } else if country == "AU" {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_NL")
-            } else if country == "NL" {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
+                    .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
+            } else if is_euro_plan_country(country) {
+                // Euro countries: Monitor (€29) or Digest (€59) plan
+                match body.plan_type.as_deref() {
+                    Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
+                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
+                    _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
+                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"), // Default to Monitor
+                }
             } else {
+                // Fallback for any other countries
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-            }.expect("Stripe price ID not found for region")
+                    .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
+            }
         },
         SubscriptionType::SelfHosting => {
             std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
-                .expect("Stripe price ID not found for region")
+                .expect("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID not set")
         },
     };
     let line_items = vec![
@@ -201,7 +281,7 @@ pub async fn create_unified_subscription_checkout(
     };
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
-        println!("Found existing subscription: {}", current_subscription.id);
+        tracing::debug!("Found existing subscription: {}", current_subscription.id);
   
         // Create metadata to track the subscription change
         metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
@@ -213,7 +293,13 @@ pub async fn create_unified_subscription_checkout(
         create_params.success_url = Some(&success_url1);
         // No trial for upgrades
     } else if body.subscription_type == SubscriptionType::Hosted && (country == "US" || country == "CA") {
-        // Add trial only for new Hosted subscriptions in US/CA
+        // Add free 7-day trial for new Hosted subscriptions in US/CA
+        sub_data.trial_period_days = Some(7);
+        if !metadata.is_empty() {
+            sub_data.metadata = Some(metadata);
+        }
+    } else if body.subscription_type == SubscriptionType::Hosted && is_euro_plan_country(country) {
+        // Add 7-day trial for euro countries (€10 setup fee handled via Stripe product config)
         sub_data.trial_period_days = Some(7);
         if !metadata.is_empty() {
             sub_data.metadata = Some(metadata);
@@ -227,17 +313,179 @@ pub async fn create_unified_subscription_checkout(
     )
     .await
     .map_err(|e| {
-        println!("Stripe error details: {:?}", e);
+        tracing::error!("Stripe error details: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
         )
     })?;
-    println!("Subscription checkout session created successfully");
+    tracing::info!("Subscription checkout session created successfully");
     // Return the Checkout session URL
     Ok(Json(json!({
         "url": checkout_session.url.unwrap(),
         "message": "Redirecting to Stripe Checkout for subscription"
+    })))
+}
+
+// ==================== Guest Checkout (No Auth Required) ====================
+
+#[derive(Deserialize)]
+pub struct GuestCheckoutBody {
+    pub subscription_type: SubscriptionType,
+    pub selected_country: String,
+    /// For euro countries: "monitor" (€29/50 msgs) or "digest" (€59/150 msgs)
+    pub plan_type: Option<String>,
+}
+
+/// Create a checkout session for users without an account
+/// POST /api/stripe/guest-checkout
+pub async fn create_guest_checkout(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<GuestCheckoutBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    tracing::debug!("Starting guest checkout for country: {}", body.selected_country);
+
+    // Check if new subscriptions are blocked
+    if let Ok(blocked) = std::env::var("BLOCK_NEW_SUBSCRIPTIONS") {
+        if blocked == "true" || blocked == "1" {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "New subscriptions are temporarily unavailable",
+                    "message": "We're currently not accepting new subscriptions. Please check back later."
+                })),
+            ));
+        }
+    }
+
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        tracing::error!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key);
+
+    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
+    let country = body.selected_country.as_str();
+
+    // Import euro plan country check
+    use crate::utils::country::is_euro_plan_country;
+
+    // Select price ID based on subscription type and country
+    let base_price_id = match body.subscription_type {
+        SubscriptionType::Hosted => {
+            if country == "US" || country == "CA" {
+                std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
+                    .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
+            } else if is_euro_plan_country(country) {
+                // Euro countries: use monitor or digest plan based on selection
+                let plan_type = body.plan_type.as_deref().unwrap_or("monitor");
+                if plan_type == "digest" {
+                    std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
+                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set")
+                } else {
+                    std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
+                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set")
+                }
+            } else {
+                // Other countries fallback
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
+                    .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
+            }
+        },
+        SubscriptionType::SelfHosting => {
+            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
+                .expect("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID not set")
+        },
+    };
+
+    let line_items = vec![
+        stripe::CreateCheckoutSessionLineItems {
+            price: Some(base_price_id),
+            quantity: Some(1),
+            ..Default::default()
+        },
+    ];
+
+    // Success URL redirects to password setup page with session_id
+    let success_url = format!("{}/set-password?session_id={{CHECKOUT_SESSION_ID}}", domain_url);
+    let cancel_url = format!("{}/pricing?checkout=canceled", domain_url);
+
+    // Build metadata
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("selected_country".to_string(), country.to_string());
+    metadata.insert("is_guest_checkout".to_string(), "true".to_string());
+    if let Some(ref plan_type) = body.plan_type {
+        metadata.insert("plan_type".to_string(), plan_type.clone());
+    }
+
+    // Subscription data with trial for eligible countries
+    let mut sub_data = stripe::CreateCheckoutSessionSubscriptionData {
+        metadata: Some(metadata.clone()),
+        ..Default::default()
+    };
+
+    // Add 7-day trial for new subscriptions in eligible countries
+    if body.subscription_type == SubscriptionType::Hosted {
+        if country == "US" || country == "CA" || is_euro_plan_country(country) {
+            sub_data.trial_period_days = Some(7);
+        }
+    }
+
+    let create_params = CreateCheckoutSession {
+        success_url: Some(&success_url),
+        cancel_url: Some(&cancel_url),
+        mode: Some(stripe::CheckoutSessionMode::Subscription),
+        line_items: Some(line_items),
+        // No customer - Stripe will create one
+        customer_creation: Some(stripe::CheckoutSessionCustomerCreation::Always),
+        // Collect phone number
+        phone_number_collection: Some(stripe::CreateCheckoutSessionPhoneNumberCollection {
+            enabled: true,
+        }),
+        allow_promotion_codes: Some(true),
+        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+            enabled: true,
+            liability: None,
+        }),
+        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+            enabled: true,
+        }),
+        custom_fields: Some(vec![
+            stripe::CreateCheckoutSessionCustomFields {
+                key: "referral_source".to_string(),
+                label: stripe::CreateCheckoutSessionCustomFieldsLabel {
+                    custom: "Where did you hear about Lightfriend?".to_string(),
+                    type_: stripe::CreateCheckoutSessionCustomFieldsLabelType::Custom,
+                },
+                type_: stripe::CreateCheckoutSessionCustomFieldsType::Text,
+                optional: Some(false),
+                ..Default::default()
+            },
+        ]),
+        subscription_data: Some(sub_data),
+        ..Default::default()
+    };
+
+    let checkout_session = CheckoutSession::create(&client, create_params)
+        .await
+        .map_err(|e| {
+            tracing::error!("Stripe error creating guest checkout: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to create checkout session: {}", e)})),
+            )
+        })?;
+
+    tracing::info!("Guest checkout session created: {}", checkout_session.id);
+
+    Ok(Json(json!({
+        "url": checkout_session.url.unwrap(),
+        "session_id": checkout_session.id.to_string()
     })))
 }
 
@@ -246,7 +494,7 @@ pub async fn create_customer_portal_session(
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_customer_portal_session for user_id: {}", user_id);
+    tracing::debug!("Starting create_customer_portal_session for user_id: {}", user_id);
     // Check if user is accessing their own data or is an admin
     if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
@@ -258,8 +506,8 @@ pub async fn create_customer_portal_session(
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
-    println!("JWT token validated successfully");
+    tracing::debug!("Stripe client initialized");
+    tracing::debug!("JWT token validated successfully");
     // Get Stripe customer ID
     let customer_id = state
         .user_repository
@@ -272,7 +520,7 @@ pub async fn create_customer_portal_session(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe customer ID found for user"})),
         ))?;
-    println!("Found Stripe customer ID: {}", customer_id);
+    tracing::debug!("Found Stripe customer ID: {}", customer_id);
     // Create a Billing Portal Session
     // Create a Billing Portal Session
     let mut create_session = CreateBillingPortalSession::new(customer_id.parse().unwrap());
@@ -282,19 +530,19 @@ pub async fn create_customer_portal_session(
         std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set")
     );
     create_session.return_url = Some(&return_url);
-    println!("Creating portal session with return URL: {}", return_url);
+    tracing::debug!("Creating portal session with return URL: {}", return_url);
     let portal_session = BillingPortalSession::create(
         &client,
 create_session,
     )
     .await
     .map_err(|e| {
-            eprintln!("{}", e);
+            tracing::error!("{}", e);
         (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Failed to create Customer Portal session: {}", e)})),
     )})?;
-    println!("Portal session created successfully with URL: {}", portal_session.url);
+    tracing::debug!("Portal session created successfully with URL: {}", portal_session.url);
     // Return the portal URL to redirect the user
     Ok(Json(json!({
         "url": portal_session.url,
@@ -308,7 +556,7 @@ pub async fn create_checkout_session(
     Path(user_id): Path<i32>,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_checkout_session for user_id: {}", user_id);
+    tracing::debug!("Starting create_checkout_session for user_id: {}", user_id);
     // Fetch user from the database
     let user = state
         .user_core
@@ -321,17 +569,46 @@ pub async fn create_checkout_session(
             StatusCode::NOT_FOUND,
             Json(json!({"error": "User not found"})),
         ))?;
-    println!("User found: {}", user.id);
+    tracing::debug!("User found: {}", user.id);
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
-    let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
+    let client = Client::new(stripe_secret_key.clone());
+
+    // Check if user is on Digest plan (only Digest users can buy overage credits)
+    // US/CA users are exempt from this check
+    let is_us_ca = user.phone_number_country == Some("US".to_string())
+        || user.phone_number_country == Some("CA".to_string());
+
+    if !is_us_ca {
+        // First check database for plan_type
+        let plan_type = match user.plan_type.as_deref() {
+            Some(pt) => Some(pt.to_string()),
+            None => {
+                // Lazy migration: plan_type not set, fetch from Stripe and save to DB
+                crate::utils::country::lazy_migrate_plan_type(user_id, &state).await
+            }
+        };
+
+        // Check if user is on Digest plan
+        if plan_type.as_deref() != Some("digest") {
+            tracing::info!("User {} attempted to buy credits but is not on Digest plan (plan_type={:?})", user_id, plan_type);
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "Credit top-ups are only available on the Digest plan",
+                    "upgrade_required": true,
+                    "message": "Upgrade to Digest for €49/month to get 120 credits and the ability to purchase additional credits when needed."
+                })),
+            ));
+        }
+    }
+    tracing::debug!("Stripe client initialized");
     // Check if user has a Stripe customer ID; if not, create one
     // Check if user has a Stripe customer ID; if not, create one
     let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
         Ok(Some(id)) => {
-            println!("Found existing Stripe customer ID");
+            tracing::debug!("Found existing Stripe customer ID");
             // Try to retrieve the customer to verify it exists
             match Customer::retrieve(&client, &id.parse().unwrap(), &[]).await {
                 Ok(_customer) => {
@@ -342,12 +619,12 @@ pub async fn create_checkout_session(
                     stripe::StripeError::Stripe(stripe_error) => {
                         if stripe_error.error_type == stripe::ErrorType::Api {
                             // Handle the case where the customer doesn't exist
-                            println!("Customer {} does not exist, creating new customer", id);
+                            tracing::warn!("Customer {} does not exist, creating new customer", id);
                             create_new_customer(&client, user_id, &user.email, &state).await?
                         } else {
                             // Handle other types of API errors
                             let error = stripe_error.message.unwrap();
-                            println!("API error: {}", error);
+                            tracing::error!("API error: {}", error);
                             return Err((
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 Json(json!({"error": format!("Stripe API error: {}", error)})),
@@ -356,7 +633,7 @@ pub async fn create_checkout_session(
                     },
                     _ => {
                         // Handle other types of errors
-                        println!("An error occurred: {:?}", e);
+                        tracing::error!("An error occurred: {:?}", e);
                         return Err((
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(json!({"error": format!("Stripe error: {:?}", e)})),
@@ -366,7 +643,7 @@ pub async fn create_checkout_session(
             }
         },
         Ok(None) => {
-            println!("No Stripe customer ID found, creating new customer");
+            tracing::debug!("No Stripe customer ID found, creating new customer");
             create_new_customer(&client, user_id, &user.email, &state).await?
         },
         Err(e) => return Err((
@@ -377,11 +654,11 @@ pub async fn create_checkout_session(
    
     let amount_dollars = payload.amount_dollars; // From BuyCreditsRequest
     let amount_cents = (amount_dollars * 100.0).round() as i64; // Convert to cents for Stripe
-    println!("Processing payment of {} EUR ({} cents)", amount_dollars, amount_cents);
+    tracing::info!("Processing payment of {} EUR ({} cents)", amount_dollars, amount_cents);
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
    
     // Create a Checkout Session with payment method attachment
-    println!("Creating Stripe checkout session");
+    tracing::debug!("Creating Stripe checkout session");
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
@@ -421,13 +698,13 @@ pub async fn create_checkout_session(
     )
     .await
     .map_err(|e| {
-    println!("Stripe error details: {:?}", e); // Log the full error
+    tracing::error!("Stripe error details: {:?}", e); // Log the full error
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to create Checkout Session: {}", e)})),
         )
     })?;
-    println!("Checkout session created successfully");
+    tracing::info!("Checkout session created successfully");
     // Save the session ID for later use (optional, if you need to track it)
     state
         .user_repository
@@ -436,7 +713,7 @@ pub async fn create_checkout_session(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
         ))?;
-    println!("Checkout session ID saved to database");
+    tracing::debug!("Checkout session ID saved to database");
     // Return the Checkout session URL to redirect the user
     Ok(Json(json!({
         "url": checkout_session.url.unwrap(), // Safe to unwrap as it's always present for Checkout
@@ -461,18 +738,18 @@ async fn create_new_customer(
     )
     .await
     .map_err(|e| {
-        println!("Failed to create customer: {}", e);
+        tracing::error!("Failed to create customer: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to create Stripe customer: {}", e)})),
         )
     })?;
-    println!("Created new Stripe customer");
+    tracing::info!("Created new Stripe customer");
     state
         .user_repository
         .set_stripe_customer_id(user_id, &customer.id.to_string())
         .map_err(|e| {
-            println!("Failed to update database with new customer ID: {}", e);
+            tracing::error!("Failed to update database with new customer ID: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)})),
@@ -524,6 +801,16 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     // Check if it's self-hosted (tier 3)
     if price_id == std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID").unwrap_or_default() {
         info.tier = "tier 3";
+        return info;
+    }
+
+    // Check for new Monitor and Digest plans (tier 2)
+    if price_id == std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID").unwrap_or_default() {
+        info.tier = "tier 2";
+        return info;
+    }
+    if price_id == std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID").unwrap_or_default() {
+        info.tier = "tier 2";
         return info;
     }
 
@@ -623,6 +910,113 @@ pub async fn stripe_webhook(
                 // Always check and cancel existing subscriptions when a new one is created
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
                     tracing::info!("New subscription created, checking for existing subscriptions to cancel");
+
+                    // ========== GUEST CHECKOUT: Create user if not exists ==========
+                    // Check if this is a guest checkout (user doesn't exist for this customer)
+                    let existing_user = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str());
+                    if let Ok(None) = existing_user {
+                        tracing::info!("Guest checkout detected - creating user for customer {}", customer_id);
+
+                        // Fetch customer details from Stripe
+                        if let Ok(customer) = Customer::retrieve(&client, &customer_id, &[]).await {
+                            let email = customer.email.clone().unwrap_or_default();
+                            let phone = customer.phone.clone().unwrap_or_default();
+
+                            if !email.is_empty() {
+                                // Check if user with this email already exists
+                                let email_exists = state.user_core.find_by_email(&email);
+
+                                match email_exists {
+                                    Ok(Some(existing_user_by_email)) => {
+                                        // Link existing user to this Stripe customer
+                                        tracing::info!("Found existing user {} with email {}, linking to Stripe customer",
+                                            existing_user_by_email.id, email);
+                                        let _ = state.user_repository.set_stripe_customer_id(
+                                            existing_user_by_email.id,
+                                            &customer_id.to_string()
+                                        );
+                                        // Update phone if provided and user doesn't have one
+                                        if !phone.is_empty() && existing_user_by_email.phone_number.is_empty() {
+                                            let _ = state.user_core.update_phone_number(existing_user_by_email.id, &phone);
+                                        }
+                                    },
+                                    Ok(None) => {
+                                        // Create new user (no password - they'll set it via magic link)
+                                        use crate::handlers::auth_dtos::NewUser;
+                                        use rand::Rng;
+
+                                        // Generate magic token
+                                        let magic_token: String = rand::thread_rng()
+                                            .sample_iter(&rand::distributions::Alphanumeric)
+                                            .take(64)
+                                            .map(char::from)
+                                            .collect();
+
+                                        let new_user = NewUser {
+                                            email: email.clone(),
+                                            password_hash: "NOT_SET".to_string(), // Placeholder - user sets via magic link
+                                            phone_number: phone.clone(),
+                                            time_to_live: 0, // No expiry for paid users
+                                            verified: true, // Payment = verified
+                                            credits: 0.0,
+                                            credits_left: 0.0,
+                                            charge_when_under: false,
+                                            waiting_checks_count: 0,
+                                            discount: false,
+                                            sub_tier: None,
+                                        };
+
+                                        if let Ok(()) = state.user_core.create_user(new_user) {
+                                            if let Ok(Some(created_user)) = state.user_core.find_by_email(&email) {
+                                                tracing::info!("Created new user {} from guest checkout", created_user.id);
+
+                                                // Link Stripe customer
+                                                let _ = state.user_repository.set_stripe_customer_id(
+                                                    created_user.id,
+                                                    &customer_id.to_string()
+                                                );
+
+                                                // Set phone country from phone number
+                                                if !phone.is_empty() {
+                                                    let _ = crate::handlers::profile_handlers::set_user_phone_country(
+                                                        &state, created_user.id, &phone
+                                                    ).await;
+                                                }
+
+                                                // Ensure user settings and info exist
+                                                let _ = state.user_core.ensure_user_settings_exist(created_user.id);
+                                                let _ = state.user_core.ensure_user_info_exists(created_user.id);
+
+                                                // Store magic token
+                                                let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
+
+                                                // Store session_id -> token mapping for redirect flow
+                                                // We need to get the checkout session ID from the subscription metadata
+                                                if let Some(session_id) = subscription.metadata.get("checkout_session_id") {
+                                                    state.session_to_token.insert(session_id.clone(), magic_token.clone());
+                                                }
+
+                                                // Send magic link email
+                                                let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+                                                let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
+                                                let email_clone = email.clone();
+
+                                                tokio::spawn(async move {
+                                                    if let Err(e) = crate::utils::email::send_magic_link_email(&email_clone, &magic_link).await {
+                                                        tracing::error!("Failed to send magic link email: {}", e);
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        tracing::error!("Error checking if email exists: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // ========== END GUEST CHECKOUT ==========
                   
                     // List all active subscriptions for the customer
                     let existing_subscriptions = stripe::Subscription::list(
@@ -751,24 +1145,61 @@ pub async fn stripe_webhook(
                         if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(sub_info.tier)) {
                             tracing::error!("Failed to update subscription tier: {}", e);
                         }
-                        // Simplified credit allocation logic
+                        // Credit allocation logic based on plan type
+                        use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_legacy_euro_plan_price, is_byot_plan_price};
+
                         let messages: f32;
-                        println!("sub_tier: {}", sub_info.tier);
+                        tracing::debug!("sub_tier: {}", sub_info.tier);
 
                         // Tier 3 (self-hosted) gets 0 credits
                         if sub_info.tier == "tier 3" {
                             messages = 0.0;
                             tracing::info!("Self-hosted subscription (tier 3), no monthly credits");
                         }
-                        // Tier 2 (hosted) - regional credit model
+                        // Tier 2 (hosted) - check plan type for credit allocation
                         else if sub_info.tier == "tier 2" {
-                            // US/CA users get 200 monthly credits
+                            // US/CA users get 200 monthly credits (same pricing as Monitor)
                             if user.phone_number_country == Some("US".to_string())
                                 || user.phone_number_country == Some("CA".to_string()) {
                                 messages = 200.0;
+                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
+                                    tracing::error!("Failed to update plan_type: {}", e);
+                                }
                                 tracing::info!("US/CA tier 2 subscription, allocating 200 monthly credits");
                             }
-                            // All other regions get 0 monthly credits (pay-per-use + 10€ first-time bonus)
+                            // Monitor plan (€29) gets credits for ~40 regular messages
+                            else if is_monitor_plan_price(&price_id) {
+                                let country = user.phone_number_country.as_deref().unwrap_or("FI");
+                                messages = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
+                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
+                                    tracing::error!("Failed to update plan_type: {}", e);
+                                }
+                            }
+                            // Digest plan (€49) gets credits for ~120 regular messages
+                            else if is_digest_plan_price(&price_id) {
+                                let country = user.phone_number_country.as_deref().unwrap_or("FI");
+                                messages = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
+                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("digest")) {
+                                    tracing::error!("Failed to update plan_type: {}", e);
+                                }
+                            }
+                            // Legacy euro plans (€19) get 0 credits - treat as monitor
+                            else if is_legacy_euro_plan_price(&price_id) {
+                                messages = 0.0;
+                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
+                                    tracing::error!("Failed to update plan_type: {}", e);
+                                }
+                                tracing::info!("Legacy euro plan subscription, allocating 0 monthly credits (pay-per-use model)");
+                            }
+                            // BYOT plan (€19) - bring your own Twilio, 0 credits (pay-per-use)
+                            else if is_byot_plan_price(&price_id) {
+                                messages = 0.0;
+                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("byot")) {
+                                    tracing::error!("Failed to update plan_type: {}", e);
+                                }
+                                tracing::info!("BYOT plan subscription, allocating 0 monthly credits (pay-per-use model)");
+                            }
+                            // Fallback for other regions
                             else {
                                 messages = 0.0;
                                 tracing::info!("Non-US/CA tier 2 subscription, allocating 0 monthly credits (pay-per-use model)");
@@ -800,6 +1231,18 @@ pub async fn stripe_webhook(
                         }
                         tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}",
                             user.id, sub_info.country, sub_info.tier);
+
+                        // Clear BYOT credentials if user is subscribing to a non-BYOT plan
+                        // This ensures users switching from BYOT to Lightfriend-managed plans
+                        // don't have mismatched routing (their credentials vs Lightfriend's)
+                        if !crate::utils::country::is_byot_plan_price(&price_id) {
+                            if state.user_core.has_twilio_credentials(user.id) {
+                                tracing::info!("User {} switching to non-BYOT plan, clearing BYOT credentials", user.id);
+                                if let Err(e) = state.user_core.clear_twilio_credentials(user.id) {
+                                    tracing::error!("Failed to clear BYOT credentials for user {}: {}", user.id, e);
+                                }
+                            }
+                        }
 
                         // Tier 3: Provision subaccount or regenerate Tinfoil key
                         if sub_info.tier == "tier 3" {
@@ -1005,7 +1448,7 @@ pub async fn stripe_webhook(
                                 )
                                 .await
                                 .map_err(|e| {
-                                    eprintln!("Failed to update customer address: {}", e);
+                                    tracing::error!("Failed to update customer address: {}", e);
                                     // Continue processing even if address update fails (non-critical)
                                 })
                                 .ok();
@@ -1088,7 +1531,7 @@ pub async fn fetch_next_billing_date(
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting fetch_next_billing_date for user_id: {}", user_id);
+    tracing::debug!("Starting fetch_next_billing_date for user_id: {}", user_id);
     // Check if user is accessing their own data or is an admin
     if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
@@ -1100,7 +1543,7 @@ pub async fn fetch_next_billing_date(
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
+    tracing::debug!("Stripe client initialized");
     // Get Stripe customer ID
     let customer_id = state
         .user_repository
@@ -1113,7 +1556,7 @@ pub async fn fetch_next_billing_date(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe customer ID found for user"})),
         ))?;
-    println!("Found Stripe customer ID: {}", customer_id);
+    tracing::debug!("Found Stripe customer ID: {}", customer_id);
     // List all subscriptions for the customer
     let subscriptions = stripe::Subscription::list(
         &client,
@@ -1125,7 +1568,7 @@ pub async fn fetch_next_billing_date(
     )
     .await
     .map_err(|e| {
-        println!("Failed to list subscriptions: {}", e);
+        tracing::error!("Failed to list subscriptions: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to fetch subscriptions: {}", e)})),
@@ -1149,7 +1592,7 @@ pub async fn fetch_next_billing_date(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update next billing date: {}", e)})),
         ))?;
-    println!("Successfully updated next billing date to {}", latest_end_date);
+    tracing::info!("Successfully updated next billing date to {}", latest_end_date);
     Ok(Json(json!({
         "message": "Successfully updated next billing date",
         "next_billing_date": latest_end_date
@@ -1160,12 +1603,12 @@ pub async fn automatic_charge(
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting automatic_charge for user_id: {}", user_id);
+    tracing::debug!("Starting automatic_charge for user_id: {}", user_id);
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
+    tracing::debug!("Stripe client initialized");
     // Fetch user from the database
     let user = state
         .user_core
@@ -1178,7 +1621,7 @@ pub async fn automatic_charge(
             StatusCode::NOT_FOUND,
             Json(json!({"error": "User not found"})),
         ))?;
-    println!("User found: {}", user.id);
+    tracing::debug!("User found: {}", user.id);
     // Get Stripe customer ID and payment method ID
     let customer_id = state
         .user_repository
@@ -1203,14 +1646,14 @@ pub async fn automatic_charge(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe payment method found for user"})),
         ))?;
-    println!("Stripe payment method ID found");
+    tracing::debug!("Stripe payment method ID found");
     let charge_back_to = user.charge_back_to.unwrap_or(5.00);
-    println!("User charge_back_to: {}, current credits: {}", charge_back_to, user.credits);
+    tracing::debug!("User charge_back_to: {}, current credits: {}", charge_back_to, user.credits);
    
     let charge_amount_cents = (charge_back_to * 100.0).round() as i64; // Convert to cents for Stripe
-    println!("Charging credits (€{})", charge_back_to);
+    tracing::info!("Charging credits (€{})", charge_back_to);
     // Create a PaymentIntent for the off-session charge
-    println!("Creating payment intent");
+    tracing::debug!("Creating payment intent");
     let mut create_intent = CreatePaymentIntent::new(charge_amount_cents, stripe::Currency::EUR);
     create_intent.customer = Some(customer_id.parse().unwrap());
     create_intent.payment_method = Some(payment_method_id.parse().unwrap());
@@ -1220,36 +1663,36 @@ pub async fn automatic_charge(
     let payment_intent = PaymentIntent::create(&client, create_intent)
         .await
         .map_err(|e| {
-            println!("Failed to create PaymentIntent: {}", e);
+            tracing::error!("Failed to create PaymentIntent: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to create PaymentIntent: {}", e)})),
             )
         })?;
    
-    println!("Payment intent created with status: {:?}", payment_intent.status);
+    tracing::debug!("Payment intent created with status: {:?}", payment_intent.status);
    
     // Check if the payment was successful
     if payment_intent.status == stripe::PaymentIntentStatus::Succeeded {
-        println!("Payment succeeded, updating user credits");
+        tracing::info!("Payment succeeded, updating user credits");
         // Update user's credits
         state
             .user_repository
             .increase_credits(user_id, charge_back_to)
             .map_err(|e| {
-                println!("Failed to update user credits: {}", e);
+                tracing::error!("Failed to update user credits: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("Database error updating credits: {}", e)})),
                 )
             })?;
-        println!("User credits updated successfully, returning success response");
+        tracing::info!("User credits updated successfully, returning success response");
         Ok(Json(json!({
             "message": "Automatic charge successful, credits updated",
             "amount": charge_back_to,
         })))
     } else {
-        println!("Payment intent failed or requires action, status: {:?}", payment_intent.status);
+        tracing::warn!("Payment intent failed or requires action, status: {:?}", payment_intent.status);
         Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Payment intent failed or requires action"})),

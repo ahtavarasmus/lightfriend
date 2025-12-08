@@ -1,7 +1,18 @@
 use crate::AppState;
+use crate::utils::country::{is_local_number_country, is_notification_only_country, get_country_code_from_phone};
 use std::sync::Arc;
 
+/// Helper to check if a phone number is US/CA
+fn is_us_or_ca(phone: &str) -> bool {
+    phone.starts_with("+1")
+}
+
 /// Checks if a user has sufficient credits to perform an action.
+///
+/// Credits interpretation differs by region:
+/// - US/CA: credits_left is message COUNT (1 = 1 message)
+/// - Euro countries: credits_left is EURO VALUE (deduct actual cost)
+///
 /// Returns Ok(()) if the user has enough credits, or Err with an appropriate error message if not.
 /// Also handles automatic recharging if enabled.
 pub async fn check_user_credits(
@@ -11,65 +22,86 @@ pub async fn check_user_credits(
     amount: Option<i32>,
 ) -> Result<(), String> {
 
-    // Check if the event type is free based on discount_tier
-    let messages_are_included;
-    if user.phone_number.starts_with("+1") ||
-            user.phone_number.starts_with("+358") ||
-            user.phone_number.starts_with("+31") ||
-            user.phone_number.starts_with("+44") ||
-            user.phone_number.starts_with("+61") {
-        messages_are_included = false;
-    } else {
-        // true since they pay to twilio. won't cause bug since sending messages outside the range will require their own creds
-        messages_are_included = true; 
+    // BYOT users with their own Twilio credentials pay Twilio directly - no credit check
+    if state.user_core.has_twilio_credentials(user.id) {
+        return Ok(());
     }
+
+    // Check if the event type is free based on country
+    // Local number countries and notification-only countries are charged through Lightfriend
+    // Other countries pay Twilio directly (require their own credentials)
+    let messages_are_included = !is_local_number_country(&user.phone_number)
+        && !is_notification_only_country(&user.phone_number);
 
     if messages_are_included {
         return Ok(());
     }
 
-    // Define costs based on phone number
-    let (message_cost, voice_second_cost, noti_msg_cost, noti_call_cost) = if user.phone_number.starts_with("+1") {
-        (0.075, 0.0033, 0.075, 0.15) // US, CA
-    } else if user.phone_number.starts_with("+358") {
-        (0.30, 0.005, 0.15, 0.70) // Finland
-    } else if user.phone_number.starts_with("+31") {
-        (0.30, 0.005, 0.15, 0.45) // NL
-    } else if user.phone_number.starts_with("+44") {
-        (0.30, 0.005, 0.15, 0.20) // UK
-    } else if user.phone_number.starts_with("+61") {
-        (0.30, 0.005, 0.15, 0.20) // Australia
+    // Get required amounts based on region (dual interpretation)
+    let (required_credits_left, required_credits) = if is_us_or_ca(&user.phone_number) {
+        // US/CA: credits_left is message COUNT, credits is dollar value
+        let credits_left_cost = match event_type {
+            "message" => 1.0,
+            "voice" => 0.0, // voice uses credits, not credits_left
+            "noti_msg" => 0.5,
+            "noti_call" => 0.5,
+            "digest" => amount.unwrap_or(1) as f32,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        let credits_cost = match event_type {
+            "message" => 0.075,
+            "voice" => amount.unwrap_or(0) as f32 * 0.0033,
+            "noti_msg" => 0.075,
+            "noti_call" => 0.15,
+            "digest" => amount.unwrap_or(1) as f32 * 0.075,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        (credits_left_cost, credits_cost)
     } else {
-        (0.0, 0.0, 0.0, 0.0) 
+        // Euro countries: credits_left is EURO VALUE with segment-based pricing
+        let country_code = get_country_code_from_phone(&user.phone_number);
+        let pricing = if let Some(code) = country_code {
+            crate::api::twilio_pricing::get_notification_only_pricing(state, &code).await.ok()
+        } else {
+            None
+        };
+
+        let (noti_price, msg_price, digest_price, voice_price) = match pricing {
+            Some(p) => (p.notification_price, p.regular_message_price, p.digest_price, p.calculated_voice_price),
+            None => {
+                // Fallback: assume ~€0.10 raw price
+                (0.195, 0.39, 0.39, 0.13) // 0.10 × 1.5/3/3 × 1.3
+            }
+        };
+
+        // ElevenLabs voice AI cost: $0.11 per minute (added to voice calls)
+        const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
+
+        // Both credits_left and credits use actual euro cost
+        let cost = match event_type {
+            "message" => msg_price,
+            "voice" => {
+                // Voice: first minute always charged, then per additional minute
+                // Includes Twilio voice + ElevenLabs AI voice cost
+                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+                minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            },
+            "noti_msg" => noti_price,
+            "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN, // First minute always charged + ElevenLabs
+            "digest" => digest_price * amount.unwrap_or(1) as f32,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        (cost, cost) // Same value for both since both are euro-based
     };
 
-    // Calculate cost based on event type
-    let required_credits = match event_type {
-        "message" => message_cost,
-        "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
-        "noti_msg" => noti_msg_cost,
-        "noti_call" => noti_call_cost,
-        "digest" => amount.unwrap_or(0) as f32 * message_cost,
-        _ => return Err("Invalid event type".to_string()),
-    };
-
-    let required_credits_left= match event_type {
-        "message" => 1.00,
-        "voice" => 0.00,
-        "noti_call" => 1.00 / 2.00,
-        "noti_msg" => 1.00 / 2.00,
-        "digest" => 1.00 * amount.unwrap_or(0) as f32,
-        _ => return Err("Invalid event type".to_string()),
-    };
-
-    
-    if (user.credits_left < 0.00 || user.credits_left < required_credits_left) && (user.credits < 0.0 || user.credits < required_credits) {
+    // Check if user has sufficient balance
+    if user.credits_left < required_credits_left && user.credits < required_credits {
         // Check if enough time has passed since the last notification (24 hours)
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i32;
-        
+
         let should_notify = match user.last_credits_notification {
             None => true,
             Some(last_time) => (current_time - last_time) >= 24 * 3600 // 24 hours in seconds
@@ -77,7 +109,7 @@ pub async fn check_user_credits(
 
         if should_notify && event_type != "digest" {
             // Send notification about depleted credits and monthly quota
-                
+
             // Update the last notification timestamp
             if let Err(e) = state.user_core.update_last_credits_notification(user.id, current_time) {
                 eprintln!("Failed to update last_credits_notification: {}", e);
@@ -85,7 +117,7 @@ pub async fn check_user_credits(
 
             let user_clone = user.clone();
             let state_clone = state.clone();
-            
+
             tokio::spawn(async move {
                 let _ = crate::api::twilio_utils::send_conversation_message(
                     &state_clone,
@@ -122,6 +154,11 @@ pub async fn check_user_credits(
 }
 
 /// Deducts credits from a user's account, using monthly credits (credits_left) first before using regular credits.
+///
+/// Credits interpretation differs by region:
+/// - US/CA: credits_left is message COUNT (1 = 1 message)
+/// - Euro countries: credits_left is EURO VALUE (deduct actual cost with segment-based pricing)
+///
 /// Returns Ok(()) if credits were successfully deducted, or Err with an appropriate error message if not.
 pub fn deduct_user_credits(
     state: &Arc<AppState>,
@@ -138,6 +175,11 @@ pub fn deduct_user_credits(
         }
     };
 
+    // BYOT users with their own Twilio credentials pay Twilio directly - no credit deduction
+    if state.user_core.has_twilio_credentials(user_id) {
+        return Ok(());
+    }
+
     // For tier 3 self-hosted users, check if they have US/CA unlimited
     let is_tier3 = user.sub_tier.as_deref() == Some("tier 3");
     let user_settings = if is_tier3 {
@@ -152,79 +194,95 @@ pub fn deduct_user_credits(
         None
     };
 
-    let messages_are_included;
-    if user.phone_number.starts_with("+1") ||
-            user.phone_number.starts_with("+358") ||
-            user.phone_number.starts_with("+31") ||
-            user.phone_number.starts_with("+44") ||
-            user.phone_number.starts_with("+61") {
-        messages_are_included = false;
-    } else {
-        // true since they pay to twilio. won't cause bug since sending messages outside the range will require their own creds
-        messages_are_included = true;
-    }
+    // Check if the event type is free based on country
+    // Local number countries and notification-only countries are charged through Lightfriend
+    // Other countries pay Twilio directly (require their own credentials)
+    let messages_are_included = !is_local_number_country(&user.phone_number)
+        && !is_notification_only_country(&user.phone_number);
 
     if messages_are_included {
         return Ok(());
     }
 
-    // Define costs based on phone number or tier 3 dynamic pricing
-    let (message_cost, voice_second_cost, noti_msg_cost, noti_call_cost) = if is_tier3 {
-        // For tier 3, use outbound_message_pricing from user_settings
-        if let Some(ref settings) = user_settings {
-            if let Some(pricing) = settings.outbound_message_pricing {
-                // Tier 3 dynamic pricing based on country
-                (pricing, 0.005, pricing, pricing * 2.0)
-            } else {
-                // Fallback to US pricing if not set
-                (0.075, 0.0033, 0.075, 0.15)
-            }
-        } else {
-            (0.075, 0.0033, 0.075, 0.15)
-        }
-    } else if user.phone_number.starts_with("+1") {
-        (0.075, 0.0033, 0.075, 0.15) // US
-    } else if user.phone_number.starts_with("+358") {
-        (0.30, 0.005, 0.15, 0.70) // Finland
-    } else if user.phone_number.starts_with("+31") {
-        (0.30, 0.005, 0.15, 0.45) // NL
-    } else if user.phone_number.starts_with("+44") {
-        (0.30, 0.005, 0.15, 0.20) // UK
-    } else if user.phone_number.starts_with("+61") {
-        (0.30, 0.005, 0.15, 0.20) // Australia
+    // Calculate deduction amounts based on region (dual interpretation)
+    let (credits_left_deduction, credits_deduction) = if is_tier3 {
+        // Tier 3: use outbound_message_pricing from user_settings
+        let pricing = user_settings.as_ref().and_then(|s| s.outbound_message_pricing).unwrap_or(0.075);
+        let cost = match event_type {
+            "message" => pricing,
+            "voice" => amount.unwrap_or(0) as f32 * 0.005,
+            "noti_msg" => pricing,
+            "noti_call" => pricing * 2.0,
+            "digest" => pricing,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        (0.0, cost) // Tier 3 doesn't use credits_left
+    } else if is_us_or_ca(&user.phone_number) {
+        // US/CA: credits_left is message COUNT, credits is dollar value
+        let credits_left_cost = match event_type {
+            "message" => 1.0,
+            "voice" => 0.0, // voice uses credits, not credits_left
+            "noti_msg" => 0.5,
+            "noti_call" => 0.5,
+            "digest" => 1.0,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        let credits_cost = match event_type {
+            "message" => 0.075,
+            "voice" => amount.unwrap_or(0) as f32 * 0.0033,
+            "noti_msg" => 0.075,
+            "noti_call" => 0.15,
+            "digest" => 0.075,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        (credits_left_cost, credits_cost)
     } else {
-        (0.0, 0.0, 0.0, 0.0)
+        // Euro countries: credits_left is EURO VALUE with segment-based pricing
+        let country_code = get_country_code_from_phone(&user.phone_number);
+        let pricing = country_code.and_then(|code| {
+            crate::api::twilio_pricing::get_cached_euro_pricing_sync(state, &code)
+        });
+
+        let (noti_price, msg_price, digest_price, voice_price) = match pricing {
+            Some(p) => (p.notification_price, p.regular_message_price, p.digest_price, p.calculated_voice_price),
+            None => {
+                tracing::warn!("No cached pricing for euro country, using fallback");
+                // Fallback: assume ~€0.10 raw price
+                (0.195, 0.39, 0.39, 0.13) // 0.10 × 1.5/3/3 × 1.3
+            }
+        };
+
+        // ElevenLabs voice AI cost: $0.11 per minute (added to voice calls)
+        const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
+
+        // Both credits_left and credits use actual euro cost
+        let cost = match event_type {
+            "message" => msg_price,
+            "voice" => {
+                // Voice: first minute always charged, then per additional minute
+                // Includes Twilio voice + ElevenLabs AI voice cost
+                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+                minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            },
+            "noti_msg" => noti_price,
+            "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN, // First minute always charged + ElevenLabs
+            "digest" => digest_price,
+            _ => return Err("Invalid event type".to_string()),
+        };
+        (cost, cost) // Same value for both since both are euro-based
     };
 
-    // Calculate cost based on event type
-    let cost = match event_type {
-        "message" => message_cost,
-        "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
-        "noti_msg" => noti_msg_cost,
-        "noti_call" => noti_call_cost,
-        "digest" => message_cost,
-        _ => return Err("Invalid event type".to_string()),
-    };
-
-    let cost_credits_left= match event_type {
-        "message" => 1.00,
-        "voice" => 0.00,
-        "noti_msg" => 1.00 / 2.00,
-        "noti_call" => 1.00 / 2.00,
-        "digest" => 1.00,
-        _ => return Err("Invalid event type".to_string()),
-    };
-
-    // Deduct credits based on available credits_left
-    if user.credits_left >= cost_credits_left {
-        // Deduct from credits_left only
-        if let Err(e) = state.user_repository.update_user_credits_left(user_id, (user.credits_left - cost_credits_left).max(0.0)) {
+    // Deduct credits: prefer credits_left, fall back to credits
+    if user.credits_left >= credits_left_deduction && credits_left_deduction > 0.0 {
+        // Deduct from credits_left
+        let new_credits_left = (user.credits_left - credits_left_deduction).max(0.0);
+        if let Err(e) = state.user_repository.update_user_credits_left(user_id, new_credits_left) {
             eprintln!("Failed to update user credits_left: {}", e);
             return Err("Failed to process credits".to_string());
         }
     } else {
-        // Deduct from regular credits only
-        let new_credits = (user.credits - cost).max(0.0);
+        // Deduct from regular credits
+        let new_credits = (user.credits - credits_deduction).max(0.0);
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());

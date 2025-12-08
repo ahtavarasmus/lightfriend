@@ -215,6 +215,20 @@ pub async fn disable(
     auth_user: AuthUser,
     Json(req): Json<TotpDisableRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if user has passkeys - cannot disable TOTP if passkeys are registered
+    let passkey_count = state.webauthn_repository
+        .get_passkey_count(auth_user.user_id)
+        .unwrap_or(0);
+
+    if passkey_count > 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Cannot disable authenticator app while passkeys are registered. Please remove all passkeys first."
+            }))
+        ));
+    }
+
     // Get the stored secret
     let secret_opt = state.totp_repository.get_secret(auth_user.user_id)
         .map_err(|e| {

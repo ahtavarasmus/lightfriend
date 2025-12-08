@@ -1,9 +1,11 @@
 use yew::prelude::*;
+use yew_router::prelude::*;
 use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen::JsValue;
 use web_sys::UrlSearchParams;
 use crate::utils::api::Api;
+use crate::Route;
 use crate::connections::whatsapp::WhatsappConnect;
 use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
@@ -397,17 +399,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                         <i class="fa-solid fa-robot"></i>
                         {"Notifications"}
                         <div class="group-summary">
-                            <span class="monitoring-cost">
-                                {
-                                    if props.phone_number.starts_with("+1") {
-                                        format!("Est. {:.2} Messages/mo", props.estimated_monitoring_cost)
-                                    } else if props.phone_number.starts_with("+358") || props.phone_number.starts_with("+44") || props.phone_number.starts_with("+61") {
-                                        format!("Est. {}{:.2}/mo", currency, props.estimated_monitoring_cost)
-                                    } else {
-                                        "".to_string()
-                                    }
-                                }
-                            </span>
                             <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
                                 "fas fa-chevron-up"
                             } else {
@@ -785,6 +776,19 @@ pub fn connect(props: &ConnectProps) -> Html {
     font-size: 0.8rem;
     background: rgba(52, 211, 153, 0.1);
     color: #34D399;
+}
+.usage-link {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    background: rgba(126, 178, 255, 0.15);
+    color: #7EB2FF;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.usage-link:hover {
+    background: rgba(126, 178, 255, 0.25);
+    color: #9AC4FF;
 }
 .service-group-title {
     cursor: pointer;

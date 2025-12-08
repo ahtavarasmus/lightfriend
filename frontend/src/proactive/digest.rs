@@ -230,31 +230,7 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
     } else {
         "Other"
     };
-    let digest_extra: Html = {
-        let active_count = [
-            (*morning_digest_time).clone(),
-            (*day_digest_time).clone(),
-            (*evening_digest_time).clone(),
-        ].iter().filter(|time| time.is_some()).count() as f32;
-        if active_count > 0.0 {
-            if country == "US" {
-                let messages_per_month = active_count * 30.0 * 0.5;
-                html! { <span>{format!(" (Uses {:.1} Messages per month)", messages_per_month)}</span> }
-            } else if country == "Other" {
-                html! { <span>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per month)"}</span> }
-            } else {
-                let currency = match country {
-                    "FI" => "€",
-                    "AU" => "€",
-                    _ => "€",
-                };
-                let cost_per_month = active_count * 30.0 * 0.30;
-                html! { <span>{format!(" (Current setup uses {};{:.2} per month)", currency, cost_per_month)}</span> }
-            }
-        } else {
-            html! {}
-        }
-    };
+    let digest_extra: Html = html! {};
     html! {
         <>
         <style>

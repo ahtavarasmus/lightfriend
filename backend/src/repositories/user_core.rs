@@ -86,6 +86,24 @@ impl UserCore {
             None => Ok(None),
         }
     }
+
+    pub fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .filter(users::magic_token.eq(token))
+            .first::<User>(&mut conn)
+            .optional()?;
+        Ok(user)
+    }
+
+    pub fn set_magic_token(&self, user_id: i32, token: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::magic_token.eq(Some(token)))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn get_or_generate_magic_login_token(&self, user_id: i32) -> Result<String, DieselError> {
         use crate::schema::user_settings;
         self.ensure_user_settings_exist(user_id)?;
@@ -274,6 +292,15 @@ impl UserCore {
         diesel::update(users::table)
             .filter(users::email.eq(email))
             .set(users::password_hash.eq(password_hash))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set(users::phone_number.eq(phone))
             .execute(&mut conn)?;
         Ok(())
     }
@@ -604,19 +631,17 @@ impl UserCore {
             if existing_email.is_some() {
                 return Err(DieselError::NotFound);
             }
-            // Get current user to check if phone number is changing
+            // Get current user
             let current_user = users::table
                 .find(user_id)
                 .first::<User>(conn)?;
-            // If phone number is changing, set verified to false
-            let should_unverify = current_user.phone_number != phone_number;
-            // Update user table
+            // Update user table (no longer unverifying on phone change)
             diesel::update(users::table.find(user_id))
                 .set((
                     users::email.eq(email),
                     users::phone_number.eq(phone_number),
                     users::nickname.eq(nickname),
-                    users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
+                    users::verified.eq(current_user.verified), // Keep verified status unchanged
                     users::preferred_number.eq(preferred_number),
                 ))
                 .execute(conn)?;
@@ -1160,9 +1185,9 @@ impl UserCore {
     pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::decrypt;
-        
+
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+
         // Get the user settings
         let settings = user_settings::table
             .filter(user_settings::user_id.eq(user_id))
@@ -1182,16 +1207,36 @@ impl UserCore {
         }
     }
 
+    /// Check if user has their own Twilio credentials stored (BYOT)
+    pub fn has_twilio_credentials(&self, user_id: i32) -> bool {
+        use crate::schema::user_settings;
+
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select((
+                user_settings::encrypted_twilio_account_sid,
+                user_settings::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn);
+
+        matches!(settings, Ok((Some(_), Some(_))))
+    }
+
 
     pub fn update_twilio_credentials(&self, user_id: i32, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::encrypt;
-        
+
         // Ensure user settings exist
         self.ensure_user_settings_exist(user_id)?;
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+
         let encrypted_account_sid = encrypt(account_sid)?;
         let encrypted_auth_token = encrypt(auth_token)?;
 
@@ -1202,6 +1247,23 @@ impl UserCore {
             ))
             .execute(&mut conn)?;
 
+        Ok(())
+    }
+
+    /// Clear BYOT Twilio credentials when user switches to a Lightfriend-managed plan
+    pub fn clear_twilio_credentials(&self, user_id: i32) -> Result<(), Box<dyn Error>> {
+        use crate::schema::user_settings;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set((
+                user_settings::encrypted_twilio_account_sid.eq(None::<String>),
+                user_settings::encrypted_twilio_auth_token.eq(None::<String>),
+            ))
+            .execute(&mut conn)?;
+
+        tracing::info!("Cleared BYOT Twilio credentials for user {}", user_id);
         Ok(())
     }
 

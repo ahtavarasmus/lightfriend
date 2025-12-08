@@ -157,18 +157,6 @@ pub async fn handle_incoming_sms(
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
 
-    // Check for Shazam shortcut ('S' or 's')
-    if payload.body.trim() == "S" || payload.body.trim() == "s" {
-
-        return (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(TwilioResponse {
-                message: "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string(),
-            })
-        );
-    }
-
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
         if let Ok(Some(user)) = state.user_core.find_by_phone_number(&payload.from) {
@@ -918,8 +906,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             continue;
                         }
                     };
-                } else if name == "use_shazam" {
-                    tool_answers.insert(tool_call_id, "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string());
                 } else if name == "fetch_emails" {
                     tracing::debug!("Executing fetch_emails tool call");
                     let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
@@ -951,60 +937,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         Ok(email) => {
                             let email = &email["email"];
                             
-                            // Upload attachments to Twilio if present
-                            /*
-                            let mut uploaded_attachments: Vec<(String, String)> = Vec::new(); // (filename, media_sid)
-                            if let Some(attachments) = email["attachments"].as_array() {
-                                for attachment_url in attachments {
-                                    if let Some(url) = attachment_url.as_str() {
-                                        // Download attachment content
-                                        if let Ok(response) = reqwest::get(url).await {
-                                            if let Some(content_type) = response.headers().get("content-type")
-                                                .and_then(|ct| ct.to_str().ok())
-                                                .map(|s| s.to_string()) {
-                                                if let Ok(bytes) = response.bytes().await {
-                                                    // Extract filename from URL or use default
-                                                    let filename = url.split('/').last()
-                                                        .unwrap_or("attachment")
-                                                        .to_string();
-                                                    
-                                                    // Upload to Twilio
-                                                    match crate::api::twilio_utils::upload_media_to_twilio(
-                                                        &state,
-                                                        &conversation.service_sid,
-                                                        &bytes,
-                                                        &content_type,
-                                                        &filename,
-                                                        &user
-                                                    ).await {
-                                                        Ok(media_sid) => {
-                                                            // Store in thread-local map
-                                                            MEDIA_SID_MAP.with(|map| {
-                                                                map.borrow_mut().insert(filename.clone(), media_sid.clone());
-                                                            });
-                                                            uploaded_attachments.push((filename.clone(), media_sid));
-                                                        },
-                                                        Err(e) => {
-                                                            tracing::error!("Failed to upload attachment to Twilio: {}", e);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Add attachment information with just filenames
-                            if !uploaded_attachments.is_empty() {
-                                response.push_str("\n\nAttachments:\n");
-                                for (filename, _) in &uploaded_attachments {
-                                    response.push_str(&format!("- {}\n", filename));
-                                }
-                            }
-                            */
-
-                            // Format the response with all email details and just filenames for attachments
+                            // Format the response with all email details
                             let response = format!(
                                 "From: {}\nSubject: {}\nDate: {}\n\n{}",
                                 email["from"],

@@ -336,6 +336,8 @@ diesel::table! {
         waiting_checks_count -> Integer,
         next_billing_date_timestamp -> Nullable<Integer>,
         phone_number_country -> Nullable<Text>,
+        magic_token -> Nullable<Text>,
+        plan_type -> Nullable<Text>,
     }
 }
 
@@ -346,6 +348,42 @@ diesel::table! {
         content -> Text,
         service_type -> Text,
         noti_type -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    waitlist (id) {
+        id -> Nullable<Integer>,
+        email -> Text,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
+    webauthn_challenges (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        challenge -> Text,
+        challenge_type -> Text,
+        context -> Nullable<Text>,
+        created_at -> Integer,
+        expires_at -> Integer,
+    }
+}
+
+diesel::table! {
+    webauthn_credentials (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        credential_id -> Text,
+        encrypted_public_key -> Text,
+        device_name -> Text,
+        counter -> Integer,
+        transports -> Nullable<Text>,
+        aaguid -> Nullable<Text>,
+        created_at -> Integer,
+        last_used_at -> Nullable<Integer>,
+        enabled -> Integer,
     }
 }
 
@@ -363,6 +401,8 @@ diesel::joinable!(totp_secrets -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
+diesel::joinable!(webauthn_challenges -> users (user_id));
+diesel::joinable!(webauthn_credentials -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     bridges,
@@ -389,4 +429,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     user_settings,
     users,
     waiting_checks,
+    waitlist,
+    webauthn_challenges,
+    webauthn_credentials,
 );

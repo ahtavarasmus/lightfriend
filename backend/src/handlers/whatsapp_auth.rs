@@ -758,20 +758,6 @@ pub async fn resync_whatsapp(
         }
         tracing::debug!("✅ Sent groups sync command");
 
-        /*
-        // Start accepting invitations for new rooms
-        let client_clone = client.clone();
-        tokio::spawn(async move {
-            // Wait a bit for initial invitations to arrive
-            sleep(Duration::from_secs(5)).await;
-            
-            // Run the invitation acceptance loop for 15 minutes
-            if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(900)).await {
-                tracing::error!("Error in accept_room_invitations: {}", e);
-            }
-        });
-        */
-
         tracing::debug!("✅ WhatsApp resync process completed for user {}", auth_user.user_id);
         Ok(AxumJson(json!({
             "message": "WhatsApp resync initiated successfully"

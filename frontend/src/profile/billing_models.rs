@@ -52,6 +52,7 @@ pub struct UserProfile {
     pub nearby_places: Option<String>,
     pub phone_number_country: Option<String>,
     pub server_ip: Option<String>,
+    pub plan_type: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -62,6 +63,85 @@ pub struct StripeSetupIntentResponse {
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;
 pub const VOICE_SECOND_COST: f32 = 0.0033;
 pub const MESSAGE_COST: f32 = 0.20;
+
+/// Usage projection response - all values in NOTIFICATION UNITS (not currency)
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct UsageProjection {
+    /// User's plan type: "monitor" or "digest"
+    pub plan_type: Option<String>,
+    /// Plan capacity in notifications per month (40 for monitor, 120 for digest)
+    pub plan_capacity: i32,
+    /// Whether auto top-up is enabled
+    pub has_auto_topup: bool,
+    /// Days until billing cycle resets
+    pub days_until_billing: Option<i32>,
+    /// True if using example data (< 3 days of usage history)
+    pub is_example_data: bool,
+
+    // Digest usage
+    /// Number of active digests per day (0-3)
+    pub digest_count: i32,
+    /// Digests per month (digest_count * 30)
+    pub digests_per_month: i32,
+
+    // Detailed breakdown (all averages from last 30 days)
+    /// SMS notifications per day (_critical, _priority_sms) - cheaper
+    pub avg_sms_notifications_per_day: f32,
+    /// Call notifications per day (_priority_call, noti_call) - more expensive
+    pub avg_call_notifications_per_day: f32,
+    /// Regular SMS messages per day
+    pub avg_messages_per_day: f32,
+    /// Voice call minutes per day
+    pub avg_voice_mins_per_day: f32,
+
+    // Combined for simple display
+    /// Average notifications per day (sms + call combined)
+    pub avg_notifications_per_day: f32,
+    /// Projected notifications per month (avg * 30)
+    pub notifications_per_month: i32,
+
+    // Totals
+    /// Total projected usage per month (digests + notifications + messages)
+    pub total_usage_per_month: i32,
+    /// Usage as percentage of plan capacity
+    pub usage_percentage: f32,
+    /// Remaining capacity (can be negative if over)
+    pub remaining_capacity: i32,
+
+    // Overage info (only if usage > capacity)
+    pub overage: Option<OverageInfo>,
+
+    // Segmented bar fields
+    /// Whether this is a notification-only country
+    pub is_notification_only: bool,
+    /// Digests as percentage of plan capacity
+    pub digest_percentage: f32,
+    /// SMS notifications as percentage of plan capacity
+    pub sms_noti_percentage: f32,
+    /// Call notifications as percentage of plan capacity
+    pub call_noti_percentage: f32,
+    /// Messages as percentage of plan capacity
+    pub messages_percentage: f32,
+    /// Voice as percentage of plan capacity
+    pub voice_percentage: f32,
+
+    // Overage credits info
+    /// User's overage credits balance
+    pub overage_credits: f32,
+    /// Days overage credits will last at current usage rate
+    pub overage_days_remaining: Option<i32>,
+}
+
+/// Overage information - this is where we show euro amounts
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct OverageInfo {
+    /// How many notifications over the plan limit
+    pub notifications_over: i32,
+    /// Estimated euro cost for the overage
+    pub estimated_cost_euros: f32,
+    /// Whether auto top-up will cover it
+    pub covered_by_auto_topup: bool,
+}
 
 pub fn format_timestamp(timestamp: i32) -> String {
     match Utc.timestamp_opt(timestamp as i64, 0) {

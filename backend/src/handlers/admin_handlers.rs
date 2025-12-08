@@ -393,7 +393,7 @@ pub async fn update_subscription_tier(
     axum::extract::Path((user_id, tier)): axum::extract::Path<(i32, String)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let tier = if tier == "tier 0" { None } else { Some(tier.as_str()) };
-    
+
     // Update the subscription tier
     state.user_repository.set_subscription_tier(user_id, tier).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -403,6 +403,28 @@ pub async fn update_subscription_tier(
 
     Ok(Json(json!({
         "message": "Subscription tier updated successfully"
+    })))
+}
+
+/// Update a user's plan type (monitor, digest, byot, or none)
+pub async fn update_plan_type(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((user_id, plan_type)): axum::extract::Path<(i32, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let plan_type = match plan_type.as_str() {
+        "none" => None,
+        other => Some(other),
+    };
+
+    // Update the plan type
+    state.user_repository.update_plan_type(user_id, plan_type).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+    tracing::info!("plan type updated to {:?} for user {}", plan_type, user_id);
+
+    Ok(Json(json!({
+        "message": "Plan type updated successfully"
     })))
 }
 

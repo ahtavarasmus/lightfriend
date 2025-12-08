@@ -1,0 +1,7 @@
+CREATE TABLE waitlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+ALTER TABLE users ADD COLUMN magic_token TEXT;

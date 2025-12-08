@@ -2,11 +2,13 @@ use yew::prelude::*;
 use web_sys::HtmlInputElement;
 use crate::utils::api::Api;
 use serde_json::{Value, json};
+use chrono::{Utc, Duration};
 use crate::profile::billing_models::{ // Import from the new file
     AutoTopupSettings,
     BuyCreditsRequest,
     ApiResponse,
     UserProfile,
+    UsageProjection,
     MIN_TOPUP_AMOUNT_CREDITS
 };
 use wasm_bindgen_futures::spawn_local;
@@ -32,6 +34,36 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     let show_buy_credits_modal = use_state(|| false);
     let buy_credits_amount = use_state(|| 5.00);
     let show_confirmation_modal = use_state(|| false); // New state for confirmation modal
+    let enable_auto_topup_with_purchase = use_state(|| true); // Checkbox for enabling auto top-up with first purchase
+
+    // Usage projection state
+    let usage_projection = use_state(|| None::<UsageProjection>);
+
+    // Fetch usage projection on mount (only once)
+    {
+        let usage_projection = usage_projection.clone();
+        use_effect_with_deps(move |_| {
+            spawn_local(async move {
+                match Api::get("/api/pricing/usage-projection")
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<UsageProjection>().await {
+                                usage_projection.set(Some(data));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        web_sys::console::log_1(&format!("Failed to fetch usage projection: {:?}", e).into());
+                    }
+                }
+            });
+            || ()
+        }, ());
+    }
+
     // Rate constants (replace with actual values from crate::profile::billing_models)
     let voice_second_cost = crate::profile::billing_models::VOICE_SECOND_COST;
     let message_cost = crate::profile::billing_models::MESSAGE_COST;
@@ -48,7 +80,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         let auto_topup_amount = auto_topup_amount.clone();
         let saved_auto_topup_amount = saved_auto_topup_amount.clone();
         let user_profile_state = user_profile_state.clone();
-       
+        let usage_projection = usage_projection.clone();
+
         Callback::from(move |settings: AutoTopupSettings| {
             let user_id = user_id;
             let error = error.clone();
@@ -57,6 +90,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             let auto_topup_amount = auto_topup_amount.clone();
             let saved_auto_topup_amount = saved_auto_topup_amount.clone();
             let user_profile_state = user_profile_state.clone();
+            let usage_projection = usage_projection.clone();
             let settings = settings.clone();
            
             spawn_local(async move {
@@ -91,6 +125,31 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     // Update saved amount with the server's value
                                                     if let Some(new_amount) = updated_profile.charge_back_to {
                                                         saved_auto_topup_amount.set(new_amount);
+                                                    }
+                                                    // Refresh usage projection to reflect new auto top-up status
+                                                    web_sys::console::log_1(&"Fetching usage projection after auto top-up toggle".into());
+                                                    match Api::get("/api/pricing/usage-projection")
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(proj_response) => {
+                                                            if proj_response.ok() {
+                                                                match proj_response.json::<UsageProjection>().await {
+                                                                    Ok(data) => {
+                                                                        web_sys::console::log_1(&format!("Usage projection refreshed, has_auto_topup: {}", data.has_auto_topup).into());
+                                                                        usage_projection.set(Some(data));
+                                                                    }
+                                                                    Err(e) => {
+                                                                        web_sys::console::log_1(&format!("Failed to parse usage projection: {:?}", e).into());
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                web_sys::console::log_1(&"Usage projection response not ok".into());
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            web_sys::console::log_1(&format!("Failed to fetch usage projection: {:?}", e).into());
+                                                        }
                                                     }
                                                 }
                                                 Err(e) => {
@@ -178,15 +237,32 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         let success = success.clone();
         let show_confirmation_modal = show_confirmation_modal.clone();
         let buy_credits_amount = buy_credits_amount.clone();
-       
+        let enable_auto_topup_with_purchase = enable_auto_topup_with_purchase.clone();
+        let auto_topup_active = auto_topup_active.clone();
+
         Callback::from(move |_| {
             let user_id = user_id;
             let error = error.clone();
             let success = success.clone();
             let show_confirmation_modal = show_confirmation_modal.clone();
             let buy_credits_amount = buy_credits_amount.clone();
-           
+            let enable_auto_topup = *enable_auto_topup_with_purchase && !*auto_topup_active;
+
             spawn_local(async move {
+                // If auto top-up checkbox is checked, enable it first
+                if enable_auto_topup {
+                    let settings = AutoTopupSettings {
+                        active: true,
+                        amount: Some(*buy_credits_amount), // Use the same amount they're buying
+                    };
+                    let _ = Api::post(&format!("/api/billing/update-auto-topup/{}", user_id))
+                        .header("Content-Type", "application/json")
+                        .json(&settings)
+                        .expect("Failed to serialize auto top-up settings")
+                        .send()
+                        .await;
+                }
+
                 let amount_dollars = *buy_credits_amount; // Safely dereference the cloned handle
                 let request = BuyCreditsRequest { amount_dollars };
                 match Api::post(&format!("/api/stripe/checkout-session/{}", user_id))
@@ -216,7 +292,18 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 error.set(Some("Failed to parse Stripe response".to_string()));
                             }
                         } else {
-                            error.set(Some("Failed to create Stripe Checkout session".to_string()));
+                            // Check if this is an upgrade required error
+                            if let Ok(data) = response.json::<Value>().await {
+                                if data.get("upgrade_required").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    error.set(Some("Credit top-ups are only available on the Digest plan. Upgrade to Digest for more credits and top-up ability.".to_string()));
+                                } else if let Some(msg) = data.get("error").and_then(|v| v.as_str()) {
+                                    error.set(Some(msg.to_string()));
+                                } else {
+                                    error.set(Some("Failed to create Stripe Checkout session".to_string()));
+                                }
+                            } else {
+                                error.set(Some("Failed to create Stripe Checkout session".to_string()));
+                            }
                         }
                         // Clear error after 3 seconds
                         let error_clone = error.clone();
@@ -379,74 +466,284 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 {
                     html! {
                         <>
-                            // Subscription or Discount Status
-                            <div class="section-container status-section">
-                                {
-                                    if let Some(sub_tier) = &user_profile.sub_tier {
-                                        html! {
-                                            <div class="status">
-                                                <div class="subscription-tier">
-                                                <h3>{"Current Subscription"}</h3>
-                                                <div class="tooltip">
+                            // Usage Projection Section
+                            {
+                                if let Some(projection) = (*usage_projection).as_ref() {
+                                    let percentage = projection.usage_percentage.min(100.0);
+                                    let bar_color = if projection.usage_percentage <= 60.0 {
+                                        "#4CAF50" // Green
+                                    } else if projection.usage_percentage <= 90.0 {
+                                        "#FFC107" // Yellow
+                                    } else {
+                                        "#F44336" // Red
+                                    };
+
+                                    let plan_name = match projection.plan_type.as_deref() {
+                                        Some("digest") => "Digest",
+                                        Some("monitor") => "Monitor",
+                                        _ => "Monitor"
+                                    };
+
+                                    // Calculate messages per month for display
+                                    let messages_per_month = (projection.avg_messages_per_day * 30.0).round() as i32;
+
+                                    // Build segments for the bar (only non-zero values)
+                                    let mut segments: Vec<(&str, f32, &str, String)> = vec![];
+
+                                    if projection.digest_percentage > 0.0 {
+                                        segments.push((
+                                            "#9333ea", // purple
+                                            projection.digest_percentage,
+                                            "Digests",
+                                            format!("{}/mo", projection.digests_per_month)
+                                        ));
+                                    }
+                                    if projection.sms_noti_percentage > 0.0 {
+                                        let sms_per_month = (projection.avg_sms_notifications_per_day * 30.0).round() as i32;
+                                        segments.push((
+                                            "#3b82f6", // blue
+                                            projection.sms_noti_percentage,
+                                            "SMS Notifications",
+                                            format!("~{}/mo", sms_per_month)
+                                        ));
+                                    }
+                                    if projection.call_noti_percentage > 0.0 {
+                                        let call_per_month = (projection.avg_call_notifications_per_day * 30.0).round() as i32;
+                                        segments.push((
+                                            "#f97316", // orange
+                                            projection.call_noti_percentage,
+                                            "Call Notifications",
+                                            format!("~{}/mo", call_per_month)
+                                        ));
+                                    }
+                                    if projection.messages_percentage > 0.0 {
+                                        segments.push((
+                                            "#22c55e", // green
+                                            projection.messages_percentage,
+                                            "Messages",
+                                            format!("~{}/mo", messages_per_month)
+                                        ));
+                                    }
+
+                                    // Calculate remaining capacity as actionable units
+                                    let remaining_messages = projection.remaining_capacity / 3; // 1 message = 3 notification units
+                                    let remaining_notifications = projection.remaining_capacity;
+                                    let remaining_voice_mins = (projection.remaining_capacity as f32 * 0.67).round() as i32; // rough estimate
+
+                                    // Check if user should downgrade (Digest plan, usage <= 40)
+                                    let should_suggest_downgrade = projection.plan_type.as_deref() == Some("digest")
+                                        && projection.total_usage_per_month <= 40
+                                        && projection.overage.is_none();
+
+                                    html! {
+                                        <div class="section-container usage-projection-section">
+                                            <div class="usage-projection-card">
+                                                <div class="usage-header">
+                                                    <h3>
+                                                        {"Monthly Projected Usage"}
+                                                        {
+                                                            if projection.is_example_data {
+                                                                html! { <span class="example-badge">{"(est.)"}</span> }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </h3>
+                                                    <span class="usage-percentage">{format!("{:.0}%", projection.usage_percentage)}</span>
+                                                </div>
+
+                                                // Segmented progress bar
+                                                <div class="usage-bar-container" style="position: relative; height: 24px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                                                    <div style="display: flex; height: 100%;">
+                                                        {
+                                                            segments.iter().map(|(color, pct, label, value)| {
+                                                                let width = if projection.usage_percentage > 100.0 {
+                                                                    // Scale down if over 100%
+                                                                    pct * 100.0 / projection.usage_percentage
+                                                                } else {
+                                                                    *pct
+                                                                };
+                                                                // Show inline text if segment is wide enough (>15%)
+                                                                let show_inline_label = width > 15.0;
+                                                                html! {
+                                                                    <div
+                                                                        class="segment-bar"
+                                                                        style={format!("width: {}%; background-color: {}; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;", width, color)}
+                                                                        title={format!("{}: {}", label, value)}
+                                                                    >
+                                                                        {
+                                                                            if show_inline_label {
+                                                                                html! {
+                                                                                    <span style="color: white; font-size: 11px; font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px;">
+                                                                                        {*label}
+                                                                                    </span>
+                                                                                }
+                                                                            } else {
+                                                                                html! {}
+                                                                            }
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                        {
+                                                            // Show overflow section if over 100%
+                                                            if projection.usage_percentage > 100.0 {
+                                                                let overflow_pct = ((projection.usage_percentage - 100.0) / projection.usage_percentage) * 100.0;
+                                                                let overage_euros = projection.overage.as_ref().map(|o| o.estimated_cost_euros).unwrap_or(0.0);
+                                                                let show_inline = overflow_pct > 12.0; // Show text if segment is wide enough
+                                                                html! {
+                                                                    <div
+                                                                        style={format!("width: {}%; background-color: #ef4444; display: flex; align-items: center; justify-content: center;", overflow_pct)}
+                                                                        title={format!("Over limit: ~{:.0}€/mo", overage_euros)}
+                                                                    >
+                                                                        {
+                                                                            if show_inline {
+                                                                                html! {
+                                                                                    <span style="color: white; font-size: 11px; font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.5); white-space: nowrap;">
+                                                                                        {format!("~{:.0}€", overage_euros)}
+                                                                                    </span>
+                                                                                }
+                                                                            } else {
+                                                                                html! {}
+                                                                            }
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </div>
+                                                </div>
+
+                                                // Remaining capacity or overage info
+                                                <div class="capacity-info" style="margin-top: 12px;">
                                                     {
-                                                        if sub_tier == "tier 1" {
-                                                            "Basic Plan gives your lightfriend access to Perplexity Search and Weather tool with 40 monthly Message quota."
-                                                        } else if sub_tier == "tier 1.5" {
-                                                            "Oracle Plan gives full integrations capability to your lightfriend."
-                                                        } else if sub_tier == "tier 2" {
-                                                            "Hosted Plan gives full integrations and monitoring capability to your lightfriend."
-                                                        } else if sub_tier == "tier 3" {
-                                                            "Easy Self-Hosting Plan gives you ability to host your own lightfriend on your own server with easy setup and automatic updates."
+                                                        if projection.remaining_capacity > 0 {
+                                                            if projection.is_notification_only {
+                                                                html! {
+                                                                    <div style="color: #4ade80; font-size: 0.9rem;">
+                                                                        {format!("Room for ~{} more notifications this month", remaining_notifications)}
+                                                                    </div>
+                                                                }
+                                                            } else {
+                                                                html! {
+                                                                    <div style="color: #4ade80; font-size: 0.9rem;">
+                                                                        {format!("Room for ~{} more messages, ~{} notifications, or ~{} voice mins", remaining_messages, remaining_notifications, remaining_voice_mins)}
+                                                                    </div>
+                                                                }
+                                                            }
+                                                        } else if let Some(overage) = &projection.overage {
+                                                            if overage.covered_by_auto_topup {
+                                                                html! {
+                                                                    <div style="color: #4ade80; font-size: 0.9rem;">
+                                                                        {format!("Estimated extra: ~{:.0}EUR/month (covered by auto top-up)", overage.estimated_cost_euros)}
+                                                                    </div>
+                                                                }
+                                                            } else if projection.plan_type.as_deref() == Some("monitor") {
+                                                                html! {
+                                                                    <div style="color: #fbbf24; font-size: 0.9rem;">
+                                                                        {"Over limit - reduce digests or upgrade to Digest plan"}
+                                                                    </div>
+                                                                }
+                                                            } else if projection.overage_credits > 0.0 {
+                                                                // Has overage credits but no auto top-up - show run-out date
+                                                                let days_remaining = projection.overage_days_remaining.unwrap_or(0);
+                                                                let days_until_billing = projection.days_until_billing.unwrap_or(30);
+                                                                let run_out_date = Utc::now() + Duration::days(days_remaining as i64);
+                                                                let formatted_date = run_out_date.format("%b %d").to_string();
+
+                                                                if days_remaining >= days_until_billing {
+                                                                    // Credits last through billing cycle - show how long they'll last
+                                                                    let months_covered = (days_remaining as f32 / 30.0).floor() as i32;
+                                                                    let coverage_text = if months_covered >= 12 {
+                                                                        format!("~{}+ months", months_covered)
+                                                                    } else if months_covered > 1 {
+                                                                        format!("~{} months", months_covered)
+                                                                    } else {
+                                                                        "this month".to_string()
+                                                                    };
+                                                                    html! {
+                                                                        <div style="color: #4ade80; font-size: 0.9rem;">
+                                                                            {format!("Your {:.2}€ credits cover {} of overage, running out ~{}", projection.overage_credits, coverage_text, formatted_date)}
+                                                                        </div>
+                                                                    }
+                                                                } else {
+                                                                    // Credits will run out before billing cycle
+                                                                    html! {
+                                                                        <div style="color: #fbbf24; font-size: 0.9rem;">
+                                                                            {format!("Credits ({:.2}€) projected to run out ~{} - buy more or enable auto top-up", projection.overage_credits, formatted_date)}
+                                                                        </div>
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                html! {
+                                                                    <div style="color: #fbbf24; font-size: 0.9rem;">
+                                                                        {format!("~{:.0}EUR over limit - buy credits or enable auto top-up", overage.estimated_cost_euros)}
+                                                                    </div>
+                                                                }
+                                                            }
+                                                        } else if projection.has_auto_topup {
+                                                            // At ~100% but no overage yet, and auto top-up is enabled
+                                                            html! {
+                                                                <div style="color: #4ade80; font-size: 0.9rem;">
+                                                                    {"At quota limit - any extra usage covered by auto top-up"}
+                                                                </div>
+                                                            }
                                                         } else {
-                                                            ""
+                                                            html! {}
                                                         }
                                                     }
                                                 </div>
-                                                    <span class="tier-label">
-                                                        {
-                                                            if sub_tier == "tier 1" {
-                                                                "Basic Plan"
-                                                            } else if sub_tier == "tier 1.5" {
-                                                                "Oracle Plan"
-                                                            } else if sub_tier == "tier 2" {
-                                                                "Hosted Plan"
-                                                            } else if sub_tier == "tier 3" {
-                                                                "Easy Self-Hosting Plan"
-                                                            } else {
-                                                                "Active"
-                                                            }
+
+                                                // Downgrade suggestion
+                                                {
+                                                    if should_suggest_downgrade {
+                                                        html! {
+                                                            <div style="margin-top: 12px; padding: 10px; background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.3); border-radius: 6px;">
+                                                                <span style="color: #4ade80; font-size: 0.9rem;">
+                                                                    {"Your usage fits the Monitor Plan - downgrade to save 20EUR/month"}
+                                                                </span>
+                                                            </div>
                                                         }
-                                                    </span>
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+
+                                                // Example data info
+                                                {
+                                                    if projection.is_example_data {
+                                                        html! {
+                                                            <div style="margin-top: 12px; color: #666; font-size: 0.8rem; font-style: italic;">
+                                                                {"Based on typical usage. Actual data appears after a few days of activity."}
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+
+                                                // Plan info footer
+                                                <div class="plan-info-footer" style="margin-top: 12px; color: #888; font-size: 0.85rem;">
+                                                    <span>{format!("{} Plan: {}/mo capacity", plan_name, projection.plan_capacity)}</span>
+                                                    {
+                                                        if let Some(days) = projection.days_until_billing {
+                                                            html! { <span>{format!(" ({} days left)", days)}</span> }
+                                                        } else {
+                                                            html! {}
+                                                        }
+                                                    }
                                                 </div>
                                             </div>
-                                        }
-                                    } else if user_profile.discount {
-                                        html! {
-                                            <div class="status">
-                                                <div class="discount-status">
-                                                <h3>{"Current Subscription"}</h3>
-                                                <div class="tooltip">
-                                                    {"Early adopters keep access to tools: Email, Calendar, Perplexity and Weather regardless of their subscription status(although credits have to be bought to use them). Thank you for taking interest!"}
-                                                </div>
-                                                    <span>{"Early adopter"}</span>
-                                                </div>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {
-                                            <div class="status">
-                                                <div class="discount-status">
-                                                <h3>{"Current Subscription"}</h3>
-                                                <div class="tooltip">
-                                                    {"Current subscription is inactive. You need a active subscription to use lightfriend."}
-                                                </div>
-                                                    <span>{"Inactive"}</span>
-                                                </div>
-                                            </div>
-                                        }
+                                        </div>
                                     }
+                                } else {
+                                    html! {}
                                 }
-                            </div>
+                            }
+
                             // Purchased Credits
                             <div class="section-container">
                                 <div class="credits-grid">
@@ -676,6 +973,33 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         }}
                                                     />
                                                 </div>
+                                                // Only show auto top-up checkbox if not already enabled
+                                                {
+                                                    if !*auto_topup_active {
+                                                        html! {
+                                                            <div class="auto-topup-checkbox" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    id="enable-auto-topup"
+                                                                    checked={*enable_auto_topup_with_purchase}
+                                                                    onchange={{
+                                                                        let enable_auto_topup_with_purchase = enable_auto_topup_with_purchase.clone();
+                                                                        Callback::from(move |e: Event| {
+                                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                                            enable_auto_topup_with_purchase.set(input.checked());
+                                                                        })
+                                                                    }}
+                                                                    style="width: 18px; height: 18px; cursor: pointer;"
+                                                                />
+                                                                <label for="enable-auto-topup" style="color: #ccc; font-size: 0.9rem; cursor: pointer;">
+                                                                    {"Enable automatic top-up (refill when credits run low)"}
+                                                                </label>
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
                                                 <div class="modal-actions">
                                                     <button
                                                         class="cancel-button"
@@ -931,11 +1255,16 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 1rem;
     padding: 2rem;
     border-radius: 16px;
     transition: all 0.3s ease;
     border: 1px solid rgba(30, 144, 255, 0.2);
     backdrop-filter: blur(5px);
+}
+.subscription-tier h3, .discount-status h3, .no-subscription h3 {
+    margin: 0;
+    white-space: nowrap;
 }
 .subscription-tier:hover, .discount-status:hover, .no-subscription:hover {
     transform: translateY(-2px);
@@ -1624,6 +1953,242 @@ input:checked + .slider:before {
     color: #7EB2FF;
     font-size: 1rem;
     font-weight: 500;
+}
+
+/* Usage Projection Styles */
+.usage-projection-section {
+    margin-bottom: 2rem;
+}
+
+.usage-projection-card {
+    background: linear-gradient(145deg, rgba(30, 144, 255, 0.08), rgba(30, 144, 255, 0.03));
+    border-radius: 16px;
+    padding: 1.5rem;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+}
+
+.usage-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.usage-header h3 {
+    color: #7EB2FF;
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.usage-percentage {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+
+.usage-bar-container {
+    width: 100%;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+}
+
+.usage-bar {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease, background-color 0.3s ease;
+}
+
+.usage-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+.usage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.usage-label {
+    color: #B3D1FF;
+    font-size: 0.95rem;
+}
+
+.usage-value {
+    color: #e0e0e0;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.capacity-info {
+    margin-bottom: 1rem;
+}
+
+.capacity-remaining, .capacity-over {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+}
+
+.capacity-label {
+    color: #B3D1FF;
+    font-size: 0.9rem;
+}
+
+.capacity-value {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.capacity-value.positive {
+    color: #4CAF50;
+}
+
+.capacity-value.negative {
+    color: #F44336;
+}
+
+.overage-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.overage-info.covered {
+    background: rgba(76, 175, 80, 0.1);
+    border-color: rgba(76, 175, 80, 0.3);
+}
+
+.overage-label {
+    color: #81c784;
+    font-size: 0.85rem;
+}
+
+.overage-value {
+    color: #e0e0e0;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.usage-tip {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.usage-tip.warning {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.tip-icon {
+    background: #FFC107;
+    color: #000;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.tip-text {
+    color: #FFE082;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.usage-status.ok {
+    color: #81c784;
+    font-size: 0.95rem;
+    padding: 0.5rem 0;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.plan-info-footer {
+    color: #888;
+    font-size: 0.85rem;
+    text-align: center;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.days-left {
+    color: #7EB2FF;
+}
+
+/* Example data styles */
+.example-badge {
+    font-size: 0.75rem;
+    color: #FFC107;
+    margin-left: 0.5rem;
+    font-weight: normal;
+    font-style: italic;
+}
+
+.example-data-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(100, 181, 246, 0.1);
+    border: 1px solid rgba(100, 181, 246, 0.3);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.info-icon {
+    background: #64B5F6;
+    color: #000;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.info-text {
+    color: #90CAF9;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.usage-item.usage-total {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.usage-item.usage-total .usage-label,
+.usage-item.usage-total .usage-value {
+    font-weight: 600;
 }
             "#}
         </style>

@@ -47,6 +47,7 @@ pub struct UserResponse {
     pub credits_left: f32,
     pub discount: bool,
     pub discount_tier: Option<String>,
+    pub plan_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -43,6 +43,19 @@ struct MessagingPricing {
 }
 
 #[derive(Deserialize, Debug)]
+struct PhoneNumberPricing {
+    #[serde(default)]
+    phone_number_prices: Vec<PhoneNumberPrice>,
+    price_unit: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct PhoneNumberPrice {
+    number_type: String,
+    current_price: String,
+}
+
+#[derive(Deserialize, Debug)]
 struct InboundSmsPrice {
     number_type: String,
     #[serde(default)]
@@ -75,6 +88,27 @@ struct InboundCallPrice {
 
 #[derive(Deserialize, Debug)]
 struct OutboundPrefixPrice {
+    current_price: String,
+}
+
+/// Response from Twilio Voice Pricing v2 API (origin-based pricing)
+#[derive(Deserialize, Debug)]
+struct OriginBasedVoicePricing {
+    #[serde(default)]
+    originating_call_prices: Vec<OriginatingCallPrice>,
+    #[serde(default)]
+    terminating_prefix_prices: Vec<TerminatingPrefixPrice>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OriginatingCallPrice {
+    base_price: String,
+    current_price: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct TerminatingPrefixPrice {
+    base_price: String,
     current_price: String,
 }
 
@@ -227,6 +261,168 @@ async fn fetch_pricing(
     };
 
     Ok((outbound_sms_price, inbound_sms_price, outbound_voice_price, inbound_voice_price))
+}
+
+/// Fetch domestic (same-country) voice pricing using Twilio v2 API
+/// This is for BYOT users who call from their country's number to the same country
+/// Returns (outbound_per_min, inbound_per_min)
+async fn fetch_domestic_voice_pricing(
+    country_code: &str,
+    account_sid: &str,
+    auth_token: &str,
+) -> Result<(Option<f32>, Option<f32>), String> {
+    let client = reqwest::Client::new();
+    let country_upper = country_code.to_uppercase();
+
+    // Twilio v2 Voice Pricing API with origination country
+    // https://pricing.twilio.com/v2/Voice/Countries/{country}?OriginationNumber=+{country_prefix}
+    // But simpler: /v2/Voice/Numbers/{number} gives us origin-based pricing
+    // For now, use the country endpoint which gives us domestic rates
+    let url = format!(
+        "https://pricing.twilio.com/v2/Voice/Countries/{}",
+        country_upper
+    );
+
+    match client
+        .get(&url)
+        .basic_auth(account_sid, Some(auth_token))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<OriginBasedVoicePricing>().await {
+                Ok(pricing) => {
+                    // Outbound: terminating_prefix_prices (calling TO the country FROM the country)
+                    let outbound = pricing
+                        .terminating_prefix_prices
+                        .first()
+                        .and_then(|p| p.current_price.parse::<f32>().ok());
+
+                    // Inbound: originating_call_prices (receiving calls on a number IN the country)
+                    let inbound = pricing
+                        .originating_call_prices
+                        .first()
+                        .and_then(|p| p.current_price.parse::<f32>().ok());
+
+                    Ok((outbound, inbound))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to parse v2 voice pricing for {}: {}", country_upper, e);
+                    Ok((None, None))
+                }
+            }
+        }
+        Ok(resp) => {
+            tracing::warn!("v2 voice pricing API returned {} for {}", resp.status(), country_upper);
+            Ok((None, None))
+        }
+        Err(e) => {
+            tracing::warn!("Failed to fetch v2 voice pricing for {}: {}", country_upper, e);
+            Ok((None, None))
+        }
+    }
+}
+
+/// Fetch phone number monthly pricing for a country
+/// Returns (local_price, mobile_price) - both are monthly costs
+pub async fn fetch_phone_number_pricing(
+    country_code: &str,
+    account_sid: &str,
+    auth_token: &str,
+) -> Result<(Option<f32>, Option<f32>), String> {
+    let client = reqwest::Client::new();
+
+    let url = format!(
+        "https://pricing.twilio.com/v1/PhoneNumbers/Countries/{}",
+        country_code.to_uppercase()
+    );
+
+    match client
+        .get(&url)
+        .basic_auth(account_sid, Some(auth_token))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<PhoneNumberPricing>().await {
+                Ok(pricing) => {
+                    let mut local_price = None;
+                    let mut mobile_price = None;
+
+                    for price in pricing.phone_number_prices {
+                        let p = price.current_price.parse::<f32>().ok();
+                        match price.number_type.to_lowercase().as_str() {
+                            "local" => local_price = p,
+                            "mobile" => mobile_price = p,
+                            _ => {}
+                        }
+                    }
+
+                    Ok((local_price, mobile_price))
+                }
+                Err(_) => Ok((None, None)),
+            }
+        }
+        _ => Ok((None, None)),
+    }
+}
+
+/// Full BYOT pricing info for a country
+#[derive(Debug, Clone, Serialize)]
+pub struct ByotCountryPricing {
+    pub country_code: String,
+    pub has_local_numbers: bool,
+    /// Monthly cost for local phone number
+    pub local_number_monthly: Option<f32>,
+    /// Monthly cost for mobile phone number
+    pub mobile_number_monthly: Option<f32>,
+    /// Raw SMS price per segment (outbound)
+    pub sms_price_per_segment: Option<f32>,
+    /// Voice price per minute (outbound)
+    pub voice_price_per_minute: Option<f32>,
+    /// Inbound SMS price (if local number)
+    pub inbound_sms_price: Option<f32>,
+    /// Inbound voice price per minute (if local number)
+    pub inbound_voice_price_per_minute: Option<f32>,
+}
+
+/// Get full BYOT pricing for a country (fetches from Twilio or cache)
+/// BYOT = Bring Your Own Twilio - users buy numbers in their own country
+/// Voice pricing uses DOMESTIC rates (country→country) since users call from their own country's number
+pub async fn get_byot_pricing(
+    state: &Arc<AppState>,
+    country_code: &str,
+) -> Result<ByotCountryPricing, String> {
+    let country_upper = country_code.to_uppercase();
+
+    // Get capability info (this handles caching for SMS pricing)
+    let capability = get_country_capability(state, &country_upper).await?;
+
+    let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
+        .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
+    let auth_token = std::env::var("TWILIO_AUTH_TOKEN")
+        .map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
+
+    // Fetch phone number pricing
+    let (local_price, mobile_price) = fetch_phone_number_pricing(&country_upper, &account_sid, &auth_token).await?;
+
+    // Fetch DOMESTIC voice pricing using v2 API
+    // This is crucial for BYOT - users call FROM their country TO their country
+    let (domestic_outbound_voice, domestic_inbound_voice) =
+        fetch_domestic_voice_pricing(&country_upper, &account_sid, &auth_token).await?;
+
+    Ok(ByotCountryPricing {
+        country_code: country_upper,
+        has_local_numbers: capability.can_receive_sms,
+        local_number_monthly: local_price,
+        mobile_number_monthly: mobile_price,
+        sms_price_per_segment: capability.outbound_sms_price,
+        // Use domestic voice rates for BYOT (country→country calls)
+        voice_price_per_minute: domestic_outbound_voice.or(capability.outbound_voice_price_per_min),
+        inbound_sms_price: capability.inbound_sms_price,
+        // Use domestic inbound voice rates for BYOT
+        inbound_voice_price_per_minute: domestic_inbound_voice.or(capability.inbound_voice_price_per_min),
+    })
 }
 
 /// Determine the tier for a given country

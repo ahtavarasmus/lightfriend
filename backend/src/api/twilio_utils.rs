@@ -392,11 +392,14 @@ pub async fn validate_twilio_signature(
         };
     } else {
 
-        auth_token = if user.phone_number.starts_with("+1") ||
-                   user.phone_number.starts_with("+358") ||
-                   user.phone_number.starts_with("+31") ||
-                   user.phone_number.starts_with("+44") ||
-                   user.phone_number.starts_with("+61") {
+        // BYOT users with their own credentials always use their own account
+        auth_token = if state.user_core.has_twilio_credentials(user.id) {
+            match state.user_core.get_twilio_credentials(user.id) {
+                Ok((_, token)) => token,
+                Err(_) => return Err(StatusCode::UNAUTHORIZED)
+            }
+        } else if crate::utils::country::is_local_number_country(&user.phone_number)
+            || crate::utils::country::is_notification_only_country(&user.phone_number) {
             std::env::var("TWILIO_AUTH_TOKEN")
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         } else {
@@ -459,12 +462,11 @@ pub async fn delete_twilio_message_media(
     media_sid: &str,
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
+    // BYOT users with their own credentials always use their own account
+    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+        state.user_core.get_twilio_credentials(user.id)?
+    } else if crate::utils::country::is_local_number_country(&user.phone_number)
+        || crate::utils::country::is_notification_only_country(&user.phone_number) {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
@@ -528,13 +530,12 @@ pub async fn delete_twilio_message(
     user: &User,
 ) -> Result<(), Box<dyn Error>> {
     tracing::debug!("deleting incoming message");
-    let _is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
+    // BYOT users with their own credentials always use their own account
+    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+        state.user_core.get_twilio_credentials(user.id)?
+    } else if crate::utils::country::is_local_number_country(&user.phone_number)
+        || crate::utils::country::is_notification_only_country(&user.phone_number) {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
@@ -602,39 +603,35 @@ pub async fn send_conversation_message(
         return Ok("dev not sending anything".to_string());
     }
 
-    /*
-    if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
-        if media_sid.is_none() {
-            // Use TextBee for text-only messages
-            let recipient = user.preferred_number.clone().unwrap();
-            let body_clone = body.to_string();
-            let device_id_clone = device_id.clone();
-            let api_key_clone = api_key.clone();
-
-            spawn(async move {
-                if let Err(e) = send_textbee_sms(device_id_clone, api_key_clone, recipient, body_clone).await {
-                    tracing::error!("Failed to send TextBee SMS: {}", e);
-                }
+    // Lazy migration: backfill plan_type for existing users who don't have it set
+    // This ensures all users get their plan_type populated when they use the service
+    if user.plan_type.is_none() {
+        let is_us_ca = user.phone_number_country == Some("US".to_string())
+            || user.phone_number_country == Some("CA".to_string());
+        if !is_us_ca {
+            // Run in background to not block the message send
+            let state_clone = state.clone();
+            let user_id = user.id;
+            tokio::spawn(async move {
+                crate::utils::country::lazy_migrate_plan_type(user_id, &state_clone).await;
             });
-
-            return Ok("".to_string());
         }
-        // If media is present, fall back to Twilio
     }
-    */
-    // If TextBee not set up or failed, fall back to Twilio
 
     // Twilio send logic
-    let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
-       user.phone_number.starts_with("+358") ||
-       user.phone_number.starts_with("+31") ||
-       user.phone_number.starts_with("+44") ||
-       user.phone_number.starts_with("+61") {
+    // BYOT users with their own credentials always use their own account
+    // Otherwise, use global credentials for local-number and notification-only countries
+    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+        // BYOT user - use their own Twilio account
+        state.user_core.get_twilio_credentials(user.id)?
+    } else if crate::utils::country::is_local_number_country(&user.phone_number)
+        || crate::utils::country::is_notification_only_country(&user.phone_number) {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
         )
     } else {
+        // Non-supported country must have their own credentials
         state.user_core.get_twilio_credentials(user.id)?
     };
 
@@ -672,7 +669,17 @@ pub async fn send_conversation_message(
                 "NL" => from_number = env::var("NL_PHONE").expect("NL_PHONE not set"),
                 "GB" => from_number = env::var("GB_PHONE").expect("GB_PHONE not set"),
                 "AU" => from_number = env::var("AUS_PHONE").expect("AUS_PHONE not set"),
-                _ => tracing::info!("Using empty from_number for unsupported country: {}", c),
+                _ => {
+                    // Check if this is a notification-only country
+                    if crate::utils::country::is_notification_only_country(&user.phone_number) {
+                        // Use US messaging service for notification-only countries
+                        use_messaging_service = true;
+                        update_preferred = false;
+                        tracing::info!("Using US messaging service for notification-only country: {}", c);
+                    } else {
+                        tracing::info!("Using empty from_number for unsupported country: {}", c);
+                    }
+                }
             }
         }
     }

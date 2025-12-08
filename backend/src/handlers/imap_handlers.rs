@@ -767,57 +767,6 @@ pub async fn fetch_single_email_imap(
             }).unwrap_or_else(|| String::from("[Failed to parse email body]"));
             // Generate a snippet from the clean body
             let snippet = clean_content.chars().take(200).collect::<String>();
-            // Extract image attachments (PNG and JPEG only) and upload to Twilio
-            /*
-            let attachments = if let Some(msg) = parsed.as_ref() {
-                let mut attachment_futures = Vec::new();
-              
-                for attachment in msg.attachments() {
-                    if let Some(content_type) = attachment.content_type() {
-                        let ctype = content_type.ctype();
-                        if let Some(subtype) = content_type.subtype() {
-                            let content_type_str = format!("{}/{}", ctype, subtype).to_lowercase();
-                            if content_type_str == "image/png" ||
-                               content_type_str == "image/jpeg" ||
-                               content_type_str == "image/jpg" {
-                                let filename = attachment.attachment_name()
-                                    .map(|name| name.to_string())
-                                    .unwrap_or_else(|| format!("attachment.{}", subtype));
-                                let attachment_data = attachment.contents().to_vec();
-                                tracing::info!("Found image attachment: {} ({})", filename, content_type_str);
-                                // Upload to Twilio (pass owned values)
-                                let upload_future = upload_media_to_twilio(
-                                    content_type_str,
-                                    attachment_data,
-                                    filename,
-                                    conversation.service_sid.clone(),
-                                );
-                              
-                                attachment_futures.push(upload_future);
-                            }
-                        }
-                    }
-                }
-                // Await all upload futures and collect successful results
-                let mut uploaded_attachments = Vec::new();
-                for future in attachment_futures {
-                    match future.await {
-                        Ok(url) => {
-                            tracing::info!("Successfully uploaded attachment to Twilio: {}", url);
-                            uploaded_attachments.push(url);
-                        },
-                        Err(e) => {
-                            tracing::error!("Failed to upload attachment to Twilio: {}", e);
-                            // Continue processing other attachments even if one fails
-                        }
-                    }
-                }
-              
-                uploaded_attachments
-            } else {
-                Vec::new()
-            };
-                                */
             (clean_content, snippet, Vec::new())
         },
         None => (String::new(), String::new(), Vec::new())

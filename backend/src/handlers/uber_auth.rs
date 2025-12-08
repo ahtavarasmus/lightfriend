@@ -63,10 +63,6 @@ pub async fn uber_login(
         .uber_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
         .add_scope(Scope::new("profile".to_string()))
-        /*
-        .add_scope(Scope::new("history".to_string()))
-        .add_scope(Scope::new("offline_access".to_string()))
-        */
         .add_extra_param("prompt", "login");
     let (auth_url, _) = auth_builder
         .set_pkce_challenge(pkce_challenge)

@@ -719,7 +719,9 @@ struct InstructionsProps {
     auth_token: UseStateHandle<String>,
     on_token_change: Callback<Event>,
     on_save_creds: Callback<MouseEvent>,
+    on_clear_creds: Callback<MouseEvent>,
     creds_save_status: UseStateHandle<Option<Result<(), String>>>,
+    has_existing_creds: bool,
     open_modal: Callback<String>,
     is_phone_valid: bool,
     is_sid_valid: bool,
@@ -737,7 +739,9 @@ fn instructions_component(props: &InstructionsProps) -> Html {
     let auth_token = props.auth_token.clone();
     let on_token_change = props.on_token_change.clone();
     let on_save_creds = props.on_save_creds.clone();
+    let on_clear_creds = props.on_clear_creds.clone();
     let creds_save_status = props.creds_save_status.clone();
+    let has_existing_creds = props.has_existing_creds;
     let can_edit = props.can_edit;
     let is_phone_valid = props.is_phone_valid;
     let is_sid_valid = props.is_sid_valid;
@@ -856,13 +860,29 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                             />
                         </div>
                     </div>
-                    <button
-                        class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
-                        onclick={on_save_creds.clone()}
-                        disabled={!can_edit || !(is_sid_valid && is_token_valid)}
-                    >
-                        {"Save"}
-                    </button>
+                    <div class="button-row">
+                        <button
+                            class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
+                            onclick={on_save_creds.clone()}
+                            disabled={!can_edit || !(is_sid_valid && is_token_valid)}
+                        >
+                            {"Save"}
+                        </button>
+                        {
+                            if has_existing_creds && can_edit {
+                                html! {
+                                    <button
+                                        class="remove-button"
+                                        onclick={on_clear_creds.clone()}
+                                    >
+                                        {"Remove Credentials"}
+                                    </button>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
                     {
                         match &*creds_save_status {
                             Some(Ok(_)) => html! {
@@ -1019,6 +1039,24 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                 }
                 .save-status.error {
                     color: #f44336;
+                    background: rgba(244, 67, 54, 0.1);
+                }
+                .button-row {
+                    display: flex;
+                    gap: 1rem;
+                    align-items: center;
+                }
+                .remove-button {
+                    padding: 0.75rem 1.5rem;
+                    background: transparent;
+                    color: #f44336;
+                    border: 1px solid #f44336;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    transition: all 0.3s ease;
+                }
+                .remove-button:hover {
                     background: rgba(244, 67, 54, 0.1);
                 }
                 "#}
@@ -1329,6 +1367,44 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             });
         })
     };
+    let on_clear_creds = {
+        let creds_save_status = creds_save_status.clone();
+        let account_sid = account_sid.clone();
+        let auth_token = auth_token.clone();
+        Callback::from(move |_: MouseEvent| {
+            let creds_save_status = creds_save_status.clone();
+            let account_sid = account_sid.clone();
+            let auth_token = auth_token.clone();
+            creds_save_status.set(None);
+            spawn_local(async move {
+                let result = Api::delete("/api/profile/twilio-creds")
+                    .send()
+                    .await;
+                match result {
+                    Ok(response) => {
+                        if response.status() == 401 {
+                            if let Some(window) = window() {
+                                if let Ok(Some(storage)) = window.local_storage() {
+                                    let _ = storage.remove_item("token");
+                                }
+                            }
+                            creds_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                        } else if response.ok() {
+                            // Clear the input fields
+                            account_sid.set(String::new());
+                            auth_token.set(String::new());
+                            creds_save_status.set(Some(Ok(())));
+                        } else {
+                            creds_save_status.set(Some(Err("Failed to remove credentials".to_string())));
+                        }
+                    }
+                    Err(_) => {
+                        creds_save_status.set(Some(Err("Network error occurred".to_string())));
+                    }
+                }
+            });
+        })
+    };
     let on_save_textbee = {
         let textbee_api_key = textbee_api_key.clone();
         let textbee_device_id = textbee_device_id.clone();
@@ -1393,7 +1469,17 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             modal_visible.set(true);
         })
     };
-    let can_edit = props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2");
+    // BYOT is available for:
+    // 1. Tier 2 users (existing behavior)
+    // 2. Users from non-local-number countries (BYOT eligibility)
+    // Local number countries: US, CA, FI, NL, GB, AU - these have Lightfriend-provided numbers
+    let is_local_number_country = props.country.as_deref().map(|c| {
+        matches!(c, "US" | "CA" | "FI" | "NL" | "GB" | "AU")
+    }).unwrap_or(true); // Default to true if no country (block access until country is known)
+
+    let can_edit = props.is_logged_in && (
+        props.sub_tier.as_deref() == Some("tier 2") || !is_local_number_country
+    );
     let is_phone_valid = {
         let val = &*phone_number;
         !val.is_empty() && val.starts_with('+') && val.len() >= 10 && val[1..].chars().all(|c| c.is_ascii_digit()) && !val.starts_with("...")
@@ -1561,7 +1647,9 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     auth_token={auth_token.clone()}
                     on_token_change={on_token_change.clone()}
                     on_save_creds={on_save_creds.clone()}
+                    on_clear_creds={on_clear_creds.clone()}
                     creds_save_status={creds_save_status.clone()}
+                    has_existing_creds={props.twilio_sid.as_ref().map(|s| !s.is_empty() && !s.starts_with("...")).unwrap_or(false)}
                     open_modal={open_modal.clone()}
                     is_phone_valid={is_phone_valid}
                     is_sid_valid={is_sid_valid}

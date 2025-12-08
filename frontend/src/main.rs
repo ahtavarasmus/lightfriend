@@ -7,6 +7,7 @@ use wasm_bindgen::JsCast;
 mod config;
 mod utils {
     pub mod api;
+    pub mod webauthn;
 }
 mod profile {
     pub mod stripe;
@@ -66,9 +67,9 @@ mod connections {
 }
 mod auth {
     pub mod connect;
-    pub mod verify;
     pub mod signup;
     pub mod oauth_flow;
+    pub mod set_password;
 }
 mod admin {
     pub mod dashboard;
@@ -94,9 +95,8 @@ use auth::{
     signup::register::Register,
     signup::login::Login,
     signup::password_reset::PasswordReset,
-    verify::Verify,
+    set_password::SetPassword,
 };
-use profile::profile::Billing;
 use admin::dashboard::AdminDashboard;
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
@@ -134,8 +134,6 @@ pub enum Route {
     Admin,
     #[at("/billing")]
     Billing,
-    #[at("/verify")]
-    Verify,
     #[at("/terms")]
     Terms,
     #[at("/privacy")]
@@ -148,6 +146,10 @@ pub enum Route {
     SwitchToDumbphoneGuide,
     #[at("/how-to-read-more-accidentally")]
     ReadMoreAccidentallyGuide,
+    #[at("/set-password")]
+    SetPassword,
+    #[at("/set-password/:token")]
+    SetPasswordWithToken { token: String },
 }
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
     if matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
@@ -215,12 +217,8 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
             html! { <AdminDashboard /> }
         },
         Route::Billing => {
-            info!("Rendering Billing page");
-            html! { <Billing /> }
-        },
-        Route::Verify => {
-            info!("Rendering Verify page");
-            html! { <Verify /> }
+            // Redirect to Home with billing tab parameter
+            html! { <Redirect<Route> to={Route::Home} /> }
         },
         Route::Terms => {
             info!("Rendering Terms page");
@@ -245,6 +243,14 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::ReadMoreAccidentallyGuide => {
             info!("Rendering ReadMoreAccidentallyGuide page");
             html! { <ReadMoreAccidentallyGuide /> }
+        },
+        Route::SetPassword => {
+            info!("Rendering SetPassword page");
+            html! { <SetPassword /> }
+        },
+        Route::SetPasswordWithToken { token } => {
+            info!("Rendering SetPassword page with token");
+            html! { <SetPassword token={Some(token)} /> }
         },
     }
 }
@@ -587,19 +593,6 @@ pub fn nav(props: &NavProps) -> Html {
                         if *logged_in {
                             html! {
                                 <>
-                                    {
-                                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-                                            html! {
-                                                <div onclick={close_menu.clone()}>
-                                                    <Link<Route> to={Route::Billing} classes="nav-profile-link">
-                                                        {"Billing"}
-                                                    </Link<Route>>
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
                                     <button onclick={
                                         let close = close_menu.clone();
                                         let logout = handle_logout.clone();

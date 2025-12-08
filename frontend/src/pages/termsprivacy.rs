@@ -76,22 +76,19 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"7. WhatsApp Integration"}</h2>
-                <p>{"Lightfriend integrates with WhatsApp to allow you to send and receive WhatsApp messages via SMS or voice calls. Due to the technical requirements of providing this service, we must process and temporarily store certain WhatsApp data. Here's how we handle your WhatsApp data:"}</p>
+                <h2>{"7. Messaging Platform Integrations (WhatsApp, Signal, Telegram)"}</h2>
+                <p>{"Lightfriend integrates with various messaging platforms to allow you to send and receive messages via SMS or voice calls. This section applies to all messaging integrations including WhatsApp, Signal, and Telegram."}</p>
                 <ul>
-                    <li>{"Connection Data: When you connect your WhatsApp account, we store necessary authentication data to maintain the connection between our service and your WhatsApp account."}</li>
-                    <li>{"Message Encryption in Transit: All WhatsApp messages are protected with end-to-end encryption during transmission between WhatsApp's API and our servers. The decryption process occurs securely on our servers using securely stored keys, which is necessary for converting messages to SMS and voice calls."}</li>
-                    <li>{"Message Processing: To enable the conversion of WhatsApp messages to SMS and voice calls, messages must be processed and temporarily stored on our secure servers. This storage is a technical necessity to ensure reliable message delivery and conversion between different communication formats."}</li>
-                    <li>{"Message Storage Duration: Messages are retained only for the minimum time necessary to ensure reliable delivery and system functionality. We automatically remove messages based on our retention policy."}</li>
-                    <li>{"Security Measures: Access to message data is strictly limited to only essential system processes required for service operation. Our servers are secured with industry-standard practices and access controls."}</li>
-                    <li>{"Data Retention: WhatsApp connection data is retained until you disconnect the service or delete your account."}</li>
-                    <li>{"Third-Party Access: We do not share your WhatsApp data with any third parties except as required by law."}</li>
+                    <li>{"Connection Data: We store encrypted authentication data to maintain connections to your messaging accounts."}</li>
+                    <li>{"Message Processing: Messages are processed and temporarily stored on our servers to enable format conversion between platforms. This is a technical necessity for service operation."}</li>
+                    <li>{"Data Retention: Connection data is retained until you disconnect the service or delete your account. Messages are retained only as long as necessary for delivery."}</li>
+                    <li>{"Third-Party Access: We do not share your messaging data with third parties except as required by law."}</li>
                 </ul>
                 <p>{"Important Disclaimers:"}</p>
                 <ul>
-                    <li>{"Message Content Responsibility: Users are solely responsible for the content of messages sent through our service. Lightfriend acts solely as a technical intermediary for message delivery and does not monitor, edit, or take responsibility for user-generated content."}</li>
-                    <li>{"Technical Requirements: The processing and temporary storage of messages is a technical requirement necessary to provide the service. By using our WhatsApp integration, you acknowledge and accept these technical requirements."}</li>
-                    <li>{"Service Limitations: Due to the technical nature of the WhatsApp bridge, we cannot guarantee the privacy of messages beyond our implemented security measures. Users should consider this when deciding what information to share through the service."}</li>
+                    <li>{"Users are solely responsible for the content of messages sent through our service. Lightfriend acts only as a technical intermediary."}</li>
+                    <li>{"We cannot guarantee privacy beyond our implemented security measures. Users should consider this when deciding what information to share."}</li>
+                    <li>{"We are not responsible for any actions taken by the underlying messaging platforms."}</li>
                 </ul>
             </section>
 
@@ -108,7 +105,44 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"8. Data Retention"}</h2>
+                <h2>{"9. Vehicle Integration (Tesla)"}</h2>
+                <p>{"Lightfriend offers integration with Tesla vehicles to allow remote vehicle control via SMS or voice commands. BY USING THIS FEATURE, YOU ACKNOWLEDGE AND ACCEPT THE FOLLOWING:"}</p>
+                <ul>
+                    <li>{"We store encrypted OAuth tokens to access your Tesla account on your behalf."}</li>
+                    <li>{"Commands you send may control real vehicle functions including but not limited to: unlocking doors, starting climate control, opening trunks, and other vehicle operations."}</li>
+                    <li>{"THIS IS AN EXPERIMENTAL SERVICE. You use it entirely at your own risk."}</li>
+                    <li>{"You are solely responsible for ensuring it is safe and appropriate to send any vehicle command."}</li>
+                    <li>{"Lightfriend does not verify the safety, appropriateness, or consequences of any command."}</li>
+                    <li>{"Lightfriend accepts NO LIABILITY whatsoever for any accidents, damage, injury, theft, loss, or any other consequences resulting from vehicle commands."}</li>
+                    <li>{"By using this integration, you explicitly waive any and all claims against Lightfriend related to vehicle control."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"10. Email Integration (IMAP)"}</h2>
+                <p>{"Lightfriend can connect to your email account to monitor and notify you of important messages."}</p>
+                <ul>
+                    <li>{"We store encrypted credentials (server, port, password) to access your email."}</li>
+                    <li>{"Email content is accessed by our AI to judge importance and send notifications."}</li>
+                    <li>{"You are responsible for the security of your email account credentials."}</li>
+                    <li>{"We do not share your email data with third parties except as required by law."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"11. Other Third-Party Services"}</h2>
+                <p>{"Lightfriend may integrate with additional third-party services not explicitly listed above. For all such integrations:"}</p>
+                <ul>
+                    <li>{"We store only the credentials necessary for access, encrypted at rest."}</li>
+                    <li>{"You connect these services at your own risk."}</li>
+                    <li>{"You are responsible for your accounts with these third-party services."}</li>
+                    <li>{"We are not liable for any issues arising from third-party service failures or actions."}</li>
+                    <li>{"We may modify or discontinue integrations at any time."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"12. Data Retention"}</h2>
                 <p>{"We retain your data until:"}</p>
                 <ul>
                     <li>{"You request account deletion"}</li>
@@ -118,7 +152,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"9. Contact Information"}</h2>
+                <h2>{"13. Contact Information"}</h2>
                 <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
                 <p>{"Email: rasmus@ahtava.com"}</p>
                 <p>{"Location: Tampere, Finland"}</p>
@@ -156,7 +190,7 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"3. Billing, Payments, and Refund Policy"}</h2>
+                <h2>{"4. Billing, Payments, and Refund Policy"}</h2>
                 <h3>{"Prepaid Credits and No Refunds Policy"}</h3>
                 <ul>
                     <li>{"The Service operates on a prepaid credit model where you purchase credits in advance to use for calling and texting features."}</li>
@@ -195,41 +229,92 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"4. Intellectual Property"}</h2>
+                <h2>{"5. Intellectual Property"}</h2>
                 <p>{"All content provided on the Service, including text, graphics, logos, and software, is the property of lightfriend or its content suppliers and is protected by intellectual property laws."}</p>
             </section>
 
             <section>
-                <h2>{"5. Termination"}</h2>
+                <h2>{"6. Termination"}</h2>
                 <p>{"We reserve the right to suspend or terminate your access to the Service at our discretion, without notice, for conduct that we believe violates these Terms or is harmful to other users."}</p>
             </section>
 
             <section>
-                <h2>{"6. Limitation of Liability"}</h2>
-                <p>{"The Service is provided \"as is\" without warranties of any kind. lightfriend will not be liable for any damages arising from the use or inability to use the Service."}</p>
+                <h2>{"7. Limitation of Liability"}</h2>
+                <p>{"THE SERVICE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED. TO THE FULLEST EXTENT PERMITTED BY LAW:"}</p>
+                <ul>
+                    <li>{"Lightfriend makes no warranties regarding accuracy, reliability, or availability of the Service."}</li>
+                    <li>{"Lightfriend shall not be liable for any direct, indirect, incidental, special, consequential, or punitive damages arising from your use of or inability to use the Service."}</li>
+                    <li>{"Lightfriend is not responsible for any actions taken by third-party services or integrations."}</li>
+                    <li>{"You assume all risk associated with your use of the Service and any connected third-party services."}</li>
+                    <li>{"In no event shall Lightfriend's total liability exceed the amount you paid for the Service in the preceding 12 months."}</li>
+                </ul>
             </section>
 
             <section>
-                <h2>{"7. Changes to Terms"}</h2>
+                <h2>{"8. Third-Party Integrations"}</h2>
+                <p>{"The Service allows you to connect various third-party accounts and services. By using these integrations:"}</p>
+                <ul>
+                    <li>{"You are solely responsible for your accounts with third-party services."}</li>
+                    <li>{"Lightfriend is not liable for any failures, outages, or issues with third-party services."}</li>
+                    <li>{"You must comply with the terms of service of each third-party platform you connect."}</li>
+                    <li>{"We may modify or discontinue any integration at any time without notice."}</li>
+                    <li>{"Third-party services may change their APIs or terms, which may affect functionality."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"9. Vehicle Control Services (Tesla Integration)"}</h2>
+                <p>{"THIS IS AN EXPERIMENTAL SERVICE. BY USING THE TESLA INTEGRATION, YOU EXPRESSLY ACKNOWLEDGE AND AGREE:"}</p>
+                <ul>
+                    <li>{"Commands sent through Lightfriend may control real vehicle functions including unlocking, climate control, and other operations."}</li>
+                    <li>{"YOU ACCEPT FULL AND SOLE RESPONSIBILITY for all vehicle commands you send and their consequences."}</li>
+                    <li>{"You must verify that conditions are safe before sending any vehicle command."}</li>
+                    <li>{"Lightfriend does not verify the safety, appropriateness, or timing of any command."}</li>
+                    <li>{"LIGHTFRIEND ACCEPTS NO LIABILITY WHATSOEVER for any accidents, vehicle damage, personal injury, death, theft, property damage, or any other consequences resulting from vehicle commands."}</li>
+                    <li>{"By using this integration, you EXPLICITLY WAIVE any and all claims against Lightfriend related to vehicle control."}</li>
+                    <li>{"You agree to indemnify and hold Lightfriend harmless from any claims arising from your use of vehicle control features."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"10. Messaging Services"}</h2>
+                <p>{"The Service integrates with messaging platforms including WhatsApp, Signal, and Telegram. By using these features:"}</p>
+                <ul>
+                    <li>{"You are solely responsible for all message content sent through the Service."}</li>
+                    <li>{"Lightfriend acts only as a technical intermediary and does not monitor or control message content."}</li>
+                    <li>{"We are not liable for message delivery failures or third-party platform actions."}</li>
+                    <li>{"You must comply with the terms of service of each messaging platform."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"11. Indemnification"}</h2>
+                <p>{"You agree to indemnify, defend, and hold harmless Lightfriend, its owners, employees, and affiliates from any claims, damages, losses, or expenses (including legal fees) arising from:"}</p>
+                <ul>
+                    <li>{"Your use of the Service or any connected integrations."}</li>
+                    <li>{"Your violation of these Terms."}</li>
+                    <li>{"Your violation of any third-party rights."}</li>
+                    <li>{"Any actions taken through your account or connected services."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"12. Changes to Terms"}</h2>
                 <p>{"We may update these Terms from time to time. Continued use of the Service after any such changes constitutes your acceptance of the new Terms."}</p>
             </section>
 
             <section>
-                <h2>{"8. Governing Law"}</h2>
-                <p>{"These Terms are governed by and construed in accordance with the laws of the jurisdiction in which lightfriend operates, in Tampere, Finland."}</p>
+                <h2>{"13. Governing Law"}</h2>
+                <p>{"These Terms are governed by and construed in accordance with the laws of Finland. Any disputes shall be resolved in the courts of Tampere, Finland."}</p>
             </section>
 
             <section>
-                <h2>{"9. Service Usage Policy"}</h2>
-                <p>{"By using our platform, you agree to use the AI-powered voice and text assistance services responsibly. lightfriend is designed to provide smart tools for dumbphone users, including calendar access, email integration, messaging services, and Perplexity search capabilities. Users are responsible for using these features in accordance with applicable laws and regulations. The service should not be used for any malicious or harmful purposes that could compromise the platform's integrity or other users' experience."}</p>
-            </section>
-<section>
-                <h2>{"Data Protection and Privacy"}</h2>
+                <h2>{"14. Data Protection and Privacy"}</h2>
                 <p>{"Your privacy and personal data are protected under our Privacy Policy, which forms an integral part of these Terms. By using the Service, you acknowledge that you have read and understood our Privacy Policy and consent to the collection and processing of your personal data as described therein."}</p>
             </section>
 
             <section>
-                <h2>{"10. Contact Us"}</h2>
+                <h2>{"15. Contact Us"}</h2>
                 <p>
                     {"For questions or concerns regarding these Terms, please contact us at "}
                     <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>

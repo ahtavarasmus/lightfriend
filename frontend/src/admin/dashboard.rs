@@ -44,6 +44,7 @@ struct UserInfo {
     credits_left: f32,
     discount: bool,
     discount_tier: Option<String>,
+    plan_type: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -656,6 +657,7 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Monthly Credits"}</th>
                                                 <th>{"Tier"}</th>
+                                                <th>{"Plan"}</th>
                                                 <th>{"BYON"}</th>
                                                 <th>{"Verified"}</th>
                                                 <th>{"Notify"}</th>
@@ -735,6 +737,19 @@ pub fn admin_dashboard() -> Html {
                                                                         }
                                                                     )}>
                                                                         {user.sub_tier.clone().unwrap_or_else(|| "None".to_string())}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "plan-badge",
+                                                                        match user.plan_type.as_deref() {
+                                                                            Some("byot") => "byot",
+                                                                            Some("digest") => "digest",
+                                                                            Some("monitor") => "monitor",
+                                                                            _ => "none"
+                                                                        }
+                                                                    )}>
+                                                                        {user.plan_type.clone().unwrap_or_else(|| "None".to_string()).to_uppercase()}
                                                                     </span>
                                                                 </td>
                                                                 <td>
@@ -1115,8 +1130,62 @@ pub fn admin_dashboard() -> Html {
                                                                                 _ => "Set Tier 3"
                                                                             }}
                                                                         </button>
-                                                                        
-                                                                        <button 
+                                                                        <button
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                let current_plan = user.plan_type.clone();
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    // Cycle: None -> byot -> digest -> monitor -> None
+                                                                                    let new_plan = match current_plan.as_deref() {
+                                                                                        None => "byot",
+                                                                                        Some("byot") => "digest",
+                                                                                        Some("digest") => "monitor",
+                                                                                        Some("monitor") | _ => "none",
+                                                                                    };
+
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        match Api::post(&format!("/api/admin/plan-type/{}/{}", user_id, new_plan))
+                                                                                            .send()
+                                                                                            .await
+                                                                                        {
+                                                                                            Ok(response) => {
+                                                                                                if response.ok() {
+                                                                                                    // Refresh the users list
+                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                        .send()
+                                                                                                        .await
+                                                                                                    {
+                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                            users.set(updated_users);
+                                                                                                        }
+                                                                                                    }
+                                                                                                } else {
+                                                                                                    error.set(Some("Failed to update plan type".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                            Err(_) => {
+                                                                                                error.set(Some("Failed to send request".to_string()));
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button plan-type"
+                                                                        >
+                                                                            {match user.plan_type.as_deref() {
+                                                                                None => "Set BYOT",
+                                                                                Some("byot") => "Set Digest",
+                                                                                Some("digest") => "Set Monitor",
+                                                                                Some("monitor") => "Remove Plan",
+                                                                                _ => "Set BYOT"
+                                                                            }}
+                                                                        </button>
+
+                                                                        <button
                                                                             onclick={{
                                                                                 let delete_modal = delete_modal.clone();
                                                                                 let user_id = user.id;
@@ -1843,6 +1912,46 @@ pub fn admin_dashboard() -> Html {
                     .iq-button.discount-tier:hover {
                         background: linear-gradient(45deg, #81C784, #4CAF50);
                         box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+                    }
+
+                    .iq-button.plan-type {
+                        background: linear-gradient(45deg, #00BCD4, #26C6DA);
+                    }
+
+                    .iq-button.plan-type:hover {
+                        background: linear-gradient(45deg, #26C6DA, #00BCD4);
+                        box-shadow: 0 4px 15px rgba(0, 188, 212, 0.4);
+                    }
+
+                    .plan-badge {
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        font-size: 0.8rem;
+                        font-weight: 500;
+                    }
+
+                    .plan-badge.byot {
+                        background: rgba(156, 39, 176, 0.1);
+                        color: #9C27B0;
+                        border: 1px solid rgba(156, 39, 176, 0.2);
+                    }
+
+                    .plan-badge.digest {
+                        background: rgba(0, 188, 212, 0.1);
+                        color: #00BCD4;
+                        border: 1px solid rgba(0, 188, 212, 0.2);
+                    }
+
+                    .plan-badge.monitor {
+                        background: rgba(255, 152, 0, 0.1);
+                        color: #FF9800;
+                        border: 1px solid rgba(255, 152, 0, 0.2);
+                    }
+
+                    .plan-badge.none {
+                        background: rgba(128, 128, 128, 0.1);
+                        color: #808080;
+                        border: 1px solid rgba(128, 128, 128, 0.2);
                     }
 
                     .iq-button.migrate {

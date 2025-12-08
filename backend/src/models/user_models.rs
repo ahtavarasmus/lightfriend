@@ -21,6 +21,9 @@ use crate::schema::subaccounts;
 use crate::schema::country_availability;
 use crate::schema::totp_secrets;
 use crate::schema::totp_backup_codes;
+use crate::schema::webauthn_credentials;
+use crate::schema::webauthn_challenges;
+use crate::schema::waitlist;
 
 
 
@@ -57,6 +60,8 @@ pub struct User {
     pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
+    pub magic_token: Option<String>, // token for magic link login/password setup
+    pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
@@ -647,4 +652,77 @@ pub struct NewTotpBackupCode {
     pub user_id: i32,
     pub code_hash: String,
     pub used: i32,
+}
+
+// WebAuthn models for passkeys (Touch ID, Face ID, etc.)
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = webauthn_credentials)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct WebauthnCredential {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub credential_id: String,
+    pub encrypted_public_key: String,
+    pub device_name: String,
+    pub counter: i32,
+    pub transports: Option<String>,
+    pub aaguid: Option<String>,
+    pub created_at: i32,
+    pub last_used_at: Option<i32>,
+    pub enabled: i32,  // 0 = disabled, 1 = enabled
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = webauthn_credentials)]
+pub struct NewWebauthnCredential {
+    pub user_id: i32,
+    pub credential_id: String,
+    pub encrypted_public_key: String,
+    pub device_name: String,
+    pub counter: i32,
+    pub transports: Option<String>,
+    pub aaguid: Option<String>,
+    pub created_at: i32,
+    pub enabled: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = webauthn_challenges)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct WebauthnChallenge {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub challenge: String,
+    pub challenge_type: String,  // "registration" or "authentication"
+    pub context: Option<String>,  // e.g., "login", "tesla_unlock"
+    pub created_at: i32,
+    pub expires_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = webauthn_challenges)]
+pub struct NewWebauthnChallenge {
+    pub user_id: i32,
+    pub challenge: String,
+    pub challenge_type: String,
+    pub context: Option<String>,
+    pub created_at: i32,
+    pub expires_at: i32,
+}
+
+// Waitlist models for users who want updates but haven't subscribed
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = waitlist)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct WaitlistEntry {
+    pub id: Option<i32>,
+    pub email: String,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = waitlist)]
+pub struct NewWaitlistEntry {
+    pub email: String,
+    pub created_at: i32,
 }
