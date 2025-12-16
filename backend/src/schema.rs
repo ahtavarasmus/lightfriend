@@ -159,6 +159,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    refund_info (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        has_refunded -> Integer,
+        last_credit_pack_amount -> Nullable<Float>,
+        last_credit_pack_purchase_timestamp -> Nullable<Integer>,
+        refunded_at -> Nullable<Integer>,
+    }
+}
+
+diesel::table! {
     subaccounts (id) {
         id -> Integer,
         user_id -> Text,
@@ -302,6 +313,8 @@ diesel::table! {
         monthly_message_count -> Integer,
         outbound_message_pricing -> Nullable<Float>,
         notify_on_climate_ready -> Bool,
+        last_instant_digest_time -> Nullable<Integer>,
+        phone_service_active -> Bool,
     }
 }
 
@@ -387,6 +400,20 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    youtube (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        expires_in -> Integer,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+    }
+}
+
 diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
@@ -395,6 +422,7 @@ diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
+diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
@@ -418,6 +446,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     message_history,
     priority_senders,
     processed_emails,
+    refund_info,
     subaccounts,
     task_notifications,
     tesla,
@@ -432,4 +461,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     waitlist,
     webauthn_challenges,
     webauthn_credentials,
+    youtube,
 );

@@ -16,6 +16,7 @@ use crate::connections::signal::SignalConnect;
 use crate::connections::messenger::MessengerConnect;
 use crate::connections::instagram::InstagramConnect;
 use crate::connections::tesla::TeslaConnect;
+use crate::connections::youtube::YouTubeConnect;
 use serde_json::Value;
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -49,6 +50,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     let messenger_connected = use_state(|| false);
     let uber_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
+    let youtube_connected = use_state(|| false);
     let selected_app = use_state(|| None::<String>);
     let proactive_enabled = use_state(|| true);
     {
@@ -62,6 +64,7 @@ pub fn connect(props: &ConnectProps) -> Html {
         let messenger_connected = messenger_connected.clone();
         let uber_connected = uber_connected.clone();
         let tesla_connected = tesla_connected.clone();
+        let youtube_connected = youtube_connected.clone();
         use_effect_with_deps(
             move |_| {
                 // Auth handled by cookies - check all connection statuses
@@ -225,6 +228,22 @@ pub fn connect(props: &ConnectProps) -> Html {
                         }
                     }
                 });
+                // youtube status check
+                spawn_local({
+                    let youtube_connected = youtube_connected.clone();
+                    async move {
+                        if let Ok(response) = Api::get("/api/auth/youtube/status")
+                            .send()
+                            .await
+                        {
+                            if let Ok(data) = response.json::<Value>().await {
+                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                    youtube_connected.set(connected);
+                                }
+                            }
+                        }
+                    }
+                });
                 || ()
             },
             (),
@@ -279,6 +298,7 @@ pub fn connect(props: &ConnectProps) -> Html {
             "messenger" => html! { <MessengerConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
+            "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             _ => html! {},
         }
     } else {
@@ -337,10 +357,26 @@ pub fn connect(props: &ConnectProps) -> Html {
                         >
                             <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_%282024%29.svg" alt="Signal Logo" width="24" height="24"/>
                         </button>
+                        <button
+                            class={classes!("app-icon", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
+                        </button>
                         {
-                            if props.user_id == 1 {
+                            if props.user_id == 1 || props.user_id == 129 {
                                 html! {
                                     <>
+                                        <button
+                                            class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
+                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                                selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
+                                            })}
+                                        >
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
+                                        </button>
                                         /*<button
                                             class={classes!("app-icon", if *instagram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "instagram") { "selected" } else { "" })}
                                             onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
@@ -365,14 +401,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         >
                                             <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.svg" alt="Uber" width="24" height="24"/>
                                         </button>*/
-                                        <button
-                                            class={classes!("app-icon", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
-                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                                selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
-                                            })}
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
-                                        </button>
                                     </>
                                 }
                             } else {

@@ -95,6 +95,7 @@ pub fn admin_dashboard() -> Html {
         user_id: None,
         user_email: None,
     });
+    let reset_link_status = use_state(|| None::<(i32, String)>); // (user_id, message)
 
     let users_effect = users.clone();
     let error_effect = error.clone();
@@ -1184,6 +1185,63 @@ pub fn admin_dashboard() -> Html {
                                                                                 _ => "Set BYOT"
                                                                             }}
                                                                         </button>
+
+                                                                        // Send Password Reset Link button
+                                                                        <button
+                                                                            onclick={{
+                                                                                let user_id = user.id;
+                                                                                let user_email = user.email.clone();
+                                                                                let reset_link_status = reset_link_status.clone();
+                                                                                Callback::from(move |_| {
+                                                                                    let user_id = user_id;
+                                                                                    let user_email = user_email.clone();
+                                                                                    let reset_link_status = reset_link_status.clone();
+                                                                                    reset_link_status.set(Some((user_id, "Sending...".to_string())));
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        match Api::post(&format!("/api/admin/send-password-reset/{}", user_id))
+                                                                                            .send()
+                                                                                            .await
+                                                                                        {
+                                                                                            Ok(response) => {
+                                                                                                if response.ok() {
+                                                                                                    reset_link_status.set(Some((user_id, format!("Reset link sent to {}", user_email))));
+                                                                                                    // Clear message after 3 seconds
+                                                                                                    let reset_link_status = reset_link_status.clone();
+                                                                                                    gloo_timers::callback::Timeout::new(3000, move || {
+                                                                                                        reset_link_status.set(None);
+                                                                                                    }).forget();
+                                                                                                } else {
+                                                                                                    reset_link_status.set(Some((user_id, "Failed to send reset link".to_string())));
+                                                                                                }
+                                                                                            }
+                                                                                            Err(e) => {
+                                                                                                reset_link_status.set(Some((user_id, format!("Error: {}", e))));
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button"
+                                                                            style="background: #4ade80;"
+                                                                        >
+                                                                            {"Send Reset Link"}
+                                                                        </button>
+                                                                        // Show reset link status for this user
+                                                                        {
+                                                                            if let Some((status_user_id, status_msg)) = (*reset_link_status).as_ref() {
+                                                                                if *status_user_id == user.id {
+                                                                                    html! {
+                                                                                        <span style="margin-left: 8px; font-size: 0.85rem; color: #4ade80;">
+                                                                                            {status_msg}
+                                                                                        </span>
+                                                                                    }
+                                                                                } else {
+                                                                                    html! {}
+                                                                                }
+                                                                            } else {
+                                                                                html! {}
+                                                                            }
+                                                                        }
 
                                                                         <button
                                                                             onclick={{

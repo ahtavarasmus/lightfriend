@@ -33,6 +33,12 @@ pub struct VerifyPasswordResetRequest {
     new_password: String,
 }
 
+#[derive(Deserialize)]
+pub struct CompletePasswordResetRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
 use serde::Serialize;
 #[derive(Serialize)]
 pub struct PasswordResetResponse {
@@ -113,14 +119,16 @@ pub async fn login(
         ));
     }
 
-    let user = match state.user_core.find_by_email(&login_req.email) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "User not found"}))
-            ));
+    // Constant-time login: Always run bcrypt verification to prevent timing attacks
+    // that could reveal whether an email exists in the database
+    const DUMMY_HASH: &str = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYA/lVQ.S1Gu";
+
+    let (user, hash_to_verify) = match state.user_core.find_by_email(&login_req.email) {
+        Ok(Some(user)) => {
+            let hash = user.password_hash.clone();
+            (Some(user), hash)
         }
+        Ok(None) => (None, DUMMY_HASH.to_string()),
         Err(_) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -128,234 +136,82 @@ pub async fn login(
             ));
         }
     };
-   
-    match bcrypt::verify(&login_req.password, &user.password_hash) {
-        Ok(true) => {
-            // Check if 2FA methods are enabled for this user
-            let totp_enabled = state.totp_repository.is_totp_enabled(user.id)
-                .unwrap_or(false);
-            let webauthn_enabled = state.webauthn_repository.has_passkeys(user.id)
-                .unwrap_or(false);
 
-            if totp_enabled || webauthn_enabled {
-                // Generate a temporary token for the 2FA step
-                let login_token: String = rand::thread_rng()
-                    .sample_iter(&rand::distributions::Alphanumeric)
-                    .take(32)
-                    .map(char::from)
-                    .collect();
+    // Always run bcrypt verification (constant-time behavior)
+    let password_valid = bcrypt::verify(&login_req.password, &hash_to_verify).unwrap_or(false);
 
-                // Set expiry to 5 minutes from now
-                let expiry = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64 + 300; // 5 minutes
-
-                // Store the pending login (used by both TOTP and WebAuthn)
-                state.pending_totp_logins.insert(login_token.clone(), (user.id, expiry));
-
-                // Return response indicating 2FA is required with available methods
-                let mut response = Response::new(axum::body::Body::from(
-                    serde_json::to_string(&json!({
-                        "requires_2fa": true,
-                        "totp_enabled": totp_enabled,
-                        "webauthn_enabled": webauthn_enabled,
-                        "login_token": login_token,
-                        "message": "Please complete 2FA verification"
-                    })).unwrap()
-                ));
-                *response.status_mut() = StatusCode::OK;
-                response.headers_mut().insert(
-                    "Content-Type",
-                    "application/json".parse().unwrap()
-                );
-                return Ok(response);
-            }
-
-            generate_tokens_and_response(user.id)
-        }
+    // Check both conditions: user must exist AND password must be valid
+    let user = match user {
+        Some(u) if password_valid => u,
         _ => {
-            Err((
+            // Generic error message to not reveal whether user exists
+            return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid credentials"}))
-            ))
+            ));
         }
+    };
+
+    // Password is valid, proceed with 2FA check
+    // Check if 2FA methods are enabled for this user
+    let totp_enabled = state.totp_repository.is_totp_enabled(user.id)
+        .unwrap_or(false);
+    let webauthn_enabled = state.webauthn_repository.has_passkeys(user.id)
+        .unwrap_or(false);
+
+    if totp_enabled || webauthn_enabled {
+        // Generate a temporary token for the 2FA step
+        let login_token: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+
+        // Set expiry to 5 minutes from now
+        let expiry = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64 + 300; // 5 minutes
+
+        // Store the pending login (used by both TOTP and WebAuthn)
+        state.pending_totp_logins.insert(login_token.clone(), (user.id, expiry));
+
+        // Return response indicating 2FA is required with available methods
+        let mut response = Response::new(axum::body::Body::from(
+            serde_json::to_string(&json!({
+                "requires_2fa": true,
+                "totp_enabled": totp_enabled,
+                "webauthn_enabled": webauthn_enabled,
+                "login_token": login_token,
+                "message": "Please complete 2FA verification"
+            })).unwrap()
+        ));
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            "Content-Type",
+            "application/json".parse().unwrap()
+        );
+        return Ok(response);
     }
+
+    generate_tokens_and_response(user.id)
 }
 
 
+/// Returns contact instructions for password reset.
+///
+/// Password resets now require manual verification by admin.
+/// This endpoint just tells the user how to request a reset.
 pub async fn request_password_reset(
-    State(state): State<Arc<AppState>>,
-    Json(reset_req): Json<PasswordResetRequest>,
-) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Define rate limit: 3 attempts per hour per email
-    let quota = Quota::per_hour(NonZeroU32::new(3).unwrap());
-    let limiter_key = reset_req.email.clone();
-
-    // Get or create a rate limiter for this email
-    let entry = state.password_reset_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
-        tracing::warn!("Rate limit exceeded for password reset request");
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "Too many password reset attempts. Please try again later."}))
-        ));
-    }
-    // Find user by email
-    let user = match state.user_core.find_by_email(&reset_req.email) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ));
-        }
-        Err(_) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
-            ));
-        }
-    };
-
-    // Generate 6-digit OTP
-    let otp: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Uniform::new(0, 10))
-        .take(6)
-        .map(|d| d.to_string())
-        .collect();
-
-    // Store OTP with expiration (5 minutes from now)
-    let expiration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() + 300; // 5 minutes
-
-    // Remove any existing OTP for this email first
-    state.password_reset_otps.remove(&reset_req.email);
-
-    // Insert the new OTP
-    state.password_reset_otps.insert(
-        reset_req.email.clone(),
-        (otp.clone(), expiration)
-    );
-
-    tracing::debug!("Stored OTP {} for email {} with expiration {}", otp, reset_req.email, expiration);
-
-    let message = format!("Your Lightfriend password reset code is: {}. Valid for 5 minutes.", otp);
-    if let Err(_) = crate::api::twilio_utils::send_conversation_message(
-        &state,
-        &message,
-        None,
-        &user
-    ).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to send OTP"}))
-        ));
-    }
-
-    Ok(Json(PasswordResetResponse {
-        message: "Password reset code sent to your phone".to_string()
-    }))
-}
-
-pub async fn verify_password_reset(
-    State(state): State<Arc<AppState>>,
-    Json(verify_req): Json<VerifyPasswordResetRequest>,
-) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Define rate limit: 3 attempts per 60 minutes per email
-    let quota = Quota::with_period(std::time::Duration::from_secs(60 * 60))
-        .unwrap()
-        .allow_burst(NonZeroU32::new(3).unwrap());
-    let limiter_key = verify_req.email.clone();
-
-    // Get or create a rate limiter for this email
-    let entry = state.password_reset_verify_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
-        tracing::warn!("Rate limit exceeded for password reset verification: [redacted email]");
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "Too many verification attempts. Please try again later."}))
-        ));
-    }
-    tracing::debug!("Verifying OTP {} for email {}", verify_req.otp, verify_req.email);
-    
-    // Remove the OTP data immediately to prevent any hanging references
-    let otp_data = match state.password_reset_otps.remove(&verify_req.email) {
-        Some((_, data)) => data,  // The first element is the key (email), second is the value tuple
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "No valid OTP found for this email"}))
-            ));
-        }
-    };
-
-    let (stored_otp, expiration_time) = otp_data;
-
-    let current_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    if current_time > expiration_time {
-        tracing::debug!("OTP expired: current_time {} > expiration {}", current_time, expiration_time);
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "OTP has expired"}))
-        ));
-    }
-
-    if verify_req.otp != stored_otp {
-        tracing::debug!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid OTP"}))
-        ));
-    }
-
-    // Hash new password
-    let password_hash = bcrypt::hash(&verify_req.new_password, bcrypt::DEFAULT_COST)
-        .map_err(|e| {
-            tracing::error!("Password hashing failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Password hashing failed"}))
-            )
-        })?;
-
-    // Update password in database
-    if let Err(e) = state.user_core.update_password(&verify_req.email, &password_hash) {
-        tracing::error!("Failed to update password: {}", e);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to update password"}))
-        ));
-    }
-    tracing::info!("New password updated successfully");
-
-    // Also remove any rate limiting for this email
-    state.login_limiter.remove(&verify_req.email);
-    
-    tracing::info!("Password reset completed successfully, sending response");
-    
-    // Create success response with explicit status code
-    let response = PasswordResetResponse {
-        message: "Password has been reset successfully. You can now log in with your new password.".to_string()
-    };
-    
-    Ok(Json(response))
+    State(_state): State<Arc<AppState>>,
+    Json(_reset_req): Json<PasswordResetRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // No automated password reset - direct users to contact support
+    Ok(Json(json!({
+        "contact_required": true,
+        "message": "To reset your password, please contact rasmus@ahtava.com. We'll verify your identity and send you a secure reset link.",
+        "support_email": "rasmus@ahtava.com"
+    })))
 }
 
 
@@ -924,7 +780,7 @@ pub async fn set_password_from_magic_link(
         })?;
 
     // Update the password
-    state.user_core.update_password(&user.email, &password_hash)
+    state.user_core.update_password(user.id, &password_hash)
         .map_err(|e| {
             tracing::error!("Failed to update password: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to update password"})))
@@ -951,6 +807,20 @@ pub async fn get_token_from_session(
 
     // Remove the mapping (single use)
     state.session_to_token.remove(&session_id);
+
+    // Check if this is an existing user checkout (should redirect to login instead of auto-login)
+    if token == "EXISTING_USER" {
+        return Ok(Json(json!({
+            "existing_user": true
+        })));
+    }
+
+    // Check if this is a new user checkout (should check email for magic link)
+    if token == "NEW_USER_CHECK_EMAIL" {
+        return Ok(Json(json!({
+            "new_user_check_email": true
+        })));
+    }
 
     Ok(Json(json!({
         "token": token
@@ -1018,4 +888,115 @@ pub async fn add_to_waitlist(
         "message": "Successfully added to waitlist",
         "email": email
     })))
+}
+
+/// Validate a password reset token.
+///
+/// Returns success if the token exists and hasn't expired,
+/// without consuming the token.
+pub async fn validate_reset_token(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Look up the token
+    let token_data = state.pending_password_resets.get(&token);
+
+    match token_data {
+        Some(entry) => {
+            let (user_id, expiry) = *entry;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+
+            if now > expiry {
+                // Token has expired - remove it
+                drop(entry); // Release the lock before removing
+                state.pending_password_resets.remove(&token);
+                return Err((
+                    StatusCode::GONE,
+                    Json(json!({"error": "Reset link has expired. Please request a new one."}))
+                ));
+            }
+
+            // Token is valid
+            Ok(Json(json!({
+                "valid": true,
+                "message": "Token is valid"
+            })))
+        }
+        None => {
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Invalid or expired reset link."}))
+            ))
+        }
+    }
+}
+
+/// Complete password reset using a valid token.
+///
+/// Sets the new password and consumes the token (one-time use).
+pub async fn complete_password_reset(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CompletePasswordResetRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate password length
+    if req.new_password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Password must be at least 8 characters long"}))
+        ));
+    }
+
+    // Look up and remove the token (consume it)
+    let token_data = state.pending_password_resets.remove(&req.token);
+
+    match token_data {
+        Some((_, (user_id, expiry))) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+
+            if now > expiry {
+                return Err((
+                    StatusCode::GONE,
+                    Json(json!({"error": "Reset link has expired. Please request a new one."}))
+                ));
+            }
+
+            // Hash the new password
+            let password_hash = bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST)
+                .map_err(|e| {
+                    tracing::error!("Failed to hash password: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Failed to process password"}))
+                    )
+                })?;
+
+            // Update the user's password
+            state.user_core.update_password(user_id, &password_hash)
+                .map_err(|e| {
+                    tracing::error!("Failed to update password for user {}: {}", user_id, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Failed to update password"}))
+                    )
+                })?;
+
+            tracing::info!("Password reset completed for user {}", user_id);
+
+            Ok(Json(json!({
+                "message": "Password has been reset successfully. You can now log in with your new password."
+            })))
+        }
+        None => {
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Invalid or expired reset link."}))
+            ))
+        }
+    }
 }

@@ -78,6 +78,72 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
     }
 }
 
+/// Checks all bridges for all users and deletes any that are unhealthy
+pub async fn check_all_bridges_health(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    debug!("Starting bridge health check for all users...");
+
+    let users_with_bridges = state.user_repository.get_users_with_active_bridges()?;
+    debug!("Found {} users with active bridges", users_with_bridges.len());
+
+    for (user_id, bridges) in users_with_bridges {
+        for bridge in bridges {
+            if !is_bridge_healthy(state, user_id, &bridge).await {
+                tracing::info!("Bridge {} for user {} is unhealthy, deleting", bridge.bridge_type, user_id);
+                if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
+                    error!("Failed to delete unhealthy bridge {} for user {}: {}", bridge.bridge_type, user_id, e);
+                }
+            }
+        }
+
+        // Clean up Matrix client if no bridges left
+        match state.user_repository.has_active_bridges(user_id) {
+            Ok(false) => {
+                cleanup_matrix_client(state, user_id).await;
+            }
+            Err(e) => {
+                error!("Failed to check active bridges for user {}: {}", user_id, e);
+            }
+            _ => {}
+        }
+    }
+
+    debug!("Bridge health check completed");
+    Ok(())
+}
+
+async fn is_bridge_healthy(state: &Arc<AppState>, user_id: i32, bridge: &crate::models::user_models::Bridge) -> bool {
+    // Try to get Matrix client and fetch rooms for this bridge type
+    // Note: Empty rooms is OK (user might not have any chats yet)
+    // We only consider it unhealthy if we get an actual error
+    match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+        Ok(client) => {
+            match crate::utils::bridge::get_service_rooms(&client, &bridge.bridge_type).await {
+                Ok(_) => true,  // Successfully fetched rooms (even if empty) = healthy
+                Err(e) => {
+                    tracing::warn!("Failed to fetch {} rooms for user {}: {}", bridge.bridge_type, user_id, e);
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to get Matrix client for user {}: {}", user_id, e);
+            false
+        }
+    }
+}
+
+async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
+    let mut matrix_clients = state.matrix_clients.lock().await;
+    let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+    if let Some(task) = sync_tasks.remove(&user_id) {
+        task.abort();
+        debug!("Aborted sync task for user {} during cleanup", user_id);
+    }
+    if matrix_clients.remove(&user_id).is_some() {
+        debug!("Removed Matrix client for user {} during cleanup", user_id);
+    }
+}
+
 pub async fn start_scheduler(state: Arc<AppState>) {
     // Initialize matrix clients and sync tasks once on startup
     tracing::debug!("Initializing Matrix clients and sync tasks...");
@@ -517,6 +583,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create calendar notification job");
 
     sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
+
+    // Bridge health check - runs daily at midnight UTC
+    let state_clone = Arc::clone(&state);
+    let bridge_health_job = Job::new_async("0 0 0 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running daily bridge health check...");
+            if let Err(e) = check_all_bridges_health(&state).await {
+                error!("Bridge health check failed: {}", e);
+            }
+        })
+    }).expect("Failed to create bridge health check job");
+
+    sched.add(bridge_health_job).await.expect("Failed to add bridge health check job to scheduler");
+
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 

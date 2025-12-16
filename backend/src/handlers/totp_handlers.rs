@@ -364,7 +364,26 @@ pub async fn verify_login(
     Json(req): Json<TotpLoginVerifyRequest>,
 ) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
     use std::time::{SystemTime, UNIX_EPOCH};
+    use std::num::NonZeroU32;
+    use governor::{Quota, RateLimiter};
     use crate::handlers::auth_handlers::generate_tokens_and_response;
+
+    // Rate limiting: 5 attempts per 15 minutes per login_token
+    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
+    let limiter_key = req.totp_token.clone();
+
+    let entry = state.totp_verify_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+
+    if limiter.check_key(&limiter_key).is_err() {
+        tracing::warn!("Rate limit exceeded for TOTP verification");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+        ));
+    }
 
     // Validate the totp_token and get user_id
     let pending_login = state.pending_totp_logins.get(&req.totp_token)

@@ -39,8 +39,19 @@ mod handlers {
     pub mod twilio_handlers;
     pub mod billing_handlers;
     pub mod stripe_handlers;
+    pub mod refund_handlers;
     pub mod google_calendar;
     pub mod google_calendar_auth;
+    pub mod youtube_auth;
+    pub mod youtube;
+    pub mod tiktok;
+    pub mod instagram_reels;
+    pub mod twitter;
+    pub mod reddit;
+    pub mod spotify;
+    pub mod rumble;
+    pub mod streamable;
+    pub mod bluesky;
     pub mod imap_auth;
     pub mod imap_handlers;
     pub mod google_tasks_auth;
@@ -125,12 +136,12 @@ use repositories::totp_repository::TotpRepository;
 use repositories::webauthn_repository::WebauthnRepository;
 use handlers::{
     auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
-    admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
+    admin_handlers, stripe_handlers, refund_handlers, google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
     signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
     messenger_auth, messenger_handlers, instagram_auth, instagram_handlers,
-    tesla_auth,
+    tesla_auth, youtube_auth, youtube,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -145,6 +156,7 @@ pub struct AppState {
     user_repository: Arc<UserRepository>,
     google_calendar_oauth_client: GoogleOAuthClient,
     google_tasks_oauth_client: GoogleOAuthClient,
+    youtube_oauth_client: GoogleOAuthClient,
     uber_oauth_client: GoogleOAuthClient,
     tesla_oauth_client: TeslaOAuthClient,
     session_store: MemoryStore,
@@ -162,7 +174,10 @@ pub struct AppState {
     totp_repository: Arc<TotpRepository>,
     webauthn_repository: Arc<WebauthnRepository>,
     pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
+    pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
+    totp_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    webauthn_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
 pub fn validate_env() {
     let required_vars = [
@@ -257,6 +272,15 @@ async fn main() {
         .set_token_uri(TokenUrl::new("https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/tesla/callback", tesla_redirect_url)).expect("Invalid redirect URL"));
 
+    // YouTube OAuth client
+    let youtube_client_id = std::env::var("YOUTUBE_CLIENT_ID").unwrap_or_else(|_| "default-youtube-client-id-for-testing".to_string());
+    let youtube_client_secret = std::env::var("YOUTUBE_CLIENT_SECRET").unwrap_or_else(|_| "default-youtube-secret-for-testing".to_string());
+    let youtube_oauth_client = BasicClient::new(ClientId::new(youtube_client_id))
+        .set_client_secret(ClientSecret::new(youtube_client_secret))
+        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
+        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
+        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/youtube/callback", server_url_oauth)).expect("Invalid redirect URL"));
+
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
@@ -267,6 +291,7 @@ async fn main() {
         google_tasks_oauth_client,
         uber_oauth_client,
         tesla_oauth_client,
+        youtube_oauth_client,
         session_store: session_store.clone(),
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
@@ -282,7 +307,10 @@ async fn main() {
         totp_repository,
         webauthn_repository,
         pending_totp_logins: DashMap::new(),
+        pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
+        totp_verify_limiter: DashMap::new(),
+        webauthn_verify_limiter: DashMap::new(),
     });
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
@@ -327,7 +355,8 @@ async fn main() {
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
         .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback))
         .route("/api/auth/uber/callback", get(uber_auth::uber_callback))
-        .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback));
+        .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback))
+        .route("/api/auth/youtube/callback", get(youtube_auth::youtube_callback));
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
@@ -337,7 +366,8 @@ async fn main() {
         .route("/api/logout", post(auth_handlers::logout))
         .route("/api/auth/refresh", post(auth_handlers::refresh_token))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
-        .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
+        .route("/api/password-reset/validate/{token}", get(auth_handlers::validate_reset_token))
+        .route("/api/password-reset/complete", post(auth_handlers::complete_password_reset))
         .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
         .route("/api/phone-verify/verify", post(auth_handlers::verify_phone_verify))
         .route("/api/country-info", post(twilio_handlers::get_country_info))
@@ -371,6 +401,7 @@ async fn main() {
         .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
         .route("/api/admin/monthly-credits/{user_id}/{amount}", post(admin_handlers::update_monthly_credits))
         .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
+        .route("/api/admin/send-password-reset/{user_id}", post(admin_handlers::send_password_reset_link))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
     // Protected routes that need user authentication
     let protected_routes = Router::new()
@@ -392,6 +423,7 @@ async fn main() {
         .route("/api/webauthn/passkey/rename", patch(handlers::webauthn_handlers::rename_passkey))
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
+        .route("/api/profile/sensitive-change-requirements", get(profile_handlers::check_sensitive_change_requirements))
         .route("/api/profile/field", patch(profile_handlers::patch_profile_field))
         .route("/api/profile/server-ip", post(self_host_handlers::update_server_ip))
         .route("/api/profile/magic-link", get(self_host_handlers::get_magic_link))
@@ -411,9 +443,13 @@ async fn main() {
         .route("/api/profile/proactive-agent", post(profile_handlers::update_proactive_agent_on))
         .route("/api/profile/proactive-agent", get(profile_handlers::get_proactive_agent_on))
         .route("/api/profile/get_nearby_places", get(profile_handlers::get_nearby_places))
+        .route("/api/chat/web", post(profile_handlers::web_chat))
+        .route("/api/chat/digest", get(profile_handlers::get_instant_digest))
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
+        .route("/api/refund/eligibility", get(refund_handlers::get_refund_eligibility))
+        .route("/api/refund/request", post(refund_handlers::request_refund))
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/unified-subscription-checkout/{user_id}", post(stripe_handlers::create_unified_subscription_checkout))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
@@ -444,6 +480,28 @@ async fn main() {
         .route("/api/tesla/mark-paired", post(tesla_auth::tesla_mark_paired))
         .route("/api/tesla/notify-climate-ready", get(tesla_auth::get_notify_on_climate_ready))
         .route("/api/tesla/notify-climate-ready", post(tesla_auth::update_notify_on_climate_ready))
+        .route("/api/auth/youtube/login", get(youtube_auth::youtube_login))
+        .route("/api/auth/youtube/status", get(youtube_auth::youtube_status))
+        .route("/api/auth/youtube/upgrade", get(youtube_auth::youtube_upgrade_scope))
+        .route("/api/auth/youtube/downgrade", get(youtube_auth::youtube_downgrade_scope))
+        .route("/api/auth/youtube/connection", delete(youtube_auth::delete_youtube_connection))
+        .route("/api/youtube/subscriptions", get(youtube::get_subscription_feed))
+        .route("/api/youtube/search", get(youtube::search_youtube))
+        .route("/api/youtube/video/{video_id}", get(youtube::get_video_details))
+        .route("/api/youtube/subscribe", post(youtube::subscribe_to_channel))
+        .route("/api/youtube/unsubscribe/{channel_id}", delete(youtube::unsubscribe_from_channel))
+        .route("/api/youtube/video/{video_id}/comments", get(youtube::get_video_comments))
+        .route("/api/youtube/video/{video_id}/comments", post(youtube::post_video_comment))
+        .route("/api/youtube/video/{video_id}/rate", post(youtube::rate_video))
+        // External media platforms (no platform auth required, just user auth)
+        .route("/api/tiktok/resolve", post(handlers::tiktok::resolve_tiktok_url))
+        .route("/api/instagram/resolve", post(handlers::instagram_reels::resolve_instagram_reel))
+        .route("/api/twitter/resolve", post(handlers::twitter::resolve_twitter_url))
+        .route("/api/reddit/resolve", post(handlers::reddit::resolve_reddit_url))
+        .route("/api/spotify/resolve", post(handlers::spotify::resolve_spotify_url))
+        .route("/api/rumble/resolve", post(handlers::rumble::resolve_rumble_url))
+        .route("/api/streamable/resolve", post(handlers::streamable::resolve_streamable_url))
+        .route("/api/bluesky/resolve", post(handlers::bluesky::resolve_bluesky_url))
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
         .route("/api/auth/imap/disconnect", delete(imap_auth::delete_imap_connection))
@@ -507,6 +565,10 @@ async fn main() {
         // WhatsApp filter toggle routes
         // Generic filter toggle routes
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
+        // Web-based voice call routes (browser to ElevenLabs)
+        .route("/api/call/web-signed-url", get(elevenlabs::get_web_signed_url))
+        .route("/api/call/web-end", post(elevenlabs::end_web_call))
+        .route("/api/call/web-check-credits", get(elevenlabs::check_web_call_credits))
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     let self_hosted_public_router = Router::new()
         .route("/verify-token", post(self_host_handlers::verify_token))

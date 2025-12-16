@@ -43,15 +43,16 @@ pub async fn handle_firecrawl_search(
 
 pub async fn get_weather(
     state: &Arc<AppState>,
-    location: &str, 
+    location: &str,
     units: &str,
+    forecast_type: &str,
     user_id: i32,
 ) -> Result<String, Box<dyn Error>> {
-    
+
     let client = reqwest::Client::new();
     // Get API keys from environment or user settings
     let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-    
+
     let (geoapify_key, pirate_weather_key) = if is_self_hosted {
         // Get keys from user settings for self-hosted environment
         match state.user_core.get_settings_for_tier3() {
@@ -71,11 +72,11 @@ pub async fn get_weather(
             std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set")
         )
     };
-    
+
     // Get user info for timezone
     let user_info = state.user_core.get_user_info(user_id).map_err(|e| format!("Failed to get user info: {}", e))?;
     let user_timezone = user_info.timezone;
-    
+
     // First, get coordinates using Geoapify
     let geocoding_url = format!(
         "https://api.geoapify.com/v1/geocode/search?text={}&format=json&apiKey={}",
@@ -113,12 +114,21 @@ pub async fn get_weather(
         _ => "si"
     };
 
+    // Adjust exclude parameter based on forecast_type
+    let exclude = match forecast_type {
+        "current" => "minutely,hourly,daily,alerts",
+        "hourly" => "minutely,daily,alerts",
+        "daily" => "minutely,alerts",
+        _ => "minutely,daily,alerts", // default to current + some hourly
+    };
+
     let weather_url = format!(
-        "https://api.pirateweather.net/forecast/{}/{},{}?units={}&exclude=minutely,daily,alerts",
+        "https://api.pirateweather.net/forecast/{}/{},{}?units={}&exclude={}",
         pirate_weather_key,
         lat,
         lon,
-        unit_system
+        unit_system,
+        exclude
     );
 
     let weather_data: serde_json::Value = client
@@ -137,8 +147,8 @@ pub async fn get_weather(
     let description = current["summary"].as_str().unwrap_or("unknown weather");
 
     let (temp_unit, speed_unit) = match units {
-        "imperial" => ("Fahrenheit", "miles per hour"),
-        _ => ("Celsius", "meters per second")
+        "imperial" => ("F", "mph"),
+        _ => ("C", "m/s")
     };
 
     println!("{:#?}", weather_data);
@@ -151,38 +161,63 @@ pub async fn get_weather(
     use chrono_tz::Tz;
     let tz: Tz = tz_str.parse::<Tz>().unwrap_or(chrono_tz::UTC);
 
-    // Process hourly forecast
+    // Process hourly forecast (for hourly or daily forecast types)
     let mut hourly_forecast = String::new();
-    if let Some(hourly) = weather_data["hourly"]["data"].as_array() {
-        // Get next 6 hours
-        for (i, hour) in hourly.iter().take(6).enumerate() {
-            if let (Some(temp), Some(precip_prob)) = (
-                hour["temperature"].as_f64(),
-                hour["precipProbability"].as_f64()
-            ) {
-                if i == 0 {
-                    hourly_forecast.push_str("\n\nHourly forecast:");
+    if forecast_type == "hourly" || forecast_type == "daily" {
+        if let Some(hourly) = weather_data["hourly"]["data"].as_array() {
+            // Get next 24 hours for hourly forecast
+            let hours_to_show = if forecast_type == "hourly" { 24 } else { 12 };
+            hourly_forecast.push_str("\n\nHourly forecast:");
+            for hour in hourly.iter().take(hours_to_show) {
+                if let (Some(temp), Some(precip_prob)) = (
+                    hour["temperature"].as_f64(),
+                    hour["precipProbability"].as_f64()
+                ) {
+                    let time = hour["time"].as_i64().unwrap_or(0);
+                    let dt_utc = chrono::DateTime::from_timestamp(time, 0)
+                        .unwrap_or(chrono::Utc::now());
+                    let dt_local = dt_utc.with_timezone(&tz);
+                    let datetime = dt_local.format("%a %H:%M").to_string();
+
+                    hourly_forecast.push_str(&format!(
+                        "\n{}: {}°{}, {}% precip",
+                        datetime,
+                        temp.round(),
+                        temp_unit,
+                        (precip_prob * 100.0).round()
+                    ));
                 }
-                let time = hour["time"].as_i64().unwrap_or(0);
+            }
+        }
+    }
+
+    // Process daily forecast (for daily forecast type)
+    let mut daily_forecast = String::new();
+    if forecast_type == "daily" {
+        if let Some(daily) = weather_data["daily"]["data"].as_array() {
+            daily_forecast.push_str("\n\n7-day forecast:");
+            for day in daily.iter().take(7) {
+                let time = day["time"].as_i64().unwrap_or(0);
                 let dt_utc = chrono::DateTime::from_timestamp(time, 0)
                     .unwrap_or(chrono::Utc::now());
                 let dt_local = dt_utc.with_timezone(&tz);
-                let datetime = dt_local.format("%H:%M").to_string();
-                
-                hourly_forecast.push_str(&format!(
-                    "\n{}: {} degrees {} with {}% chance of precipitation",
-                    datetime,
-                    temp.round(),
-                    temp_unit,
-                    (precip_prob * 100.0).round()
+                let day_name = dt_local.format("%A").to_string();
+
+                let high = day["temperatureHigh"].as_f64().unwrap_or(0.0);
+                let low = day["temperatureLow"].as_f64().unwrap_or(0.0);
+                let precip = day["precipProbability"].as_f64().unwrap_or(0.0) * 100.0;
+                let summary = day["summary"].as_str().unwrap_or("");
+
+                daily_forecast.push_str(&format!(
+                    "\n{}: {}°-{}°{}, {}% precip. {}",
+                    day_name, low.round(), high.round(), temp_unit, precip.round(), summary
                 ));
             }
         }
     }
 
     let response = format!(
-        "The weather in {} is {} with a temperature of {} degrees {}. \
-        The humidity is {}% and wind speed is {} {}. \n{}",
+        "Weather in {}: {} {}°{}. Humidity {}%, wind {} {}.{}{}",
         location_name,
         description.to_lowercase(),
         temp.round(),
@@ -190,7 +225,8 @@ pub async fn get_weather(
         humidity.round(),
         wind_speed.round(),
         speed_unit,
-        hourly_forecast
+        hourly_forecast,
+        daily_forecast
     );
 
     Ok(response)

@@ -57,6 +57,86 @@ pub fn get_model() -> String {
     "openai/gpt-4o-2024-11-20".to_string()
 }
 
+/// Truncate a string nicely at word boundaries, adding "..." if truncated
+fn truncate_nicely(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    // Leave room for "..."
+    let target_len = max_chars.saturating_sub(3);
+
+    // Find a good break point (end of sentence or word)
+    let chars: Vec<char> = text.chars().collect();
+    let mut break_point = target_len;
+
+    // Try to find end of sentence within last 50 chars
+    for i in (target_len.saturating_sub(50)..=target_len).rev() {
+        if i < chars.len() && (chars[i] == '.' || chars[i] == '!' || chars[i] == '?') {
+            // Check if next char is space or end
+            if i + 1 >= chars.len() || chars[i + 1].is_whitespace() {
+                break_point = i + 1;
+                return chars[..break_point].iter().collect();
+            }
+        }
+    }
+
+    // Otherwise find last space
+    for i in (0..=target_len).rev() {
+        if i < chars.len() && chars[i].is_whitespace() {
+            break_point = i;
+            break;
+        }
+    }
+
+    let truncated: String = chars[..break_point].iter().collect();
+    format!("{}...", truncated.trim_end())
+}
+
+/// Ask LLM to condense a response to fit within max_chars
+async fn condense_response(
+    client: &openai_api_rs::v1::api::OpenAIClient,
+    original: &str,
+    max_chars: usize,
+) -> Result<String, String> {
+    use openai_api_rs::v1::chat_completion::{ChatCompletionRequest, ChatCompletionMessage, MessageRole, Content};
+
+    let prompt = format!(
+        "Condense the following message to fit within {} characters while preserving the key information. \
+        Keep it natural and conversational. Do NOT use markdown, bullets, or special formatting. \
+        Just output the condensed message, nothing else.\n\nOriginal message:\n{}",
+        max_chars, original
+    );
+
+    let req = ChatCompletionRequest::new(
+        get_model(), // Use same model as main responses (gpt-4o)
+        vec![ChatCompletionMessage {
+            role: MessageRole::user,
+            content: Content::Text(prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }],
+    ).max_tokens(300);
+
+    match client.chat_completion(req).await {
+        Ok(response) => {
+            if let Some(choice) = response.choices.first() {
+                if let Some(content) = &choice.message.content {
+                    let condensed = content.trim().to_string();
+                    // If still too long, truncate nicely
+                    if condensed.chars().count() > max_chars {
+                        return Ok(truncate_nicely(&condensed, max_chars));
+                    }
+                    return Ok(condensed);
+                }
+            }
+            Err("No response from condensing".to_string())
+        }
+        Err(e) => Err(format!("Failed to condense: {}", e))
+    }
+}
+
 pub async fn handle_textbee_sms(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<TextBeeWebhookPayload>,
@@ -268,67 +348,70 @@ pub async fn process_sms(
                     "Couldn't find a message to cancel".to_string()
                 };
 
-                let state_clone = state.clone();
-                let user_clone = user.clone();
-                let response_msg_clone = response_msg.clone();
-                let start_time_clone = start_time;
+                // Only send actual SMS if not in test mode
+                if !is_test {
+                    let state_clone = state.clone();
+                    let user_clone = user.clone();
+                    let response_msg_clone = response_msg.clone();
+                    let start_time_clone = start_time;
 
-                tokio::spawn(async move {
-                    match crate::api::twilio_utils::send_conversation_message(
-                        &state_clone,
-                        &response_msg_clone,
-                        None,
-                        &user_clone
-                    ).await {
-                        Ok(message_sid) => {
-                            // Log usage (similar to regular message)
-                            let processing_time_secs = start_time_clone.elapsed().as_secs();
-                            if let Err(e) = state_clone.user_repository.log_usage(
-                                user_clone.id,
-                                Some(message_sid.clone()),
-                                "sms".to_string(),
-                                None,
-                                Some(processing_time_secs as i32),
-                                Some(true), // Assume success for cancel
-                                Some("cancel handling".to_string()),
-                                None,
-                                None,
-                                None,
-                            ) {
-                                tracing::error!("Failed to log SMS usage for cancel: {}", e);
+                    tokio::spawn(async move {
+                        match crate::api::twilio_utils::send_conversation_message(
+                            &state_clone,
+                            &response_msg_clone,
+                            None,
+                            &user_clone
+                        ).await {
+                            Ok(message_sid) => {
+                                // Log usage (similar to regular message)
+                                let processing_time_secs = start_time_clone.elapsed().as_secs();
+                                if let Err(e) = state_clone.user_repository.log_usage(
+                                    user_clone.id,
+                                    Some(message_sid.clone()),
+                                    "sms".to_string(),
+                                    None,
+                                    Some(processing_time_secs as i32),
+                                    Some(true), // Assume success for cancel
+                                    Some("cancel handling".to_string()),
+                                    None,
+                                    None,
+                                    None,
+                                ) {
+                                    tracing::error!("Failed to log SMS usage for cancel: {}", e);
+                                }
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
+                                    tracing::error!("Failed to deduct user credits for cancel: {}", e);
+                                }
                             }
-                            if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
-                                tracing::error!("Failed to deduct user credits for cancel: {}", e);
+                            Err(e) => {
+                                tracing::error!("Failed to send cancel response message: {}", e);
+                                // Log the failed attempt
+                                let processing_time_secs = start_time_clone.elapsed().as_secs();
+                                let error_status = format!("failed to send: {}", e);
+                                if let Err(log_err) = state_clone.user_repository.log_usage(
+                                    user_clone.id,
+                                    None,
+                                    "sms".to_string(),
+                                    None,
+                                    Some(processing_time_secs as i32),
+                                    Some(false), // Mark as unsuccessful
+                                    Some("cancel handling".to_string()),
+                                    Some(error_status),
+                                    None,
+                                    None,
+                                ) {
+                                    tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
+                                }
                             }
                         }
-                        Err(e) => {
-                            tracing::error!("Failed to send cancel response message: {}", e);
-                            // Log the failed attempt
-                            let processing_time_secs = start_time_clone.elapsed().as_secs();
-                            let error_status = format!("failed to send: {}", e);
-                            if let Err(log_err) = state_clone.user_repository.log_usage(
-                                user_clone.id,
-                                None,
-                                "sms".to_string(),
-                                None,
-                                Some(processing_time_secs as i32),
-                                Some(false), // Mark as unsuccessful
-                                Some("cancel handling".to_string()),
-                                Some(error_status),
-                                None,
-                                None,
-                            ) {
-                                tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
-                            }
-                        }
-                    }
-                });
+                    });
+                }
 
                 return (
                     StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
-                        message: "Cancel processed successfully".to_string(),
+                        message: response_msg,
                     })
                 );
             }
@@ -450,13 +533,14 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 480 characters) while being accurate and helpful. Characters are expensive - be succinct! When listing items (emails, events, tasks), just use numbers and content directly without repeating labels like 'Subject:', 'Event:', etc. Example: 'Emails: 1. Meeting reminder (10am) 2. Invoice from John (9am)' NOT 'Emails: 1. Subject: Meeting reminder (10am) 2. Subject: Invoice from John (9am)'. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.
 
 ### Tool Usage Guidelines:
-- Provide all relevant details in the response immediately. 
+- Provide all relevant details in the response immediately.
 - Tools that involve sending or creating something, add the content to be sent into a queue which are automatically sent after 60 seconds unless user replies 'cancel'.
 - Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
 - When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
+- CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
 
 ### Date and Time Handling:
 - Always work with times in the user's timezone: {} with offset {}.
@@ -505,18 +589,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     }
 
-    fn generate_tool_summary(tool_calls: &Vec<chat_completion::ToolCall>, _msg: &crate::models::user_models::MessageHistory) -> String {
-        // Logic to summarize: iterate over tool_calls, extract action names/queries, and perhaps fetch related tool responses if stored
-        // For simplicity, assume you have access to tool response data via another query or embedded in msg
-        let mut summary = String::new();
-        for call in tool_calls {
-            summary.push_str(&format!("Called {:?} with args {:?}; ", call.function.name, call.function.arguments));
-        }
-        // Append high-level outcome if available (e.g., from a separate tool response lookup)
-        summary.push_str("processed results to inform response.");
-        summary
-    }
-
     // Only include conversation history if message doesn't start with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
 
@@ -534,44 +606,41 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 .unwrap_or_default();
 
             let mut context_messages: Vec<ChatMessage> = Vec::new();
-            
+
             // Process messages in chronological order
             for msg in history.into_iter().rev() {
+                // Skip assistant messages that triggered tool calls (they have empty content)
+                // Including these with structured format causes the model to mimic the pattern
+                if msg.role == "assistant" && msg.tool_calls_json.is_some() {
+                    continue;
+                }
+
+                // For tool messages: format as context that won't be mimicked
+                if msg.role == "tool" {
+                    let context_content = format!("[Previous result: {}]", msg.encrypted_content);
+                    let chat_msg = ChatMessage {
+                        role: "assistant".to_string(),
+                        content: chat_completion::Content::Text(context_content),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    };
+                    context_messages.push(chat_msg);
+                    continue;
+                }
+
                 let role = match msg.role.as_str() {
                     "user" => "user",
                     "assistant" => "assistant",
-                    "tool" => "tool",
                     _ => continue,
                 };
-                
-                let mut chat_msg = ChatMessage {
+
+                // Regular messages (user, final assistant responses)
+                let chat_msg = ChatMessage {
                     role: role.to_string(),
                     content: chat_completion::Content::Text(msg.encrypted_content.clone()),
                     tool_calls: None,
                     tool_call_id: None,
                 };
-                if msg.role == "assistant" && msg.tool_calls_json.is_some() {
-                    // Parse tool_calls_json into Vec<ToolCall>
-                    if let Some(json_str) = &msg.tool_calls_json {
-                        match serde_json::from_str::<Vec<chat_completion::ToolCall>>(json_str) {
-                            Ok(tool_calls) => {
-                                chat_msg.tool_calls = None;
-                                // Set content to empty for tool-calling assistants to avoid confusion
-                                let original_content = msg.encrypted_content.clone(); // Assuming this is the final response content
-                                let tool_summary = generate_tool_summary(&tool_calls, &msg); // Implement this function to create a text summary
-                                let modified_content = format!("{}\n\n[Tool Summary: {}]", original_content, tool_summary);
-                                println!("here with {}", modified_content);
-                                chat_msg.content = chat_completion::Content::Text(modified_content);
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to parse tool_calls_json: {:?}", e);
-                                // Fallback: use original content without summary
-                                chat_msg.content = chat_completion::Content::Text(msg.encrypted_content.clone());
-                            }
-                        }
-                    }
-                }
-                
                 context_messages.push(chat_msg);
             }
             
@@ -752,29 +821,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 }
             };
 
-            let assistant_resp_time= std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            let tool_calls_json = serde_json::to_string(&tool_calls).unwrap();
-
-            let history_entry = crate::models::user_models::NewMessageHistory {
-                user_id: user.id,
-                role: "assistant".to_string(),
-                // Store the entire tool-call JSON so it can be replayed later
-                encrypted_content: "".to_string(),
-                tool_name: None,
-                tool_call_id: None,
-                tool_calls_json: Some(tool_calls_json),
-                created_at: assistant_resp_time,
-                conversation_id: "".to_string(),
-            };
-
-            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                tracing::error!("Failed to store tool-call message in history: {e}");
-            }
-
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
                 tracing::debug!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
@@ -832,6 +878,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     struct WeatherQuestion {
                         location: String,
                         units: String,
+                        forecast_type: Option<String>,
                     }
                     let c: WeatherQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
@@ -840,10 +887,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             continue;
                         }
                     };
-                    let location= c.location;
-                    let units= c.units;
+                    let location = c.location;
+                    let units = c.units;
+                    let forecast_type = c.forecast_type.unwrap_or_else(|| "current".to_string());
 
-                    match crate::utils::tool_exec::get_weather(&state, &location, &units, user.id).await {
+                    match crate::utils::tool_exec::get_weather(&state, &location, &units, &forecast_type, user.id).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1281,6 +1329,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         &state,
                         user.id,
                         arguments,
+                        false, // send notification for SMS-initiated commands
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "switch_selected_tesla_vehicle" {
@@ -1356,7 +1405,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 model,
                 follow_up_messages,
             )
-            .max_tokens(100); // Consistent token limit for follow-up messages
+            .max_tokens(250); // Allow up to ~480 chars for follow-up messages
 
             match client.chat_completion(follow_up_req).await {
                 Ok(follow_up_result) => {
@@ -1367,7 +1416,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     if response.trim().is_empty() {
                         tracing::warn!("Follow-up response was empty, using tool answer directly");
                         tool_answers.values().next()
-                            .map(|ans| ans.chars().take(400).collect::<String>())
+                            .map(|ans| truncate_nicely(ans, 480))
                             .unwrap_or_else(|| "I processed your request but couldn't generate a response.".to_string())
                     } else {
                         response
@@ -1376,10 +1425,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 Err(e) => {
                     tracing::error!("Failed to get follow-up completion: {}", e);
 
-                    // Return the tool answer directly without truncating too much
-                    // SMS can handle up to 1600 chars, so 500 is reasonable
+                    // Return the tool answer directly, truncated nicely to 480 chars
                     tool_answers.values().next()
-                        .map(|ans| ans.chars().take(500).collect::<String>())
+                        .map(|ans| truncate_nicely(ans, 480))
                         .unwrap_or_else(|| "I apologize, but I encountered an error processing your request. Please try again.".to_string())
                 }
             }
@@ -1406,6 +1454,16 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         &final_response,
         fail
     ).await;
+
+    // Ensure response is within 480 char limit - regenerate if too long
+    let final_response = if final_response.chars().count() > 480 && !fail {
+        condense_response(&client, &final_response, 480).await.unwrap_or_else(|_| {
+            // If condensing fails, truncate intelligently
+            truncate_nicely(&final_response, 480)
+        })
+    } else {
+        final_response
+    };
 
     let final_response_with_notice = final_response.clone();
 

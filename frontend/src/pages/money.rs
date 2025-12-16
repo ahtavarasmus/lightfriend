@@ -573,6 +573,7 @@ struct UserProfile {
     id: i32,
     email: String,
     sub_tier: Option<String>,
+    plan_type: Option<String>,
     phone_number: Option<String>,
     verified: bool,
     phone_number_country: Option<String>,
@@ -590,6 +591,8 @@ pub struct PricingProps {
     pub user_email: String,
     #[prop_or_default]
     pub sub_tier: Option<String>,
+    #[prop_or_default]
+    pub user_plan_type: Option<String>,
     #[prop_or_default]
     pub is_logged_in: bool,
     #[prop_or_default]
@@ -656,7 +659,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                         "guaranteed" => "Guaranteed",
                         _ => "Hosted" // Default to Hosted if unknown
                     },
-                    "trial_days": if selected_country == "US" || selected_country == "CA" { 7 } else { 0 },
                 });
                 if let Some(pt) = plan_type {
                     request_body["plan_type"] = json!(pt);
@@ -766,6 +768,7 @@ pub struct GuestCheckoutButtonProps {
 pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
     let loading = use_state(|| false);
     let error = use_state(|| None::<String>);
+    let terms_accepted = use_state(|| false);
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
     let plan_type = props.plan_type.clone();
@@ -773,12 +776,19 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
     let onclick = {
         let loading = loading.clone();
         let error = error.clone();
+        let terms_accepted = terms_accepted.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
         let plan_type = plan_type.clone();
 
         Callback::from(move |e: web_sys::MouseEvent| {
             e.prevent_default();
+
+            if !*terms_accepted {
+                error.set(Some("Please accept the terms and conditions".to_string()));
+                return;
+            }
+
             let loading = loading.clone();
             let error = error.clone();
             let subscription_type = subscription_type.clone();
@@ -832,23 +842,106 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
         })
     };
 
+    let on_terms_change = {
+        let terms_accepted = terms_accepted.clone();
+        let error = error.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            terms_accepted.set(input.checked());
+            if input.checked() {
+                error.set(None);
+            }
+        })
+    };
+
     let button_text = if *loading {
         "Loading..."
     } else {
         "Get Started"
     };
 
+    let checkbox_css = r#"
+    .terms-checkbox-container {
+        margin: 1rem 0;
+        padding: 0 0.5rem;
+    }
+    .terms-checkbox-container label {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.7);
+        line-height: 1.4;
+    }
+    .terms-checkbox-container input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        min-width: 18px;
+        border: 2px solid rgba(30, 144, 255, 0.5);
+        border-radius: 4px;
+        background: rgba(30, 30, 30, 0.7);
+        cursor: pointer;
+        position: relative;
+        margin-top: 2px;
+        transition: all 0.2s ease;
+    }
+    .terms-checkbox-container input[type="checkbox"]:checked {
+        background: #1E90FF;
+        border-color: #1E90FF;
+    }
+    .terms-checkbox-container input[type="checkbox"]:checked::after {
+        content: "✓";
+        position: absolute;
+        color: white;
+        font-size: 12px;
+        left: 2px;
+        top: -1px;
+    }
+    .terms-checkbox-container input[type="checkbox"]:hover {
+        border-color: #1E90FF;
+    }
+    .terms-checkbox-container a {
+        color: #1E90FF;
+        text-decoration: none;
+    }
+    .terms-checkbox-container a:hover {
+        color: #7EB2FF;
+        text-decoration: underline;
+    }
+    "#;
+
     html! {
         <>
+            <style>{checkbox_css}</style>
+            <div class="terms-checkbox-container">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked={*terms_accepted}
+                        onchange={on_terms_change}
+                    />
+                    <span>
+                        {"By signing up you agree to our "}
+                        <a href="/terms" target="_blank">{"terms of service"}</a>
+                        {" and "}
+                        <a href="/privacy" target="_blank">{"privacy policy"}</a>
+                        {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
+                    </span>
+                </label>
+            </div>
             if let Some(err) = (*error).as_ref() {
                 <div style="color: #ff6b6b; font-size: 0.85rem; margin-bottom: 0.5rem; text-align: center;">
                     {err}
                 </div>
             }
             <button
-                class="iq-button signup-button"
+                class={classes!("iq-button", "signup-button", if !*terms_accepted { "disabled" } else { "" })}
                 onclick={onclick}
-                disabled={*loading}
+                disabled={*loading || !*terms_accepted}
+                style={if !*terms_accepted { "opacity: 0.6; cursor: not-allowed;" } else { "" }}
             >
                 <b>{button_text}</b>
             </button>
@@ -876,14 +969,13 @@ pub struct PricingCardProps {
     pub subscription_type: String,
     pub is_popular: bool,
     pub is_premium: bool,
-    pub is_trial: bool,
-    #[prop_or(false)]
-    pub is_euro_trial: bool,
     pub user_id: i32,
     pub user_email: String,
     pub is_logged_in: bool,
     pub verified: bool,
     pub sub_tier: Option<String>,
+    #[prop_or_default]
+    pub user_plan_type: Option<String>,
     pub selected_country: String,
     #[prop_or(false)]
     pub coming_soon: bool,
@@ -913,7 +1005,12 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 }
             });
             html! { <button class="iq-button verify-required" onclick={onclick}><b>{"Verify Account to Subscribe"}</b></button> }
-        } else if props.sub_tier.as_ref() == Some(&effective_tier) {
+        } else if props.sub_tier.as_ref() == Some(&effective_tier)
+            && (props.plan_type == props.user_plan_type
+                || (props.user_plan_type.is_none() && props.selected_country != "Other")) {
+            // Show "Current Plan" if tier matches AND either:
+            // - plan_type matches exactly, OR
+            // - user has no plan_type (legacy US/CA users) and not on BYOT
             html! { <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button> }
         } else {
             html! {
@@ -956,18 +1053,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         position: absolute;
         top: -15px;
         right: 20px;
-        background: linear-gradient(45deg, #00FFFF, #00CED1);
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 500;
-        z-index: 4;
-    }
-    .trial-tag {
-        position: absolute;
-        top: -15px;
-        left: 20px;
         background: linear-gradient(45deg, #00FFFF, #00CED1);
         color: white;
         padding: 0.5rem 1rem;
@@ -1262,15 +1347,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     html! {}
                 }
             }
-            {
-                if props.is_trial {
-                    html! { <div class="trial-tag">{"7-Day Free Trial"}</div> }
-                } else if props.is_euro_trial {
-                    html! { <div class="trial-tag">{"€10 for 7-Day Trial"}</div> }
-                } else {
-                    html! {}
-                }
-            }
             <div class="card-header">
                 <h3>{props.plan_name.clone()}</h3>
             </div>
@@ -1280,17 +1356,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <div class="price">
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
-                    { if props.is_trial {
-                        html! {
-                            <p class="billing-note">{"First 7 days free"}</p>
-                        }
-                    } else if props.is_euro_trial {
-                        html! {
-                            <p class="billing-note">{"7-day trial for €10"}</p>
-                        }
-                    } else {
-                        html! {}
-                    }}
                 </div>
                     <div class="learn-more-section">
                         <a href="/how-to-switch-to-dumbphone" class="learn-more-link">{"How to switch to a dumbphone and what you'll need"}</a>
@@ -1385,7 +1450,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li><i class="fas fa-phone"></i>{"Voice calling and SMS interface"}</li>
                 <li><i class="fas fa-comments"></i>{base_messages_text}</li>
                 <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
-                <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</li>
+                <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast up to 7 days"}</li>
                 <li><i class="fas fa-route"></i>{"Step-by-step Directions from Google Maps"}</li>
                 <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
                 <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
@@ -1395,6 +1460,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li><i class="fas fa-envelope"></i>{"Fetch, Send, Reply and Monitor Emails"}</li>
                 <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
                 <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
+                <li><i class="fas fa-car"></i>{"Tesla Vehicle Control (lock, unlock, climate, start, battery)"}</li>
                 <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
                 <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
                 <li><i class="fas fa-clock"></i>{"Custom Waiting Checks Specific Content"}</li>
@@ -1517,7 +1583,7 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
             <div class="credit-pricing">
                 <style>{credit_css}</style>
                 <h2>{"Overage Credits"}</h2>
-                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
+                <p class="subtitle">{"Available on Digest plan only"}</p>
                 <p class="loading">{"Loading pricing..."}</p>
             </div>
         }
@@ -1536,8 +1602,8 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
             <div class="credit-pricing">
                 <style>{credit_css}</style>
                 <h2>{"Overage Credits"}</h2>
-                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
-                <p>{"Your plan includes prepaid credits each month. If you use them all, you can purchase more at these rates:"}</p>
+                <p class="subtitle">{"Available on Digest plan only"}</p>
+                <p>{"Digest plan includes prepaid credits each month. If you use them all, you can purchase more at these rates:"}</p>
                 <ul>
                     if let Some(noti) = notification_price {
                         <li>{format!("Notification: €{:.2} each", noti)}</li>
@@ -1569,8 +1635,8 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
             <div class="credit-pricing">
                 <style>{credit_css}</style>
                 <h2>{"Overage Credits"}</h2>
-                <p class="subtitle">{"Buy extra credits when your monthly plan allowance runs out"}</p>
-                <p>{"Your plan includes prepaid credits each month. Exact overage pricing varies by country."}</p>
+                <p class="subtitle">{"Available on Digest plan only"}</p>
+                <p>{"Digest plan includes prepaid credits each month. Exact overage pricing varies by country."}</p>
             </div>
         }
     }
@@ -2152,19 +2218,20 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 best_for={"Full-featured cloud service ready to go. Reclaim 2-4 hours per day* for just"}
                                 price={*hosted_total_price}
                                 currency={"$"}
-                                period={"/day"}
+                                period={"/month"}
                                 features={hosted_features.clone()}
                                 subscription_type={"hosted"}
                                 is_popular={true}
                                 is_premium={false}
-                                is_trial={true}
                                 user_id={props.user_id}
                                 user_email={props.user_email.clone()}
                                 is_logged_in={props.is_logged_in}
                                 verified={props.verified}
                                 sub_tier={props.sub_tier.clone()}
+                                user_plan_type={props.user_plan_type.clone()}
                                 selected_country={props.selected_country.clone()}
                                 coming_soon={false}
+                                plan_type={Some("monitor".to_string())}
                                 hosted_prices={hosted_prices.clone()}
                             />
                         }
@@ -2186,15 +2253,16 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 subscription_type={"hosted"}
                                 is_popular={true}
                                 is_premium={false}
-                                is_trial={false}
                                 user_id={props.user_id}
                                 user_email={props.user_email.clone()}
                                 is_logged_in={props.is_logged_in}
                                 verified={props.verified}
                                 sub_tier={props.sub_tier.clone()}
+                                user_plan_type={props.user_plan_type.clone()}
                                 selected_country={props.selected_country.clone()}
                                 coming_soon={false}
                                 hosted_prices={hosted_prices.clone()}
+                                plan_type={Some("byot".to_string())}
                             >
                                 <ByotPricingDisplay />
                             </PricingCard>
@@ -2219,9 +2287,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
 
                         let mut monitor_features = base_features.clone();
                         monitor_features.push(Feature { text: "Go off-grid knowing critical alerts reach you".to_string(), sub_items: vec![] });
+                        monitor_features.push(Feature { text: "Fixed monthly quota (no overage credits)".to_string(), sub_items: vec![] });
 
                         let mut digest_features = base_features;
                         digest_features.push(Feature { text: "Eliminates FOMO - stay caught up without checking".to_string(), sub_items: vec![] });
+                        digest_features.push(Feature { text: "Can purchase overage credits if needed".to_string(), sub_items: vec![] });
 
                         let selected_country_clone = props.selected_country.clone();
                         let selected_country_clone2 = props.selected_country.clone();
@@ -2238,13 +2308,12 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     subscription_type={"hosted"}
                                     is_popular={false}
                                     is_premium={false}
-                                    is_trial={false}
-                                    is_euro_trial={true}
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
                                     verified={props.verified}
                                     sub_tier={props.sub_tier.clone()}
+                                    user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
                                     coming_soon={false}
                                     hosted_prices={hosted_prices.clone()}
@@ -2265,13 +2334,12 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     subscription_type={"hosted"}
                                     is_popular={true}
                                     is_premium={false}
-                                    is_trial={false}
-                                    is_euro_trial={true}
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
                                     verified={props.verified}
                                     sub_tier={props.sub_tier.clone()}
+                                    user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
                                     coming_soon={false}
                                     hosted_prices={hosted_prices.clone()}
@@ -2297,7 +2365,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     subscription_type={"guaranteed"}
                     is_popular={false}
                     is_premium={true}
-                    is_trial={false}
                     user_id={props.user_id}
                     user_email={props.user_email.clone()}
                     is_logged_in={props.is_logged_in}
@@ -2320,7 +2387,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
@@ -2333,11 +2400,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 30 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Monitor and Digest?"}</summary>
-                                    <p>{"Monitor is for critical notifications only - you get 30 credits and cannot buy more. Digest includes 120 credits with the ability to top up when needed, perfect for daily summaries and regular use."}</p>
+                                    <p>{"Monitor is for critical notifications only - you get 40 credits and cannot buy more. Digest includes 120 credits with the ability to purchase additional credits when needed, perfect for daily summaries and regular use."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
@@ -2350,11 +2417,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 30 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Monitor and Digest?"}</summary>
-                                    <p>{"Monitor is for critical notifications only - you get 30 credits and cannot buy more. Digest includes 120 credits with the ability to top up when needed, perfect for daily summaries and regular use."}</p>
+                                    <p>{"Monitor is for critical notifications only - you get 40 credits and cannot buy more. Digest includes 120 credits with the ability to purchase additional credits when needed, perfect for daily summaries and regular use."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
@@ -2371,7 +2438,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What is BYOT?"}</summary>

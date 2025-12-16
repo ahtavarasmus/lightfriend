@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use axum::{
     Json,
     extract::{State, Multipart},
@@ -6,6 +7,7 @@ use axum::{
 };
 use serde_json::json;
 use serde::{Deserialize, Serialize};
+use rand::Rng;
 
 use std::path::Path;
 use tokio::fs;
@@ -614,4 +616,64 @@ pub async fn test_sms(
     }
 }
 
+/// Admin-only endpoint to generate and send a password reset link to a user.
+///
+/// This generates a secure one-time token, stores it with 24-hour expiry,
+/// and sends the reset link to the user's email.
+pub async fn send_password_reset_link(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Look up user by ID to get their email
+    let user = state.user_core.find_by_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Generate cryptographically secure token (32 alphanumeric chars)
+    let token: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+
+    // Set expiry to 24 hours from now
+    let expiry = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64 + (24 * 60 * 60); // 24 hours
+
+    // Store the token with user_id and expiry
+    state.pending_password_resets.insert(token.clone(), (user_id, expiry));
+
+    // Build reset URL
+    let frontend_url = std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let reset_link = format!("{}/password-reset/{}", frontend_url, token);
+
+    // Send email with reset link
+    if let Err(e) = crate::utils::email::send_password_reset_email(
+        &state.user_repository,
+        &user.email,
+        &reset_link,
+    ).await {
+        tracing::error!("Failed to send password reset email to {}: {}", user.email, e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to send reset email. Please try again."}))
+        ));
+    }
+
+    tracing::info!("Password reset link sent to user {} ({})", user_id, user.email);
+
+    Ok(Json(json!({
+        "message": format!("Password reset link sent to {}", user.email),
+        "email": user.email
+    })))
+}
 

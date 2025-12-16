@@ -1,8 +1,8 @@
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use crate::{
-    models::user_models::User,
-    schema::users,
+    models::user_models::{User, RefundInfo, NewRefundInfo},
+    schema::{users, refund_info},
 };
 
 impl crate::repositories::user_repository::UserRepository {
@@ -154,17 +154,81 @@ impl crate::repositories::user_repository::UserRepository {
             .find(user_id)
             .select((users::sub_tier, users::discount_tier))
             .first::<(Option<String>, Option<String>)>(&mut conn)?;
-        
+
         // If user has msg discount tier, they always have messages available
         if user.1.as_deref() == Some("msg") {
-        
+
             return Ok(user.0.map_or(false, |t| t == tier));
         }
-        
+
         // Check both subscription tier and remaining messages
         Ok(user.0.map_or(false, |t| t == tier))
     }
 
+    // Refund info methods
+    pub fn get_refund_info(&self, user_id: i32) -> Result<Option<RefundInfo>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        refund_info::table
+            .filter(refund_info::user_id.eq(user_id))
+            .first::<RefundInfo>(&mut conn)
+            .optional()
+    }
 
+    pub fn get_or_create_refund_info(&self, user_id: i32) -> Result<RefundInfo, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Try to get existing
+        if let Some(info) = refund_info::table
+            .filter(refund_info::user_id.eq(user_id))
+            .first::<RefundInfo>(&mut conn)
+            .optional()?
+        {
+            return Ok(info);
+        }
+
+        // Create new
+        let new_info = NewRefundInfo {
+            user_id,
+            has_refunded: 0,
+        };
+        diesel::insert_into(refund_info::table)
+            .values(&new_info)
+            .execute(&mut conn)?;
+
+        // Return the created row
+        refund_info::table
+            .filter(refund_info::user_id.eq(user_id))
+            .first::<RefundInfo>(&mut conn)
+    }
+
+    pub fn set_has_refunded(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Ensure row exists
+        self.get_or_create_refund_info(user_id)?;
+
+        diesel::update(refund_info::table.filter(refund_info::user_id.eq(user_id)))
+            .set((
+                refund_info::has_refunded.eq(1),
+                refund_info::refunded_at.eq(Some(timestamp)),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_last_credit_pack_purchase(&self, user_id: i32, amount: f32, timestamp: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Ensure row exists
+        self.get_or_create_refund_info(user_id)?;
+
+        diesel::update(refund_info::table.filter(refund_info::user_id.eq(user_id)))
+            .set((
+                refund_info::last_credit_pack_amount.eq(Some(amount)),
+                refund_info::last_credit_pack_purchase_timestamp.eq(Some(timestamp)),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
 }
 

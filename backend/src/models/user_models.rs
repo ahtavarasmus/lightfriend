@@ -24,6 +24,7 @@ use crate::schema::totp_backup_codes;
 use crate::schema::webauthn_credentials;
 use crate::schema::webauthn_challenges;
 use crate::schema::waitlist;
+use crate::schema::youtube;
 
 
 
@@ -358,6 +359,34 @@ pub struct NewGoogleCalendar{
     pub expires_in: i32,
 }
 
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = youtube)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct YouTube {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub expires_in: i32,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = youtube)]
+pub struct NewYouTube {
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub expires_in: i32,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+}
+
 #[derive(Debug, Queryable, Insertable)]
 #[diesel(table_name = calendar_notifications)]
 pub struct CalendarNotification {
@@ -471,6 +500,8 @@ pub struct UserSettings {
     pub monthly_message_count: i32, // for US/CA tier 3 monitoring (threshold at 1000 messages/month)
     pub outbound_message_pricing: Option<f32>, // cached Twilio outbound SMS price for user's country
     pub notify_on_climate_ready: bool, // whether to send notification when Tesla climate reaches target temp
+    pub last_instant_digest_time: Option<i32>, // timestamp of last on-demand digest fetch
+    pub phone_service_active: bool, // whether phone service (SMS and calls) is active - can be disabled for security (e.g., stolen phone)
 }
 
 #[derive(Insertable)]
@@ -725,4 +756,24 @@ pub struct WaitlistEntry {
 pub struct NewWaitlistEntry {
     pub email: String,
     pub created_at: i32,
+}
+
+// Refund tracking models
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = crate::schema::refund_info)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct RefundInfo {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub has_refunded: i32,  // 0 = no, 1 = yes (SQLite doesn't have bool)
+    pub last_credit_pack_amount: Option<f32>,
+    pub last_credit_pack_purchase_timestamp: Option<i32>,
+    pub refunded_at: Option<i32>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = crate::schema::refund_info)]
+pub struct NewRefundInfo {
+    pub user_id: i32,
+    pub has_refunded: i32,
 }

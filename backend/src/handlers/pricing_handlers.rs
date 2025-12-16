@@ -116,7 +116,7 @@ pub async fn get_euro_countries_pricing(
             monitor: PlanDetails {
                 name: "Monitor".to_string(),
                 price: 29.0,
-                messages_included: 30,
+                messages_included: 40,
             },
             digest: PlanDetails {
                 name: "Digest".to_string(),
@@ -315,8 +315,9 @@ pub async fn get_dashboard_credits(
             let notifications = (credit_value * 2.0).floor() as i32; // 2 notifications per message
             let responses = (credit_value).floor() as i32; // 1 response per message
             let digests = (credit_value).floor() as i32; // 1 digest per message
-            // Voice: ~$0.20 per min total (Twilio + ElevenLabs)
-            let voice_mins = (credit_value * 0.20 / 0.20).floor() as i32; // Roughly 1:1 for US
+            // Voice: ~$0.185 per min total (Twilio $0.075 + ElevenLabs $0.11)
+            // Each message credit is worth ~$0.075, so voice_mins = (credits * $0.075) / $0.185
+            let voice_mins = (credit_value * 0.075 / 0.185).floor() as i32;
 
             CreditEquivalents {
                 raw_value: credit_value,
@@ -485,6 +486,16 @@ pub struct UsageProjectionResponse {
     pub messages_percentage: f32,
     /// Voice as percentage of plan capacity
     pub voice_percentage: f32,
+
+    // === ACTUAL USAGE THIS BILLING PERIOD ===
+    /// Actual notifications used this billing period (not projected)
+    pub actual_notifications_used: i32,
+    /// Actual voice minutes used this billing period
+    pub actual_voice_mins_used: i32,
+    /// Actual messages sent this billing period
+    pub actual_messages_used: i32,
+    /// Actual digests sent this billing period
+    pub actual_digests_used: i32,
 }
 
 /// Overage information - this is where we show euro amounts
@@ -534,12 +545,18 @@ pub async fn get_usage_projection(
         .filter(|&&x| x.is_some())
         .count() as i32;
 
-    // Get plan capacity based on plan type
+    // Get plan capacity based on country and plan type
+    // US/CA: always 400 messages (hosted plan)
+    // Other countries: monitor=40, digest=120
     let plan_type = user.plan_type.clone();
-    let plan_capacity = match plan_type.as_deref() {
-        Some("digest") => 120,
-        Some("monitor") => 40,
-        _ => 40, // Default to monitor capacity
+    let is_us_ca = matches!(user.phone_number_country.as_deref(), Some("US") | Some("CA"));
+    let plan_capacity = if is_us_ca {
+        400 // US/CA hosted plan
+    } else {
+        match plan_type.as_deref() {
+            Some("digest") => 120,
+            _ => 40, // monitor or default
+        }
     };
 
     // Calculate digests per month
@@ -658,6 +675,90 @@ pub async fn get_usage_projection(
     let avg_notifications_per_day = avg_sms_notifications_per_day + avg_call_notifications_per_day;
     let notifications_per_month = (avg_notifications_per_day * 30.0).round() as i32;
     let messages_per_month = (avg_messages_per_day * 30.0).round() as i32;
+
+    // === CALCULATE ACTUAL USAGE THIS BILLING PERIOD ===
+    let (actual_notifications_used, actual_voice_mins_used, actual_messages_used, actual_digests_used) = {
+        let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+        let now: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Calculate billing period start
+        let billing_period_start: i64 = if let Some(next_billing) = user.next_billing_date_timestamp {
+            // Billing period started 30 days before next billing date
+            (next_billing as i64) - 2_592_000 // 30 days in seconds
+        } else {
+            // No billing date set, default to 30 days ago
+            now - 2_592_000
+        };
+
+        // Actual SMS notifications this billing period
+        let actual_sms_notis: i64 = usage_logs::table
+            .filter(usage_logs::user_id.eq(auth_user.user_id))
+            .filter(
+                usage_logs::activity_type.like("%_critical")
+                    .or(usage_logs::activity_type.like("%_priority_sms"))
+                    .or(usage_logs::activity_type.eq("noti_msg"))
+            )
+            .filter(usage_logs::activity_type.not_like("%_priority_call"))
+            .filter(usage_logs::created_at.ge(billing_period_start as i32))
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+
+        // Actual call notifications this billing period
+        let actual_call_notis: i64 = usage_logs::table
+            .filter(usage_logs::user_id.eq(auth_user.user_id))
+            .filter(
+                usage_logs::activity_type.like("%_priority_call")
+                    .or(usage_logs::activity_type.eq("noti_call"))
+            )
+            .filter(usage_logs::created_at.ge(billing_period_start as i32))
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+
+        // Actual messages this billing period
+        let actual_msgs: i64 = usage_logs::table
+            .filter(usage_logs::user_id.eq(auth_user.user_id))
+            .filter(
+                usage_logs::activity_type.eq("sms")
+                    .or(usage_logs::activity_type.eq("message"))
+            )
+            .filter(usage_logs::created_at.ge(billing_period_start as i32))
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+
+        // Actual voice minutes this billing period
+        let actual_voice_secs: Option<f32> = usage_logs::table
+            .select(sql::<diesel::sql_types::Nullable<Float>>("SUM(COALESCE(call_duration, 0))"))
+            .filter(usage_logs::user_id.eq(auth_user.user_id))
+            .filter(
+                usage_logs::activity_type.like("%voice%")
+                    .or(usage_logs::activity_type.like("%call%"))
+            )
+            .filter(usage_logs::created_at.ge(billing_period_start as i32))
+            .first(&mut conn)
+            .unwrap_or(None);
+
+        // Actual digests this billing period
+        let actual_digs: i64 = usage_logs::table
+            .filter(usage_logs::user_id.eq(auth_user.user_id))
+            .filter(usage_logs::activity_type.eq("digest"))
+            .filter(usage_logs::created_at.ge(billing_period_start as i32))
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+
+        (
+            (actual_sms_notis + actual_call_notis) as i32,
+            (actual_voice_secs.unwrap_or(0.0) / 60.0).round() as i32,
+            actual_msgs as i32,
+            actual_digs as i32,
+        )
+    };
 
     // Total usage includes digests, notifications, and messages
     // Digests and messages cost ~3x a notification for display purposes
@@ -886,5 +987,9 @@ pub async fn get_usage_projection(
         call_noti_percentage,
         messages_percentage,
         voice_percentage,
+        actual_notifications_used,
+        actual_voice_mins_used,
+        actual_messages_used,
+        actual_digests_used,
     }))
 }

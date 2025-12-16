@@ -98,9 +98,16 @@ body {
 }
 
 .top-nav.scrolled {
-    background-color: rgba(26, 26, 26, 0.95);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(30, 144, 255, 0.2);
+    background-color: transparent;
+    backdrop-filter: none;
+    border-bottom: none;
+    height: 0;
+    padding: 0;
+    overflow: visible;
+}
+
+.top-nav.scrolled .nav-content {
+    transform: translateY(1rem);
 }
 
 .burger-menu {
@@ -1540,3 +1547,52 @@ button[type="submit"].loading::after {
     color: #9ec5ff;
 }
 
+/* First-time subscriber onboarding overlay */
+.onboarding-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+}
+
+.onboarding-modal {
+    background: rgba(30, 30, 30, 0.95);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.onboarding-modal button:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 16px rgba(30, 144, 255, 0.4);
+}
+
+@media (max-width: 480px) {
+    .onboarding-modal {
+        padding: 1.5rem;
+    }
+}

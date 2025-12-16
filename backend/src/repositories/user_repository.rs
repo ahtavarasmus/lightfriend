@@ -733,6 +733,174 @@ impl UserRepository {
         Ok(())
     }
 
+    // YouTube integration methods
+    pub fn has_active_youtube(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = youtube::table
+            .filter(youtube::user_id.eq(user_id))
+            .filter(youtube::status.eq("active"))
+            .first::<crate::models::user_models::YouTube>(&mut conn)
+            .optional()?;
+
+        Ok(connection.is_some())
+    }
+
+    pub fn get_youtube_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = youtube::table
+            .filter(youtube::user_id.eq(user_id))
+            .filter(youtube::status.eq("active"))
+            .first::<crate::models::user_models::YouTube>(&mut conn)
+            .optional()?;
+
+        if let Some(connection) = connection {
+            let access_token = match decrypt(&connection.encrypted_access_token) {
+                Ok(token) => token,
+                Err(e) => {
+                    tracing::error!("Failed to decrypt YouTube access token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
+                Ok(token) => token,
+                Err(e) => {
+                    tracing::error!("Failed to decrypt YouTube refresh token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            Ok(Some((access_token, refresh_token)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_youtube_connection(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        self.create_youtube_connection_with_scope(user_id, access_token, refresh_token, expires_in, "readonly")
+    }
+
+    pub fn create_youtube_connection_with_scope(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: i32,
+        scope: &str,
+    ) -> Result<(), DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let encrypted_access_token = encrypt(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+        let encrypted_refresh_token = encrypt(refresh_token.unwrap_or(""))
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Delete any existing connection first
+        diesel::delete(youtube::table)
+            .filter(youtube::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        // Store scope in description field
+        let description = format!("scope:{}", scope);
+
+        let new_youtube = crate::models::user_models::NewYouTube {
+            user_id,
+            encrypted_access_token,
+            encrypted_refresh_token,
+            status: "active".to_string(),
+            expires_in,
+            last_update: current_time,
+            created_on: current_time,
+            description,
+        };
+
+        diesel::insert_into(youtube::table)
+            .values(&new_youtube)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_youtube_scope(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let result = youtube::table
+            .filter(youtube::user_id.eq(user_id))
+            .filter(youtube::status.eq("active"))
+            .select(youtube::description)
+            .first::<String>(&mut conn)
+            .optional()?;
+
+        Ok(result.map(|desc| {
+            // Format: "scope:write" or "scope:readonly" or legacy formats
+            if desc.starts_with("scope:write") {
+                "write".to_string()
+            } else if desc.starts_with("scope:") {
+                desc.replace("scope:", "")
+            } else {
+                "readonly".to_string() // Default for old connections
+            }
+        }))
+    }
+
+    pub fn delete_youtube_connection(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(youtube::table)
+            .filter(youtube::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn update_youtube_access_token(
+        &self,
+        user_id: i32,
+        new_access_token: &str,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::youtube;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let encrypted_access_token = encrypt(new_access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        diesel::update(youtube::table)
+            .filter(youtube::user_id.eq(user_id))
+            .filter(youtube::status.eq("active"))
+            .set((
+                youtube::encrypted_access_token.eq(encrypted_access_token),
+                youtube::expires_in.eq(expires_in),
+                youtube::last_update.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn get_active_imap_connection_users(&self) -> Result<Vec<i32>, DieselError> {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1377,6 +1545,21 @@ impl UserRepository {
             .count()
             .get_result::<i64>(&mut conn)?;
         Ok(count > 0)
+    }
+
+    pub fn get_users_with_active_bridges(&self) -> Result<std::collections::HashMap<i32, Vec<Bridge>>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let all_bridges: Vec<Bridge> = bridges::table
+            .filter(bridges::status.eq("connected"))
+            .load(&mut conn)?;
+
+        let mut result: std::collections::HashMap<i32, Vec<Bridge>> = std::collections::HashMap::new();
+        for bridge in all_bridges {
+            result.entry(bridge.user_id).or_default().push(bridge);
+        }
+        Ok(result)
     }
 
     pub fn get_active_signal_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {

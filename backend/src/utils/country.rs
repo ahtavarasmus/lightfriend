@@ -80,6 +80,11 @@ pub fn is_supported_country(phone: &str) -> bool {
     is_local_number_country(phone) || is_notification_only_country(phone)
 }
 
+/// Check if a country code is a notification-only country
+pub fn is_notification_only_country_code(country: &str) -> bool {
+    NOTIFICATION_ONLY_COUNTRIES.iter().any(|(_, code)| *code == country)
+}
+
 /// Check if a country code is eligible for €29/€59 euro plans
 /// This includes all non-US/CA countries (local-number + notification-only)
 pub fn is_euro_plan_country(country: &str) -> bool {
@@ -125,86 +130,6 @@ pub fn is_byot_plan_price(price_id: &str) -> bool {
     std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
         .map(|p| p == price_id)
         .unwrap_or(false)
-}
-
-/// Lazy migration helper: fetches plan_type from Stripe for users who don't have it set in the database.
-/// This handles existing subscribed users who subscribed before the plan_type field was added.
-/// Returns Some("monitor"), Some("digest"), or Some("byot") if found, None if no active subscription or unknown plan.
-///
-/// This function is intended to be called when a user interacts with the service and their
-/// plan_type is NULL in the database. It will query Stripe, determine the plan type, and
-/// save it to the database for future use.
-pub async fn lazy_migrate_plan_type(
-    user_id: i32,
-    state: &std::sync::Arc<crate::AppState>,
-) -> Option<String> {
-    // Get customer ID from database
-    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
-        Ok(Some(id)) => id,
-        _ => {
-            tracing::debug!("No Stripe customer ID found for user {} during lazy plan_type migration", user_id);
-            return None;
-        }
-    };
-
-    // Initialize Stripe client
-    let stripe_secret_key = match std::env::var("STRIPE_SECRET_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            tracing::error!("STRIPE_SECRET_KEY not set, cannot perform lazy plan_type migration");
-            return None;
-        }
-    };
-    let client = stripe::Client::new(stripe_secret_key);
-
-    // List active subscriptions
-    let subscriptions = match stripe::Subscription::list(
-        &client,
-        &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().unwrap()),
-            status: Some(stripe::SubscriptionStatusFilter::Active),
-            limit: Some(10),
-            ..Default::default()
-        },
-    ).await {
-        Ok(subs) => subs,
-        Err(e) => {
-            tracing::error!("Failed to list subscriptions for lazy migration: {}", e);
-            return None;
-        }
-    };
-
-    // Find the price_id from active subscriptions and determine plan type
-    for sub in subscriptions.data.iter() {
-        for item in sub.items.data.iter() {
-            if let Some(price) = &item.price {
-                let price_id = price.id.to_string();
-
-                let plan_type = if is_digest_plan_price(&price_id) {
-                    Some("digest")
-                } else if is_monitor_plan_price(&price_id) || is_legacy_euro_plan_price(&price_id) {
-                    Some("monitor")
-                } else if is_byot_plan_price(&price_id) {
-                    Some("byot")
-                } else {
-                    None
-                };
-
-                if let Some(pt) = plan_type {
-                    // Save to database for future use
-                    if let Err(e) = state.user_repository.update_plan_type(user_id, Some(pt)) {
-                        tracing::error!("Failed to save plan_type during lazy migration: {}", e);
-                    } else {
-                        tracing::info!("Lazy migrated plan_type='{}' for user {}", pt, user_id);
-                    }
-                    return Some(pt.to_string());
-                }
-            }
-        }
-    }
-
-    tracing::debug!("No matching plan found for user {} during lazy migration", user_id);
-    None
 }
 
 #[cfg(test)]

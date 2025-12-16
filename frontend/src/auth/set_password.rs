@@ -19,7 +19,12 @@ struct MagicLinkResponse {
 
 #[derive(Deserialize)]
 struct SessionTokenResponse {
-    token: String,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    existing_user: bool,
+    #[serde(default)]
+    new_user_check_email: bool,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +45,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
     let success = use_state(|| None::<String>);
     let loading = use_state(|| true);
     let needs_password = use_state(|| true);
+    let check_email = use_state(|| false);
     let token = use_state(|| props.token.clone().unwrap_or_default());
     let is_submitting = use_state(|| false);
 
@@ -49,6 +55,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
         let loading = loading.clone();
         let error = error.clone();
         let needs_password = needs_password.clone();
+        let check_email = check_email.clone();
         let prop_token = props.token.clone();
 
         use_effect_with_deps(move |prop_token| {
@@ -56,6 +63,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
             let loading = loading.clone();
             let error = error.clone();
             let needs_password = needs_password.clone();
+            let check_email = check_email.clone();
             let prop_token = prop_token.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
@@ -81,7 +89,27 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                                         Ok(response) => {
                                             if response.ok() {
                                                 if let Ok(resp) = response.json::<SessionTokenResponse>().await {
-                                                    resp.token
+                                                    // Check if this is an existing user checkout
+                                                    if resp.existing_user {
+                                                        // Redirect to login instead of auto-logging in
+                                                        if let Some(window) = web_sys::window() {
+                                                            let _ = window.location().set_href("/login?subscription=activated");
+                                                        }
+                                                        return;
+                                                    }
+                                                    // Check if this is a new user who needs to check email
+                                                    if resp.new_user_check_email {
+                                                        check_email.set(true);
+                                                        loading.set(false);
+                                                        return;
+                                                    }
+                                                    if let Some(token) = resp.token {
+                                                        token
+                                                    } else {
+                                                        error.set(Some("No token in response".to_string()));
+                                                        loading.set(false);
+                                                        return;
+                                                    }
                                                 } else {
                                                     error.set(Some("Failed to parse session response".to_string()));
                                                     loading.set(false);
@@ -321,6 +349,20 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                         html! {
                             <div class="success-message" style="color: #4ecdc4; text-align: center;">
                                 {success_message}
+                            </div>
+                        }
+                    } else if *check_email {
+                        html! {
+                            <div style="text-align: center;">
+                                <div style="color: #4ecdc4; font-size: 1.2rem; margin-bottom: 1.5rem;">
+                                    {"Thank you for subscribing!"}
+                                </div>
+                                <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 1.5rem;">
+                                    {"We've sent you an email with a link to set your password and access your account."}
+                                </p>
+                                <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">
+                                    {"Please check your inbox (and spam folder) for the email from Lightfriend."}
+                                </p>
                             </div>
                         }
                     } else if *needs_password {

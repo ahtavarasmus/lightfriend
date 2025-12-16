@@ -19,6 +19,7 @@ use crate::handlers::imap_handlers::{fetch_emails_imap, fetch_single_email_imap}
 pub struct LocationCallPayload {
     location: String,
     units: String,
+    forecast_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,7 +149,22 @@ pub async fn fetch_assistant(
     match state.user_core.find_by_phone_number(&caller_number) {
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
-          
+
+            // Check if phone service is deactivated (e.g., stolen phone scenario)
+            if let Ok(false) = state.user_core.get_phone_service_active(user.id) {
+                tracing::warn!(
+                    "User {} has phone service deactivated - blocking incoming call",
+                    user.id
+                );
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "Service deactivated",
+                        "message": "Phone service is currently deactivated for this number."
+                    }))
+                ));
+            }
+
             let user_settings = match state.user_core.get_user_settings(user.id) {
                 Ok(settings) => settings,
                 Err(e) => {
@@ -2123,6 +2139,7 @@ pub async fn make_notification_call(
             ));
         }
     };
+
     let to_phone_number = user.phone_number.clone();
     let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
@@ -2356,7 +2373,8 @@ pub async fn handle_weather_tool_call(
         }
     };
     
-    match crate::utils::tool_exec::get_weather(&state, &payload.location, &payload.units, user_id).await {
+    let forecast_type = payload.forecast_type.as_deref().unwrap_or("current");
+    match crate::utils::tool_exec::get_weather(&state, &payload.location, &payload.units, forecast_type, user_id).await {
         Ok(weather_info) => {
             Json(json!({
                 "response": weather_info
@@ -2413,4 +2431,327 @@ pub async fn handle_directions_tool_call(
             }))
         }
     }
+}
+
+// =====================================================
+// Web-based voice call endpoints (browser to ElevenLabs)
+// =====================================================
+
+/// Response from ElevenLabs signed URL API
+#[derive(Deserialize)]
+struct ElevenLabsSignedUrlResponse {
+    signed_url: String,
+}
+
+/// Response for web call initiation
+#[derive(Serialize)]
+pub struct WebCallInitResponse {
+    signed_url: String,
+    user_id: i32,
+    max_duration_secs: i32,
+    cost_per_minute: f32,
+    // Conversation overrides for the agent
+    agent_overrides: serde_json::Value,
+}
+
+/// Get signed URL for web-based voice call
+/// This endpoint requires JWT authentication and checks user credits
+pub async fn get_web_signed_url(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<WebCallInitResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    // Get user
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ));
+        }
+        Err(e) => {
+            error!("Database error finding user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+
+    // Check if user has subscription
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Subscription required for web calls"}))
+        ));
+    }
+
+    // Determine cost per minute based on region
+    let is_us_ca = user.phone_number.starts_with("+1");
+    let cost_per_minute = if is_us_ca {
+        1.0 // 1 message credit per minute for US/CA
+    } else {
+        0.15 // 0.15 EUR per minute for Euro countries
+    };
+
+    // Check if user has at least 1 minute worth of credits
+    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "web_call", Some(60)).await {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            Json(json!({"error": e}))
+        ));
+    }
+
+    // Get user settings and info for dynamic variables
+    let user_settings = state.user_core.get_user_settings(user_id).ok();
+    let user_info = state.user_core.get_user_info(user_id).ok();
+
+    // Build dynamic variables like fetch_assistant does
+    let nickname = user.nickname.clone().unwrap_or_default();
+    let user_own_info = user_info.as_ref().and_then(|i| i.info.clone()).unwrap_or_default();
+    let user_location = user_info.as_ref().and_then(|i| i.location.clone()).unwrap_or_default();
+    let nearby_places = user_info.as_ref().and_then(|i| i.nearby_places.clone()).unwrap_or_default();
+    let timezone_str = user_info.as_ref().and_then(|i| i.timezone.clone()).unwrap_or_else(|| "UTC".to_string());
+
+    // Get timezone offset
+    let (hours, minutes) = match get_offset_with_jiff(&timezone_str) {
+        Ok((h, m)) => (h, m),
+        Err(_) => (0, 0)
+    };
+    let offset = format!("{}{:02}:{:02}", if hours >= 0 { "+" } else { "-" }, hours.abs(), minutes.abs());
+
+    // Get voice ID based on language
+    let agent_language = user_settings.as_ref().map(|s| s.agent_language.as_str()).unwrap_or("en");
+    let voice_id = match agent_language {
+        "fi" => std::env::var("FI_VOICE_ID").unwrap_or_else(|_| std::env::var("US_VOICE_ID").unwrap_or_default()),
+        "de" => std::env::var("DE_VOICE_ID").unwrap_or_else(|_| std::env::var("US_VOICE_ID").unwrap_or_default()),
+        _ => std::env::var("US_VOICE_ID").unwrap_or_default(),
+    };
+
+    // Build first message based on language
+    let first_message = match agent_language {
+        "fi" => format!("Moi {}!", nickname),
+        "de" => format!("Hallo {}!", nickname),
+        _ => format!("Hello {}!", nickname),
+    };
+
+    // Build agent overrides (using camelCase for JS SDK)
+    // Note: Only include fields we want to override - omit empty/default fields per ElevenLabs docs
+    let agent_overrides = json!({
+        "agent": {
+            "firstMessage": first_message,
+            "language": agent_language
+        },
+        "tts": {
+            "voiceId": voice_id
+        }
+    });
+
+    // Build dynamic variables (these get substituted into the prompt)
+    let dynamic_variables = json!({
+        "user_id": user_id.to_string(),
+        "name": nickname,
+        "user_info": user_own_info,
+        "location": user_location,
+        "nearby_places": nearby_places,
+        "timezone": timezone_str,
+        "timezone_offset_from_utc": offset,
+        "now": format!("{}", chrono::Utc::now()),
+        "email_id": "-1",
+        "content_type": "",
+        "notification_message": ""
+    });
+
+    // Get agent ID from environment
+    let agent_id = std::env::var("AGENT_ID")
+        .or_else(|_| std::env::var("ASSISTANT_ID"))
+        .unwrap_or_else(|_| "202a9873-5f36-42bb-8162-a2010ad97e62".to_string());
+
+    // Get ElevenLabs API key
+    let api_key = match std::env::var("ELEVENLABS_API_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            error!("ELEVENLABS_API_KEY not set");
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Server configuration error"}))
+            ));
+        }
+    };
+
+    // Request signed URL from ElevenLabs
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!(
+            "https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id={}",
+            agent_id
+        ))
+        .header("xi-api-key", &api_key)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<ElevenLabsSignedUrlResponse>().await {
+                    Ok(data) => {
+                        // Calculate max duration based on user's credits
+                        // For US/CA: max minutes = credits_left (message units)
+                        // For Euro: max minutes = credits_left / 0.15
+                        let max_minutes = if is_us_ca {
+                            (user.credits_left + user.credits).floor() as i32
+                        } else {
+                            ((user.credits_left + user.credits) / 0.15).floor() as i32
+                        };
+                        // Cap at 30 minutes max per call
+                        let max_duration_secs = (max_minutes.min(30) * 60).max(60);
+
+                        // Combine overrides with dynamic variables
+                        let full_overrides = json!({
+                            "agent": agent_overrides["agent"],
+                            "tts": agent_overrides["tts"],
+                            "dynamicVariables": dynamic_variables
+                        });
+
+                        Ok(Json(WebCallInitResponse {
+                            signed_url: data.signed_url,
+                            user_id,
+                            max_duration_secs,
+                            cost_per_minute,
+                            agent_overrides: full_overrides,
+                        }))
+                    }
+                    Err(e) => {
+                        error!("Failed to parse ElevenLabs response: {}", e);
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "Failed to get signed URL"}))
+                        ))
+                    }
+                }
+            } else {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                error!("ElevenLabs API error: {} - {}", status, body);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get signed URL from ElevenLabs"}))
+                ))
+            }
+        }
+        Err(e) => {
+            error!("Network error calling ElevenLabs: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Network error"}))
+            ))
+        }
+    }
+}
+
+/// Request body for ending a web call
+#[derive(Deserialize)]
+pub struct EndWebCallRequest {
+    duration_secs: i32,
+}
+
+/// End web call and deduct credits based on duration
+pub async fn end_web_call(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    Json(payload): Json<EndWebCallRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let duration_secs = payload.duration_secs.max(0);
+
+    // Calculate minutes (round up)
+    let minutes = ((duration_secs as f32) / 60.0).ceil() as i32;
+
+    if minutes == 0 {
+        return Ok(Json(json!({
+            "status": "ok",
+            "message": "No charge for calls under 1 second",
+            "duration_secs": duration_secs,
+            "minutes_charged": 0
+        })));
+    }
+
+    // Deduct credits based on minutes
+    // Pass duration in seconds to deduct_user_credits which will calculate the cost
+    if let Err(e) = crate::utils::usage::deduct_user_credits(
+        &state,
+        user_id,
+        "web_call",
+        Some(duration_secs),
+    ) {
+        error!("Failed to deduct credits for web call: {}", e);
+        // Still return success - the call happened, we should log it
+    }
+
+    // Log the usage
+    if let Err(e) = state.user_repository.log_usage(
+        user_id,
+        None, // no call_sid for web calls
+        "web_call".to_string(),
+        None,
+        Some(duration_secs),
+        None,
+        None,
+        Some("done".to_string()),
+        None,
+        None,
+    ) {
+        error!("Failed to log web call usage: {}", e);
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "duration_secs": duration_secs,
+        "minutes_charged": minutes
+    })))
+}
+
+/// Check if user has enough credits for continued web call
+/// Returns remaining minutes available
+pub async fn check_web_call_credits(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ));
+        }
+        Err(e) => {
+            error!("Database error: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+
+    let is_us_ca = user.phone_number.starts_with("+1");
+
+    // Calculate remaining minutes
+    let remaining_minutes = if is_us_ca {
+        // US/CA: credits_left is message count, 1 message = 1 minute
+        (user.credits_left + user.credits).floor() as i32
+    } else {
+        // Euro: credits_left is EUR, 0.15 EUR per minute
+        ((user.credits_left + user.credits) / 0.15).floor() as i32
+    };
+
+    let has_credits = remaining_minutes >= 1;
+
+    Ok(Json(json!({
+        "has_credits": has_credits,
+        "remaining_minutes": remaining_minutes,
+        "should_end_call": !has_credits
+    })))
 }

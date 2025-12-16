@@ -457,6 +457,25 @@ pub async fn verify_login(
     Json(req): Json<VerifyLoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     use std::time::{SystemTime, UNIX_EPOCH};
+    use std::num::NonZeroU32;
+    use governor::{Quota, RateLimiter};
+
+    // Rate limiting: 5 attempts per minute per login_token
+    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
+    let limiter_key = req.login_token.clone();
+
+    let entry = state.webauthn_verify_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+
+    if limiter.check_key(&limiter_key).is_err() {
+        tracing::warn!("Rate limit exceeded for WebAuthn verification");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({"error": "Too many verification attempts. Please try again later."}))
+        ));
+    }
 
     // Get pending login from the shared map
     let pending = state.pending_totp_logins.get(&req.login_token)

@@ -37,7 +37,7 @@ pub struct BuyCreditsRequest {
 #[derive(Deserialize)]
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
-    /// For euro countries: "monitor" (€29/50 msgs) or "digest" (€59/150 msgs)
+    /// For euro countries: "monitor" (€29/40 msgs) or "digest" (€49/120 msgs)
     pub plan_type: Option<String>,
 }
 
@@ -49,7 +49,7 @@ pub struct SubscriptionCheckoutBody {
 /// # Arguments
 /// * `state` - Application state for database/pricing access
 /// * `country_code` - User's phone number country code (e.g., "FI", "DE")
-/// * `message_count` - Number of messages the plan includes (50 for Monitor, 150 for Digest)
+/// * `message_count` - Number of messages the plan includes (40 for Monitor, 120 for Digest)
 /// * `plan_name` - Plan name for logging ("Monitor" or "Digest")
 ///
 /// # Returns
@@ -114,24 +114,18 @@ async fn calculate_euro_credit_allocation(
 
 pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
     Path(user_id): Path<i32>,
     Json(body): Json<SubscriptionCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    tracing::debug!("Starting create_subscription_checkout for user_id: {}", user_id);
-
-    // Check if new subscriptions are blocked
-    if let Ok(blocked) = std::env::var("BLOCK_NEW_SUBSCRIPTIONS") {
-        if blocked == "true" || blocked == "1" {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": "New subscriptions are temporarily unavailable",
-                    "message": "We're currently not accepting new subscriptions as we prepare for improvements to our service. You'll be notified via email when subscriptions are available again."
-                })),
-            ));
-        }
+    // Security: Verify user can only create checkout for themselves
+    if auth_user.user_id != user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
     }
+    tracing::debug!("Starting create_subscription_checkout for user_id: {}", user_id);
 
     // Verify user exists in database
     let user = state
@@ -231,6 +225,7 @@ pub async fn create_unified_subscription_checkout(
                 .expect("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID not set")
         },
     };
+    // Build line items
     let line_items = vec![
         stripe::CreateCheckoutSessionLineItems {
             price: Some(base_price_id),
@@ -238,6 +233,7 @@ pub async fn create_unified_subscription_checkout(
             ..Default::default()
         }
     ];
+
     let success_url = format!("{}/billing?subscription=success", domain_url);
     let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
     let mut create_params = CreateCheckoutSession {
@@ -274,38 +270,29 @@ pub async fn create_unified_subscription_checkout(
         ]),
         ..Default::default()
     };
-    // Handle metadata if needed (removed cold_turkey)
-    let mut metadata = std::collections::HashMap::new();
-    let mut sub_data = stripe::CreateCheckoutSessionSubscriptionData {
-        ..Default::default()
-    };
+    // Handle metadata for plan changes
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
-  
+
         // Create metadata to track the subscription change
+        let mut metadata = std::collections::HashMap::new();
         metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
         metadata.insert("plan_change".to_string(), "true".to_string());
         metadata.insert("user_id".to_string(), user_id.to_string());
-  
-        sub_data.metadata = Some(metadata.clone());
+
+        // Set metadata on both subscription_data AND session itself
+        // subscription_data.metadata goes on the subscription object
+        // session metadata is needed for CheckoutSessionCompleted webhook to detect plan changes
+        let sub_data = stripe::CreateCheckoutSessionSubscriptionData {
+            metadata: Some(metadata.clone()),
+            ..Default::default()
+        };
+        create_params.subscription_data = Some(sub_data);
+        create_params.metadata = Some(metadata);
         // Update success URL to indicate plan change
         create_params.success_url = Some(&success_url1);
-        // No trial for upgrades
-    } else if body.subscription_type == SubscriptionType::Hosted && (country == "US" || country == "CA") {
-        // Add free 7-day trial for new Hosted subscriptions in US/CA
-        sub_data.trial_period_days = Some(7);
-        if !metadata.is_empty() {
-            sub_data.metadata = Some(metadata);
-        }
-    } else if body.subscription_type == SubscriptionType::Hosted && is_euro_plan_country(country) {
-        // Add 7-day trial for euro countries (€10 setup fee handled via Stripe product config)
-        sub_data.trial_period_days = Some(7);
-        if !metadata.is_empty() {
-            sub_data.metadata = Some(metadata);
-        }
     }
-    create_params.subscription_data = Some(sub_data);
 
     let checkout_session = CheckoutSession::create(
         &client,
@@ -333,7 +320,7 @@ pub async fn create_unified_subscription_checkout(
 pub struct GuestCheckoutBody {
     pub subscription_type: SubscriptionType,
     pub selected_country: String,
-    /// For euro countries: "monitor" (€29/50 msgs) or "digest" (€59/150 msgs)
+    /// For euro countries: "monitor" (€29/40 msgs) or "digest" (€49/120 msgs)
     pub plan_type: Option<String>,
 }
 
@@ -344,19 +331,6 @@ pub async fn create_guest_checkout(
     Json(body): Json<GuestCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     tracing::debug!("Starting guest checkout for country: {}", body.selected_country);
-
-    // Check if new subscriptions are blocked
-    if let Ok(blocked) = std::env::var("BLOCK_NEW_SUBSCRIPTIONS") {
-        if blocked == "true" || blocked == "1" {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": "New subscriptions are temporarily unavailable",
-                    "message": "We're currently not accepting new subscriptions. Please check back later."
-                })),
-            ));
-        }
-    }
 
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
@@ -402,6 +376,7 @@ pub async fn create_guest_checkout(
         },
     };
 
+    // Build line items
     let line_items = vec![
         stripe::CreateCheckoutSessionLineItems {
             price: Some(base_price_id),
@@ -422,26 +397,17 @@ pub async fn create_guest_checkout(
         metadata.insert("plan_type".to_string(), plan_type.clone());
     }
 
-    // Subscription data with trial for eligible countries
-    let mut sub_data = stripe::CreateCheckoutSessionSubscriptionData {
+    // Subscription data
+    let sub_data = stripe::CreateCheckoutSessionSubscriptionData {
         metadata: Some(metadata.clone()),
         ..Default::default()
     };
-
-    // Add 7-day trial for new subscriptions in eligible countries
-    if body.subscription_type == SubscriptionType::Hosted {
-        if country == "US" || country == "CA" || is_euro_plan_country(country) {
-            sub_data.trial_period_days = Some(7);
-        }
-    }
 
     let create_params = CreateCheckoutSession {
         success_url: Some(&success_url),
         cancel_url: Some(&cancel_url),
         mode: Some(stripe::CheckoutSessionMode::Subscription),
         line_items: Some(line_items),
-        // No customer - Stripe will create one
-        customer_creation: Some(stripe::CheckoutSessionCustomerCreation::Always),
         // Collect phone number
         phone_number_collection: Some(stripe::CreateCheckoutSessionPhoneNumberCollection {
             enabled: true,
@@ -467,6 +433,15 @@ pub async fn create_guest_checkout(
                 ..Default::default()
             },
         ]),
+        custom_text: Some(stripe::CreateCheckoutSessionCustomText {
+            after_submit: None,
+            shipping_address: None,
+            submit: Some(stripe::CreateCheckoutSessionCustomTextSubmit {
+                message: "Your email and phone number will be your Lightfriend login credentials. The phone number is also how you'll interact with Lightfriend via SMS. Both can be changed later.".to_string(),
+            }),
+            terms_of_service_acceptance: None,
+        }),
+        metadata: Some(metadata.clone()),
         subscription_data: Some(sub_data),
         ..Default::default()
     };
@@ -552,10 +527,17 @@ create_session,
 
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
     Path(user_id): Path<i32>,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Security: Verify user can only create checkout for themselves
+    if auth_user.user_id != user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
     tracing::debug!("Starting create_checkout_session for user_id: {}", user_id);
     // Fetch user from the database
     let user = state
@@ -581,18 +563,9 @@ pub async fn create_checkout_session(
         || user.phone_number_country == Some("CA".to_string());
 
     if !is_us_ca {
-        // First check database for plan_type
-        let plan_type = match user.plan_type.as_deref() {
-            Some(pt) => Some(pt.to_string()),
-            None => {
-                // Lazy migration: plan_type not set, fetch from Stripe and save to DB
-                crate::utils::country::lazy_migrate_plan_type(user_id, &state).await
-            }
-        };
-
-        // Check if user is on Digest plan
-        if plan_type.as_deref() != Some("digest") {
-            tracing::info!("User {} attempted to buy credits but is not on Digest plan (plan_type={:?})", user_id, plan_type);
+        // Check if user is on Digest plan (only Digest plan users can buy overage credits)
+        if user.plan_type.as_deref() != Some("digest") {
+            tracing::info!("User {} attempted to buy credits but is not on Digest plan (plan_type={:?})", user_id, user.plan_type);
             return Err((
                 StatusCode::FORBIDDEN,
                 Json(json!({
@@ -764,20 +737,16 @@ struct SubscriptionInfo {
 }
 fn base_price_id(items: &[stripe::SubscriptionItem]) -> Option<String> {
     let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
+    let trial_fee_id = std::env::var("STRIPE_EURO_TRIAL_FEE_PRICE_ID").unwrap_or_default();
     items.iter()
-         .find(|it| it.price.as_ref().map(|p| p.id.as_str()) != Some(topup_id.as_str()))
+         .find(|it| {
+             it.price.as_ref().map(|p| {
+                 let id = p.id.as_str();
+                 id != topup_id.as_str() && id != trial_fee_id.as_str()
+             }).unwrap_or(false)
+         })
          .and_then(|it| it.price.as_ref())
          .map(|p| p.id.to_string())
-}
-// Helper function to check if DigitalDetox one-time fee is present
-fn is_digital_detox_subscription(items: &[stripe::SubscriptionItem]) -> bool {
-    let digital_detox_fee_id_us = std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_US").unwrap_or_default();
-    let digital_detox_fee_id_other = std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_OTHER").unwrap_or_default();
-    items.iter().any(|item| {
-        item.price.as_ref().map(|p| {
-            p.id.as_str() == digital_detox_fee_id_us || p.id.as_str() == digital_detox_fee_id_other
-        }).unwrap_or(false)
-    })
 }
 // Helper function to extract subscription info from price ID
 fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
@@ -911,113 +880,9 @@ pub async fn stripe_webhook(
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
                     tracing::info!("New subscription created, checking for existing subscriptions to cancel");
 
-                    // ========== GUEST CHECKOUT: Create user if not exists ==========
-                    // Check if this is a guest checkout (user doesn't exist for this customer)
-                    let existing_user = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str());
-                    if let Ok(None) = existing_user {
-                        tracing::info!("Guest checkout detected - creating user for customer {}", customer_id);
+                    // Guest checkout user creation is now handled in CheckoutSessionCompleted event
+                    // to ensure we have access to the checkout session ID for the redirect flow
 
-                        // Fetch customer details from Stripe
-                        if let Ok(customer) = Customer::retrieve(&client, &customer_id, &[]).await {
-                            let email = customer.email.clone().unwrap_or_default();
-                            let phone = customer.phone.clone().unwrap_or_default();
-
-                            if !email.is_empty() {
-                                // Check if user with this email already exists
-                                let email_exists = state.user_core.find_by_email(&email);
-
-                                match email_exists {
-                                    Ok(Some(existing_user_by_email)) => {
-                                        // Link existing user to this Stripe customer
-                                        tracing::info!("Found existing user {} with email {}, linking to Stripe customer",
-                                            existing_user_by_email.id, email);
-                                        let _ = state.user_repository.set_stripe_customer_id(
-                                            existing_user_by_email.id,
-                                            &customer_id.to_string()
-                                        );
-                                        // Update phone if provided and user doesn't have one
-                                        if !phone.is_empty() && existing_user_by_email.phone_number.is_empty() {
-                                            let _ = state.user_core.update_phone_number(existing_user_by_email.id, &phone);
-                                        }
-                                    },
-                                    Ok(None) => {
-                                        // Create new user (no password - they'll set it via magic link)
-                                        use crate::handlers::auth_dtos::NewUser;
-                                        use rand::Rng;
-
-                                        // Generate magic token
-                                        let magic_token: String = rand::thread_rng()
-                                            .sample_iter(&rand::distributions::Alphanumeric)
-                                            .take(64)
-                                            .map(char::from)
-                                            .collect();
-
-                                        let new_user = NewUser {
-                                            email: email.clone(),
-                                            password_hash: "NOT_SET".to_string(), // Placeholder - user sets via magic link
-                                            phone_number: phone.clone(),
-                                            time_to_live: 0, // No expiry for paid users
-                                            verified: true, // Payment = verified
-                                            credits: 0.0,
-                                            credits_left: 0.0,
-                                            charge_when_under: false,
-                                            waiting_checks_count: 0,
-                                            discount: false,
-                                            sub_tier: None,
-                                        };
-
-                                        if let Ok(()) = state.user_core.create_user(new_user) {
-                                            if let Ok(Some(created_user)) = state.user_core.find_by_email(&email) {
-                                                tracing::info!("Created new user {} from guest checkout", created_user.id);
-
-                                                // Link Stripe customer
-                                                let _ = state.user_repository.set_stripe_customer_id(
-                                                    created_user.id,
-                                                    &customer_id.to_string()
-                                                );
-
-                                                // Set phone country from phone number
-                                                if !phone.is_empty() {
-                                                    let _ = crate::handlers::profile_handlers::set_user_phone_country(
-                                                        &state, created_user.id, &phone
-                                                    ).await;
-                                                }
-
-                                                // Ensure user settings and info exist
-                                                let _ = state.user_core.ensure_user_settings_exist(created_user.id);
-                                                let _ = state.user_core.ensure_user_info_exists(created_user.id);
-
-                                                // Store magic token
-                                                let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
-
-                                                // Store session_id -> token mapping for redirect flow
-                                                // We need to get the checkout session ID from the subscription metadata
-                                                if let Some(session_id) = subscription.metadata.get("checkout_session_id") {
-                                                    state.session_to_token.insert(session_id.clone(), magic_token.clone());
-                                                }
-
-                                                // Send magic link email
-                                                let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
-                                                let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
-                                                let email_clone = email.clone();
-
-                                                tokio::spawn(async move {
-                                                    if let Err(e) = crate::utils::email::send_magic_link_email(&email_clone, &magic_link).await {
-                                                        tracing::error!("Failed to send magic link email: {}", e);
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        tracing::error!("Error checking if email exists: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // ========== END GUEST CHECKOUT ==========
-                  
                     // List all active subscriptions for the customer
                     let existing_subscriptions = stripe::Subscription::list(
                         &client,
@@ -1051,25 +916,9 @@ pub async fn stripe_webhook(
                             }
                         }
                     }
-                    // Add first-time bonus credits for non-US/CA users on new hosted plans
+                    // Automatically create Twilio subaccount for tier 3 (self-hosted) users
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                         let sub_info = extract_subscription_info(&base_price);
-                        let is_hosted = sub_info.tier == "tier 2";
-
-                        // Check if user is NOT from US/CA
-                        let is_non_us_ca = user.phone_number_country.as_deref() != Some("US")
-                            && user.phone_number_country.as_deref() != Some("CA");
-
-                        // Give 10€ starter bonus to non-US/CA users on their first subscription
-                        if is_hosted && is_non_us_ca {
-                            if let Err(e) = state.user_repository.increase_credits(user.id, 10.0) {
-                                tracing::error!("Failed to add first-time bonus credits: {}", e);
-                            } else {
-                                tracing::info!("Added 10€ first-time bonus credits for non-US/CA user {}", user.id);
-                            }
-                        }
-
-                        // Automatically create Twilio subaccount for tier 3 (self-hosted) users
                         if sub_info.tier == "tier 3" {
                             tracing::info!("Tier 3 subscription detected, creating Twilio subaccount for user {}", user.id);
                             let state_clone = state.clone();
@@ -1104,6 +953,13 @@ pub async fn stripe_webhook(
                     tracing::info!("Skipping subscription update as it's part of a plan change");
                     return Ok(StatusCode::OK);
                 }
+                // Skip processing subscription updates for subscriptions being cancelled
+                // This prevents the old subscription from overwriting the new subscription's settings
+                // when it gets updated with cancel_at_period_end = true during a plan change
+                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated && subscription.cancel_at_period_end {
+                    tracing::info!("Skipping subscription update for subscription being cancelled (cancel_at_period_end=true): {}", subscription.id);
+                    return Ok(StatusCode::OK);
+                }
                 // Get the base price ID from the subscription items
                 let base_price = if let Some(first_item) = subscription.items.data.first() {
                     if let Some(price) = &first_item.price {
@@ -1135,8 +991,7 @@ pub async fn stripe_webhook(
                         // Extract subscription info (both country and tier)
                         let sub_info = extract_subscription_info(&price_id);
                         let _is_sentinel_price_id = is_sentinel_price_id(&price_id);
-                        let _is_digital_detox = is_digital_detox_subscription(&subscription.items.data);
-                      
+
                         // Update subscription country
                         if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
                             tracing::error!("Failed to update subscription country: {}", e);
@@ -1158,14 +1013,14 @@ pub async fn stripe_webhook(
                         }
                         // Tier 2 (hosted) - check plan type for credit allocation
                         else if sub_info.tier == "tier 2" {
-                            // US/CA users get 200 monthly credits (same pricing as Monitor)
+                            // US/CA users get 400 monthly credits (hosted plan)
                             if user.phone_number_country == Some("US".to_string())
                                 || user.phone_number_country == Some("CA".to_string()) {
-                                messages = 200.0;
+                                messages = 400.0;
                                 if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
                                     tracing::error!("Failed to update plan_type: {}", e);
                                 }
-                                tracing::info!("US/CA tier 2 subscription, allocating 200 monthly credits");
+                                tracing::info!("US/CA tier 2 subscription, allocating 400 monthly credits");
                             }
                             // Monitor plan (€29) gets credits for ~40 regular messages
                             else if is_monitor_plan_price(&price_id) {
@@ -1213,7 +1068,7 @@ pub async fn stripe_webhook(
                         if let Err(e) = state.user_repository.update_sub_credits(user.id, messages) {
                             tracing::error!("Failed to update subscription credits: {}", e);
                         } else {
-                            tracing::info!("Set daily credits to 40 for user {}", user.id);
+                            tracing::info!("Set monthly credits to {} for user {}", messages, user.id);
                         }
                         // Reset monthly message count for tier 3 users on billing cycle renewal
                         if sub_info.tier == "tier 3" {
@@ -1240,6 +1095,23 @@ pub async fn stripe_webhook(
                                 tracing::info!("User {} switching to non-BYOT plan, clearing BYOT credentials", user.id);
                                 if let Err(e) = state.user_core.clear_twilio_credentials(user.id) {
                                     tracing::error!("Failed to clear BYOT credentials for user {}: {}", user.id, e);
+                                }
+                            }
+                        }
+
+                        // Set preferred Lightfriend number based on user's country (for non-BYOT plans)
+                        if !crate::utils::country::is_byot_plan_price(&price_id) && user.preferred_number.is_none() {
+                            if let Some(ref country) = user.phone_number_country {
+                                match state.user_core.set_preferred_number_for_country(user.id, country) {
+                                    Ok(Some(num)) => {
+                                        tracing::info!("Set preferred Lightfriend number {} for user {} (country: {})", num, user.id, country);
+                                    }
+                                    Ok(None) => {
+                                        tracing::info!("No dedicated Lightfriend number for country {} (user {})", country, user.id);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to set preferred number for user {}: {}", user.id, e);
+                                    }
                                 }
                             }
                         }
@@ -1377,13 +1249,17 @@ pub async fn stripe_webhook(
                             });
                         }
 
-                        // No active subscriptions left, clear subscription tier and country
+                        // No active subscriptions left, clear subscription tier, country, plan_type, and credits
                         tracing::info!("No active subscriptions remaining, clearing subscription info");
                         if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
                             tracing::error!("Failed to clear subscription tier: {}", e);
                         }
                         if let Err(e) = state.user_core.update_sub_country(user.id, None) {
                             tracing::error!("Failed to clear subscription country: {}", e);
+                        }
+                        // Clear plan_type
+                        if let Err(e) = state.user_repository.update_plan_type(user.id, None) {
+                            tracing::error!("Failed to clear plan_type: {}", e);
                         }
                         // Clear monthly credits
                         if let Err(e) = state.user_repository.update_sub_credits(user.id, 0.0) {
@@ -1415,103 +1291,363 @@ pub async fn stripe_webhook(
             match event.data.object {
                 stripe::EventObject::CheckoutSession(session) => {
                     tracing::info!("Checkout session found: {}", session.id);
-                  
-                    // Skip processing if this is a subscription checkout
+
+                    // Handle guest checkout for subscription mode
                     if matches!(session.mode, stripe::CheckoutSessionMode::Subscription) {
-                        tracing::info!("Ignoring subscription checkout session");
-                        return Ok(StatusCode::OK);
-                    }
-                    if let Some(customer) = &session.customer {
-                        let customer_id = match customer {
-                            stripe::Expandable::Id(id) => id.clone(),
-                            stripe::Expandable::Object(customer) => customer.id.clone(),
-                        };
-                        tracing::info!("Customer ID: {}", customer_id);
-                        // Update customer address with billing address from Checkout
-                        if let Some(billing_details) = &session.shipping_details {
-                            if let Some(address) = &billing_details.address {
-                                tracing::info!("Updating customer address with billing details");
-                                Customer::update(
-                                    &client,
-                                    &customer_id,
-                                    stripe::UpdateCustomer {
-                                        address: Some(stripe::Address {
-                                            line1: address.line1.clone(),
-                                            city: address.city.clone(),
-                                            country: address.country.clone(),
-                                            postal_code: address.postal_code.clone(),
-                                            state: address.state.clone(),
-                                            ..Default::default()
-                                        }),
-                                        ..Default::default()
-                                    },
-                                )
-                                .await
-                                .map_err(|e| {
-                                    tracing::error!("Failed to update customer address: {}", e);
-                                    // Continue processing even if address update fails (non-critical)
-                                })
-                                .ok();
+                        tracing::info!("Processing subscription checkout session for guest checkout");
+
+                        // Check if this is a guest checkout by looking at metadata
+                        let is_guest = session.metadata.as_ref()
+                            .and_then(|m| m.get("is_guest_checkout"))
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+
+                        if is_guest {
+                            if let Some(customer) = &session.customer {
+                                let customer_id = match customer {
+                                    stripe::Expandable::Id(id) => id.clone(),
+                                    stripe::Expandable::Object(c) => c.id.clone(),
+                                };
+
+                                // Check if user already exists for this customer
+                                let existing_user = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str());
+                                if let Ok(None) = existing_user {
+                                    tracing::info!("Guest checkout - creating user for customer {}", customer_id);
+
+                                    // Fetch customer details from Stripe
+                                    if let Ok(customer_obj) = Customer::retrieve(&client, &customer_id, &[]).await {
+                                        let email = customer_obj.email.clone().unwrap_or_default();
+                                        let phone = customer_obj.phone.clone().unwrap_or_default();
+
+                                        if !email.is_empty() {
+                                            // Check if user with this email already exists
+                                            let email_exists = state.user_core.find_by_email(&email);
+
+                                            match email_exists {
+                                                Ok(Some(existing_user_by_email)) => {
+                                                    tracing::info!("Found existing user {} with email {}, linking to Stripe customer",
+                                                        existing_user_by_email.id, email);
+                                                    let _ = state.user_repository.set_stripe_customer_id(
+                                                        existing_user_by_email.id,
+                                                        &customer_id.to_string()
+                                                    );
+                                                    if !phone.is_empty() && existing_user_by_email.phone_number.is_empty() {
+                                                        let _ = state.user_core.update_phone_number(existing_user_by_email.id, &phone);
+                                                    }
+                                                    // Store EXISTING_USER flag instead of magic token
+                                                    // This tells the frontend to redirect to login instead of auto-logging in
+                                                    state.session_to_token.insert(session.id.to_string(), "EXISTING_USER".to_string());
+
+                                                    // Set subscription tier and plan_type from checkout session
+                                                    if let Some(subscription) = &session.subscription {
+                                                        let sub_id = match subscription {
+                                                            stripe::Expandable::Id(id) => id.clone(),
+                                                            stripe::Expandable::Object(s) => s.id.clone(),
+                                                        };
+                                                        if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
+                                                            if let Some(price_id) = sub.items.data.first()
+                                                                .and_then(|item| item.price.as_ref())
+                                                                .map(|price| price.id.to_string())
+                                                            {
+                                                                let sub_info = extract_subscription_info(&price_id);
+                                                                let _ = state.user_repository.set_subscription_tier(existing_user_by_email.id, Some(sub_info.tier));
+
+                                                                // Set plan_type from metadata or derive from price
+                                                                use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
+                                                                let plan_type = if is_digest_plan_price(&price_id) {
+                                                                    "digest"
+                                                                } else if is_byot_plan_price(&price_id) {
+                                                                    "byot"
+                                                                } else {
+                                                                    "monitor"
+                                                                };
+                                                                let _ = state.user_repository.update_plan_type(existing_user_by_email.id, Some(plan_type));
+                                                                tracing::info!("Set subscription tier={} and plan_type={} for existing user {} from checkout", sub_info.tier, plan_type, existing_user_by_email.id);
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                Ok(None) => {
+                                                    use crate::handlers::auth_dtos::NewUser;
+                                                    use rand::Rng;
+
+                                                    let magic_token: String = rand::thread_rng()
+                                                        .sample_iter(&rand::distributions::Alphanumeric)
+                                                        .take(64)
+                                                        .map(char::from)
+                                                        .collect();
+
+                                                    let new_user = NewUser {
+                                                        email: email.clone(),
+                                                        password_hash: "NOT_SET".to_string(),
+                                                        phone_number: phone.clone(),
+                                                        time_to_live: 0,
+                                                        verified: true,
+                                                        credits: 0.0,
+                                                        credits_left: 0.0,
+                                                        charge_when_under: false,
+                                                        waiting_checks_count: 0,
+                                                        discount: false,
+                                                        sub_tier: None,
+                                                    };
+
+                                                    if let Ok(()) = state.user_core.create_user(new_user) {
+                                                        if let Ok(Some(created_user)) = state.user_core.find_by_email(&email) {
+                                                            tracing::info!("Created new user {} from guest checkout", created_user.id);
+
+                                                            let _ = state.user_repository.set_stripe_customer_id(
+                                                                created_user.id,
+                                                                &customer_id.to_string()
+                                                            );
+
+                                                            if !phone.is_empty() {
+                                                                if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(
+                                                                    &state, created_user.id, &phone
+                                                                ).await {
+                                                                    // Also set preferred Lightfriend number based on country
+                                                                    let _ = state.user_core.set_preferred_number_for_country(created_user.id, &country);
+                                                                }
+                                                            }
+
+                                                            let _ = state.user_core.ensure_user_settings_exist(created_user.id);
+                                                            let _ = state.user_core.ensure_user_info_exists(created_user.id);
+                                                            let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
+
+                                                            // Store flag instead of magic token for security
+                                                            // User must use email link to set password
+                                                            state.session_to_token.insert(session.id.to_string(), "NEW_USER_CHECK_EMAIL".to_string());
+                                                            tracing::info!("Stored NEW_USER_CHECK_EMAIL flag for session {}", session.id);
+
+                                                            // Send magic link email
+                                                            let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+                                                            let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
+                                                            let email_clone = email.clone();
+                                                            let user_repo = state.user_repository.clone();
+
+                                                            tokio::spawn(async move {
+                                                                if let Err(e) = crate::utils::email::send_magic_link_email(&user_repo, &email_clone, &magic_link).await {
+                                                                    tracing::error!("Failed to send magic link email: {}", e);
+                                                                }
+                                                            });
+
+                                                            // Set subscription tier and plan_type from checkout session
+                                                            if let Some(subscription) = &session.subscription {
+                                                                let sub_id = match subscription {
+                                                                    stripe::Expandable::Id(id) => id.clone(),
+                                                                    stripe::Expandable::Object(s) => s.id.clone(),
+                                                                };
+                                                                if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
+                                                                    if let Some(price_id) = sub.items.data.first()
+                                                                        .and_then(|item| item.price.as_ref())
+                                                                        .map(|price| price.id.to_string())
+                                                                    {
+                                                                        let sub_info = extract_subscription_info(&price_id);
+                                                                        let _ = state.user_repository.set_subscription_tier(created_user.id, Some(sub_info.tier));
+
+                                                                        // Set plan_type from price ID
+                                                                        use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
+                                                                        let plan_type = if is_digest_plan_price(&price_id) {
+                                                                            "digest"
+                                                                        } else if is_byot_plan_price(&price_id) {
+                                                                            "byot"
+                                                                        } else {
+                                                                            "monitor"
+                                                                        };
+                                                                        let _ = state.user_repository.update_plan_type(created_user.id, Some(plan_type));
+                                                                        tracing::info!("Set subscription tier={} and plan_type={} for new user {} from checkout", sub_info.tier, plan_type, created_user.id);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    tracing::error!("Error checking if email exists: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
+                            return Ok(StatusCode::OK);
+                        } else {
+                            // Non-guest subscription checkout (plan upgrade/change)
+                            // Check if this is a plan change by looking at subscription_data metadata
+                            let is_plan_change = session.metadata.as_ref()
+                                .and_then(|m| m.get("plan_change"))
+                                .map(|v| v == "true")
+                                .unwrap_or(false);
+
+                            if is_plan_change {
+                                tracing::info!("Processing plan change checkout session");
+                                if let Some(customer) = &session.customer {
+                                    let customer_id = match customer {
+                                        stripe::Expandable::Id(id) => id.clone(),
+                                        stripe::Expandable::Object(c) => c.id.clone(),
+                                    };
+
+                                    if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                                        // Update plan_type based on the new subscription
+                                        if let Some(subscription) = &session.subscription {
+                                            let sub_id = match subscription {
+                                                stripe::Expandable::Id(id) => id.clone(),
+                                                stripe::Expandable::Object(s) => s.id.clone(),
+                                            };
+                                            if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
+                                                if let Some(price_id) = sub.items.data.first()
+                                                    .and_then(|item| item.price.as_ref())
+                                                    .map(|price| price.id.to_string())
+                                                {
+                                                    use crate::utils::country::{is_digest_plan_price, is_byot_plan_price};
+                                                    let plan_type = if is_digest_plan_price(&price_id) {
+                                                        "digest"
+                                                    } else if is_byot_plan_price(&price_id) {
+                                                        "byot"
+                                                    } else {
+                                                        "monitor"
+                                                    };
+                                                    if let Err(e) = state.user_repository.update_plan_type(user.id, Some(plan_type)) {
+                                                        tracing::error!("Failed to update plan_type during plan change: {}", e);
+                                                    } else {
+                                                        tracing::info!("Updated plan_type to '{}' for user {} during plan change", plan_type, user.id);
+                                                    }
+
+                                                    // Also update subscription tier and credits
+                                                    let sub_info = extract_subscription_info(&price_id);
+                                                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(sub_info.tier)) {
+                                                        tracing::error!("Failed to update subscription tier during plan change: {}", e);
+                                                    }
+
+                                                    // Update credits based on new plan
+                                                    if sub_info.tier == "tier 2" {
+                                                        let messages: f32 = if user.phone_number_country == Some("US".to_string())
+                                                            || user.phone_number_country == Some("CA".to_string()) {
+                                                            200.0
+                                                        } else if is_digest_plan_price(&price_id) {
+                                                            let country = user.phone_number_country.as_deref().unwrap_or("FI");
+                                                            calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await
+                                                        } else {
+                                                            let country = user.phone_number_country.as_deref().unwrap_or("FI");
+                                                            calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await
+                                                        };
+                                                        if let Err(e) = state.user_repository.update_sub_credits(user.id, messages) {
+                                                            tracing::error!("Failed to update subscription credits during plan change: {}", e);
+                                                        } else {
+                                                            tracing::info!("Updated monthly credits to {} for user {} during plan change", messages, user.id);
+                                                        }
+                                                    }
+
+                                                    // Update next billing date
+                                                    if let Err(e) = state.user_core.update_next_billing_date(user.id, sub.current_period_end as i32) {
+                                                        tracing::error!("Failed to update next billing date during plan change: {}", e);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            return Ok(StatusCode::OK);
                         }
-                        let payment_intent = session.payment_intent.as_ref()
-                            .ok_or_else(|| (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": "No payment intent in session"})),
-                            ))?;
-                        // Retrieve the payment method from the payment intent
-                        let payment_intent_id = match payment_intent {
-                            stripe::Expandable::Id(id) => id.clone(),
-                            stripe::Expandable::Object(pi) => pi.id.clone(),
-                        };
-                      
-                        tracing::info!("Payment intent ID found");
-                        let payment_intent = PaymentIntent::retrieve(&client, &payment_intent_id, &[])
+                    }
+                    // Payment mode (credit pack purchases) - not subscription mode
+                    if let Some(customer) = &session.customer {
+                    let customer_id = match customer {
+                        stripe::Expandable::Id(id) => id.clone(),
+                        stripe::Expandable::Object(customer) => customer.id.clone(),
+                    };
+                    tracing::info!("Customer ID: {}", customer_id);
+                    // Update customer address with billing address from Checkout
+                    if let Some(billing_details) = &session.shipping_details {
+                        if let Some(address) = &billing_details.address {
+                            tracing::info!("Updating customer address with billing details");
+                            Customer::update(
+                                &client,
+                                &customer_id,
+                                stripe::UpdateCustomer {
+                                    address: Some(stripe::Address {
+                                        line1: address.line1.clone(),
+                                        city: address.city.clone(),
+                                        country: address.country.clone(),
+                                        postal_code: address.postal_code.clone(),
+                                        state: address.state.clone(),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                },
+                            )
                             .await
+                            .map_err(|e| {
+                                tracing::error!("Failed to update customer address: {}", e);
+                                // Continue processing even if address update fails (non-critical)
+                            })
+                            .ok();
+                        }
+                    }
+                    let payment_intent = session.payment_intent.as_ref()
+                        .ok_or_else(|| (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "No payment intent in session"})),
+                        ))?;
+                    // Retrieve the payment method from the payment intent
+                    let payment_intent_id = match payment_intent {
+                        stripe::Expandable::Id(id) => id.clone(),
+                        stripe::Expandable::Object(pi) => pi.id.clone(),
+                    };
+
+                    tracing::info!("Payment intent ID found");
+                    let payment_intent = PaymentIntent::retrieve(&client, &payment_intent_id, &[])
+                        .await
+                        .map_err(|e| (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": format!("Failed to retrieve PaymentIntent: {}", e)})),
+                        ))?;
+                    if let Some(payment_method) = payment_intent.payment_method {
+                        // Extract the payment method ID from the Expandable enum
+                        let payment_method_id = match payment_method {
+                            stripe::Expandable::Id(id) => id,
+                            stripe::Expandable::Object(pm) => pm.id.clone(),
+                        };
+
+                        // Save the payment method ID to your database for the customer
+                        let user = state
+                            .user_repository
+                            .find_by_stripe_customer_id(&customer_id)
                             .map_err(|e| (
                                 StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": format!("Failed to retrieve PaymentIntent: {}", e)})),
+                                Json(json!({"error": format!("Database error: {}", e)})),
+                            ))?
+                            .ok_or_else(|| (
+                                StatusCode::NOT_FOUND,
+                                Json(json!({"error": "Customer not found"})),
                             ))?;
-                        if let Some(payment_method) = payment_intent.payment_method {
-                            // Extract the payment method ID from the Expandable enum
-                            let payment_method_id = match payment_method {
-                                stripe::Expandable::Id(id) => id,
-                                stripe::Expandable::Object(pm) => pm.id.clone(),
-                            };
-                          
-                            // Save the payment method ID to your database for the customer
-                            let user = state
-                                .user_repository
-                                .find_by_stripe_customer_id(&customer_id)
-                                .map_err(|e| (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": format!("Database error: {}", e)})),
-                                ))?
-                                .ok_or_else(|| (
-                                    StatusCode::NOT_FOUND,
-                                    Json(json!({"error": "Customer not found"})),
-                                ))?;
-                            tracing::info!("Found user with ID: {}", user.id);
-                            state
-                                .user_repository
-                                .set_stripe_payment_method_id(user.id, &payment_method_id)
-                                .map_err(|e| (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": format!("Database error: {}", e)})),
-                                ))?;
-                            tracing::info!("Successfully saved payment method ID for user");
-                            let amount_in_cents = session.amount_subtotal.unwrap_or(0);
-                            let amount = amount_in_cents as f32 / 100.00;
-                            state
-                                .user_repository
-                                .increase_credits(user.id, amount)
-                                .map_err(|e| (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": format!("Database error: {}", e)})),
-                                ))?;
-                            tracing::info!("Increased the credits amount by {} successfully", amount);
+                        tracing::info!("Found user with ID: {}", user.id);
+                        state
+                            .user_repository
+                            .set_stripe_payment_method_id(user.id, &payment_method_id)
+                            .map_err(|e| (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Database error: {}", e)})),
+                            ))?;
+                        tracing::info!("Successfully saved payment method ID for user");
+                        let amount_in_cents = session.amount_subtotal.unwrap_or(0);
+                        let amount = amount_in_cents as f32 / 100.00;
+                        state
+                            .user_repository
+                            .increase_credits(user.id, amount)
+                            .map_err(|e| (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Database error: {}", e)})),
+                            ))?;
+                        tracing::info!("Increased the credits amount by {} successfully", amount);
+
+                        // Track credit pack purchase for refund eligibility
+                        let now = chrono::Utc::now().timestamp() as i32;
+                        if let Err(e) = state.user_repository.update_last_credit_pack_purchase(user.id, amount, now) {
+                            tracing::warn!("Failed to track credit pack purchase for refund: {}", e);
                         }
                     }
+                }
                 },
                 _ => {
                     tracing::error!("Checkout session not found in event object");

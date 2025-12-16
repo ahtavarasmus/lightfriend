@@ -4,6 +4,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use crate::utils::api::Api;
+use crate::components::feature_preview::FeaturePreview;
 use serde::Deserialize;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -1277,6 +1278,12 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             // Check subscription tier
             if props.sub_tier == Some("tier 2".to_string()) || props.sub_tier == Some("tier 3".to_string()) {
                 if !*tesla_connected {
+                    <FeaturePreview
+                        gif_src="/assets/previews/tesla-controls-preview.gif"
+                        caption="Control your Tesla from the dashboard - lock, climate, defrost, and more"
+                        badge_text="Preview"
+                        max_width={380}
+                    />
                     <button
                         class="connect-button"
                         onclick={onclick_connect}

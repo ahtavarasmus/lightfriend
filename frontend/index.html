@@ -79,8 +79,181 @@
           integrity="sha384-WUKfUKJWWozTO86fecAQl5HFU+mPCfwD/8YKsZivWNSWM2B7aFDZWGO9671FxUcq"
           crossorigin="anonymous"
         ></script>
-        <script defer src="https://js.stripe.com/v3/"></script> 
+        <script defer src="https://js.stripe.com/v3/"></script>
         <link rel="preload" href="/wasm-support.js" as="script">
         <link rel="preload" href="/assets/inter-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+
+        <!-- ElevenLabs Conversational AI SDK -->
+        <script type="module">
+            import { Conversation } from 'https://cdn.jsdelivr.net/npm/@11labs/client@latest/+esm';
+
+            console.log('ElevenLabs SDK loaded');
+
+            // Store the active conversation instance
+            window._elevenLabsConversation = null;
+            window._elevenLabsCallStartTime = null;
+            window._elevenLabsCallStatus = 'disconnected';
+            window._elevenLabsOnStatusChange = null;
+
+            // Start a web call with signed URL and overrides
+            window.startElevenLabsCall = async function(signedUrl, overrides) {
+                console.log('startElevenLabsCall called with URL:', signedUrl ? signedUrl.substring(0, 50) + '...' : 'null');
+                console.log('Overrides:', overrides);
+                try {
+                    // Request microphone permission
+                    console.log('Requesting microphone permission...');
+                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                    console.log('Microphone permission granted');
+
+                    window._elevenLabsCallStatus = 'connecting';
+                    window._elevenLabsCallStartTime = Date.now(); // Start timer immediately
+                    if (window._elevenLabsOnStatusChange) {
+                        window._elevenLabsOnStatusChange('connecting');
+                    }
+
+                    console.log('Starting ElevenLabs session...');
+                    const sessionConfig = {
+                        signedUrl: signedUrl,
+                        onConnect: () => {
+                            console.log('ElevenLabs call connected!');
+                            window._elevenLabsCallStatus = 'connected';
+                            if (window._elevenLabsOnStatusChange) {
+                                window._elevenLabsOnStatusChange('connected');
+                            }
+                        },
+                        onDisconnect: () => {
+                            console.log('ElevenLabs call disconnected');
+                            window._elevenLabsCallStatus = 'disconnected';
+                            if (window._elevenLabsOnStatusChange) {
+                                window._elevenLabsOnStatusChange('disconnected');
+                            }
+                        },
+                        onError: (error) => {
+                            console.error('ElevenLabs call error:', error);
+                            window._elevenLabsCallStatus = 'error';
+                            if (window._elevenLabsOnStatusChange) {
+                                window._elevenLabsOnStatusChange('error');
+                            }
+                        },
+                        onMessage: (message) => {
+                            console.log('ElevenLabs message:', message);
+                        },
+                        onModeChange: (mode) => {
+                            console.log('ElevenLabs mode changed:', mode);
+                        },
+                        onStatusChange: (status) => {
+                            console.log('ElevenLabs status changed:', status);
+                        }
+                    };
+
+                    // Helper to convert Map objects to plain objects (serde_wasm_bindgen creates Maps)
+                    function mapToObject(item) {
+                        if (item instanceof Map) {
+                            const obj = {};
+                            item.forEach((value, key) => {
+                                obj[key] = mapToObject(value);
+                            });
+                            return obj;
+                        } else if (Array.isArray(item)) {
+                            return item.map(mapToObject);
+                        } else {
+                            return item;
+                        }
+                    }
+
+                    // Add overrides if provided - dynamicVariables goes at TOP LEVEL, not inside overrides
+                    if (overrides) {
+                        // Convert Maps to plain objects
+                        const plainOverrides = mapToObject(overrides);
+                        console.log('Processing overrides:', JSON.stringify(plainOverrides, null, 2));
+
+                        // dynamicVariables must be at top level per ElevenLabs SDK docs
+                        if (plainOverrides.dynamicVariables) {
+                            sessionConfig.dynamicVariables = plainOverrides.dynamicVariables;
+                            console.log('Set dynamicVariables at top level:', sessionConfig.dynamicVariables);
+                        }
+
+                        // agent and tts stay inside overrides
+                        const actualOverrides = {};
+                        if (plainOverrides.agent) {
+                            actualOverrides.agent = plainOverrides.agent;
+                        }
+                        if (plainOverrides.tts) {
+                            actualOverrides.tts = plainOverrides.tts;
+                        }
+                        if (plainOverrides.conversation) {
+                            actualOverrides.conversation = plainOverrides.conversation;
+                        }
+
+                        if (Object.keys(actualOverrides).length > 0) {
+                            sessionConfig.overrides = actualOverrides;
+                            console.log('Set overrides:', JSON.stringify(actualOverrides, null, 2));
+                        }
+                    }
+
+                    const conversation = await Conversation.startSession(sessionConfig);
+
+                    console.log('ElevenLabs session started successfully');
+                    console.log('Conversation object:', conversation);
+                    console.log('Conversation methods:', Object.keys(conversation));
+                    window._elevenLabsConversation = conversation;
+
+                    // Try to get the conversation ID if available
+                    if (conversation.getId) {
+                        console.log('Conversation ID:', conversation.getId());
+                    }
+
+                    return true;
+                } catch (error) {
+                    console.error('Failed to start ElevenLabs call:', error);
+                    window._elevenLabsCallStatus = 'error';
+                    window._elevenLabsCallStartTime = null;
+                    if (window._elevenLabsOnStatusChange) {
+                        window._elevenLabsOnStatusChange('error');
+                    }
+                    return false;
+                }
+            };
+
+            // End the active call
+            window.endElevenLabsCall = async function() {
+                console.log('endElevenLabsCall called');
+                if (window._elevenLabsConversation) {
+                    try {
+                        await window._elevenLabsConversation.endSession();
+                        console.log('Session ended');
+                    } catch (e) {
+                        console.error('Error ending call:', e);
+                    }
+                    window._elevenLabsConversation = null;
+                }
+                const duration = window.getElevenLabsCallDuration();
+                console.log('Call duration:', duration, 'seconds');
+                window._elevenLabsCallStartTime = null;
+                window._elevenLabsCallStatus = 'disconnected';
+                return duration;
+            };
+
+            // Get current call duration in seconds
+            window.getElevenLabsCallDuration = function() {
+                if (!window._elevenLabsCallStartTime) return 0;
+                return Math.floor((Date.now() - window._elevenLabsCallStartTime) / 1000);
+            };
+
+            // Check if call is active
+            window.isElevenLabsCallActive = function() {
+                return window._elevenLabsCallStatus === 'connected' || window._elevenLabsCallStatus === 'connecting';
+            };
+
+            // Get current call status
+            window.getElevenLabsCallStatus = function() {
+                return window._elevenLabsCallStatus;
+            };
+
+            // Set status change callback
+            window.setElevenLabsStatusCallback = function(callback) {
+                window._elevenLabsOnStatusChange = callback;
+            };
+        </script>
     </body>
 </html>

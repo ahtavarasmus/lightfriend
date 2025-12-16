@@ -105,7 +105,24 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"9. Vehicle Integration (Tesla)"}</h2>
+                <h2>{"9. YouTube Integration and OAuth"}</h2>
+                <p>{"Lightfriend provides an intentional YouTube viewing experience through our web dashboard, designed for users who want to access YouTube content without algorithmic recommendations, infinite scroll, or autoplay. This feature uses YouTube API Services."}</p>
+                <ul>
+                    <li><strong>{"YouTube API Services: "}</strong>{"This application uses YouTube API Services. By using the YouTube features, you are also agreeing to be bound by the "}<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{"YouTube Terms of Service"}</a>{"."}</li>
+                    <li><strong>{"Google Privacy Policy: "}</strong>{"Google's Privacy Policy applies to your use of YouTube through our service. Please review the "}<a href="http://www.google.com/policies/privacy" target="_blank" rel="noopener noreferrer">{"Google Privacy Policy"}</a>{"."}</li>
+                    <li><strong>{"Data We Access (Read-Only): "}</strong>{"With your authorization via the youtube.readonly scope, we access: your YouTube subscriptions list to display recent videos from channels you follow, video metadata (titles, thumbnails, descriptions, view counts), and the ability to search YouTube on your behalf."}</li>
+                    <li><strong>{"Data We Access (Extended Permissions): "}</strong>{"If you choose to enable extended permissions via the youtube.force-ssl scope, we can additionally: subscribe/unsubscribe from channels on your behalf, read and post comments, and like/dislike videos. These actions are only performed when you explicitly request them through our interface."}</li>
+                    <li><strong>{"Tokens We Store: "}</strong>{"Upon your authorization, we store an encrypted access token and refresh token in our secure database. These tokens enable Lightfriend to access YouTube on your behalf when you use our dashboard."}</li>
+                    <li><strong>{"What We Don't Store: "}</strong>{"We do not store your YouTube videos, watch history, search history, or any content beyond the encrypted authentication tokens necessary for the integration."}</li>
+                    <li><strong>{"Usage: "}</strong>{"The stored tokens are used exclusively to authenticate with YouTube API when you actively use the YouTube features in our dashboard. We do not access your YouTube data in the background or use it to train AI models."}</li>
+                    <li><strong>{"Sharing: "}</strong>{"We do not share your YouTube data or tokens with third parties, except as required by law."}</li>
+                    <li><strong>{"Revoking Access: "}</strong>{"You can disconnect YouTube from Lightfriend at any time through your account settings. You can also revoke Lightfriend's access to your Google account at any time by visiting your "}<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">{"Google Security Settings"}</a>{". Upon revocation through Lightfriend, your tokens are deleted and revoked immediately. Upon revocation through Google Security Settings, we will delete your tokens within 30 days."}</li>
+                    <li><strong>{"Contact: "}</strong>{"For questions about our YouTube integration privacy practices, contact rasmus@ahtava.com."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"10. Vehicle Integration (Tesla)"}</h2>
                 <p>{"Lightfriend offers integration with Tesla vehicles to allow remote vehicle control via SMS or voice commands. BY USING THIS FEATURE, YOU ACKNOWLEDGE AND ACCEPT THE FOLLOWING:"}</p>
                 <ul>
                     <li>{"We store encrypted OAuth tokens to access your Tesla account on your behalf."}</li>
@@ -119,7 +136,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"10. Email Integration (IMAP)"}</h2>
+                <h2>{"11. Email Integration (IMAP)"}</h2>
                 <p>{"Lightfriend can connect to your email account to monitor and notify you of important messages."}</p>
                 <ul>
                     <li>{"We store encrypted credentials (server, port, password) to access your email."}</li>
@@ -130,7 +147,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"11. Other Third-Party Services"}</h2>
+                <h2>{"12. Other Third-Party Services"}</h2>
                 <p>{"Lightfriend may integrate with additional third-party services not explicitly listed above. For all such integrations:"}</p>
                 <ul>
                     <li>{"We store only the credentials necessary for access, encrypted at rest."}</li>
@@ -142,7 +159,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"12. Data Retention"}</h2>
+                <h2>{"13. Data Retention"}</h2>
                 <p>{"We retain your data until:"}</p>
                 <ul>
                     <li>{"You request account deletion"}</li>
@@ -152,7 +169,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"13. Contact Information"}</h2>
+                <h2>{"14. Contact Information"}</h2>
                 <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
                 <p>{"Email: rasmus@ahtava.com"}</p>
                 <p>{"Location: Tampere, Finland"}</p>
@@ -277,7 +294,19 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"10. Messaging Services"}</h2>
+                <h2>{"10. YouTube Integration"}</h2>
+                <p>{"Lightfriend provides an intentional YouTube viewing experience through our web dashboard, designed for users who prefer to access YouTube without algorithmic recommendations, infinite scroll, or autoplay. By using the YouTube integration:"}</p>
+                <ul>
+                    <li>{"You agree to be bound by the "}<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{"YouTube Terms of Service"}</a>{"."}</li>
+                    <li>{"You authorize Lightfriend to access your YouTube account data as described in our Privacy Policy."}</li>
+                    <li>{"If you enable extended permissions, any actions taken through our YouTube features (subscribing, commenting, rating) are performed on your behalf at your explicit request, and you accept full responsibility for them."}</li>
+                    <li>{"Lightfriend is not responsible for any content on YouTube or actions taken by YouTube/Google."}</li>
+                    <li>{"You may revoke access at any time through your Lightfriend account settings or your "}<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">{"Google Security Settings"}</a>{"."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"11. Messaging Services"}</h2>
                 <p>{"The Service integrates with messaging platforms including WhatsApp, Signal, and Telegram. By using these features:"}</p>
                 <ul>
                     <li>{"You are solely responsible for all message content sent through the Service."}</li>
@@ -288,7 +317,7 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"11. Indemnification"}</h2>
+                <h2>{"12. Indemnification"}</h2>
                 <p>{"You agree to indemnify, defend, and hold harmless Lightfriend, its owners, employees, and affiliates from any claims, damages, losses, or expenses (including legal fees) arising from:"}</p>
                 <ul>
                     <li>{"Your use of the Service or any connected integrations."}</li>
@@ -299,22 +328,22 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"12. Changes to Terms"}</h2>
+                <h2>{"13. Changes to Terms"}</h2>
                 <p>{"We may update these Terms from time to time. Continued use of the Service after any such changes constitutes your acceptance of the new Terms."}</p>
             </section>
 
             <section>
-                <h2>{"13. Governing Law"}</h2>
+                <h2>{"14. Governing Law"}</h2>
                 <p>{"These Terms are governed by and construed in accordance with the laws of Finland. Any disputes shall be resolved in the courts of Tampere, Finland."}</p>
             </section>
 
             <section>
-                <h2>{"14. Data Protection and Privacy"}</h2>
+                <h2>{"15. Data Protection and Privacy"}</h2>
                 <p>{"Your privacy and personal data are protected under our Privacy Policy, which forms an integral part of these Terms. By using the Service, you acknowledge that you have read and understood our Privacy Policy and consent to the collection and processing of your personal data as described therein."}</p>
             </section>
 
             <section>
-                <h2>{"15. Contact Us"}</h2>
+                <h2>{"16. Contact Us"}</h2>
                 <p>
                     {"For questions or concerns regarding these Terms, please contact us at "}
                     <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>

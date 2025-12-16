@@ -410,8 +410,7 @@ pub async fn handle_search_chat_contacts(
         }
         Err(e) => {
             eprintln!("Failed to search rooms: {}", e);
-            let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-            format!("Failed to search contacts. Please make sure you're connected to {} bridge.", capitalized_platform)
+            e.to_string()
         }
     }
 }
@@ -482,8 +481,7 @@ pub async fn handle_fetch_chat_messages(
         }
         Err(e) => {
             eprintln!("Failed to fetch chat messages: {}", e);
-            let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-            format!("Failed to fetch messages from '{}'. Please make sure you're connected to {} bridge and the chat exists.", args.chat_name, capitalized_platform)
+            e.to_string()
         }
     }
 }
@@ -562,7 +560,7 @@ pub async fn handle_fetch_recent_messages(
         }
         Err(e) => {
             eprintln!("Failed to fetch messages: {}", e);
-            format!("Failed to fetch messages. Please make sure you're connected to {} bridge.", capitalized_platform)
+            e.to_string()
         }
     }
 }

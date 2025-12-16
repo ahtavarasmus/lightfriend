@@ -48,12 +48,21 @@ pub fn get_weather_tool() -> openai_api_rs::v1::chat_completion::Tool {
             ..Default::default()
         }),
     );
+    weather_properties.insert(
+        "forecast_type".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Type of forecast: 'current' for just current conditions, 'hourly' for next 24 hours (use for tomorrow/tonight queries), 'daily' for 7-day forecast (use for week queries). Default: 'current'".to_string()),
+            enum_values: Some(vec!["current".to_string(), "hourly".to_string(), "daily".to_string()]),
+            ..Default::default()
+        }),
+    );
 
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("get_weather"),
-            description: Some(String::from("Fetches the current weather for the given location. The AI should use the user's home location from user info if none is specified in the query.")),
+            description: Some(String::from("Fetches weather forecast for the given location. Use forecast_type to get current conditions, hourly forecast (next 24h), or daily forecast (7 days). The AI should use the user's home location from user info if none is specified in the query.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(weather_properties),

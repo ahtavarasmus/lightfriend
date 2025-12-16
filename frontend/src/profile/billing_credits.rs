@@ -9,7 +9,9 @@ use crate::profile::billing_models::{ // Import from the new file
     ApiResponse,
     UserProfile,
     UsageProjection,
-    MIN_TOPUP_AMOUNT_CREDITS
+    MIN_TOPUP_AMOUNT_CREDITS,
+    RefundEligibilityResponse,
+    RefundRequestResponse,
 };
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
@@ -39,6 +41,15 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     // Usage projection state
     let usage_projection = use_state(|| None::<UsageProjection>);
 
+    // State for cycling through quota display metrics (notifications, voice, messages, digests)
+    let quota_display_index = use_state(|| 0_usize);
+
+    // Refund-related states
+    let refund_eligibility = use_state(|| None::<RefundEligibilityResponse>);
+    let refund_loading = use_state(|| false);
+    let refund_processing = use_state(|| false);
+    let show_refund_confirm = use_state(|| false);
+
     // Fetch usage projection on mount (only once)
     {
         let usage_projection = usage_projection.clone();
@@ -59,6 +70,34 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         web_sys::console::log_1(&format!("Failed to fetch usage projection: {:?}", e).into());
                     }
                 }
+            });
+            || ()
+        }, ());
+    }
+
+    // Fetch refund eligibility on mount
+    {
+        let refund_eligibility = refund_eligibility.clone();
+        let refund_loading = refund_loading.clone();
+        use_effect_with_deps(move |_| {
+            refund_loading.set(true);
+            spawn_local(async move {
+                match Api::get("/api/refund/eligibility")
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<RefundEligibilityResponse>().await {
+                                refund_eligibility.set(Some(data));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        web_sys::console::log_1(&format!("Failed to fetch refund eligibility: {:?}", e).into());
+                    }
+                }
+                refund_loading.set(false);
             });
             || ()
         }, ());
@@ -459,6 +498,65 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             });
         })
     };
+
+    // Handle refund request
+    let handle_refund_request = {
+        let error = error.clone();
+        let success = success.clone();
+        let refund_processing = refund_processing.clone();
+        let show_refund_confirm = show_refund_confirm.clone();
+        let refund_eligibility = refund_eligibility.clone();
+
+        Callback::from(move |_| {
+            let error = error.clone();
+            let success = success.clone();
+            let refund_processing = refund_processing.clone();
+            let show_refund_confirm = show_refund_confirm.clone();
+            let refund_eligibility = refund_eligibility.clone();
+
+            refund_processing.set(true);
+            show_refund_confirm.set(false);
+
+            spawn_local(async move {
+                match Api::post("/api/refund/request")
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if let Ok(data) = response.json::<RefundRequestResponse>().await {
+                            if data.success {
+                                success.set(Some(data.message));
+                                // Update eligibility to show already refunded
+                                if let Some(mut elig) = (*refund_eligibility).clone() {
+                                    elig.already_refunded = true;
+                                    elig.eligible = false;
+                                    elig.reason = "You have already received a refund.".to_string();
+                                    refund_eligibility.set(Some(elig));
+                                }
+                            } else {
+                                error.set(Some(data.message));
+                            }
+                        } else {
+                            error.set(Some("Failed to process refund".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        error.set(Some(format!("Network error: {:?}", e)));
+                    }
+                }
+                refund_processing.set(false);
+                // Clear messages after delay
+                let error_clone = error.clone();
+                let success_clone = success.clone();
+                spawn_local(async move {
+                    TimeoutFuture::new(5_000).await;
+                    error_clone.set(None);
+                    success_clone.set(None);
+                });
+            });
+        })
+    };
+
     html! {
         <>
         <div class="profile-info">
@@ -466,8 +564,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 {
                     html! {
                         <>
-                            // Usage Projection Section
+                            // Usage Projection Section - only show if user has an active subscription
                             {
+                                if user_profile.sub_tier.is_some() {
                                 if let Some(projection) = (*usage_projection).as_ref() {
                                     let percentage = projection.usage_percentage.min(100.0);
                                     let bar_color = if projection.usage_percentage <= 60.0 {
@@ -535,8 +634,113 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         && projection.total_usage_per_month <= 40
                                         && projection.overage.is_none();
 
+                                    // === ACTUAL QUOTA DISPLAY - Build list of available metrics ===
+                                    // Each metric: (label, used, capacity)
+                                    let mut quota_metrics: Vec<(&str, i32, i32)> = vec![
+                                        ("notifications", projection.actual_notifications_used, projection.plan_capacity * 3), // plan_capacity is in units, notifications are 3x
+                                    ];
+
+                                    // Only add voice if user has voice usage
+                                    if projection.actual_voice_mins_used > 0 || projection.avg_voice_mins_per_day > 0.0 {
+                                        // Voice capacity is roughly plan_capacity * 2 (since voice is ~1.5 units per minute)
+                                        let voice_capacity = projection.plan_capacity * 2;
+                                        quota_metrics.push(("voice minutes", projection.actual_voice_mins_used, voice_capacity));
+                                    }
+
+                                    // Only add messages if NOT notification-only country
+                                    if !projection.is_notification_only {
+                                        // Messages capacity is roughly plan_capacity (1 message = 1 unit)
+                                        let messages_capacity = projection.plan_capacity;
+                                        quota_metrics.push(("messages", projection.actual_messages_used, messages_capacity));
+                                    }
+
+                                    // Only add digests if user has active digests
+                                    if projection.digest_count > 0 {
+                                        // Digests capacity is plan_capacity (1 digest = 1 unit)
+                                        let digests_capacity = projection.plan_capacity;
+                                        quota_metrics.push(("digests", projection.actual_digests_used, digests_capacity));
+                                    }
+
+                                    let current_index = *quota_display_index % quota_metrics.len().max(1);
+                                    let (metric_label, metric_used, metric_capacity) = quota_metrics.get(current_index)
+                                        .copied()
+                                        .unwrap_or(("notifications", 0, projection.plan_capacity * 3));
+                                    let metric_remaining = (metric_capacity - metric_used).max(0);
+                                    let metric_percentage = if metric_capacity > 0 {
+                                        (metric_remaining as f32 / metric_capacity as f32) * 100.0
+                                    } else {
+                                        100.0
+                                    };
+
+                                    // Color based on percentage remaining
+                                    let quota_color = if metric_percentage >= 25.0 {
+                                        "#4ade80" // green
+                                    } else if metric_percentage >= 10.0 {
+                                        "#fbbf24" // yellow
+                                    } else {
+                                        "#ef4444" // red
+                                    };
+
+                                    // Click handler to cycle through metrics
+                                    let metrics_len = quota_metrics.len();
+                                    let cycle_quota_metric = {
+                                        let quota_display_index = quota_display_index.clone();
+                                        Callback::from(move |_: web_sys::MouseEvent| {
+                                            quota_display_index.set((*quota_display_index + 1) % metrics_len.max(1));
+                                        })
+                                    };
+
                                     html! {
                                         <div class="section-container usage-projection-section">
+                                            // Remaining usage section - its own card above the projection
+                                            <div class="usage-projection-card" style="margin-bottom: 16px;">
+                                                <div class="usage-header">
+                                                    <h3>{"Remaining This Month"}</h3>
+                                                </div>
+                                                <div
+                                                    style={format!("padding: 8px 12px; background: {}1a; border-radius: 6px; cursor: pointer;", quota_color)}
+                                                    onclick={cycle_quota_metric}
+                                                >
+                                                    <span style={format!("color: {}; font-weight: 500;", quota_color)}>
+                                                        {format!("{} of {} ", metric_used, metric_capacity)}
+                                                    </span>
+                                                    <span style={format!("color: {}; font-weight: 500; text-decoration: underline;", quota_color)}>
+                                                        {metric_label}
+                                                    </span>
+                                                    <span style={format!("color: {}; font-weight: 500;", quota_color)}>
+                                                        {" used"}
+                                                    </span>
+                                                    {
+                                                        if quota_metrics.len() > 1 {
+                                                            html! {
+                                                                <span style="color: #888; font-size: 0.8rem; margin-left: 8px;">
+                                                                    {"(click to see equivalents)"}
+                                                                </span>
+                                                            }
+                                                        } else {
+                                                            html! {}
+                                                        }
+                                                    }
+                                                </div>
+                                                // Quota reset date
+                                                {
+                                                    if let Some(days) = projection.days_until_billing {
+                                                        let billing_date = chrono::Utc::now() + chrono::Duration::days(days as i64);
+                                                        let formatted_date = billing_date.format("%B %d, %Y").to_string();
+                                                        html! {
+                                                            <div style="margin-top: 8px; color: #888; font-size: 0.85rem;">
+                                                                {"Quota resets on "}
+                                                                <span style="color: #ccc; font-weight: 500;">{formatted_date}</span>
+                                                                {format!(" ({} days)", days)}
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                            </div>
+
+                                            // Projected usage card
                                             <div class="usage-projection-card">
                                                 <div class="usage-header">
                                                     <h3>
@@ -550,6 +754,19 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         }
                                                     </h3>
                                                     <span class="usage-percentage">{format!("{:.0}%", projection.usage_percentage)}</span>
+                                                </div>
+
+                                                // Explanation text
+                                                <div style="margin-bottom: 12px; color: #888; font-size: 0.8rem;">
+                                                    {
+                                                        if projection.digest_count > 0 {
+                                                            format!("Based on your average usage pattern and {} scheduled digest{}",
+                                                                projection.digest_count,
+                                                                if projection.digest_count == 1 { "" } else { "s" })
+                                                        } else {
+                                                            "Based on your average usage pattern".to_string()
+                                                        }
+                                                    }
                                                 </div>
 
                                                 // Segmented progress bar
@@ -641,10 +858,11 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                                         {format!("Estimated extra: ~{:.0}EUR/month (covered by auto top-up)", overage.estimated_cost_euros)}
                                                                     </div>
                                                                 }
-                                                            } else if projection.plan_type.as_deref() == Some("monitor") {
+                                                            } else if projection.plan_type.as_deref() == Some("monitor") || user_profile.plan_type.as_deref() == Some("monitor") {
+                                                                // Monitor plan users cannot buy overage credits - suggest upgrade
                                                                 html! {
                                                                     <div style="color: #fbbf24; font-size: 0.9rem;">
-                                                                        {"Over limit - reduce digests or upgrade to Digest plan"}
+                                                                        {format!("~{:.0}EUR over limit - upgrade to Digest plan for more capacity + overage credits", overage.estimated_cost_euros)}
                                                                     </div>
                                                                 }
                                                             } else if projection.overage_credits > 0.0 {
@@ -742,24 +960,31 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 } else {
                                     html! {}
                                 }
+                                } else {
+                                    html! {}
+                                }
                             }
 
-                            // Purchased Credits
-                            <div class="section-container">
-                                <div class="credits-grid">
-                                    <div class="credits-header">{"Purchased Overage Credits"}</div>
-                                    <div class="tooltip">
-                                        {"These are the overage credits you've purchased. They don't expire and can be used for voice calls, messages or to receive priority sender notifications when monthly Message quota is used up. Check overage costs in the pricing page."}
-                                    </div>
-                                    <div class="credits-amount">
-                                        <span class="amount">{format!("{:.2}€", one_time_credits)}</span>
-                                    </div>
+                            // Purchased Credits & Payment Management - unified card style
+                            <div class="usage-projection-card" style="margin-top: 16px;">
+                                <div class="usage-header">
+                                    <h3>{"Overage Credits"}</h3>
+                                    <span class="usage-percentage" style="font-size: 1.2rem;">{format!("{:.2}€", one_time_credits)}</span>
                                 </div>
-                            </div>
-                           
-                            <div class="auto-topup-container">
+                                <div style="margin-bottom: 12px; color: #888; font-size: 0.8rem;">
+                                    {"One-time purchased credits that don't expire. Used for voice calls, messages, or notifications when monthly quota is exhausted."}
+                                </div>
+
+                                <div class="auto-topup-container" style="margin-top: 12px; padding: 0;">
                                 {
-                                    if user_profile.sub_tier.is_some() || user_profile.discount {
+                                    // Monitor plan users cannot buy overage credits
+                                    if user_profile.plan_type.as_deref() == Some("monitor") {
+                                        html! {
+                                            <div class="tooltip" style="color: #888; font-size: 0.85rem;">
+                                                {"Overage credits are available on the Digest plan. Upgrade to get more capacity and the ability to buy extra credits."}
+                                            </div>
+                                        }
+                                    } else if user_profile.sub_tier.is_some() || user_profile.discount {
                                         html! {
                                             <>
                                                 if user_profile.stripe_payment_method_id.is_some() {
@@ -792,7 +1017,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 >
                                                     {"Buy Credits"}
                                                 </button>
-                                               
+
                                             </div>
                                             <div class="tooltip">
                                                     {"Subscribe to a plan to enable overage credit purchases. Overage credits allow you to make more voice calls and send more messages even after your quota is used."}
@@ -800,14 +1025,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     </>
                                         }
                                     }
-                                }
-                                if user_profile.stripe_payment_method_id.is_some() || user_profile.sub_tier.is_some() {
-                                    <button
-                                        class="customer-portal-button"
-                                        onclick={open_customer_portal.clone()}
-                                    >
-                                        {"Manage Payments"}
-                                    </button>
                                 }
                                 {
                                     if *show_auto_topup_modal {
@@ -1071,7 +1288,17 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         html! {}
                                     }
                                 }
+                                </div>
                             </div>
+                            if user_profile.stripe_payment_method_id.is_some() || user_profile.sub_tier.is_some() {
+                                <button
+                                    class="customer-portal-button"
+                                    onclick={open_customer_portal.clone()}
+                                    style="margin-top: 16px;"
+                                >
+                                    {"Manage Payments"}
+                                </button>
+                            }
                         </>
                     }
                 }
@@ -1079,6 +1306,114 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     //<PaymentMethodButton user_id={user_profile.id} />
                 </div>
                 //<UsageGraph user_id={user_profile.id} />
+
+                // Refund Section
+                <div class="refund-section">
+                    <h3 class="refund-title">{"Refund"}</h3>
+                    {
+                        if *refund_loading {
+                            html! {
+                                <div class="refund-loading">
+                                    {"Checking refund eligibility..."}
+                                </div>
+                            }
+                        } else if let Some(elig) = (*refund_eligibility).as_ref() {
+                            html! {
+                                <div class="refund-content">
+                                    {
+                                        if elig.already_refunded {
+                                            html! {
+                                                <div class="refund-status refund-ineligible">
+                                                    <p class="refund-reason">{&elig.reason}</p>
+                                                </div>
+                                            }
+                                        } else if elig.eligible {
+                                            let refund_amount = elig.refund_amount_cents.map(|c| c as f32 / 100.0).unwrap_or(0.0);
+                                            let refund_type = elig.refund_type.as_deref().unwrap_or("subscription");
+                                            let days_left = elig.days_remaining.unwrap_or(0);
+                                            let usage = elig.usage_percent.unwrap_or(0.0);
+
+                                            html! {
+                                                <div class="refund-status refund-eligible">
+                                                    <div class="refund-info">
+                                                        <p class="refund-reason">{&elig.reason}</p>
+                                                        <p class="refund-details">
+                                                            {format!("Refund amount: €{:.2}", refund_amount)}
+                                                        </p>
+                                                        <p class="refund-details">
+                                                            {format!("{} days remaining in refund window", days_left)}
+                                                        </p>
+                                                    </div>
+                                                    {
+                                                        if *show_refund_confirm {
+                                                            let show_refund_confirm = show_refund_confirm.clone();
+                                                            let handle_refund = handle_refund_request.clone();
+                                                            html! {
+                                                                <div class="refund-confirm">
+                                                                    <p>{"Are you sure you want to request a refund? This action cannot be undone."}</p>
+                                                                    <div class="refund-confirm-buttons">
+                                                                        <button
+                                                                            class="refund-cancel-btn"
+                                                                            onclick={Callback::from(move |_| show_refund_confirm.set(false))}
+                                                                        >
+                                                                            {"Cancel"}
+                                                                        </button>
+                                                                        <button
+                                                                            class="refund-confirm-btn"
+                                                                            onclick={handle_refund}
+                                                                            disabled={*refund_processing}
+                                                                        >
+                                                                            {if *refund_processing { "Processing..." } else { "Yes, Refund" }}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                        } else {
+                                                            let show_refund_confirm = show_refund_confirm.clone();
+                                                            html! {
+                                                                <button
+                                                                    class="refund-btn"
+                                                                    onclick={Callback::from(move |_| show_refund_confirm.set(true))}
+                                                                >
+                                                                    {"Request Refund"}
+                                                                </button>
+                                                            }
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {
+                                                <div class="refund-status refund-ineligible">
+                                                    <p class="refund-reason">{&elig.reason}</p>
+                                                    {
+                                                        if let Some(usage) = elig.usage_percent {
+                                                            html! {
+                                                                <p class="refund-details">{format!("Usage: {:.0}%", usage)}</p>
+                                                            }
+                                                        } else {
+                                                            html! {}
+                                                        }
+                                                    }
+                                                    <p class="refund-contact">
+                                                        {"Questions? Contact "}
+                                                        <a href={format!("mailto:{}", &elig.contact_email)}>{&elig.contact_email}</a>
+                                                    </p>
+                                                </div>
+                                            }
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! {
+                                <div class="refund-status">
+                                    <p>{"Unable to check refund eligibility."}</p>
+                                </div>
+                            }
+                        }
+                    }
+                </div>
             </div>
         </div>
         <style>
@@ -1903,6 +2238,115 @@ input:checked + .slider:before {
                 /* Adjust heading margins */
                 h3 {
                     margin: 0;
+                }
+
+                /* Refund Section Styles */
+                .refund-section {
+                    margin-top: 2rem;
+                    padding: 1.5rem;
+                    background: linear-gradient(to bottom, rgba(100, 100, 100, 0.05), rgba(100, 100, 100, 0.02));
+                    border-radius: 12px;
+                    border: 1px solid rgba(100, 100, 100, 0.2);
+                }
+                .refund-title {
+                    font-size: 1.1rem;
+                    margin-bottom: 1rem;
+                    color: #666;
+                }
+                .refund-loading {
+                    color: #888;
+                    font-style: italic;
+                }
+                .refund-content {
+                    padding: 0.5rem 0;
+                }
+                .refund-status {
+                    padding: 1rem;
+                    border-radius: 8px;
+                }
+                .refund-eligible {
+                    background: rgba(76, 175, 80, 0.1);
+                    border: 1px solid rgba(76, 175, 80, 0.3);
+                }
+                .refund-ineligible {
+                    background: rgba(158, 158, 158, 0.1);
+                    border: 1px solid rgba(158, 158, 158, 0.2);
+                }
+                .refund-reason {
+                    font-size: 0.95rem;
+                    margin-bottom: 0.5rem;
+                }
+                .refund-details {
+                    font-size: 0.85rem;
+                    color: #666;
+                    margin: 0.25rem 0;
+                }
+                .refund-contact {
+                    font-size: 0.85rem;
+                    color: #888;
+                    margin-top: 1rem;
+                }
+                .refund-contact a {
+                    color: #1e90ff;
+                    text-decoration: none;
+                }
+                .refund-contact a:hover {
+                    text-decoration: underline;
+                }
+                .refund-btn {
+                    margin-top: 1rem;
+                    padding: 0.75rem 1.5rem;
+                    background: #4CAF50;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 0.95rem;
+                    transition: background 0.2s ease;
+                }
+                .refund-btn:hover {
+                    background: #43a047;
+                }
+                .refund-confirm {
+                    margin-top: 1rem;
+                    padding: 1rem;
+                    background: rgba(255, 152, 0, 0.1);
+                    border: 1px solid rgba(255, 152, 0, 0.3);
+                    border-radius: 8px;
+                }
+                .refund-confirm p {
+                    margin-bottom: 1rem;
+                    color: #e65100;
+                }
+                .refund-confirm-buttons {
+                    display: flex;
+                    gap: 1rem;
+                }
+                .refund-cancel-btn {
+                    padding: 0.5rem 1rem;
+                    background: #9e9e9e;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .refund-cancel-btn:hover {
+                    background: #757575;
+                }
+                .refund-confirm-btn {
+                    padding: 0.5rem 1rem;
+                    background: #f44336;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .refund-confirm-btn:hover {
+                    background: #d32f2f;
+                }
+                .refund-confirm-btn:disabled {
+                    background: #bdbdbd;
+                    cursor: not-allowed;
                 }
                 "#}
         </style>

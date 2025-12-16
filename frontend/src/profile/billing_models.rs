@@ -53,6 +53,7 @@ pub struct UserProfile {
     pub phone_number_country: Option<String>,
     pub server_ip: Option<String>,
     pub plan_type: Option<String>,
+    pub phone_service_active: Option<bool>, // whether phone service is active - can be disabled for security
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -63,6 +64,8 @@ pub struct StripeSetupIntentResponse {
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;
 pub const VOICE_SECOND_COST: f32 = 0.0033;
 pub const MESSAGE_COST: f32 = 0.20;
+pub const WEB_CALL_MINUTE_COST_EUR: f32 = 0.15; // 15 cents per minute for Euro countries
+pub const WEB_CALL_MINUTE_COST_US_CA: f32 = 1.0; // 1 message credit per minute for US/CA
 
 /// Usage projection response - all values in NOTIFICATION UNITS (not currency)
 #[derive(Deserialize, Clone, PartialEq, Debug)]
@@ -130,6 +133,16 @@ pub struct UsageProjection {
     pub overage_credits: f32,
     /// Days overage credits will last at current usage rate
     pub overage_days_remaining: Option<i32>,
+
+    // Actual usage this billing period (not projected)
+    /// Actual notifications used this billing period
+    pub actual_notifications_used: i32,
+    /// Actual voice minutes used this billing period
+    pub actual_voice_mins_used: i32,
+    /// Actual messages sent this billing period
+    pub actual_messages_used: i32,
+    /// Actual digests sent this billing period
+    pub actual_digests_used: i32,
 }
 
 /// Overage information - this is where we show euro amounts
@@ -150,4 +163,25 @@ pub fn format_timestamp(timestamp: i32) -> String {
         },
         _ => "Unknown date".to_string(),
     }
+}
+
+/// Response for refund eligibility check
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct RefundEligibilityResponse {
+    pub eligible: bool,
+    pub refund_type: Option<String>,  // "subscription" or "credit_pack"
+    pub reason: String,
+    pub usage_percent: Option<f32>,
+    pub days_remaining: Option<i32>,
+    pub refund_amount_cents: Option<i64>,
+    pub already_refunded: bool,
+    pub contact_email: String,
+}
+
+/// Response for refund request
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct RefundRequestResponse {
+    pub success: bool,
+    pub message: String,
+    pub refund_id: Option<String>,
 }

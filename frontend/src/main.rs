@@ -8,6 +8,7 @@ mod config;
 mod utils {
     pub mod api;
     pub mod webauthn;
+    pub mod elevenlabs_web;
 }
 mod profile {
     pub mod stripe;
@@ -44,6 +45,7 @@ mod pages {
 }
 mod components {
     pub mod notification;
+    pub mod feature_preview;
 }
 mod proactive {
     pub mod common;
@@ -64,6 +66,13 @@ mod connections {
     pub mod messenger;
     pub mod instagram;
     pub mod tesla;
+    pub mod youtube;
+}
+mod controls {
+    pub mod tesla_controls;
+}
+mod media {
+    pub mod youtube_hub;
 }
 mod auth {
     pub mod connect;
@@ -94,7 +103,7 @@ use blog::{
 use auth::{
     signup::register::Register,
     signup::login::Login,
-    signup::password_reset::PasswordReset,
+    signup::password_reset::{PasswordReset, PasswordResetWithToken},
     set_password::SetPassword,
 };
 use admin::dashboard::AdminDashboard;
@@ -112,6 +121,8 @@ pub enum Route {
     SelfHosted,
     #[at("/password-reset")]
     PasswordReset,
+    #[at("/password-reset/:token")]
+    PasswordResetWithToken { token: String },
     #[at("/faq")]
     Faq,
     #[at("/blog")]
@@ -128,8 +139,6 @@ pub enum Route {
     Home,
     #[at("/login")]
     Login,
-    #[at("/register")]
-    Register,
     #[at("/admin")]
     Admin,
     #[at("/billing")]
@@ -176,6 +185,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
             info!("Rendering Password Reset page");
             html! { <PasswordReset /> }
         },
+        Route::PasswordResetWithToken { token } => {
+            info!("Rendering Password Reset page with token");
+            html! { <PasswordResetWithToken token={token.clone()} /> }
+        },
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }
@@ -207,10 +220,6 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Login => {
             info!("Rendering Login page");
             html! { <Login /> }
-        },
-        Route::Register => {
-            info!("Rendering Register page");
-            html! { <Register /> }
         },
         Route::Admin => {
             info!("Rendering Admin page");
@@ -480,6 +489,7 @@ pub fn pricing_wrapper() -> Html {
             user_id={profile_data.as_ref().map(|p| p.id).unwrap_or(0)}
             user_email={profile_data.as_ref().map(|p| p.email.clone()).unwrap_or("".to_string())}
             sub_tier={profile_data.as_ref().and_then(|p| p.sub_tier.clone())}
+            user_plan_type={profile_data.as_ref().and_then(|p| p.plan_type.clone())}
             is_logged_in={*is_logged_in}
             phone_number={profile_data.as_ref().and_then(|p| Some(p.phone_number.clone()))}
             verified={profile_data.as_ref().map(|p| p.verified).unwrap_or(false)}

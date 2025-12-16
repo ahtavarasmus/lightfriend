@@ -603,21 +603,6 @@ pub async fn send_conversation_message(
         return Ok("dev not sending anything".to_string());
     }
 
-    // Lazy migration: backfill plan_type for existing users who don't have it set
-    // This ensures all users get their plan_type populated when they use the service
-    if user.plan_type.is_none() {
-        let is_us_ca = user.phone_number_country == Some("US".to_string())
-            || user.phone_number_country == Some("CA".to_string());
-        if !is_us_ca {
-            // Run in background to not block the message send
-            let state_clone = state.clone();
-            let user_id = user.id;
-            tokio::spawn(async move {
-                crate::utils::country::lazy_migrate_plan_type(user_id, &state_clone).await;
-            });
-        }
-    }
-
     // Twilio send logic
     // BYOT users with their own credentials always use their own account
     // Otherwise, use global credentials for local-number and notification-only countries

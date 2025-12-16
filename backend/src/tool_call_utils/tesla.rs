@@ -197,10 +197,12 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
 }
 
 // Handle Tesla tool call from AI assistant
+// skip_notification: If true, don't send SMS notification when car wakes up (for dashboard calls)
 pub async fn handle_tesla_command(
     state: &Arc<AppState>,
     user_id: i32,
     args: &str,
+    skip_notification: bool,
 ) -> String {
     // Parse arguments
     let args_value: Value = match serde_json::from_str(args) {
@@ -341,16 +343,21 @@ pub async fn handle_tesla_command(
                         &command_clone,
                     ).await;
 
-                    let notification_msg = format!("Tesla command completed: {}", result);
-                    let first_msg = result.clone();
+                    // Only send notification if not called from dashboard
+                    if !skip_notification {
+                        let notification_msg = format!("Tesla command completed: {}", result);
+                        let first_msg = result.clone();
 
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
-                        user_id,
-                        &notification_msg,
-                        "tesla_command_success".to_string(),
-                        Some(first_msg),
-                    ).await;
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            &notification_msg,
+                            "tesla_command_success".to_string(),
+                            Some(first_msg),
+                        ).await;
+                    } else {
+                        info!("Skipping notification for dashboard-initiated Tesla command");
+                    }
 
                     // Spawn climate monitoring for defrost and climate_on commands
                     if command_clone == "defrost" || command_clone == "climate_on" {
@@ -366,28 +373,34 @@ pub async fn handle_tesla_command(
                 }
                 Ok(false) => {
                     error!("Vehicle wake-up returned false (unexpected)");
-                    let failure_msg = format!("Your {} couldn't be woken up. Please try again or use the Tesla app.", vehicle_name_clone);
+                    // Only send notification if not called from dashboard
+                    if !skip_notification {
+                        let failure_msg = format!("Your {} couldn't be woken up. Please try again or use the Tesla app.", vehicle_name_clone);
 
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
-                        user_id,
-                        "Tesla wake-up failed unexpectedly",
-                        "tesla_command_error".to_string(),
-                        Some(failure_msg),
-                    ).await;
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            "Tesla wake-up failed unexpectedly",
+                            "tesla_command_error".to_string(),
+                            Some(failure_msg),
+                        ).await;
+                    }
                 }
                 Err(error_msg) => {
                     error!("Failed to wake up vehicle: {}", error_msg);
-                    let notification_msg = format!("Tesla wake-up failed: {}", error_msg);
-                    let failure_msg = format!("Your {} couldn't be woken up. Please try again or use the Tesla app.", vehicle_name_clone);
+                    // Only send notification if not called from dashboard
+                    if !skip_notification {
+                        let notification_msg = format!("Tesla wake-up failed: {}", error_msg);
+                        let failure_msg = format!("Your {} couldn't be woken up. Please try again or use the Tesla app.", vehicle_name_clone);
 
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
-                        user_id,
-                        &notification_msg,
-                        "tesla_command_error".to_string(),
-                        Some(failure_msg),
-                    ).await;
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            &notification_msg,
+                            "tesla_command_error".to_string(),
+                            Some(failure_msg),
+                        ).await;
+                    }
                 }
             }
         });

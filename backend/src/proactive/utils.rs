@@ -225,6 +225,7 @@ pub struct DigestData {
     pub messages: Vec<MessageInfo>,
     pub calendar_events: Vec<CalendarEvent>,
     pub time_period_hours: u32,
+    pub current_datetime_local: String, // Current date/time in user's timezone for relative timestamp calculation
 }
 
 #[derive(Debug, Serialize)]
@@ -754,11 +755,16 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
 
 
 
+            // Get current datetime in user's timezone for AI context
+            let now_local = chrono::Utc::now().with_timezone(&tz);
+            let current_datetime_local = now_local.format("%Y-%m-%d %H:%M:%S").to_string();
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
                 calendar_events,
                 time_period_hours: hours_to_next,
+                current_datetime_local,
             };
 
             // Generate the digest
@@ -769,8 +775,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                     hours_since_prev, hours_to_next
                 ),
             };
-                
-            tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}", 
+
+            tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
                 
             send_notification(
@@ -1106,12 +1112,16 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 }
             });
 
+            // Get current datetime in user's timezone for AI context
+            let now_local = chrono::Utc::now().with_timezone(&tz);
+            let current_datetime_local = now_local.format("%Y-%m-%d %H:%M:%S").to_string();
 
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
                 calendar_events,
                 time_period_hours: hours_to_next,
+                current_datetime_local,
             };
 
             // Generate the digest
@@ -1122,8 +1132,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                     hours_since_prev, hours_to_next
                 ),
             };
-                
-            tracing::info!("Sending day digest for user {} at {}:00 in timezone {}", 
+
+            tracing::info!("Sending day digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
                 
             send_notification(
@@ -1479,12 +1489,16 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             });
 
+            // Get current datetime in user's timezone for AI context
+            let now_local = chrono::Utc::now().with_timezone(&tz);
+            let current_datetime_local = now_local.format("%Y-%m-%d %H:%M:%S").to_string();
 
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
                 calendar_events,
                 time_period_hours: hours_to_next,
+                current_datetime_local,
             };
 
             // Generate the digest
@@ -1495,8 +1509,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                     hours_since_prev, hours_to_next
                 ),
             };
-                
-            tracing::info!("Sending evening digest for user {} at {}:00 in timezone {}", 
+
+            tracing::info!("Sending evening digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
                 
             send_notification(
@@ -1521,9 +1535,9 @@ Rules
 • Start each platform group on a new line, followed by ': ' and the teasers/summaries.
 • Messages marked with [PRIORITY] are from user-defined priority senders. Always put them first in their platform group, highlight them with more detailed teasers (e.g., key excerpts, actions, or urgency hints), and treat them as critical/actionable to minimize user follow-ups.
 • Put critical or prioritized items first within each group.
-• Include timestamps in parentheses (e.g., '(yesterday 8pm)') for relevance.
+• Include timestamps in parentheses using relative terms based on the current datetime provided. Use '(today Xpm/am)' for same-day messages and '(yesterday Xpm/am)' only for messages from the previous calendar day. Compare the message date with the current date to determine this correctly.
 • For calendar, include events in the next 24 hours with start time and brief hint.
-• Tease naturally, e.g., 'Mom suggested dinner in family chat (yesterday 8pm)'.
+• Tease naturally, e.g., 'Mom suggested dinner in family chat (today 8pm)'.
 Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating groups.
 "#;
@@ -1569,13 +1583,13 @@ pub async fn generate_digest(
     // Conditionally include calendar section only if there are events
     let user_content = if data.calendar_events.is_empty() {
         format!(
-            "Create a digest covering the last {} hours.\n\nMessages:\n{}",
-            data.time_period_hours, messages_str
+            "Current datetime (user's local time): {}\n\nCreate a digest covering the last {} hours.\n\nMessages:\n{}",
+            data.current_datetime_local, data.time_period_hours, messages_str
         )
     } else {
         format!(
-            "Create a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
-            data.time_period_hours, messages_str, events_str
+            "Current datetime (user's local time): {}\n\nCreate a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
+            data.current_datetime_local, data.time_period_hours, messages_str, events_str
         )
     };
     let messages = vec![

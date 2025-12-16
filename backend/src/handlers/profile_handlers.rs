@@ -41,6 +41,17 @@ pub struct UpdateProfileRequest {
     location: String,
     nearby_places: String,
     preferred_number: Option<String>,
+    // Optional 2FA verification for sensitive changes
+    totp_code: Option<String>,
+    passkey_response: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+pub struct SensitiveChangeRequirements {
+    pub requires_2fa: bool,
+    pub has_passkeys: bool,
+    pub has_totp: bool,
+    pub passkey_options: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -78,6 +89,7 @@ pub struct ProfileResponse {
     phone_number_country: Option<String>,
     server_ip: Option<String>,
     plan_type: Option<String>, // "monitor" or "digest"
+    phone_service_active: bool, // whether phone service is active - can be disabled for security
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -177,8 +189,8 @@ pub async fn get_profile(
                 },
                 Err(_) => None,
             };
-            // Determine country based on phone number
-            let country = phone_country.clone().unwrap();
+            // Determine country based on phone number (default to "US" if unknown)
+            let country = phone_country.clone().unwrap_or_else(|| "US".to_string());
             // Get critical notification info
             let critical_info = state.user_core.get_critical_notification_info(auth_user.user_id).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -241,6 +253,7 @@ pub async fn get_profile(
                 phone_number_country: phone_country,
                 server_ip: user_settings.server_ip,
                 plan_type: user.plan_type,
+                phone_service_active: user_settings.phone_service_active,
             }))
         }
         None => Err((
@@ -444,6 +457,16 @@ pub async fn patch_profile_field(
                 ));
             }
             state.user_core.update_save_context(user_id, value).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
+        }
+        "phone_service_active" => {
+            let value = request.value.as_bool().ok_or_else(|| (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "phone_service_active must be a boolean"}))
+            ))?;
+            state.user_core.update_phone_service_active(user_id, value).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
@@ -870,12 +893,12 @@ async fn recalculate_credits_for_country_change(
     let is_us_ca = |c: Option<&str>| matches!(c, Some("US") | Some("CA"));
 
     // Get max credits for a country
-    // US/CA: credits_left is message count (200 for monitor-like, 400 for digest-like)
+    // US/CA: always 400 messages (hosted plan)
     // Euro: credits_left is € value = plan_messages × 3 × sms_price × 1.3
     let get_max_credits = async |country: Option<&str>| -> f32 {
         if is_us_ca(country) {
-            // US/CA: message count
-            if plan_messages >= 120.0 { 400.0 } else { 200.0 }
+            // US/CA: always 400 messages (hosted plan)
+            400.0
         } else if let Some(c) = country {
             // Euro: € value based on SMS pricing
             if let Ok(pricing) = get_byot_pricing(state, c).await {
@@ -918,6 +941,171 @@ async fn recalculate_credits_for_country_change(
     Ok(())
 }
 
+/// Check if 2FA is required for sensitive profile changes
+/// Returns the 2FA requirements and passkey options if available
+pub async fn check_sensitive_change_requirements(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<SensitiveChangeRequirements>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if user has TOTP enabled
+    let has_totp = state.totp_repository
+        .is_totp_enabled(auth_user.user_id)
+        .unwrap_or(false);
+
+    // Check if user has passkeys
+    let passkey_count = state.webauthn_repository
+        .get_passkey_count(auth_user.user_id)
+        .unwrap_or(0);
+    let has_passkeys = passkey_count > 0;
+
+    // If user has passkeys, prepare authentication options
+    let passkey_options = if has_passkeys {
+        match prepare_passkey_auth_options(&state, auth_user.user_id).await {
+            Ok(options) => Some(options),
+            Err(e) => {
+                tracing::error!("Failed to prepare passkey options: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    Ok(Json(SensitiveChangeRequirements {
+        requires_2fa: has_totp || has_passkeys,
+        has_passkeys,
+        has_totp,
+        passkey_options,
+    }))
+}
+
+/// Prepare passkey authentication options for sensitive change verification
+async fn prepare_passkey_auth_options(
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<serde_json::Value, String> {
+    use crate::utils::webauthn_config::get_webauthn;
+    use webauthn_rs::prelude::*;
+
+    let credentials = state.webauthn_repository
+        .get_credentials_by_user(user_id)
+        .map_err(|e| format!("Failed to get credentials: {:?}", e))?;
+
+    if credentials.is_empty() {
+        return Err("No passkeys registered".to_string());
+    }
+
+    // Deserialize credentials back to Passkey objects
+    let passkeys: Vec<Passkey> = credentials
+        .iter()
+        .filter_map(|c| {
+            let decrypted = state.webauthn_repository.get_decrypted_public_key(c).ok()?;
+            serde_json::from_str(&decrypted).ok()
+        })
+        .collect();
+
+    if passkeys.is_empty() {
+        return Err("Failed to load credentials".to_string());
+    }
+
+    let webauthn = get_webauthn();
+
+    // Start authentication
+    let (rcr, auth_state) = webauthn
+        .start_passkey_authentication(&passkeys)
+        .map_err(|e| format!("Failed to start authentication: {:?}", e))?;
+
+    // Store authentication state with "sensitive_change" context
+    let state_json = serde_json::to_string(&auth_state)
+        .map_err(|e| format!("Failed to serialize auth state: {:?}", e))?;
+
+    state.webauthn_repository
+        .create_challenge(
+            user_id,
+            &state_json,
+            "sensitive_change",
+            Some("profile_update".to_string()),
+            300, // 5 minute TTL
+        )
+        .map_err(|e| format!("Failed to store challenge: {:?}", e))?;
+
+    // Return the options for the frontend
+    Ok(serde_json::json!({ "options": rcr }))
+}
+
+/// Verify TOTP code for sensitive changes
+fn verify_totp_code(state: &Arc<AppState>, user_id: i32, code: &str) -> Result<bool, String> {
+    use totp_rs::{Algorithm, TOTP, Secret};
+
+    let secret_opt = state.totp_repository
+        .get_secret(user_id)
+        .map_err(|e| format!("Database error: {:?}", e))?;
+
+    let secret_base32 = secret_opt.ok_or("TOTP not configured")?;
+
+    // Get user email
+    let user = state.user_core
+        .find_by_id(user_id)
+        .map_err(|e| format!("Database error: {:?}", e))?
+        .ok_or("User not found")?;
+
+    let secret = Secret::Encoded(secret_base32);
+    let totp = TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        secret.to_bytes().unwrap(),
+        Some("Lightfriend".to_string()),
+        user.email,
+    ).map_err(|e| format!("TOTP creation error: {:?}", e))?;
+
+    Ok(totp.check_current(code).unwrap_or(false))
+}
+
+/// Verify passkey response for sensitive changes
+async fn verify_passkey_response(
+    state: &Arc<AppState>,
+    user_id: i32,
+    response: &serde_json::Value,
+) -> Result<bool, String> {
+    use crate::utils::webauthn_config::get_webauthn;
+    use webauthn_rs::prelude::*;
+
+    // Get the stored authentication state
+    let challenge = state.webauthn_repository
+        .get_valid_challenge(user_id, "sensitive_change")
+        .map_err(|e| format!("Failed to get challenge: {:?}", e))?
+        .ok_or("No pending authentication")?;
+
+    // Deserialize authentication state
+    let auth_state: PasskeyAuthentication = serde_json::from_str(&challenge.challenge)
+        .map_err(|e| format!("Failed to deserialize auth state: {:?}", e))?;
+
+    // Parse the response
+    let pk_credential: PublicKeyCredential = serde_json::from_value(response.clone())
+        .map_err(|e| format!("Failed to parse passkey response: {:?}", e))?;
+
+    let webauthn = get_webauthn();
+
+    // Finish authentication
+    let auth_result = webauthn
+        .finish_passkey_authentication(&pk_credential, &auth_state)
+        .map_err(|e| format!("Authentication failed: {:?}", e))?;
+
+    // Update the credential counter
+    let credential_id = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        auth_result.cred_id().as_ref()
+    );
+    let _ = state.webauthn_repository.update_counter(&credential_id, auth_result.counter() as i32);
+
+    // Delete the challenge
+    let _ = state.webauthn_repository.delete_challenges_by_type(user_id, "sensitive_change");
+
+    Ok(true)
+}
+
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -951,7 +1139,108 @@ pub async fn update_profile(
         ));
     }
 
-    // Get user's current data BEFORE updating (for credit recalculation)
+    // Get user's current data BEFORE updating (for credit recalculation and 2FA check)
+    let current_user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Check if email or phone is changing
+    let email_changing = current_user.email != update_req.email;
+    let phone_changing = current_user.phone_number != update_req.phone_number;
+
+    // If sensitive fields are changing, verify 2FA if user has it enabled
+    if email_changing || phone_changing {
+        let has_totp = state.totp_repository
+            .is_totp_enabled(auth_user.user_id)
+            .unwrap_or(false);
+        let passkey_count = state.webauthn_repository
+            .get_passkey_count(auth_user.user_id)
+            .unwrap_or(0);
+        let has_passkeys = passkey_count > 0;
+
+        if has_totp || has_passkeys {
+            // User has 2FA enabled, require verification
+            let mut verified = false;
+
+            // Try passkey verification first (if provided)
+            if let Some(ref passkey_response) = update_req.passkey_response {
+                match verify_passkey_response(&state, auth_user.user_id, passkey_response).await {
+                    Ok(true) => {
+                        verified = true;
+                        tracing::info!("Passkey verification successful for sensitive change");
+                    }
+                    Ok(false) => {
+                        return Err((
+                            StatusCode::UNAUTHORIZED,
+                            Json(json!({"error": "Passkey verification failed"}))
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::error!("Passkey verification error: {}", e);
+                        return Err((
+                            StatusCode::UNAUTHORIZED,
+                            Json(json!({"error": format!("Passkey verification error: {}", e)}))
+                        ));
+                    }
+                }
+            }
+
+            // Try TOTP verification (if provided and not already verified)
+            if !verified {
+                if let Some(ref totp_code) = update_req.totp_code {
+                    match verify_totp_code(&state, auth_user.user_id, totp_code) {
+                        Ok(true) => {
+                            verified = true;
+                            tracing::info!("TOTP verification successful for sensitive change");
+                        }
+                        Ok(false) => {
+                            // Also try as backup code
+                            let backup_valid = state.totp_repository
+                                .verify_backup_code(auth_user.user_id, totp_code)
+                                .unwrap_or(false);
+                            if backup_valid {
+                                verified = true;
+                                tracing::info!("Backup code verification successful for sensitive change");
+                            } else {
+                                return Err((
+                                    StatusCode::UNAUTHORIZED,
+                                    Json(json!({"error": "Invalid verification code"}))
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("TOTP verification error: {}", e);
+                            return Err((
+                                StatusCode::UNAUTHORIZED,
+                                Json(json!({"error": format!("TOTP verification error: {}", e)}))
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // If neither verification method was provided, return error with requirements
+            if !verified {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "2FA verification required",
+                        "requires_2fa": true,
+                        "has_passkeys": has_passkeys,
+                        "has_totp": has_totp
+                    }))
+                ));
+            }
+        }
+    }
+
+    // Re-fetch current user for credit recalculation (already fetched above)
     let current_user = state.user_core.find_by_id(auth_user.user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1324,6 +1613,365 @@ pub async fn delete_user(
             ))
         }
     }
+}
+
+// Web Chat - allows users to test the AI assistant through the dashboard
+const WEB_CHAT_COST_EUR: f32 = 0.01; // €0.01 per message for Euro countries
+const WEB_CHAT_COST_US: f32 = 0.5; // 0.5 messages for US/CA (uses credits_left as message count)
+
+#[derive(Deserialize)]
+pub struct WebChatRequest {
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct WebChatResponse {
+    pub message: String,
+    pub credits_charged: f32,
+}
+
+pub async fn web_chat(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<WebChatRequest>,
+) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Get the user
+    let user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Check subscription - only subscribed users can use web chat
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Please subscribe to use the web chat feature"}))
+        ));
+    }
+
+    // Determine cost based on region (US/CA uses message count, others use euro value)
+    let is_us_or_ca = user.phone_number.starts_with("+1");
+    let (credits_left_cost, credits_cost) = if is_us_or_ca {
+        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR) // US: 0.5 from credits_left (message count), or €0.01 from credits
+    } else {
+        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR) // Euro: €0.01 from either
+    };
+
+    // Check if user has sufficient credits
+    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+    if !has_credits {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+        ));
+    }
+
+    // Deduct credits (prefer credits_left, then credits)
+    let charged_amount = if user.credits_left >= credits_left_cost {
+        let new_credits_left = user.credits_left - credits_left_cost;
+        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_left_cost
+    } else {
+        let new_credits = user.credits - credits_cost;
+        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_cost
+    };
+
+    // Log the usage
+    let _ = state.user_repository.log_usage(
+        auth_user.user_id,
+        None, // sid
+        "web_chat".to_string(), // activity_type
+        Some(charged_amount), // credits
+        None, // time_consumed
+        Some(true), // success
+        Some(format!("Web chat message: {}", request.message.chars().take(50).collect::<String>())), // reason
+        None, // status
+        None, // recharge_threshold_timestamp
+        None, // zero_credits_timestamp
+    );
+
+    // Create a mock Twilio payload to reuse existing SMS processing logic
+    let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+        body: request.message,
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+        message_sid: "".to_string(),
+    };
+
+    // Process using existing SMS handler with test mode (doesn't send actual SMS)
+    let (status, _, response) = crate::api::twilio_sms::process_sms(
+        &state,
+        mock_payload,
+        true, // test mode - don't send actual SMS
+    ).await;
+
+    if status == StatusCode::OK {
+        Ok(Json(WebChatResponse {
+            message: response.message.clone(),
+            credits_charged: charged_amount,
+        }))
+    } else {
+        // Refund the credits if processing failed
+        if user.credits_left >= credits_left_cost {
+            let _ = state.user_repository.update_user_credits_left(auth_user.user_id, user.credits_left);
+        } else {
+            let _ = state.user_repository.update_user_credits(auth_user.user_id, user.credits);
+        }
+
+        Err((
+            status,
+            Json(json!({
+                "error": "Failed to process message",
+                "details": response.message
+            }))
+        ))
+    }
+}
+
+// On-demand "What's new?" digest endpoint
+pub async fn get_instant_digest(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use chrono::{Duration, Utc};
+    use std::collections::{HashMap, HashSet};
+    use crate::proactive::utils::{DigestData, MessageInfo, CalendarEvent, generate_digest};
+
+    // Get the user
+    let user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Check subscription
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Please subscribe to use the digest feature"}))
+        ));
+    }
+
+    // Get user info for timezone
+    let user_info = state.user_core.get_user_info(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get user info: {}", e)}))
+        ))?;
+
+    let timezone = user_info.timezone.clone().unwrap_or_else(|| "UTC".to_string());
+    let tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
+
+    // Charge same as web_chat
+    let is_us_or_ca = user.phone_number.starts_with("+1");
+    let (credits_left_cost, credits_cost) = if is_us_or_ca {
+        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+    } else {
+        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
+    };
+
+    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+    if !has_credits {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+        ));
+    }
+
+    // Deduct credits
+    let charged_amount = if user.credits_left >= credits_left_cost {
+        let new_credits_left = user.credits_left - credits_left_cost;
+        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_left_cost
+    } else {
+        let new_credits = user.credits - credits_cost;
+        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_cost
+    };
+
+    // Log usage
+    let _ = state.user_repository.log_usage(
+        auth_user.user_id,
+        None,
+        "instant_digest".to_string(),
+        Some(charged_amount),
+        None,
+        Some(true),
+        Some("On-demand digest request".to_string()),
+        None,
+        None,
+        None,
+    );
+
+    // Calculate cutoff time - use last instant digest time or 12 hours ago
+    let now = Utc::now();
+    let last_instant_time = state.user_core.get_last_instant_digest_time(auth_user.user_id)
+        .unwrap_or(None);
+
+    let cutoff_timestamp = match last_instant_time {
+        Some(ts) => ts as i64,
+        None => (now - Duration::hours(12)).timestamp(),
+    };
+    let cutoff_time = chrono::DateTime::from_timestamp(cutoff_timestamp, 0)
+        .unwrap_or(now - Duration::hours(12));
+
+    // Collect messages from all sources
+    let mut messages: Vec<MessageInfo> = Vec::new();
+
+    // Fetch emails if IMAP is configured
+    if let Ok(Some(_)) = state.user_repository.get_imap_credentials(auth_user.user_id) {
+        if let Ok(emails) = crate::handlers::imap_handlers::fetch_emails_imap(&state, auth_user.user_id, false, Some(50), false, true).await {
+            let email_msgs: Vec<MessageInfo> = emails.into_iter()
+                .filter(|email| {
+                    if let Some(date) = email.date {
+                        date >= cutoff_time
+                    } else {
+                        false
+                    }
+                })
+                .map(|email| MessageInfo {
+                    sender: email.from.unwrap_or_else(|| "Unknown".to_string()),
+                    content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                    timestamp_rfc: email.date_formatted.unwrap_or_else(|| "No timestamp".to_string()),
+                    platform: "email".to_string(),
+                })
+                .collect();
+            messages.extend(email_msgs);
+        }
+    }
+
+    // Fetch bridge messages (WhatsApp, Telegram, Signal)
+    for bridge_type in &["whatsapp", "telegram", "signal"] {
+        if let Ok(Some(_)) = state.user_repository.get_bridge(auth_user.user_id, bridge_type) {
+            if let Ok(bridge_msgs) = crate::utils::bridge::fetch_bridge_messages(bridge_type, &state, auth_user.user_id, cutoff_timestamp, true).await {
+                let infos: Vec<MessageInfo> = bridge_msgs.into_iter()
+                    .map(|msg| MessageInfo {
+                        sender: msg.room_name,
+                        content: msg.content,
+                        timestamp_rfc: msg.formatted_timestamp,
+                        platform: bridge_type.to_string(),
+                    })
+                    .collect();
+                messages.extend(infos);
+            }
+        }
+    }
+
+    // Fetch calendar events for next 24 hours
+    let mut calendar_events: Vec<CalendarEvent> = Vec::new();
+    if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
+        let start_time = now.to_rfc3339();
+        let end_time = (now + Duration::hours(24)).to_rfc3339();
+        if let Ok(axum::Json(value)) = crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), auth_user.user_id, &start_time, &end_time).await {
+            if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                for event in events {
+                    if let (Some(summary), Some(start), Some(duration)) = (
+                        event.get("summary").and_then(|s| s.as_str()),
+                        event.get("start").and_then(|s| s.as_str()),
+                        event.get("duration_minutes").and_then(|d| d.as_str()),
+                    ) {
+                        calendar_events.push(CalendarEvent {
+                            title: summary.to_string(),
+                            start_time_rfc: start.to_string(),
+                            duration_minutes: duration.parse().unwrap_or(60),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if there's anything to report
+    if messages.is_empty() && calendar_events.is_empty() {
+        // Update last instant digest time even if empty
+        let _ = state.user_core.set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
+
+        return Ok(Json(WebChatResponse {
+            message: "Nothing new since your last check!".to_string(),
+            credits_charged: charged_amount,
+        }));
+    }
+
+    // Build priority map for digest generation
+    let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
+    for platform in ["email", "whatsapp", "telegram", "signal"] {
+        let priors = state.user_repository.get_priority_senders(auth_user.user_id, platform).unwrap_or(Vec::new());
+        let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
+        priority_map.insert(platform.to_string(), set);
+    }
+
+    // Sort messages
+    messages.sort_by(|a, b| {
+        let plat_cmp = a.platform.cmp(&b.platform);
+        if plat_cmp == std::cmp::Ordering::Equal {
+            let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
+            let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+            b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
+        } else {
+            plat_cmp
+        }
+    });
+
+    // Get current datetime in user's timezone
+    let now_local = now.with_timezone(&tz);
+    let current_datetime_local = now_local.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    // Calculate hours since cutoff
+    let hours_since = ((now.timestamp() - cutoff_timestamp) / 3600) as u32;
+
+    // Prepare digest data
+    let digest_data = DigestData {
+        messages,
+        calendar_events,
+        time_period_hours: hours_since.max(1),
+        current_datetime_local,
+    };
+
+    // Generate digest
+    let digest_message = match generate_digest(&state, digest_data, priority_map).await {
+        Ok(digest) => digest,
+        Err(e) => {
+            tracing::error!("Failed to generate digest: {}", e);
+            "Failed to generate digest. Please try again.".to_string()
+        }
+    };
+
+    // Update last instant digest time
+    let _ = state.user_core.set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
+
+    Ok(Json(WebChatResponse {
+        message: digest_message,
+        credits_charged: charged_amount,
+    }))
 }
 
 

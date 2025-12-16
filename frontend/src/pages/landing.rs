@@ -115,6 +115,44 @@ pub fn landing() -> Html {
             margin-top: 1rem;
             border: none;
         }
+        .feature-preview-img {
+            display: block;
+            max-width: 100%;
+            width: 400px;
+            margin: 1rem auto;
+            border-radius: 12px;
+            border: 1px solid rgba(30, 144, 255, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .feature-preview-wrapper {
+            position: relative;
+            display: inline-block;
+            margin: 1rem auto;
+            width: 100%;
+            text-align: center;
+        }
+        .feature-preview-badge {
+            position: absolute;
+            top: calc(1rem + 8px);
+            right: calc(50% - 200px + 8px);
+            background: rgba(30, 144, 255, 0.85);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            z-index: 1;
+        }
+        @media (max-width: 480px) {
+            .feature-preview-img {
+                width: 100%;
+            }
+            .feature-preview-badge {
+                right: 8px;
+            }
+        }
         @media (max-width: 768px) {
             .feature-list {
                 padding: 2rem 1rem;
@@ -226,9 +264,9 @@ pub fn landing() -> Html {
                         </li>
                         <li>
                             <details>
-                                <summary><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</summary>
+                                <summary><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast up to 7 days"}</summary>
                                 <div class="feature-desc">
-                                    <p>{"Request weather information for any location via SMS or voice. Receive current conditions, temperature, and a detailed 6-hour forecast. Example: 'Weather in London' returns instant updates."}</p>
+                                    <p>{"Request weather information for any location via SMS or voice. Receive current conditions, temperature, a detailed 6-hour forecast, or up to 7 days ahead. Example: 'Weather in London' or 'What's the weather like this weekend in Paris?' returns instant updates."}</p>
                                     // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
                                 </div>
                             </details>
@@ -265,7 +303,10 @@ pub fn landing() -> Html {
                                 <summary><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Link your WhatsApp account in the web dashboard. Then, send messages (e.g., 'Send whatsapp message to Alice saying 'Hi!'), fetch recent messages ('Check whatsapp') or from specific chat ('see if Luukas has sent me anything on whatsapp') and monitor for new messages with automatic SMS or call notifications for important updates."}</p>
-                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                    <div class="feature-preview-wrapper">
+                                        <span class="feature-preview-badge">{"Preview"}</span>
+                                        <img class="feature-preview-img" src="/assets/previews/whatsapp-preview.gif" alt="WhatsApp integration preview" loading="lazy"/>
+                                    </div>
                                 </div>
                             </details>
                         </li>
@@ -292,7 +333,10 @@ pub fn landing() -> Html {
                                 <summary><i class="fas fa-envelope"></i>{"Fetch, Send, Reply and Monitor Emails"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Integrate your email (Gmail, Outlook, etc.) in the settings. Fetch recent emails (e.g., 'Check email'), find specific email ('Can you find the Delta Airlines reservation number from email?') and monitor for important ones with AI-filtered notifications sent to your phone via SMS or make it call you."}</p>
-                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                    <div class="feature-preview-wrapper">
+                                        <span class="feature-preview-badge">{"Preview"}</span>
+                                        <img class="feature-preview-img" src="/assets/previews/email-preview.gif" alt="Email integration preview" loading="lazy"/>
+                                    </div>
                                 </div>
                             </details>
                         </li>
@@ -301,7 +345,10 @@ pub fn landing() -> Html {
                                 <summary><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Sync with Google Calendar. View events (e.g., 'What's on my calendar today?'), create new ones ('Create new calendar event for Doctor at 10am tomorrow'), Set reminder on the event on either straight with lightfriend or in the calendar and get reminded via SMS or call."}</p>
-                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                    <div class="feature-preview-wrapper">
+                                        <span class="feature-preview-badge">{"Preview"}</span>
+                                        <img class="feature-preview-img" src="/assets/previews/calendar-preview.gif" alt="Calendar integration preview" loading="lazy"/>
+                                    </div>
                                 </div>
                             </details>
                         </li>
@@ -311,6 +358,18 @@ pub fn landing() -> Html {
                                 <div class="feature-desc">
                                     <p>{"Manage a personal task list or idea notebook. Create entries (e.g. call lightfriend and ask, 'Hey save this brilliant billion dollar idea i got'), fetch them ('List my saved ideas'), and organize via voice or SMS. Stored in google tasks and accessible anytime. Will not affect your existing google tasks."}</p>
                                     // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-car"></i>{"Tesla Vehicle Control"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Connect your Tesla and control it via voice call, SMS, or the Lightfriend web dashboard. Lock and unlock doors, turn on climate control, start defrost mode, and check battery status. Perfect for cold mornings - just text 'warm up my Tesla' before heading out. On the dashboard, sensitive actions like unlocking or starting the car require entering your passkey each time for security."}</p>
+                                    <div class="feature-preview-wrapper">
+                                        <span class="feature-preview-badge">{"Preview"}</span>
+                                        <img class="feature-preview-img" src="/assets/previews/tesla-controls-preview.gif" alt="Tesla controls preview" loading="lazy"/>
+                                    </div>
                                 </div>
                             </details>
                         </li>

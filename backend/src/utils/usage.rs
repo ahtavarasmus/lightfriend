@@ -22,6 +22,11 @@ pub async fn check_user_credits(
     amount: Option<i32>,
 ) -> Result<(), String> {
 
+    // Check if phone service is deactivated (e.g., stolen phone scenario)
+    if let Ok(false) = state.user_core.get_phone_service_active(user.id) {
+        return Err("Phone service is currently deactivated for this number.".to_string());
+    }
+
     // BYOT users with their own Twilio credentials pay Twilio directly - no credit check
     if state.user_core.has_twilio_credentials(user.id) {
         return Ok(());
@@ -43,6 +48,7 @@ pub async fn check_user_credits(
         let credits_left_cost = match event_type {
             "message" => 1.0,
             "voice" => 0.0, // voice uses credits, not credits_left
+            "web_call" => 1.0, // 1 message credit per minute for web calls
             "noti_msg" => 0.5,
             "noti_call" => 0.5,
             "digest" => amount.unwrap_or(1) as f32,
@@ -51,6 +57,7 @@ pub async fn check_user_credits(
         let credits_cost = match event_type {
             "message" => 0.075,
             "voice" => amount.unwrap_or(0) as f32 * 0.0033,
+            "web_call" => 0.0, // web_call uses credits_left (message units)
             "noti_msg" => 0.075,
             "noti_call" => 0.15,
             "digest" => amount.unwrap_or(1) as f32 * 0.075,
@@ -77,6 +84,9 @@ pub async fn check_user_credits(
         // ElevenLabs voice AI cost: $0.11 per minute (added to voice calls)
         const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
 
+        // Web call cost: 0.15 EUR per minute (ElevenLabs only, no Twilio)
+        const WEB_CALL_COST_PER_MIN: f32 = 0.15;
+
         // Both credits_left and credits use actual euro cost
         let cost = match event_type {
             "message" => msg_price,
@@ -85,6 +95,11 @@ pub async fn check_user_credits(
                 // Includes Twilio voice + ElevenLabs AI voice cost
                 let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
                 minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            },
+            "web_call" => {
+                // Web call: 0.15 EUR per minute (no Twilio, just ElevenLabs)
+                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+                minutes * WEB_CALL_COST_PER_MIN
             },
             "noti_msg" => noti_price,
             "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN, // First minute always charged + ElevenLabs
@@ -222,6 +237,11 @@ pub fn deduct_user_credits(
         let credits_left_cost = match event_type {
             "message" => 1.0,
             "voice" => 0.0, // voice uses credits, not credits_left
+            "web_call" => {
+                // Web call: 1 message credit per minute (round up)
+                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+                minutes
+            },
             "noti_msg" => 0.5,
             "noti_call" => 0.5,
             "digest" => 1.0,
@@ -230,6 +250,7 @@ pub fn deduct_user_credits(
         let credits_cost = match event_type {
             "message" => 0.075,
             "voice" => amount.unwrap_or(0) as f32 * 0.0033,
+            "web_call" => 0.0, // web_call uses credits_left (message units)
             "noti_msg" => 0.075,
             "noti_call" => 0.15,
             "digest" => 0.075,
@@ -255,6 +276,9 @@ pub fn deduct_user_credits(
         // ElevenLabs voice AI cost: $0.11 per minute (added to voice calls)
         const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
 
+        // Web call cost: 0.15 EUR per minute (ElevenLabs only, no Twilio)
+        const WEB_CALL_COST_PER_MIN: f32 = 0.15;
+
         // Both credits_left and credits use actual euro cost
         let cost = match event_type {
             "message" => msg_price,
@@ -263,6 +287,11 @@ pub fn deduct_user_credits(
                 // Includes Twilio voice + ElevenLabs AI voice cost
                 let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
                 minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            },
+            "web_call" => {
+                // Web call: 0.15 EUR per minute (no Twilio, just ElevenLabs)
+                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+                minutes * WEB_CALL_COST_PER_MIN
             },
             "noti_msg" => noti_price,
             "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN, // First minute always charged + ElevenLabs

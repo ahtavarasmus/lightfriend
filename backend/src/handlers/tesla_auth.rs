@@ -742,10 +742,12 @@ pub async fn tesla_command(
     // Wrap command in JSON format expected by handle_tesla_command
     let args_json = json!({"command": payload.command}).to_string();
 
+    // skip_notification=true because this is from the dashboard, no need to SMS the user
     let result = crate::tool_call_utils::tesla::handle_tesla_command(
         &state,
         auth_user.user_id,
         &args_json,
+        true, // skip notification for dashboard calls
     ).await;
 
     info!("Tesla command result: {}", result);

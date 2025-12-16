@@ -13,6 +13,8 @@ use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
 use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
+use crate::controls::tesla_controls::TeslaControls;
+use crate::media::youtube_hub::YouTubeHub;
 
 #[derive(Deserialize)]
 struct TotpStatusResponse {
@@ -90,6 +92,8 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
+    Controls,
+    Media,
     Billing,
     Settings,
 }
@@ -287,9 +291,96 @@ pub fn Home() -> Html {
             .unwrap_or(false)
     });
 
+    // First-time subscriber onboarding overlay
+    let show_onboarding = use_state(|| false);
+
     // Usage status data - lifted to Home to prevent re-fetching on tab change
     let usage_data = use_state(|| None::<UsageProjectionResponse>);
     let usage_loading = use_state(|| true);
+
+    // Web chat state - only stores the most recent exchange (user msg, bot reply)
+    let chat_user_msg = use_state(|| None::<String>);
+    let chat_bot_reply = use_state(|| None::<String>);
+    let chat_input = use_state(|| String::new());
+    let chat_loading = use_state(|| false);
+    let chat_error = use_state(|| None::<String>);
+    let chat_input_ref = use_node_ref();
+
+    // Auto-focus chat input when profile loads (input is conditionally rendered)
+    {
+        let chat_input_ref = chat_input_ref.clone();
+        let profile_data = profile_data.clone();
+        use_effect_with_deps(move |profile| {
+            // Only focus when profile is loaded and has subscription
+            if let Some(p) = profile.as_ref() {
+                if p.sub_tier.is_some() && p.sub_tier.as_deref() != Some("tier 3") {
+                    // Small delay to ensure DOM is updated
+                    let chat_input_ref = chat_input_ref.clone();
+                    gloo_timers::callback::Timeout::new(100, move || {
+                        if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                            let _ = input.focus();
+                        }
+                    }).forget();
+                }
+            }
+            || ()
+        }, profile_data);
+    }
+
+    // Web call state
+    let call_active = use_state(|| false);
+    let call_connecting = use_state(|| false);
+    let call_duration = use_state(|| 0i32);
+    let call_error = use_state(|| None::<String>);
+    let call_cost_per_min = use_state(|| 0.15f32);
+
+    // Update call duration every second when call is active
+    {
+        let call_active = call_active.clone();
+        let call_duration = call_duration.clone();
+        use_effect_with_deps(move |is_active| {
+            let interval_handle: Option<gloo_timers::callback::Interval> = if **is_active {
+                Some(gloo_timers::callback::Interval::new(1000, move || {
+                    let duration = crate::utils::elevenlabs_web::get_elevenlabs_call_duration();
+                    call_duration.set(duration);
+                }))
+            } else {
+                None
+            };
+            move || {
+                drop(interval_handle);
+            }
+        }, call_active);
+    }
+
+    // YouTube connection state
+    let youtube_connected = use_state(|| false);
+    let youtube_can_subscribe = use_state(|| false);
+
+    // Fetch YouTube connection status
+    {
+        let youtube_connected = youtube_connected.clone();
+        let youtube_can_subscribe = youtube_can_subscribe.clone();
+        use_effect_with_deps(move |_| {
+            let youtube_connected = youtube_connected.clone();
+            let youtube_can_subscribe = youtube_can_subscribe.clone();
+            spawn_local(async move {
+                if let Ok(response) = Api::get("/api/auth/youtube/status").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                youtube_connected.set(connected);
+                            }
+                            if let Some(can_sub) = data.get("can_subscribe").and_then(|v| v.as_bool()) {
+                                youtube_can_subscribe.set(can_sub);
+                            }
+                        }
+                    }
+                }
+            });
+            || ()
+        }, ());
+    }
 
     // Refetch usage data callback - can be called when switching to Billing tab
     let refetch_usage = {
@@ -442,6 +533,8 @@ pub fn Home() -> Html {
                         Some("Google Calendar connected successfully!")
                     } else if params.get("google_tasks").as_deref() == Some("success") {
                         Some("Google Tasks connected successfully!")
+                    } else if params.get("youtube").as_deref() == Some("success") {
+                        Some("YouTube connected successfully!")
                     } else {
                         None
                     };
@@ -474,6 +567,7 @@ pub fn Home() -> Html {
         let magic_link = magic_link.clone();
         let magic_error = magic_error.clone();
         let auth_status = auth_status.clone();
+        let show_onboarding = show_onboarding.clone();
         use_effect_with_deps(move |_| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
@@ -481,6 +575,7 @@ pub fn Home() -> Html {
             let magic_link = magic_link.clone();
             let magic_error = magic_error.clone();
             let auth_status = auth_status.clone();
+            let show_onboarding = show_onboarding.clone();
             spawn_local(async move {
                 let result = Api::get("/api/profile").send().await;
                 match result {
@@ -497,6 +592,16 @@ pub fn Home() -> Html {
                                 user_verified.set(profile.verified);
                                 profile_data.set(Some(profile.clone()));
                                 error.set(None);
+                                // Show onboarding for first-time subscribers
+                                if profile.sub_tier.is_some() {
+                                    if let Some(w) = window() {
+                                        if let Ok(Some(storage)) = w.local_storage() {
+                                            if storage.get_item("onboarding_seen").ok().flatten().is_none() {
+                                                show_onboarding.set(true);
+                                            }
+                                        }
+                                    }
+                                }
                                 // Fetch magic link if tier 3
                                 if profile.sub_tier.as_deref() == Some("tier 3") {
                                     spawn_local(async move {
@@ -597,8 +702,66 @@ pub fn Home() -> Html {
                     active_tab.set(DashboardTab::Settings);
                 })
             };
+            let on_dismiss_onboarding = {
+                let show_onboarding = show_onboarding.clone();
+                Callback::from(move |_: MouseEvent| {
+                    show_onboarding.set(false);
+                    if let Some(w) = window() {
+                        if let Ok(Some(storage)) = w.local_storage() {
+                            let _ = storage.set_item("onboarding_seen", "true");
+                        }
+                    }
+                })
+            };
         html! {
             <>
+                // First-time subscriber onboarding overlay
+                {
+                    if *show_onboarding {
+                        html! {
+                            <div class="onboarding-overlay" onclick={on_dismiss_onboarding.clone()}>
+                                <div class="onboarding-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                    <h2 style="margin: 0 0 1rem 0; font-size: 1.5rem; background: linear-gradient(45deg, #fff, #7EB2FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                                        {"Welcome to Lightfriend!"}
+                                    </h2>
+                                    <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 1.25rem;">
+                                        {"Here's how to get started:"}
+                                    </p>
+                                    <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; text-align: left;">
+                                        <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
+                                            <span style="position: absolute; left: 0; color: #1E90FF;">{"•"}</span>
+                                            <strong style="color: #fff;">{"Connect your services"}</strong>
+                                            {" - Link your calendar, email, or messaging apps"}
+                                        </li>
+                                        <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
+                                            <span style="position: absolute; left: 0; color: #1E90FF;">{"•"}</span>
+                                            <strong style="color: #fff;">{"Ask anything"}</strong>
+                                            {" - Use the web chat or send an SMS to your Lightfriend number"}
+                                        </li>
+                                        <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
+                                            <span style="position: absolute; left: 0; color: #1E90FF;">{"•"}</span>
+                                            <strong style="color: #fff;">{"Explore your tools"}</strong>
+                                            {" - Check out the tools available to your assistant"}
+                                        </li>
+                                        <li style="color: rgba(255, 255, 255, 0.7); padding-left: 1.5rem; position: relative;">
+                                            <span style="position: absolute; left: 0; color: #1E90FF;">{"•"}</span>
+                                            <strong style="color: #fff;">{"Set up notifications"}</strong>
+                                            {" - Configure how you want to be alerted"}
+                                        </li>
+                                    </ul>
+                                    <button
+                                        onclick={on_dismiss_onboarding.clone()}
+                                        style="background: linear-gradient(135deg, #1E90FF, #4169E1); border: none; color: white; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s;"
+                                    >
+                                        {"Got it!"}
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
                 <div class="dashboard-container">
                     <h1 class="panel-title">{"Dashboard"}</h1>
                     {
@@ -767,12 +930,390 @@ pub fn Home() -> Html {
                             }
                         }
                     </div>
+                    // Web Chat Section
+                    {
+                        if let Some(profile) = (*profile_data).as_ref() {
+                            if profile.sub_tier.is_some() && profile.sub_tier.as_deref() != Some("tier 3") {
+                                let on_send = {
+                                    let chat_input = chat_input.clone();
+                                    let chat_user_msg = chat_user_msg.clone();
+                                    let chat_bot_reply = chat_bot_reply.clone();
+                                    let chat_loading = chat_loading.clone();
+                                    let chat_error = chat_error.clone();
+                                    let refetch_usage = refetch_usage.clone();
+                                    Callback::from(move |_| {
+                                        let message = (*chat_input).clone();
+                                        if message.trim().is_empty() {
+                                            return;
+                                        }
+
+                                        let chat_input = chat_input.clone();
+                                        let chat_user_msg = chat_user_msg.clone();
+                                        let chat_bot_reply = chat_bot_reply.clone();
+                                        let chat_loading = chat_loading.clone();
+                                        let chat_error = chat_error.clone();
+                                        let refetch_usage = refetch_usage.clone();
+
+                                        // Set user message and clear previous reply
+                                        chat_user_msg.set(Some(message.clone()));
+                                        chat_bot_reply.set(None);
+                                        chat_input.set(String::new());
+                                        chat_loading.set(true);
+                                        chat_error.set(None);
+
+                                        spawn_local(async move {
+                                            match Api::post("/api/chat/web")
+                                                .json(&json!({"message": message}))
+                                                .expect("Failed to serialize")
+                                                .send()
+                                                .await
+                                            {
+                                                Ok(response) => {
+                                                    if response.ok() {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                                                chat_bot_reply.set(Some(reply));
+                                                                // Refresh usage after chat
+                                                                refetch_usage.emit(());
+                                                            }
+                                                            Err(_) => {
+                                                                chat_error.set(Some("Failed to parse response".to_string()));
+                                                            }
+                                                        }
+                                                    } else {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                                                chat_error.set(Some(err));
+                                                            }
+                                                            Err(_) => {
+                                                                chat_error.set(Some("Request failed".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    chat_error.set(Some("Network error".to_string()));
+                                                }
+                                            }
+                                            chat_loading.set(false);
+                                        });
+                                    })
+                                };
+
+                                // Handler for "What's new?" digest button
+                                let on_digest = {
+                                    let chat_user_msg = chat_user_msg.clone();
+                                    let chat_bot_reply = chat_bot_reply.clone();
+                                    let chat_loading = chat_loading.clone();
+                                    let chat_error = chat_error.clone();
+                                    let refetch_usage = refetch_usage.clone();
+                                    Callback::from(move |_| {
+                                        let chat_user_msg = chat_user_msg.clone();
+                                        let chat_bot_reply = chat_bot_reply.clone();
+                                        let chat_loading = chat_loading.clone();
+                                        let chat_error = chat_error.clone();
+                                        let refetch_usage = refetch_usage.clone();
+
+                                        // Set user message as "What's new?"
+                                        chat_user_msg.set(Some("What's new?".to_string()));
+                                        chat_bot_reply.set(None);
+                                        chat_loading.set(true);
+                                        chat_error.set(None);
+
+                                        spawn_local(async move {
+                                            match Api::get("/api/chat/digest").send().await {
+                                                Ok(response) => {
+                                                    if response.ok() {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                                                chat_bot_reply.set(Some(reply));
+                                                                refetch_usage.emit(());
+                                                            }
+                                                            Err(_) => {
+                                                                chat_error.set(Some("Failed to parse response".to_string()));
+                                                            }
+                                                        }
+                                                    } else {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                                                chat_error.set(Some(err));
+                                                            }
+                                                            Err(_) => {
+                                                                chat_error.set(Some("Request failed".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    chat_error.set(Some("Network error".to_string()));
+                                                }
+                                            }
+                                            chat_loading.set(false);
+                                        });
+                                    })
+                                };
+
+                                // Handler for starting a web call
+                                let on_start_call = {
+                                    let call_active = call_active.clone();
+                                    let call_connecting = call_connecting.clone();
+                                    let call_duration = call_duration.clone();
+                                    let call_error = call_error.clone();
+                                    let call_cost_per_min = call_cost_per_min.clone();
+                                    let refetch_usage = refetch_usage.clone();
+                                    Callback::from(move |_| {
+                                        let call_active = call_active.clone();
+                                        let call_connecting = call_connecting.clone();
+                                        let call_duration = call_duration.clone();
+                                        let call_error = call_error.clone();
+                                        let call_cost_per_min = call_cost_per_min.clone();
+                                        let refetch_usage = refetch_usage.clone();
+
+                                        call_connecting.set(true);
+                                        call_error.set(None);
+
+                                        spawn_local(async move {
+                                            // Get signed URL from backend
+                                            match Api::get("/api/call/web-signed-url").send().await {
+                                                Ok(response) => {
+                                                    if response.ok() {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                if let Some(signed_url) = data["signed_url"].as_str() {
+                                                                    if let Some(cost) = data["cost_per_minute"].as_f64() {
+                                                                        call_cost_per_min.set(cost as f32);
+                                                                    }
+                                                                    // Get agent overrides if available
+                                                                    let overrides = data.get("agent_overrides")
+                                                                        .map(|v| serde_wasm_bindgen::to_value(v).unwrap_or(wasm_bindgen::JsValue::NULL))
+                                                                        .unwrap_or(wasm_bindgen::JsValue::NULL);
+                                                                    // Start ElevenLabs call via JS interop with overrides
+                                                                    let result = crate::utils::elevenlabs_web::start_elevenlabs_call(signed_url, overrides).await;
+                                                                    if result.is_truthy() {
+                                                                        call_active.set(true);
+                                                                        call_duration.set(0);
+                                                                    } else {
+                                                                        call_error.set(Some("Failed to start call. Check microphone permissions.".to_string()));
+                                                                    }
+                                                                } else {
+                                                                    call_error.set(Some("Invalid response from server".to_string()));
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                call_error.set(Some("Failed to parse server response".to_string()));
+                                                            }
+                                                        }
+                                                    } else {
+                                                        match response.json::<Value>().await {
+                                                            Ok(data) => {
+                                                                let err = data["error"].as_str().unwrap_or("Failed to start call").to_string();
+                                                                call_error.set(Some(err));
+                                                            }
+                                                            Err(_) => {
+                                                                call_error.set(Some("Failed to start call".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    call_error.set(Some("Network error".to_string()));
+                                                }
+                                            }
+                                            call_connecting.set(false);
+                                        });
+                                    })
+                                };
+
+                                // Handler for ending a web call
+                                let on_end_call = {
+                                    let call_active = call_active.clone();
+                                    let call_duration = call_duration.clone();
+                                    let call_error = call_error.clone();
+                                    let refetch_usage = refetch_usage.clone();
+                                    Callback::from(move |_| {
+                                        let call_active = call_active.clone();
+                                        let call_duration = call_duration.clone();
+                                        let call_error = call_error.clone();
+                                        let refetch_usage = refetch_usage.clone();
+
+                                        spawn_local(async move {
+                                            // End ElevenLabs call via JS interop
+                                            let duration = crate::utils::elevenlabs_web::end_elevenlabs_call().await;
+                                            let duration_secs = duration.as_f64().unwrap_or(0.0) as i32;
+
+                                            call_active.set(false);
+
+                                            // Report usage to backend
+                                            if duration_secs > 0 {
+                                                let _ = Api::post("/api/call/web-end")
+                                                    .json(&serde_json::json!({"duration_secs": duration_secs}))
+                                                    .expect("Failed to serialize")
+                                                    .send()
+                                                    .await;
+                                                refetch_usage.emit(());
+                                            }
+                                            call_duration.set(0);
+                                        });
+                                    })
+                                };
+
+                                html! {
+                                    <div class="web-chat-section">
+                                        <div class="web-chat-messages">
+                                            {
+                                                match ((*chat_user_msg).clone(), (*chat_bot_reply).clone(), *chat_loading) {
+                                                    (None, _, false) => html! {},
+                                                    (Some(user_msg), None, true) => html! {
+                                                        <>
+                                                            <div class="chat-msg user">{user_msg}</div>
+                                                            <div class="chat-msg assistant loading">{"..."}</div>
+                                                        </>
+                                                    },
+                                                    (Some(user_msg), Some(bot_reply), _) => html! {
+                                                        <>
+                                                            <div class="chat-msg user">{user_msg}</div>
+                                                            <div class="chat-msg assistant">{bot_reply}</div>
+                                                        </>
+                                                    },
+                                                    (Some(user_msg), None, false) => html! {
+                                                        <div class="chat-msg user">{user_msg}</div>
+                                                    },
+                                                    _ => html! {}
+                                                }
+                                            }
+                                        </div>
+                                        {
+                                            if let Some(err) = (*chat_error).as_ref() {
+                                                html! { <div class="chat-error">{err}</div> }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                        {
+                                            if let Some(err) = (*call_error).as_ref() {
+                                                html! { <div class="chat-error">{err}</div> }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                        <div class="web-chat-input">
+                                            <button
+                                                class="digest-button"
+                                                onclick={{
+                                                    let on_digest = on_digest.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        on_digest.emit(());
+                                                    })
+                                                }}
+                                                disabled={*chat_loading || *call_active || *call_connecting}
+                                                title="Get a digest of recent activity from your connected apps"
+                                            >
+                                                {"What's new?"}
+                                                <span class="digest-price">{"0.01€"}</span>
+                                            </button>
+                                            {
+                                                if *call_active {
+                                                    let duration = *call_duration;
+                                                    let mins = duration / 60;
+                                                    let secs = duration % 60;
+                                                    html! {
+                                                        <button
+                                                            class="call-button call-active"
+                                                            onclick={{
+                                                                let on_end_call = on_end_call.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    on_end_call.emit(());
+                                                                })
+                                                            }}
+                                                            title="End the call"
+                                                        >
+                                                            {format!("End {mins}:{secs:02}")}
+                                                        </button>
+                                                    }
+                                                } else if *call_connecting {
+                                                    html! {
+                                                        <button
+                                                            class="call-button call-connecting"
+                                                            disabled=true
+                                                            title="Connecting..."
+                                                        >
+                                                            {"..."}
+                                                        </button>
+                                                    }
+                                                } else {
+                                                    let cost = *call_cost_per_min;
+                                                    html! {
+                                                        <button
+                                                            class="call-button"
+                                                            onclick={{
+                                                                let on_start_call = on_start_call.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    on_start_call.emit(());
+                                                                })
+                                                            }}
+                                                            disabled={*chat_loading}
+                                                            title={format!("Start voice call ({:.0}c/min)", cost * 100.0)}
+                                                        >
+                                                            <i class="fas fa-phone"></i>
+                                                            <span class="call-price">{format!("{:.2}€/m", cost)}</span>
+                                                        </button>
+                                                    }
+                                                }
+                                            }
+                                            <input
+                                                type="text"
+                                                ref={chat_input_ref.clone()}
+                                                value={(*chat_input).clone()}
+                                                placeholder="Ask your assistant..."
+                                                disabled={*chat_loading || *call_active}
+                                                onchange={{
+                                                    let chat_input = chat_input.clone();
+                                                    Callback::from(move |e: Event| {
+                                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                                        chat_input.set(input.value());
+                                                    })
+                                                }}
+                                                onkeypress={{
+                                                    let on_send = on_send.clone();
+                                                    Callback::from(move |e: KeyboardEvent| {
+                                                        if e.key() == "Enter" {
+                                                            on_send.emit(());
+                                                        }
+                                                    })
+                                                }}
+                                            />
+                                            <button
+                                                class="send-button"
+                                                onclick={{
+                                                    let on_send = on_send.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        on_send.emit(());
+                                                    })
+                                                }}
+                                                disabled={*chat_loading || *call_active}
+                                            >
+                                                {"Send"}
+                                                <span class="send-price">{"0.01€"}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                     {
                         if let Some(profile) = (*profile_data).as_ref() {
                             if profile.sub_tier.as_deref() != Some("tier 3") {
                                 html! {
                                     <>
-                                        <br/>
                                         <br/>
                                         <div class="dashboard-tabs">
                                             <button
@@ -784,6 +1325,33 @@ pub fn Home() -> Html {
                                             >
                                                 {"Connections"}
                                             </button>
+                                            <button
+                                                class={classes!("tab-button", (*active_tab == DashboardTab::Controls).then(|| "active"))}
+                                                onclick={{
+                                                    let active_tab = active_tab.clone();
+                                                    Callback::from(move |_| active_tab.set(DashboardTab::Controls))
+                                                }}
+                                            >
+                                                {"Controls"}
+                                            </button>
+                                            {
+                                                // Only show Media tab for user IDs 1 or 129
+                                                if profile.id == 1 || profile.id == 129 {
+                                                    html! {
+                                                        <button
+                                                            class={classes!("tab-button", (*active_tab == DashboardTab::Media).then(|| "active"))}
+                                                            onclick={{
+                                                                let active_tab = active_tab.clone();
+                                                                Callback::from(move |_| active_tab.set(DashboardTab::Media))
+                                                            }}
+                                                        >
+                                                            {"Media"}
+                                                        </button>
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }
+                                            }
                                             <button
                                                 class={classes!("tab-button", (*active_tab == DashboardTab::Billing).then(|| "active"))}
                                                 onclick={{
@@ -850,6 +1418,33 @@ pub fn Home() -> Html {
                                                         {
                                                             if let Some(profile) = (*profile_data).as_ref() {
                                                                 render_notification_settings(Some(profile))
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </div>
+                                                },
+                                                DashboardTab::Controls => html! {
+                                                    <div class="controls-tab">
+                                                        <TeslaControls />
+                                                    </div>
+                                                },
+                                                DashboardTab::Media => html! {
+                                                    <div class="media-tab">
+                                                        {
+                                                            if let Some(profile) = (*profile_data).as_ref() {
+                                                                if profile.id == 1 || profile.id == 129 {
+                                                                    html! {
+                                                                        <YouTubeHub youtube_connected={*youtube_connected} can_subscribe={*youtube_can_subscribe} />
+                                                                    }
+                                                                } else {
+                                                                    html! {
+                                                                        <div style="text-align: center; padding: 2rem; color: rgba(255, 255, 255, 0.7);">
+                                                                            <h3>{"Coming Soon"}</h3>
+                                                                            <p>{"Media features are currently in development."}</p>
+                                                                        </div>
+                                                                    }
+                                                                }
                                                             } else {
                                                                 html! {}
                                                             }
@@ -1166,6 +1761,169 @@ pub fn Home() -> Html {
                             margin: 0 0 1.5rem 0;
                             text-align: center;
                         }
+                        /* Web Chat Styles */
+                        .web-chat-section {
+                            margin: 1.5rem 0;
+                        }
+                        .web-chat-messages {
+                            max-height: 200px;
+                            overflow-y: auto;
+                            margin-bottom: 0.75rem;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 0.5rem;
+                        }
+                        .web-chat-messages:empty {
+                            display: none;
+                        }
+                        .chat-msg {
+                            padding: 0.5rem 0.75rem;
+                            border-radius: 8px;
+                            max-width: 85%;
+                            font-size: 0.9rem;
+                            line-height: 1.4;
+                            word-wrap: break-word;
+                        }
+                        .chat-msg.user {
+                            background: rgba(30, 144, 255, 0.2);
+                            color: #fff;
+                            align-self: flex-end;
+                            margin-left: auto;
+                        }
+                        .chat-msg.assistant {
+                            background: rgba(76, 175, 80, 0.15);
+                            color: #ccc;
+                            align-self: flex-start;
+                        }
+                        .chat-msg.loading {
+                            color: #666;
+                            font-style: italic;
+                        }
+                        .chat-error {
+                            color: #ff4444;
+                            font-size: 0.8rem;
+                            margin-bottom: 0.5rem;
+                        }
+                        .web-chat-input {
+                            display: flex;
+                            gap: 0.5rem;
+                            align-items: stretch;
+                        }
+                        .web-chat-input input {
+                            flex: 1;
+                            padding: 0.75rem 1rem;
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            border-radius: 8px;
+                            background: rgba(30, 30, 30, 0.7);
+                            color: #fff;
+                            font-size: 0.95rem;
+                        }
+                        .web-chat-input input:focus {
+                            outline: none;
+                            border-color: #1E90FF;
+                        }
+                        .web-chat-input input:disabled {
+                            opacity: 0.6;
+                        }
+                        .digest-button {
+                            position: relative;
+                            padding: 0.75rem 1rem 1.1rem 1rem;
+                            background: rgba(76, 175, 80, 0.15);
+                            border: 1px solid rgba(76, 175, 80, 0.25);
+                            border-radius: 8px;
+                            color: #4ade80;
+                            font-size: 0.85rem;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            white-space: nowrap;
+                        }
+                        .digest-price {
+                            position: absolute;
+                            bottom: 2px;
+                            right: 4px;
+                            font-size: 0.55rem;
+                            color: rgba(76, 175, 80, 0.6);
+                        }
+                        .digest-button:hover:not(:disabled) {
+                            background: rgba(76, 175, 80, 0.25);
+                            border-color: rgba(76, 175, 80, 0.4);
+                        }
+                        .digest-button:disabled {
+                            opacity: 0.5;
+                            cursor: not-allowed;
+                        }
+                        .send-button {
+                            position: relative;
+                            padding: 0.75rem 1.25rem 1.1rem 1.25rem;
+                            background: linear-gradient(45deg, #1E90FF, #4169E1);
+                            border: none;
+                            border-radius: 8px;
+                            color: #fff;
+                            font-size: 0.9rem;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        }
+                        .send-button:hover:not(:disabled) {
+                            background: linear-gradient(45deg, #4169E1, #1E90FF);
+                        }
+                        .send-button:disabled {
+                            opacity: 0.5;
+                            cursor: not-allowed;
+                        }
+                        .send-price {
+                            position: absolute;
+                            bottom: 2px;
+                            right: 4px;
+                            font-size: 0.6rem;
+                            color: rgba(255, 255, 255, 0.6);
+                        }
+                        .call-button {
+                            position: relative;
+                            padding: 0.75rem 1rem;
+                            background: rgba(255, 165, 0, 0.15);
+                            border: 1px solid rgba(255, 165, 0, 0.25);
+                            border-radius: 8px;
+                            color: #ffa500;
+                            font-size: 0.9rem;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            min-width: 44px;
+                        }
+                        .call-price {
+                            position: absolute;
+                            bottom: 2px;
+                            right: 4px;
+                            font-size: 0.55rem;
+                            color: rgba(255, 165, 0, 0.6);
+                        }
+                        .call-button:hover:not(:disabled) {
+                            background: rgba(255, 165, 0, 0.25);
+                            border-color: rgba(255, 165, 0, 0.4);
+                        }
+                        .call-button:disabled {
+                            opacity: 0.5;
+                            cursor: not-allowed;
+                        }
+                        .call-button.call-active {
+                            background: rgba(255, 69, 0, 0.2);
+                            border-color: rgba(255, 69, 0, 0.4);
+                            color: #ff4500;
+                            min-width: 100px;
+                        }
+                        .call-button.call-active:hover {
+                            background: rgba(255, 69, 0, 0.3);
+                        }
+                        .call-button.call-connecting {
+                            background: rgba(255, 165, 0, 0.1);
+                            animation: pulse 1.5s infinite;
+                        }
+                        @keyframes pulse {
+                            0%, 100% { opacity: 0.5; }
+                            50% { opacity: 1; }
+                        }
                         .dashboard-tabs {
                             display: flex;
                             gap: 1rem;
@@ -1206,7 +1964,7 @@ pub fn Home() -> Html {
                         .tab-button:hover {
                             color: #7EB2FF;
                         }
-                        .connections-tab, .billing-tab, .settings-tab {
+                        .connections-tab, .controls-tab, .media-tab, .billing-tab, .settings-tab {
                             min-height: 400px;
                         }
                         .feature-status {

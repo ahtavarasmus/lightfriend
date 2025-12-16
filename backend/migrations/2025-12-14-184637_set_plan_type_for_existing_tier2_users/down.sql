@@ -1,0 +1,5 @@
+-- Note: This is a one-way migration. We cannot reliably determine which users
+-- had their plan_type set by this migration vs those who had it set through
+-- normal subscription flow. Setting back to NULL would be incorrect for users
+-- who legitimately have plan_type set.
+-- If rollback is needed, manual intervention is required.

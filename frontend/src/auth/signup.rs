@@ -651,14 +651,14 @@ pub mod login {
                                     <button type="submit">{"Login"}</button>
                                 </form>
                                 <div class="auth-redirect">
-                                    {"Don't have an account? "}
-                                    <Link<Route> to={Route::Register}>
-                                        {"Register here"}
+                                    <Link<Route> to={Route::PasswordReset}>
+                                        {"Forgot password?"}
                                     </Link<Route>>
                                 </div>
                                 <div class="auth-redirect">
-                                    <Link<Route> to={Route::PasswordReset}>
-                                        {"Forgot password?"}
+                                    {"New? "}
+                                    <Link<Route> to={Route::Pricing}>
+                                        {"Subscribe here →"}
                                     </Link<Route>>
                                 </div>
                             </>
@@ -679,142 +679,27 @@ pub mod password_reset {
     use yew_router::prelude::*;
     use crate::Route;
     use crate::config;
+
     #[derive(Serialize)]
-    struct PasswordResetRequest {
-        email: String,
-    }
-    #[derive(Serialize)]
-    struct VerifyPasswordResetRequest {
-        email: String,
-        otp: String,
+    struct CompletePasswordResetRequest {
+        token: String,
         new_password: String,
     }
+
     #[derive(Deserialize)]
     struct PasswordResetResponse {
         message: String,
     }
-    #[function_component]
-    pub fn PasswordReset() -> Html {
-        let navigator = use_navigator().unwrap();
-        let email = use_state(String::new);
-        let otp = use_state(String::new);
-        let new_password = use_state(String::new);
-        let error = use_state(|| None::<String>);
-        let success = use_state(|| None::<String>);
-        let otp_sent = use_state(|| false);
-        let request_reset = {
-            let email = email.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-            let otp_sent_setter = otp_sent.clone();
-           
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let email = (*email).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-                let otp_sent_setter = otp_sent_setter.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post(&format!("{}/api/password-reset/request", config::get_backend_url()))
-                        .json(&PasswordResetRequest { email })
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                match response.json::<PasswordResetResponse>().await {
-                                    Ok(resp) => {
-                                        error_setter.set(None);
-                                        success_setter.set(Some(resp.message));
-                                        otp_sent_setter.set(true);
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
-                                    }
-                                }
-                            } else {
-                                match response.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to request password reset".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
-        let verify_reset = {
-            let email = email.clone();
-            let otp = otp.clone();
-            let new_password = new_password.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-            let navigator = navigator.clone();
-           
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let email = (*email).clone();
-                let otp = (*otp).clone();
-                let new_password = (*new_password).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-                let navigator = navigator.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post(&format!("{}/api/password-reset/verify", config::get_backend_url()))
-                        .json(&VerifyPasswordResetRequest {
-                            email,
-                            otp,
-                            new_password,
-                        })
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                match response.json::<PasswordResetResponse>().await {
-                                    Ok(resp) => {
-                                        println!("Password reset successful, preparing to redirect");
-                                        error_setter.set(None);
-                                        success_setter.set(Some(resp.message.clone()));
-                                        // Use setTimeout to delay navigation
-                                        let navigator = navigator.clone();
-                                        let success_message = resp.message.clone();
-                                        gloo_timers::callback::Timeout::new(2_000, move || {
-                                            println!("Redirecting to login page after password reset");
-                                            navigator.push(&Route::Login);
-                                        }).forget();
-                                    }
-                                    Err(e) => {
-                                        println!("Error parsing password reset response: {:?}", e);
-                                        error_setter.set(Some("Failed to parse server response. Please try again.".to_string()));
-                                    }
-                                }
-                            } else {
-                                error_setter.set(Some("Failed to verify reset code".to_string()));
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
-        html! {
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
-                <style>
-                {r#".login-container,
+
+    #[derive(Deserialize)]
+    struct ValidateTokenResponse {
+        valid: bool,
+    }
+
+    // Shared CSS styles
+    const AUTH_STYLES: &str = r#".login-container,
 .register-container {
-    background: rgba(30, 30, 30, 0.7); /* Darker container */
+    background: rgba(30, 30, 30, 0.7);
     border: 1px solid rgba(30, 144, 255, 0.1);
     border-radius: 16px;
     padding: 3rem;
@@ -842,7 +727,7 @@ pub mod password_reset {
 .auth-redirect {
     margin-top: 2rem;
     text-align: center;
-    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+    color: rgba(255, 255, 255, 0.6);
     font-size: 0.9rem;
 }
 .auth-redirect a {
@@ -855,148 +740,266 @@ pub mod password_reset {
     color: #7EB2FF;
     text-decoration: underline;
 }
-/* Custom checkbox styling */
-#terms-checkbox-container {
-    margin: 15px 0;
+.hero-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background-image: url('/assets/rain.gif');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 1;
+    z-index: -2;
+    pointer-events: none;
 }
-#terms-checkbox-container label {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    cursor: pointer;
-    font-size: 0.9em;
+.hero-background::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    background: linear-gradient(to bottom,
+        rgba(26, 26, 26, 0) 0%,
+        rgba(26, 26, 26, 1) 100%
+    );
+}
+.contact-info {
+    text-align: center;
     color: rgba(255, 255, 255, 0.8);
-    line-height: 1.4;
+    line-height: 1.6;
+    margin: 1.5rem 0;
 }
-#terms-checkbox-container input[type="checkbox"] {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    width: 1px !important;
-    height: 1px !important;
-    border: 2px solid rgba(30, 144, 255, 0.5) !important;
-    border-radius: 4px !important;
-    background: rgba(30, 30, 30, 0.7) !important;
-    cursor: pointer !important;
-    position: relative !important;
-    margin-top: 2px !important;
-    transition: all 0.2s ease !important;
-    display: inline-block !important;
-    vertical-align: middle !important;
-    transform: scale(0.6) !important;
-    transform-origin: left center !important;
-}
-#terms-checkbox-container input[type="checkbox"]:checked {
-    background: #1E90FF !important;
-    border-color: #1E90FF !important;
-}
-#terms-checkbox-container input[type="checkbox"]:checked::after {
-    content: "✓" !important;
-    position: absolute !important;
-    color: white !important;
-    font-size: 30px !important;
-    left: 2px !important;
-    top: -1px !important;
-    display: block !important;
-}
-#terms-checkbox-container input[type="checkbox"]:hover {
-    border-color: #1E90FF !important;
-}
-#terms-checkbox-container a {
+.contact-info a {
     color: #1E90FF;
     text-decoration: none;
-    transition: color 0.3s ease;
 }
-#terms-checkbox-container a:hover {
+.contact-info a:hover {
     color: #7EB2FF;
     text-decoration: underline;
-}
-.hero-background {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100vh;
-        background-image: url('/assets/rain.gif');
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        opacity: 1;
-        z-index: -2;
-        pointer-events: none;
-    }
-    .hero-background::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 50%;
-        background: linear-gradient(to bottom,
-            rgba(26, 26, 26, 0) 0%,
-            rgba(26, 26, 26, 1) 100%
-        );
-    }"#}
-                </style>
+}"#;
+
+    /// Password Reset page - shows contact instructions
+    /// (No token = user needs to contact admin for reset)
+    #[function_component]
+    pub fn PasswordReset() -> Html {
+        html! {
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+                <style>{AUTH_STYLES}</style>
                 <div class="hero-background"></div>
                 <div class="login-container">
                     <h1>{"Password Reset"}</h1>
+                    <div class="contact-info">
+                        <p>{"To reset your password, please contact:"}</p>
+                        <p style="margin-top: 1rem;">
+                            <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                        </p>
+                        <p style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
+                            {"We'll verify your identity and send you a secure reset link."}
+                        </p>
+                    </div>
+                    <div class="auth-redirect">
+                        <Link<Route> to={Route::Login}>
+                            {"Back to Login"}
+                        </Link<Route>>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
+    /// Password Reset with Token - shows form to set new password
+    #[derive(Properties, PartialEq)]
+    pub struct PasswordResetWithTokenProps {
+        pub token: String,
+    }
+
+    #[function_component]
+    pub fn PasswordResetWithToken(props: &PasswordResetWithTokenProps) -> Html {
+        let navigator = use_navigator().unwrap();
+        let token = props.token.clone();
+        let new_password = use_state(String::new);
+        let confirm_password = use_state(String::new);
+        let error = use_state(|| None::<String>);
+        let success = use_state(|| None::<String>);
+        let loading = use_state(|| true);
+        let token_valid = use_state(|| false);
+
+        // Validate token on mount
+        {
+            let token = token.clone();
+            let error = error.clone();
+            let loading = loading.clone();
+            let token_valid = token_valid.clone();
+
+            use_effect_with_deps(move |_| {
+                wasm_bindgen_futures::spawn_local(async move {
+                    match Request::get(&format!("{}/api/password-reset/validate/{}", config::get_backend_url(), token))
+                        .send()
+                        .await
                     {
-                        if let Some(error_message) = (*error).as_ref() {
-                            html! {
-                                <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                    {error_message}
-                                </div>
+                        Ok(response) => {
+                            if response.ok() {
+                                token_valid.set(true);
+                            } else {
+                                match response.json::<ErrorResponse>().await {
+                                    Ok(err) => error.set(Some(err.error)),
+                                    Err(_) => error.set(Some("Invalid or expired reset link.".to_string())),
+                                }
                             }
-                        } else if let Some(success_message) = (*success).as_ref() {
-                            html! {
-                                <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                    {success_message}
-                                </div>
-                            }
-                        } else {
-                            html! {}
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Failed to validate token: {}", e)));
                         }
                     }
+                    loading.set(false);
+                });
+                || ()
+            }, ());
+        }
+
+        let submit_reset = {
+            let token = token.clone();
+            let new_password = new_password.clone();
+            let confirm_password = confirm_password.clone();
+            let error = error.clone();
+            let success = success.clone();
+            let navigator = navigator.clone();
+
+            Callback::from(move |e: SubmitEvent| {
+                e.prevent_default();
+
+                let password = (*new_password).clone();
+                let confirm = (*confirm_password).clone();
+
+                if password.len() < 8 {
+                    error.set(Some("Password must be at least 8 characters long.".to_string()));
+                    return;
+                }
+
+                if password != confirm {
+                    error.set(Some("Passwords do not match.".to_string()));
+                    return;
+                }
+
+                let token = token.clone();
+                let error = error.clone();
+                let success = success.clone();
+                let navigator = navigator.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    match Request::post(&format!("{}/api/password-reset/complete", config::get_backend_url()))
+                        .json(&CompletePasswordResetRequest {
+                            token,
+                            new_password: password,
+                        })
+                        .unwrap()
+                        .send()
+                        .await
                     {
-                        if !*otp_sent {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<PasswordResetResponse>().await {
+                                    Ok(resp) => {
+                                        error.set(None);
+                                        success.set(Some(resp.message));
+                                        // Redirect to login after 2 seconds
+                                        gloo_timers::callback::Timeout::new(2_000, move || {
+                                            navigator.push(&Route::Login);
+                                        }).forget();
+                                    }
+                                    Err(_) => {
+                                        error.set(Some("Password reset successful! Redirecting to login...".to_string()));
+                                        gloo_timers::callback::Timeout::new(2_000, move || {
+                                            navigator.push(&Route::Login);
+                                        }).forget();
+                                    }
+                                }
+                            } else {
+                                match response.json::<ErrorResponse>().await {
+                                    Ok(err) => error.set(Some(err.error)),
+                                    Err(_) => error.set(Some("Failed to reset password.".to_string())),
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Request failed: {}", e)));
+                        }
+                    }
+                });
+            })
+        };
+
+        html! {
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+                <style>{AUTH_STYLES}</style>
+                <div class="hero-background"></div>
+                <div class="login-container">
+                    <h1>{"Reset Password"}</h1>
+
+                    {
+                        if *loading {
+                            html! { <p style="text-align: center;">{"Validating reset link..."}</p> }
+                        } else if !*token_valid {
                             html! {
-                                <form onsubmit={request_reset}>
-                                    <input
-                                        type="email"
-                                        placeholder="Email"
-                                        onchange={let email = email.clone(); move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            email.set(input.value());
-                                        }}
-                                    />
-                                    <button type="submit">{"Send Reset Code"}</button>
-                                </form>
+                                <>
+                                    <div class="error-message" style="color: #ff6b6b; margin-bottom: 1rem; text-align: center;">
+                                        {(*error).as_ref().unwrap_or(&"Invalid or expired reset link.".to_string())}
+                                    </div>
+                                    <div class="contact-info">
+                                        <p>{"Please contact "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>{" for a new reset link."}</p>
+                                    </div>
+                                </>
                             }
                         } else {
                             html! {
-                                <form onsubmit={verify_reset}>
-                                    <input
-                                        type="text"
-                                        placeholder="Reset Code"
-                                        onchange={let otp = otp.clone(); move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            otp.set(input.value());
-                                        }}
-                                    />
-                                    <input
-                                        type="password"
-                                        placeholder="New Password"
-                                        autocomplete="new-password"
-                                        onchange={let new_password = new_password.clone(); move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            new_password.set(input.value());
-                                        }}
-                                    />
-                                    <button type="submit">{"Reset Password"}</button>
-                                </form>
+                                <>
+                                    {
+                                        if let Some(error_msg) = (*error).as_ref() {
+                                            html! {
+                                                <div class="error-message" style="color: #ff6b6b; margin-bottom: 1rem; text-align: center;">
+                                                    {error_msg}
+                                                </div>
+                                            }
+                                        } else if let Some(success_msg) = (*success).as_ref() {
+                                            html! {
+                                                <div class="success-message" style="color: #4ade80; margin-bottom: 1rem; text-align: center;">
+                                                    {success_msg}
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    <form onsubmit={submit_reset}>
+                                        <input
+                                            type="password"
+                                            placeholder="New Password"
+                                            autocomplete="new-password"
+                                            onchange={let new_password = new_password.clone(); move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_password.set(input.value());
+                                            }}
+                                        />
+                                        <input
+                                            type="password"
+                                            placeholder="Confirm Password"
+                                            autocomplete="new-password"
+                                            onchange={let confirm_password = confirm_password.clone(); move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                confirm_password.set(input.value());
+                                            }}
+                                        />
+                                        <button type="submit">{"Set New Password"}</button>
+                                    </form>
+                                </>
                             }
                         }
                     }
+
                     <div class="auth-redirect">
                         <Link<Route> to={Route::Login}>
                             {"Back to Login"}
