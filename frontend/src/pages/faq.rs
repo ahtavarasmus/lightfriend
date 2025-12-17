@@ -345,7 +345,7 @@ pub fn faq() -> Html {
                     <p>
                         {"Your time is precious - why waste it fighting an endless battle against notifications and addictive apps? While tech giants deploy armies of experts to hijack your focus, there's a simpler path: stepping away. Choosing a dumbphone isn't about going backwards, you'll still have cutting edge AI at your fingertips. It's about taking back control of your attention and living life as its protagonist rather than watching it pass by through a screen."}
                     </p>
-                    <img src="/assets/squidwardlookingwindow.png" loading="lazy" alt="Squidward looking through window metaphor" class="faq-image" />
+                    <img src="/assets/squidwardlookingwindow.webp" loading="lazy" alt="Squidward looking through window metaphor" class="faq-image" />
                     <p>
                         {"Like Squidward on his window, many of us find ourselves looking out at life from behind our screens. We see others living, connecting, and experiencing the world firsthand, while we remain observers, separated by a digital barrier."}
                     </p>
@@ -368,7 +368,7 @@ pub fn faq() -> Html {
                     question="What's the value of boredom?"
                     id="value-of-boredom"
                 >
-                    <img src="/assets/boredom.png" loading="lazy" alt="Illustration of creative boredom" class="faq-image" />
+                    <img src="/assets/boredom.webp" loading="lazy" alt="Illustration of creative boredom" class="faq-image" />
                     <p>
                         {"Remember when being bored meant letting your mind wander, leading to unexpected bursts of creativity and self-discovery? Today's smartphones have eliminated these precious moments of 'empty time' - replacing them with endless scrolling and constant stimulation."}
                     </p>

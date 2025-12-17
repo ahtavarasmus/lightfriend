@@ -5,8 +5,9 @@ use std::sync::Arc;
 use openai_api_rs::v1::{
     chat_completion,
     types,
-    common::GPT4_O,
 };
+
+const GPT4_O: &str = "openai/gpt-4o-2024-11-20";
 use chrono::Timelike;
 use crate::tool_call_utils::utils::create_openai_client;
 use serde::{Deserialize, Serialize};
@@ -1639,7 +1640,7 @@ pub async fn generate_digest(
     )
     .tools(tools)
     .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
+    .max_tokens(350);
     match client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
