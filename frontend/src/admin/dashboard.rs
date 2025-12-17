@@ -8,14 +8,6 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use crate::admin::usage::{UsageLogs, 
-    UsageLog, 
-    CriticalMessageStats, 
-    WaitingMessageStats, 
-    CalendarMessageStats, 
-    SmsMessageStats, 
-    CallMessageStats
-};
 use serde_json::json;
 
 #[derive(Serialize)]
@@ -81,8 +73,6 @@ struct ImagePreview {
 pub fn admin_dashboard() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
-    let usage_logs = use_state(|| Vec::<UsageLog>::new());
-    let activity_filter = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
     let message = use_state(|| String::new());
     let email_subject = use_state(|| String::new());
@@ -99,45 +89,6 @@ pub fn admin_dashboard() -> Html {
 
     let users_effect = users.clone();
     let error_effect = error.clone();
-
-    // Fetch usage logs
-    {
-        let usage_logs = usage_logs.clone();
-        let error = error.clone();
-        let activity_filter = activity_filter.clone();
-
-        use_effect_with_deps(move |_| {
-            let usage_logs = usage_logs.clone();
-            let error = error.clone();
-
-            wasm_bindgen_futures::spawn_local(async move {
-                // This endpoint doesn't exist yet - we'll implement it later
-                match Api::get("/api/admin/usage-logs")
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if response.ok() {
-                            match response.json::<Vec<UsageLog>>().await {
-                                Ok(logs) => {
-                                    usage_logs.set(logs);
-                                }
-                                Err(_) => {
-                                    error.set(Some("Failed to parse usage logs data".to_string()));
-                                }
-                            }
-                        } else {
-                            error.set(Some("Failed to fetch usage logs".to_string()));
-                        }
-                    }
-                    Err(_) => {
-                        error.set(Some("Failed to fetch usage logs".to_string()));
-                    }
-                }
-            });
-            || ()
-        }, [activity_filter]);
-    }
 
     use_effect_with_deps(move |_| {
         let users = users_effect;
@@ -610,33 +561,6 @@ pub fn admin_dashboard() -> Html {
                     </div>
                 </div>
 
-                <UsageLogs
-                    usage_logs={(*usage_logs).clone()}
-                    activity_filter={(*activity_filter).clone()}
-                    on_filter_change={
-                        let activity_filter = activity_filter.clone();
-                        Callback::from(move |new_filter| {
-                            activity_filter.set(new_filter);
-                        })
-                    }
-                />
-
-                <CriticalMessageStats
-                    usage_logs={(*usage_logs).clone()}
-                />
-
-                <WaitingMessageStats
-                    usage_logs={(*usage_logs).clone()}
-                />
-                <CalendarMessageStats 
-                    usage_logs={(*usage_logs).clone()}
-                />
-                <SmsMessageStats
-                    usage_logs={(*usage_logs).clone()}
-                />
-                <CallMessageStats
-                    usage_logs={(*usage_logs).clone()}
-                />
                 {
                     if let Some(error_msg) = (*error).as_ref() {
                         html! {

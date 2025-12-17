@@ -305,10 +305,20 @@ pub async fn tesla_callback(
         )
     })?;
 
-    // Use the audience URL as the region (region API has DNS issues)
-    // TODO: Re-enable region API when Tesla fixes DNS or we find correct endpoint
-    let region = audience_url.clone();
-    info!("Using region from OAuth audience: {}", region);
+    // Detect user's actual region using the access token
+    // This is critical for users outside the default region (e.g., NA users when default is EU)
+    let region = match detect_user_region(access_token).await {
+        Ok(detected_region) => {
+            info!("Detected user's Tesla region: {}", detected_region);
+            detected_region
+        }
+        Err(e) => {
+            // Fall back to audience URL if region detection fails
+            error!("Failed to detect user region: {}. Falling back to audience URL: {}", e, audience_url);
+            audience_url.clone()
+        }
+    };
+    info!("Using Tesla region: {}", region);
 
     // Get current timestamp
     let current_time = std::time::SystemTime::now()

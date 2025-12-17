@@ -82,7 +82,6 @@ mod auth {
 }
 mod admin {
     pub mod dashboard;
-    pub mod usage;
 }
 use pages::{
     home::Home,

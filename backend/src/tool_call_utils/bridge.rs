@@ -528,8 +528,9 @@ pub async fn handle_fetch_recent_messages(
             } else {
                 let mut response = String::new();
                 for (i, msg) in messages.iter().take(15).enumerate() {
-                    let content = if msg.content.len() > 100 {
-                        format!("{}...", &msg.content[..97])
+                    let content = if msg.content.chars().count() > 100 {
+                        let truncated: String = msg.content.chars().take(97).collect();
+                        format!("{}...", truncated)
                     } else {
                         msg.content.clone()
                     };
