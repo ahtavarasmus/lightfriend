@@ -6,8 +6,6 @@ use web_sys::window;
 use crate::utils::api::Api;
 use crate::components::feature_preview::FeaturePreview;
 use serde::Deserialize;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct VehicleInfo {
@@ -34,21 +32,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
     let pairing_link = use_state(|| None::<String>);
     let qr_code_url = use_state(|| None::<String>);
     let show_pairing = use_state(|| false);
-    let lock_loading = use_state(|| false);
-    let climate_loading = use_state(|| false);
-    let defrost_loading = use_state(|| false);
-    let remote_start_loading = use_state(|| false);
     let command_result = use_state(|| None::<String>);
-    let battery_level = use_state(|| None::<i32>);
-    let battery_range = use_state(|| None::<f64>);
-    let charging_state = use_state(|| None::<String>);
-    let battery_loading = use_state(|| false);
-    let is_locked = use_state(|| None::<bool>);
-    let inside_temp = use_state(|| None::<f64>);
-    let outside_temp = use_state(|| None::<f64>);
-    let is_climate_on = use_state(|| None::<bool>);
-    let is_front_defroster_on = use_state(|| None::<bool>);
-    let is_rear_defroster_on = use_state(|| None::<bool>);
 
     // Vehicle selection state
     let available_vehicles = use_state(|| Vec::<VehicleInfo>::new());
@@ -64,14 +48,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
     // Disconnect confirmation modal state
     let show_disconnect_modal = use_state(|| false);
     let is_disconnecting = use_state(|| false);
-
-    // Climate notification preference
-    let notify_on_climate_ready = use_state(|| true);
-    let notify_toggle_loading = use_state(|| false);
-
-    // Last refresh timestamp state
-    let last_refresh_time: UseStateHandle<Option<String>> = use_state(|| None);
-    let last_refresh_epoch: UseStateHandle<Rc<RefCell<f64>>> = use_state(|| Rc::new(RefCell::new(0.0)));
 
     // Auto-hide command result after 10 seconds
     {
@@ -126,96 +102,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                 || ()
             },
             (),
-        );
-    }
-
-    // Auto-refresh vehicle status when Tesla becomes connected
-    {
-        let tesla_connected = tesla_connected.clone();
-        let battery_loading = battery_loading.clone();
-        let battery_level = battery_level.clone();
-        let battery_range = battery_range.clone();
-        let charging_state = charging_state.clone();
-        let is_locked = is_locked.clone();
-        let inside_temp = inside_temp.clone();
-        let outside_temp = outside_temp.clone();
-        let is_climate_on = is_climate_on.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
-        let last_refresh_time = last_refresh_time.clone();
-        let last_refresh_epoch = last_refresh_epoch.clone();
-
-        use_effect_with_deps(
-            move |connected| {
-                if **connected {
-                    let battery_loading = battery_loading.clone();
-                    let battery_level = battery_level.clone();
-                    let battery_range = battery_range.clone();
-                    let charging_state = charging_state.clone();
-                    let is_locked = is_locked.clone();
-                    let inside_temp = inside_temp.clone();
-                    let outside_temp = outside_temp.clone();
-                    let is_climate_on = is_climate_on.clone();
-                    let is_front_defroster_on = is_front_defroster_on.clone();
-                    let is_rear_defroster_on = is_rear_defroster_on.clone();
-                    let last_refresh_time = last_refresh_time.clone();
-                    let last_refresh_epoch = last_refresh_epoch.clone();
-
-                    spawn_local(async move {
-                        battery_loading.set(true);
-                        match Api::get("/api/tesla/battery-status").send().await {
-                            Ok(response) => {
-                                if response.ok() {
-                                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                                        if let Some(level) = data["battery_level"].as_i64() {
-                                            battery_level.set(Some(level as i32));
-                                        }
-                                        if let Some(range) = data["battery_range"].as_f64() {
-                                            battery_range.set(Some(range));
-                                        }
-                                        if let Some(state) = data["charging_state"].as_str() {
-                                            charging_state.set(Some(state.to_string()));
-                                        }
-                                        if let Some(locked) = data["locked"].as_bool() {
-                                            is_locked.set(Some(locked));
-                                        }
-                                        if let Some(temp) = data["inside_temp"].as_f64() {
-                                            inside_temp.set(Some(temp));
-                                        }
-                                        if let Some(temp) = data["outside_temp"].as_f64() {
-                                            outside_temp.set(Some(temp));
-                                        }
-                                        if let Some(climate) = data["is_climate_on"].as_bool() {
-                                            is_climate_on.set(Some(climate));
-                                        }
-                                        if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
-                                            is_front_defroster_on.set(Some(front_defrost));
-                                        }
-                                        if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
-                                            is_rear_defroster_on.set(Some(rear_defrost));
-                                        }
-                                        // Update last refresh timestamp
-                                        let now = web_sys::js_sys::Date::new_0();
-                                        let time_str = format!(
-                                            "{:02}:{:02}",
-                                            now.get_hours() as u32,
-                                            now.get_minutes() as u32,
-                                        );
-                                        last_refresh_time.set(Some(time_str));
-                                        *last_refresh_epoch.borrow_mut() = now.get_time();
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Silently fail - user can manually refresh
-                            }
-                        }
-                        battery_loading.set(false);
-                    });
-                }
-                || ()
-            },
-            tesla_connected.clone(),
         );
     }
 
@@ -308,39 +194,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         );
     }
 
-    // Fetch notify on climate ready setting when connected
-    {
-        let tesla_connected = tesla_connected.clone();
-        let notify_on_climate_ready = notify_on_climate_ready.clone();
-
-        use_effect_with_deps(
-            move |connected| {
-                if **connected {
-                    spawn_local(async move {
-                        match Api::get("/api/tesla/notify-climate-ready")
-                            .send()
-                            .await
-                        {
-                            Ok(response) => {
-                                if response.ok() {
-                                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                                        if let Some(enabled) = data["enabled"].as_bool() {
-                                            notify_on_climate_ready.set(enabled);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Silently fail - default is true
-                            }
-                        }
-                    });
-                }
-                || ()
-            },
-            tesla_connected.clone(),
-        );
-    }
 
     // Clear all state when disconnected (handles edge cases like external disconnects)
     {
@@ -348,15 +201,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         let pairing_link = pairing_link.clone();
         let qr_code_url = qr_code_url.clone();
         let show_pairing = show_pairing.clone();
-        let battery_level = battery_level.clone();
-        let battery_range = battery_range.clone();
-        let charging_state = charging_state.clone();
-        let is_locked = is_locked.clone();
-        let inside_temp = inside_temp.clone();
-        let outside_temp = outside_temp.clone();
-        let is_climate_on = is_climate_on.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
         let available_vehicles = available_vehicles.clone();
         let selected_vehicle_name = selected_vehicle_name.clone();
         let show_vehicle_selector = show_vehicle_selector.clone();
@@ -364,7 +208,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         let vehicle_pairing_link = vehicle_pairing_link.clone();
         let vehicle_qr_code_url = vehicle_qr_code_url.clone();
         let command_result = command_result.clone();
-        let last_refresh_time = last_refresh_time.clone();
 
         use_effect_with_deps(
             move |connected| {
@@ -373,15 +216,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                     pairing_link.set(None);
                     qr_code_url.set(None);
                     show_pairing.set(false);
-                    battery_level.set(None);
-                    battery_range.set(None);
-                    charging_state.set(None);
-                    is_locked.set(None);
-                    inside_temp.set(None);
-                    outside_temp.set(None);
-                    is_climate_on.set(None);
-                    is_front_defroster_on.set(None);
-                    is_rear_defroster_on.set(None);
                     available_vehicles.set(Vec::new());
                     selected_vehicle_name.set(None);
                     show_vehicle_selector.set(false);
@@ -389,136 +223,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                     vehicle_pairing_link.set(None);
                     vehicle_qr_code_url.set(None);
                     command_result.set(None);
-                    last_refresh_time.set(None);
-                }
-                || ()
-            },
-            tesla_connected.clone(),
-        );
-    }
-
-    // Auto-refresh when browser tab becomes visible (if enough time has passed)
-    {
-        let tesla_connected = tesla_connected.clone();
-        let battery_loading = battery_loading.clone();
-        let battery_level = battery_level.clone();
-        let battery_range = battery_range.clone();
-        let charging_state = charging_state.clone();
-        let is_locked = is_locked.clone();
-        let inside_temp = inside_temp.clone();
-        let outside_temp = outside_temp.clone();
-        let is_climate_on = is_climate_on.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
-        let last_refresh_time = last_refresh_time.clone();
-        let last_refresh_epoch = last_refresh_epoch.clone();
-
-        use_effect_with_deps(
-            move |connected| {
-                if **connected {
-                    let document = web_sys::window()
-                        .and_then(|w| w.document());
-
-                    if let Some(doc) = document {
-                        let battery_loading = battery_loading.clone();
-                        let battery_level = battery_level.clone();
-                        let battery_range = battery_range.clone();
-                        let charging_state = charging_state.clone();
-                        let is_locked = is_locked.clone();
-                        let inside_temp = inside_temp.clone();
-                        let outside_temp = outside_temp.clone();
-                        let is_climate_on = is_climate_on.clone();
-                        let is_front_defroster_on = is_front_defroster_on.clone();
-                        let is_rear_defroster_on = is_rear_defroster_on.clone();
-                        let last_refresh_time = last_refresh_time.clone();
-                        let last_refresh_epoch = last_refresh_epoch.clone();
-
-                        let callback = Closure::wrap(Box::new(move || {
-                            // Check if document is now visible using web_sys::js_sys::Reflect
-                            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                                if let Ok(hidden) = web_sys::js_sys::Reflect::get(&doc, &"hidden".into()) {
-                                    // Convert JsValue to bool - hidden is false when tab is visible
-                                    let is_hidden = hidden.as_bool().unwrap_or(true);
-                                    if !is_hidden {
-                                        // Check if at least 30 seconds passed since last refresh
-                                        let now = web_sys::js_sys::Date::new_0().get_time();
-                                        let last_epoch = *last_refresh_epoch.borrow();
-                                        if now - last_epoch > 30_000.0 {
-                                            // Trigger refresh
-                                            let battery_loading = battery_loading.clone();
-                                            let battery_level = battery_level.clone();
-                                            let battery_range = battery_range.clone();
-                                            let charging_state = charging_state.clone();
-                                            let is_locked = is_locked.clone();
-                                            let inside_temp = inside_temp.clone();
-                                            let outside_temp = outside_temp.clone();
-                                            let is_climate_on = is_climate_on.clone();
-                                            let is_front_defroster_on = is_front_defroster_on.clone();
-                                            let is_rear_defroster_on = is_rear_defroster_on.clone();
-                                            let last_refresh_time = last_refresh_time.clone();
-                                            let last_refresh_epoch = last_refresh_epoch.clone();
-
-                                            spawn_local(async move {
-                                                battery_loading.set(true);
-                                                match Api::get("/api/tesla/battery-status").send().await {
-                                                    Ok(response) => {
-                                                        if response.ok() {
-                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                if let Some(level) = data["battery_level"].as_i64() {
-                                                                    battery_level.set(Some(level as i32));
-                                                                }
-                                                                if let Some(range) = data["battery_range"].as_f64() {
-                                                                    battery_range.set(Some(range));
-                                                                }
-                                                                if let Some(state) = data["charging_state"].as_str() {
-                                                                    charging_state.set(Some(state.to_string()));
-                                                                }
-                                                                if let Some(locked) = data["locked"].as_bool() {
-                                                                    is_locked.set(Some(locked));
-                                                                }
-                                                                if let Some(temp) = data["inside_temp"].as_f64() {
-                                                                    inside_temp.set(Some(temp));
-                                                                }
-                                                                if let Some(temp) = data["outside_temp"].as_f64() {
-                                                                    outside_temp.set(Some(temp));
-                                                                }
-                                                                if let Some(climate) = data["is_climate_on"].as_bool() {
-                                                                    is_climate_on.set(Some(climate));
-                                                                }
-                                                                if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
-                                                                    is_front_defroster_on.set(Some(front_defrost));
-                                                                }
-                                                                if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
-                                                                    is_rear_defroster_on.set(Some(rear_defrost));
-                                                                }
-                                                                // Update timestamp
-                                                                let now = web_sys::js_sys::Date::new_0();
-                                                                let time_str = format!(
-                                                                    "{:02}:{:02}",
-                                                                    now.get_hours() as u32,
-                                                                    now.get_minutes() as u32,
-                                                                );
-                                                                last_refresh_time.set(Some(time_str));
-                                                                *last_refresh_epoch.borrow_mut() = now.get_time();
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(_) => {}
-                                                }
-                                                battery_loading.set(false);
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }) as Box<dyn Fn()>);
-
-                        let _ = doc.add_event_listener_with_callback(
-                            "visibilitychange",
-                            callback.as_ref().unchecked_ref()
-                        );
-                        callback.forget(); // Keep the closure alive
-                    }
                 }
                 || ()
             },
@@ -583,15 +287,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         let pairing_link = pairing_link.clone();
         let qr_code_url = qr_code_url.clone();
         let show_pairing = show_pairing.clone();
-        let battery_level = battery_level.clone();
-        let battery_range = battery_range.clone();
-        let charging_state = charging_state.clone();
-        let is_locked = is_locked.clone();
-        let inside_temp = inside_temp.clone();
-        let outside_temp = outside_temp.clone();
-        let is_climate_on = is_climate_on.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
         let available_vehicles = available_vehicles.clone();
         let selected_vehicle_name = selected_vehicle_name.clone();
         let show_vehicle_selector = show_vehicle_selector.clone();
@@ -608,15 +303,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             let pairing_link = pairing_link.clone();
             let qr_code_url = qr_code_url.clone();
             let show_pairing = show_pairing.clone();
-            let battery_level = battery_level.clone();
-            let battery_range = battery_range.clone();
-            let charging_state = charging_state.clone();
-            let is_locked = is_locked.clone();
-            let inside_temp = inside_temp.clone();
-            let outside_temp = outside_temp.clone();
-            let is_climate_on = is_climate_on.clone();
-            let is_front_defroster_on = is_front_defroster_on.clone();
-            let is_rear_defroster_on = is_rear_defroster_on.clone();
             let available_vehicles = available_vehicles.clone();
             let selected_vehicle_name = selected_vehicle_name.clone();
             let show_vehicle_selector = show_vehicle_selector.clone();
@@ -641,15 +327,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                             pairing_link.set(None);
                             qr_code_url.set(None);
                             show_pairing.set(false);
-                            battery_level.set(None);
-                            battery_range.set(None);
-                            charging_state.set(None);
-                            is_locked.set(None);
-                            inside_temp.set(None);
-                            outside_temp.set(None);
-                            is_climate_on.set(None);
-                            is_front_defroster_on.set(None);
-                            is_rear_defroster_on.set(None);
                             available_vehicles.set(Vec::new());
                             selected_vehicle_name.set(None);
                             show_vehicle_selector.set(false);
@@ -675,307 +352,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                         is_disconnecting.set(false);
                     }
                 }
-            });
-        })
-    };
-
-    // Handle lock/unlock button click
-    let handle_lock = {
-        let lock_loading = lock_loading.clone();
-        let command_result = command_result.clone();
-        let is_locked = is_locked.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let lock_loading = lock_loading.clone();
-            let command_result = command_result.clone();
-            let is_locked = is_locked.clone();
-
-            lock_loading.set(true);
-            command_result.set(None);
-
-            spawn_local(async move {
-                // Determine command based on current lock state
-                let command = match *is_locked {
-                    Some(true) => "unlock",  // If locked, unlock it
-                    Some(false) => "lock",   // If unlocked, lock it
-                    None => "lock",          // If unknown, default to lock
-                };
-
-                let body = serde_json::json!({
-                    "command": command
-                });
-
-                let request = match Api::post("/api/tesla/command")
-                    .json(&body)
-                {
-                    Ok(req) => req.send().await,
-                    Err(e) => {
-                        command_result.set(Some(format!("Failed to create request: {}", e)));
-                        lock_loading.set(false);
-                        return;
-                    }
-                };
-
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            // Update state optimistically after successful command
-                            match command {
-                                "lock" => is_locked.set(Some(true)),
-                                "unlock" => is_locked.set(Some(false)),
-                                _ => {}
-                            }
-
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
-                                    command_result.set(Some(msg.to_string()));
-                                }
-                            }
-                        } else {
-                            command_result.set(Some("Failed to execute lock command".to_string()));
-                        }
-                    }
-                    Err(e) => {
-                        command_result.set(Some(format!("Network error: {}", e)));
-                    }
-                }
-                lock_loading.set(false);
-            });
-        })
-    };
-
-    // Handle climate button click
-    let handle_climate = {
-        let climate_loading = climate_loading.clone();
-        let command_result = command_result.clone();
-        let is_climate_on = is_climate_on.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let climate_loading = climate_loading.clone();
-            let command_result = command_result.clone();
-            let is_climate_on = is_climate_on.clone();
-
-            climate_loading.set(true);
-            command_result.set(None);
-
-            spawn_local(async move {
-                // Determine command based on current climate state
-                let command = match *is_climate_on {
-                    Some(true) => "climate_off",  // If on, turn it off
-                    Some(false) => "climate_on",  // If off, turn it on
-                    None => "climate_on",         // If unknown, default to on
-                };
-
-                let body = serde_json::json!({
-                    "command": command
-                });
-
-                let request = match Api::post("/api/tesla/command")
-                    .json(&body)
-                {
-                    Ok(req) => req.send().await,
-                    Err(e) => {
-                        command_result.set(Some(format!("Failed to create request: {}", e)));
-                        climate_loading.set(false);
-                        return;
-                    }
-                };
-
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            // Update state optimistically after successful command
-                            match command {
-                                "climate_on" => is_climate_on.set(Some(true)),
-                                "climate_off" => is_climate_on.set(Some(false)),
-                                _ => {}
-                            }
-
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
-                                    command_result.set(Some(msg.to_string()));
-                                }
-                            }
-                        } else {
-                            command_result.set(Some("Failed to execute climate command".to_string()));
-                        }
-                    }
-                    Err(e) => {
-                        command_result.set(Some(format!("Network error: {}", e)));
-                    }
-                }
-                climate_loading.set(false);
-            });
-        })
-    };
-
-    // Handle defrost button click
-    let handle_defrost = {
-        let defrost_loading = defrost_loading.clone();
-        let command_result = command_result.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
-        let is_climate_on = is_climate_on.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let defrost_loading = defrost_loading.clone();
-            let command_result = command_result.clone();
-            let is_front_defroster_on = is_front_defroster_on.clone();
-            let is_rear_defroster_on = is_rear_defroster_on.clone();
-            let is_climate_on = is_climate_on.clone();
-
-            defrost_loading.set(true);
-            command_result.set(None);
-
-            spawn_local(async move {
-                // Determine command based on current defrost state
-                let front_on = (*is_front_defroster_on).unwrap_or(false);
-                let rear_on = (*is_rear_defroster_on).unwrap_or(false);
-                let any_defrost_on = front_on || rear_on;
-
-                // If defrost is on, turn off climate (which turns off defrost)
-                // If defrost is off, activate defrost
-                let command = if any_defrost_on {
-                    "climate_off"  // Turn off climate to deactivate defrost
-                } else {
-                    "defrost"      // Activate max defrost
-                };
-
-                let body = serde_json::json!({
-                    "command": command
-                });
-
-                let request = match Api::post("/api/tesla/command")
-                    .json(&body)
-                {
-                    Ok(req) => req.send().await,
-                    Err(e) => {
-                        command_result.set(Some(format!("Failed to create request: {}", e)));
-                        defrost_loading.set(false);
-                        return;
-                    }
-                };
-
-                            match request {
-                                Ok(response) => {
-                                    if response.ok() {
-                                        // Update state optimistically based on command
-                                        match command {
-                                            "defrost" => {
-                                                // Defrost activates both front and rear defrosters and turns on climate
-                                                is_front_defroster_on.set(Some(true));
-                                                is_rear_defroster_on.set(Some(true));
-                                                is_climate_on.set(Some(true));
-                                            }
-                                            "climate_off" => {
-                                                // Turning off climate deactivates all defrosters
-                                                is_front_defroster_on.set(Some(false));
-                                                is_rear_defroster_on.set(Some(false));
-                                                is_climate_on.set(Some(false));
-                                            }
-                                            _ => {}
-                                        }
-
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                            if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
-                                                command_result.set(Some(msg.to_string()));
-                                            }
-                                        }
-                                    } else {
-                                        command_result.set(Some("Failed to execute defrost command".to_string()));
-                                    }
-                                }
-                                Err(e) => {
-                                    command_result.set(Some(format!("Network error: {}", e)));
-                                }
-                            }
-                defrost_loading.set(false);
-            });
-        })
-    };
-
-    // Handle remote start button click
-    let handle_remote_start = {
-        let remote_start_loading = remote_start_loading.clone();
-        let command_result = command_result.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let remote_start_loading = remote_start_loading.clone();
-            let command_result = command_result.clone();
-
-            remote_start_loading.set(true);
-            command_result.set(None);
-
-            spawn_local(async move {
-                let body = serde_json::json!({
-                    "command": "remote_start"
-                });
-
-                let request = match Api::post("/api/tesla/command")
-                    .json(&body)
-                {
-                    Ok(req) => req.send().await,
-                    Err(e) => {
-                        command_result.set(Some(format!("Failed to create request: {}", e)));
-                        remote_start_loading.set(false);
-                        return;
-                    }
-                };
-
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
-                                    command_result.set(Some(msg.to_string()));
-                                }
-                            }
-                        } else {
-                            command_result.set(Some("Failed to execute remote start command".to_string()));
-                        }
-                    }
-                    Err(e) => {
-                        command_result.set(Some(format!("Network error: {}", e)));
-                    }
-                }
-                remote_start_loading.set(false);
-            });
-        })
-    };
-
-    // Handle notify on climate ready toggle
-    let handle_notify_toggle = {
-        let notify_on_climate_ready = notify_on_climate_ready.clone();
-        let notify_toggle_loading = notify_toggle_loading.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let notify_on_climate_ready = notify_on_climate_ready.clone();
-            let notify_toggle_loading = notify_toggle_loading.clone();
-            let new_value = !*notify_on_climate_ready;
-
-            notify_toggle_loading.set(true);
-
-            spawn_local(async move {
-                match Api::post("/api/tesla/notify-climate-ready")
-                    .json(&serde_json::json!({ "enabled": new_value }))
-                {
-                    Ok(req) => {
-                        match req.send().await {
-                            Ok(response) => {
-                                if response.ok() {
-                                    notify_on_climate_ready.set(new_value);
-                                }
-                            }
-                            Err(_) => {
-                                // Silently fail
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Silently fail
-                    }
-                }
-                notify_toggle_loading.set(false);
             });
         })
     };
@@ -1092,127 +468,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         })
     };
 
-    // Handle battery refresh button click
-    let handle_battery_refresh = {
-        let battery_loading = battery_loading.clone();
-        let battery_level = battery_level.clone();
-        let battery_range = battery_range.clone();
-        let charging_state = charging_state.clone();
-        let is_locked = is_locked.clone();
-        let inside_temp = inside_temp.clone();
-        let outside_temp = outside_temp.clone();
-        let is_climate_on = is_climate_on.clone();
-        let is_front_defroster_on = is_front_defroster_on.clone();
-        let is_rear_defroster_on = is_rear_defroster_on.clone();
-        let available_vehicles = available_vehicles.clone();
-        let selected_vehicle_name = selected_vehicle_name.clone();
-        let last_refresh_time = last_refresh_time.clone();
-        let last_refresh_epoch = last_refresh_epoch.clone();
-
-        Callback::from(move |_: MouseEvent| {
-            let battery_loading = battery_loading.clone();
-            let battery_level = battery_level.clone();
-            let battery_range = battery_range.clone();
-            let charging_state = charging_state.clone();
-            let is_locked = is_locked.clone();
-            let inside_temp = inside_temp.clone();
-            let outside_temp = outside_temp.clone();
-            let is_climate_on = is_climate_on.clone();
-            let is_front_defroster_on = is_front_defroster_on.clone();
-            let is_rear_defroster_on = is_rear_defroster_on.clone();
-            let available_vehicles = available_vehicles.clone();
-            let selected_vehicle_name = selected_vehicle_name.clone();
-            let last_refresh_time = last_refresh_time.clone();
-            let last_refresh_epoch = last_refresh_epoch.clone();
-
-            battery_loading.set(true);
-
-            spawn_local(async move {
-                let request = Api::get("/api/tesla/battery-status")
-                    .send()
-                    .await;
-
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(level) = data["battery_level"].as_i64() {
-                                    battery_level.set(Some(level as i32));
-                                }
-                                if let Some(range) = data["battery_range"].as_f64() {
-                                    battery_range.set(Some(range));
-                                }
-                                if let Some(state) = data["charging_state"].as_str() {
-                                    charging_state.set(Some(state.to_string()));
-                                }
-                                if let Some(locked) = data["locked"].as_bool() {
-                                    is_locked.set(Some(locked));
-                                }
-                                if let Some(temp) = data["inside_temp"].as_f64() {
-                                    inside_temp.set(Some(temp));
-                                }
-                                if let Some(temp) = data["outside_temp"].as_f64() {
-                                    outside_temp.set(Some(temp));
-                                }
-                                if let Some(climate) = data["is_climate_on"].as_bool() {
-                                    is_climate_on.set(Some(climate));
-                                }
-                                if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
-                                    is_front_defroster_on.set(Some(front_defrost));
-                                }
-                                if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
-                                    is_rear_defroster_on.set(Some(rear_defrost));
-                                }
-                                // Update last refresh timestamp
-                                let now = web_sys::js_sys::Date::new_0();
-                                let time_str = format!(
-                                    "{:02}:{:02}",
-                                    now.get_hours() as u32,
-                                    now.get_minutes() as u32,
-                                );
-                                last_refresh_time.set(Some(time_str));
-                                *last_refresh_epoch.borrow_mut() = now.get_time();
-                            }
-
-                            // Also fetch vehicles list to update selected vehicle
-                            let available_vehicles = available_vehicles.clone();
-                            let selected_vehicle_name = selected_vehicle_name.clone();
-                            spawn_local(async move {
-                                if let Ok(vehicles_response) = Api::get("/api/tesla/vehicles")
-                                    .send()
-                                    .await
-                                {
-                                    if vehicles_response.ok() {
-                                        if let Ok(data) = vehicles_response.json::<serde_json::Value>().await {
-                                            if let Some(vehicles_array) = data["vehicles"].as_array() {
-                                                let vehicles: Vec<VehicleInfo> = vehicles_array
-                                                    .iter()
-                                                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
-                                                    .collect();
-
-                                                // Find selected vehicle name
-                                                let selected_name = vehicles.iter()
-                                                    .find(|v| v.selected)
-                                                    .map(|v| v.name.clone());
-
-                                                available_vehicles.set(vehicles);
-                                                selected_vehicle_name.set(selected_name);
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    Err(_e) => {
-                        // Error handling - could set an error state here
-                    }
-                }
-                battery_loading.set(false);
-            });
-        })
-    };
-
     html! {
         <div class="service-item">
             <div class="service-header">
@@ -1253,19 +508,29 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                         <li>{"Climate Control: Start or stop preconditioning"}</li>
                         <li>{"Remote Start: Enable keyless driving for 2 minutes"}</li>
                         <li>{"Charge Status: Check battery level and range"}</li>
+                        <li>{"Cabin Overheat Protection: Keep cabin cool when parked (on/off/fan-only)"}</li>
+                    </ul>
+                </div>
+                <div class="info-subsection">
+                    <h5>{"Smart Notifications"}</h5>
+                    <ul>
+                        <li>{"Ask to be notified when climate is ready: \"Turn on climate and notify me when it's ready\""}</li>
+                        <li>{"Ask to be notified when charging completes: \"Let me know when my car is done charging\""}</li>
+                        <li>{"Notifications are automatically skipped if you're in the vehicle"}</li>
                     </ul>
                 </div>
                 <div class="info-subsection">
                     <h5>{"Example Commands"}</h5>
                     <ul>
                         <li>{"\"Lock my Tesla\""}</li>
-                        <li>{"\"Start climate control in my car\""}</li>
+                        <li>{"\"Start climate\" or \"Start climate and notify me when ready\""}</li>
                         <li>{"\"What's my Tesla's battery level?\""}</li>
-                        <li>{"\"Precondition my vehicle\""}</li>
+                        <li>{"\"Notify me when charging is complete\""}</li>
+                        <li>{"\"Turn on cabin overheat protection\" or \"Set cabin protection to fan only\""}</li>
                     </ul>
                 </div>
                 <p class="info-note">
-                    {"Your Tesla credentials are encrypted and never stored in plain text."}
+                    {"Your Tesla credentials are encrypted and never stored in plain text. You can also control your vehicle and set up notifications from the Controls tab."}
                 </p>
             </div>
 
@@ -1416,56 +681,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                                         .unwrap_or(html! {})
                                 }
 
-                                // Refresh button
-                                <button
-                                    onclick={handle_battery_refresh.clone()}
-                                    disabled={*battery_loading}
-                                    style="
-                                        padding: 8px 16px;
-                                        background: rgba(30, 144, 255, 0.15);
-                                        color: #7EB2FF;
-                                        border: 1px solid rgba(30, 144, 255, 0.3);
-                                        border-radius: 8px;
-                                        font-size: 14px;
-                                        cursor: pointer;
-                                        opacity: {if *battery_loading { \"0.6\" } else { \"1\" }};
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 6px;
-                                    "
-                                >
-                                    {if *battery_loading {
-                                        html! { <><i class="fas fa-spinner fa-spin"></i>{" Refreshing..."}</> }
-                                    } else {
-                                        html! { <><i class="fas fa-sync-alt"></i>{" Refresh"}</> }
-                                    }}
-                                </button>
-                                // Last refresh timestamp
-                                {
-                                    if *battery_loading {
-                                        html! {
-                                            <span style="
-                                                color: #7EB2FF;
-                                                font-size: 12px;
-                                                margin-left: 10px;
-                                            ">
-                                                {"Loading..."}
-                                            </span>
-                                        }
-                                    } else if let Some(time) = (*last_refresh_time).clone() {
-                                        html! {
-                                            <span style="
-                                                color: #666;
-                                                font-size: 12px;
-                                                margin-left: 10px;
-                                            ">
-                                                {format!("Updated {}", time)}
-                                            </span>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
                             </div>
 
                             // Vehicle pairing modal (shown when Setup Virtual Key is clicked)
@@ -1595,327 +810,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                                     html! {}
                                 }
                             }
-
-                            // Status display
-                            <h5 style="color: #7EB2FF; font-size: 14px; font-weight: 500; margin: 15px 0 10px 0;">{"Status"}</h5>
-                            {
-                                if battery_level.is_some() {
-                                    html! {
-                                        <>
-                                            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                                                // Battery icon (dynamic based on level)
-                                                {{
-                                                    let level = (*battery_level).unwrap_or(0);
-                                                    let icon_class = if level <= 10 {
-                                                        "fa-solid fa-battery-empty"
-                                                    } else if level <= 35 {
-                                                        "fa-solid fa-battery-quarter"
-                                                    } else if level <= 60 {
-                                                        "fa-solid fa-battery-half"
-                                                    } else if level <= 90 {
-                                                        "fa-solid fa-battery-three-quarters"
-                                                    } else {
-                                                        "fa-solid fa-battery-full"
-                                                    };
-                                                    html! {
-                                                        <i class={icon_class} style="font-size: 32px; color: #7EB2FF;"></i>
-                                                    }
-                                                }}
-                                                <div style="flex: 1;">
-                                                    <div style="color: #fff; font-size: 18px; font-weight: 600;">
-                                                        {format!("{}%", (*battery_level).unwrap_or(0))}
-                                                    </div>
-                                                    {
-                                                        if let Some(range) = *battery_range {
-                                                            html! {
-                                                                <div style="color: #999; font-size: 14px;">
-                                                                    {format!("{:.0} mi range", range)}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(state) = (*charging_state).as_ref() {
-                                                            html! {
-                                                                <div style="color: #69f0ae; font-size: 13px; margin-top: 4px;">
-                                                                    {state}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(temp) = *inside_temp {
-                                                            html! {
-                                                                <div style="color: #999; font-size: 13px; margin-top: 4px;">
-                                                                    {format!("Inside: {:.1}°C", temp)}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(temp) = *outside_temp {
-                                                            html! {
-                                                                <div style="color: #999; font-size: 13px;">
-                                                                    {format!("Outside: {:.1}°C", temp)}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(climate) = *is_climate_on {
-                                                            if climate {
-                                                                html! {
-                                                                    <div style="color: #69f0ae; font-size: 13px; margin-top: 4px;">
-                                                                        {"🌡️ Climate On"}
-                                                                    </div>
-                                                                }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(front_defrost) = *is_front_defroster_on {
-                                                            if front_defrost {
-                                                                html! {
-                                                                    <div style="color: #69f0ae; font-size: 13px; margin-top: 4px;">
-                                                                        {"❄️ Front Defrost On"}
-                                                                    </div>
-                                                                }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(rear_defrost) = *is_rear_defroster_on {
-                                                            if rear_defrost {
-                                                                html! {
-                                                                    <div style="color: #69f0ae; font-size: 13px; margin-top: 4px;">
-                                                                        {"❄️ Rear Defrost On"}
-                                                                    </div>
-                                                                }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                </div>
-                                            </div>
-                                        </>
-                                    }
-                                } else if *battery_loading {
-                                    html! {
-                                        <div style="color: #999; font-size: 14px; text-align: center; padding: 20px 0;">
-                                            <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: #7EB2FF;"></i>
-                                            <div style="margin-top: 10px;">{"Loading vehicle status..."}</div>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {
-                                        <div style="color: #999; font-size: 14px; text-align: center; padding: 20px 0;">
-                                            {"Click Refresh to load battery status"}
-                                        </div>
-                                    }
-                                }
-                            }
-
-                            // Controls
-                            <h5 style="color: #7EB2FF; font-size: 14px; font-weight: 500; margin: 15px 0 10px 0; padding-top: 10px; border-top: 1px solid rgba(30, 144, 255, 0.1);">{"Controls"}</h5>
-                            <div style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap;">
-                                <button
-                                    onclick={handle_lock.clone()}
-                                    disabled={*lock_loading}
-                                    class="tesla-control-button"
-                                    style="
-                                        flex: 1;
-                                        min-width: 120px;
-                                        padding: 14px 20px;
-                                        background: rgba(30, 144, 255, 0.1);
-                                        color: #7EB2FF;
-                                        border: 1px solid rgba(30, 144, 255, 0.2);
-                                        border-radius: 8px;
-                                        font-size: 15px;
-                                        cursor: pointer;
-                                        transition: all 0.2s;
-                                        opacity: {if *lock_loading { \"0.6\" } else { \"1\" }};
-                                    "
-                                >
-                                    {
-                                        if *lock_loading {
-                                            html! { <><i class="fas fa-spinner fa-spin"></i>{" Loading..."}</> }
-                                        } else if let Some(locked) = *is_locked {
-                                            if locked {
-                                                html! { <><i class="fas fa-lock"></i>{" Locked"}</> }
-                                            } else {
-                                                html! { <><i class="fas fa-unlock"></i>{" Unlocked"}</> }
-                                            }
-                                        } else {
-                                            html! { <><i class="fas fa-question"></i>{" Lock"}</> }
-                                        }
-                                    }
-                                </button>
-
-                                <button
-                                    onclick={handle_climate.clone()}
-                                    disabled={*climate_loading}
-                                    class="tesla-control-button"
-                                    style="
-                                        flex: 1;
-                                        min-width: 120px;
-                                        padding: 14px 20px;
-                                        background: rgba(30, 144, 255, 0.1);
-                                        color: #7EB2FF;
-                                        border: 1px solid rgba(30, 144, 255, 0.2);
-                                        border-radius: 8px;
-                                        font-size: 15px;
-                                        cursor: pointer;
-                                        transition: all 0.2s;
-                                        opacity: {if *climate_loading { \"0.6\" } else { \"1\" }};
-                                    "
-                                >
-                                    {
-                                        if *climate_loading {
-                                            html! { <><i class="fas fa-spinner fa-spin"></i>{" Loading..."}</> }
-                                        } else if let Some(climate_on) = *is_climate_on {
-                                            if climate_on {
-                                                html! { <><i class="fas fa-fan"></i>{" Climate On"}</> }
-                                            } else {
-                                                html! { <><i class="fas fa-fan"></i>{" Climate Off"}</> }
-                                            }
-                                        } else {
-                                            html! { <><i class="fas fa-question"></i>{" Climate"}</> }
-                                        }
-                                    }
-                                </button>
-
-                                <button
-                                    onclick={handle_defrost.clone()}
-                                    disabled={*defrost_loading}
-                                    class="tesla-control-button"
-                                    style="
-                                        flex: 1;
-                                        min-width: 120px;
-                                        padding: 14px 20px;
-                                        background: rgba(30, 144, 255, 0.1);
-                                        color: #7EB2FF;
-                                        border: 1px solid rgba(30, 144, 255, 0.2);
-                                        border-radius: 8px;
-                                        font-size: 15px;
-                                        cursor: pointer;
-                                        transition: all 0.2s;
-                                        opacity: {if *defrost_loading { \"0.6\" } else { \"1\" }};
-                                    "
-                                >
-                                    {
-                                        if *defrost_loading {
-                                            html! { <><i class="fas fa-spinner fa-spin"></i>{" Loading..."}</> }
-                                        } else {
-                                            // Show defrost status if we have data
-                                            let front_on = is_front_defroster_on.unwrap_or(false);
-                                            let rear_on = is_rear_defroster_on.unwrap_or(false);
-                                            let any_on = front_on || rear_on;
-
-                                            if is_front_defroster_on.is_none() && is_rear_defroster_on.is_none() {
-                                                html! { <><i class="fas fa-question"></i>{" Defrost"}</> }
-                                            } else if any_on {
-                                                html! { <><i class="fas fa-snowflake"></i>{" Defrost On"}</> }
-                                            } else {
-                                                html! { <><i class="fas fa-snowflake"></i>{" Defrost Off"}</> }
-                                            }
-                                        }
-                                    }
-                                </button>
-
-                                <button
-                                    onclick={handle_remote_start.clone()}
-                                    disabled={*remote_start_loading}
-                                    class="tesla-control-button"
-                                    style="
-                                        flex: 1;
-                                        min-width: 120px;
-                                        padding: 14px 20px;
-                                        background: rgba(255, 152, 0, 0.1);
-                                        color: #FFB74D;
-                                        border: 1px solid rgba(255, 152, 0, 0.2);
-                                        border-radius: 8px;
-                                        font-size: 15px;
-                                        cursor: pointer;
-                                        transition: all 0.2s;
-                                        opacity: {if *remote_start_loading { \"0.6\" } else { \"1\" }};
-                                    "
-                                >
-                                    {
-                                        if *remote_start_loading {
-                                            html! { <><i class="fas fa-spinner fa-spin"></i>{" Loading..."}</> }
-                                        } else {
-                                            html! { <><i class="fas fa-key"></i>{" Start Drive"}</> }
-                                        }
-                                    }
-                                </button>
-                            </div>
-
-                            // Notify when climate ready toggle
-                            <div style="
-                                display: flex;
-                                align-items: center;
-                                gap: 10px;
-                                padding: 10px 12px;
-                                background: rgba(30, 144, 255, 0.05);
-                                border: 1px solid rgba(30, 144, 255, 0.1);
-                                border-radius: 8px;
-                                margin-bottom: 15px;
-                            ">
-                                <button
-                                    onclick={handle_notify_toggle}
-                                    disabled={*notify_toggle_loading}
-                                    style={format!("
-                                        width: 44px;
-                                        height: 24px;
-                                        border-radius: 12px;
-                                        border: none;
-                                        cursor: pointer;
-                                        position: relative;
-                                        transition: background 0.2s;
-                                        background: {};
-                                        opacity: {};
-                                    ",
-                                        if *notify_on_climate_ready { "rgba(105, 240, 174, 0.5)" } else { "rgba(255, 255, 255, 0.2)" },
-                                        if *notify_toggle_loading { "0.6" } else { "1" }
-                                    )}
-                                >
-                                    <div style={format!("
-                                        width: 18px;
-                                        height: 18px;
-                                        border-radius: 50%;
-                                        background: {};
-                                        position: absolute;
-                                        top: 3px;
-                                        transition: left 0.2s;
-                                        left: {};
-                                    ",
-                                        if *notify_on_climate_ready { "#69f0ae" } else { "#999" },
-                                        if *notify_on_climate_ready { "23px" } else { "3px" }
-                                    )}></div>
-                                </button>
-                                <span style="color: #ccc; font-size: 13px;">
-                                    {"Notify me when climate is ready"}
-                                </span>
-                            </div>
 
                             // Command result feedback
                             if let Some(result) = (*command_result).as_ref() {

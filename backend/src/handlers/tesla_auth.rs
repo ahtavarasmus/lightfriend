@@ -1122,48 +1122,218 @@ pub async fn tesla_mark_paired(
     }
 }
 
-// Get notify on climate ready setting
-pub async fn get_notify_on_climate_ready(
+// Climate monitoring status endpoint
+pub async fn get_climate_notify_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_notify_on_climate_ready(auth_user.user_id) {
-        Ok(enabled) => Ok(Json(json!({ "enabled": enabled }))),
-        Err(e) => {
-            error!("Failed to get notify_on_climate_ready: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get setting"})),
-            ))
+    let is_active = state.tesla_monitoring_tasks.contains_key(&auth_user.user_id);
+    Ok(Json(json!({ "active": is_active })))
+}
+
+// Start climate monitoring from UI
+pub async fn start_climate_notify(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if already monitoring
+    if state.tesla_monitoring_tasks.contains_key(&auth_user.user_id) {
+        return Ok(Json(json!({ "success": true, "message": "Already monitoring" })));
+    }
+
+    // Get Tesla connection info
+    let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to check Tesla connection"}))))?;
+
+    if !has_tesla {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Tesla not connected"}))));
+    }
+
+    // Get access token
+    let access_token = match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id).await {
+        Ok(token) => token,
+        Err((_, msg)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": msg})))),
+    };
+
+    // Get region
+    let region = state.user_repository.get_tesla_region(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get Tesla region"}))))?;
+
+    // Get selected vehicle
+    let vehicle_info = state.user_repository.get_selected_vehicle_info(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+
+    let (vehicle_vin, vehicle_name, _) = vehicle_info;
+
+    // Spawn monitoring task
+    let state_clone = state.clone();
+    let user_id = auth_user.user_id;
+    let handle = tokio::spawn(async move {
+        info!("Starting UI-initiated climate monitoring for user {}", user_id);
+        let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
+
+        let monitoring_result = tesla_client.monitor_climate_ready(&access_token, &vehicle_vin).await
+            .map_err(|e| e.to_string());
+
+        match monitoring_result {
+            Ok(Some(temp)) => {
+                let msg = format!("Your {} is ready to drive! Cabin temp is {:.1}°C.", &vehicle_name, temp);
+                crate::proactive::utils::send_notification(
+                    &state_clone,
+                    user_id,
+                    &msg,
+                    "tesla_ready_to_drive".to_string(),
+                    Some(format!("Your {} is warmed up and ready to drive!", &vehicle_name)),
+                ).await;
+            }
+            Ok(None) => {
+                let msg = format!("Your {} should be ready by now (climate running 20+ min).", &vehicle_name);
+                crate::proactive::utils::send_notification(
+                    &state_clone,
+                    user_id,
+                    &msg,
+                    "tesla_ready_timeout".to_string(),
+                    Some(format!("Your {} should be warmed up by now.", &vehicle_name)),
+                ).await;
+            }
+            Err(error_msg) => {
+                if error_msg.contains("turned off") {
+                    crate::proactive::utils::send_notification(
+                        &state_clone,
+                        user_id,
+                        "Tesla climate was turned off before reaching target temperature.",
+                        "tesla_climate_stopped".to_string(),
+                        Some(format!("Your {} climate was stopped early.", &vehicle_name)),
+                    ).await;
+                }
+            }
         }
+
+        state_clone.tesla_monitoring_tasks.remove(&user_id);
+        info!("UI-initiated climate monitoring completed for user {}", user_id);
+    });
+
+    state.tesla_monitoring_tasks.insert(auth_user.user_id, handle);
+    Ok(Json(json!({ "success": true, "message": "Climate monitoring started" })))
+}
+
+// Cancel climate monitoring from UI
+pub async fn cancel_climate_notify(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some((_, handle)) = state.tesla_monitoring_tasks.remove(&auth_user.user_id) {
+        handle.abort();
+        info!("Cancelled climate monitoring for user {}", auth_user.user_id);
+        Ok(Json(json!({ "success": true, "message": "Climate monitoring cancelled" })))
+    } else {
+        Ok(Json(json!({ "success": true, "message": "No monitoring was active" })))
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct NotifyClimateReadyPayload {
-    pub enabled: bool,
-}
-
-// Update notify on climate ready setting
-pub async fn update_notify_on_climate_ready(
+// Charging monitoring status endpoint
+pub async fn get_charging_notify_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Json(payload): Json<NotifyClimateReadyPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.update_notify_on_climate_ready(auth_user.user_id, payload.enabled) {
-        Ok(_) => {
-            info!("Updated notify_on_climate_ready for user {}: {}", auth_user.user_id, payload.enabled);
-            Ok(Json(json!({
-                "success": true,
-                "enabled": payload.enabled
-            })))
+    let is_active = state.tesla_charging_monitor_tasks.contains_key(&auth_user.user_id);
+    Ok(Json(json!({ "active": is_active })))
+}
+
+// Start charging monitoring from UI
+pub async fn start_charging_notify(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if already monitoring
+    if state.tesla_charging_monitor_tasks.contains_key(&auth_user.user_id) {
+        return Ok(Json(json!({ "success": true, "message": "Already monitoring" })));
+    }
+
+    // Get Tesla connection info
+    let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to check Tesla connection"}))))?;
+
+    if !has_tesla {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Tesla not connected"}))));
+    }
+
+    // Get access token
+    let access_token = match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id).await {
+        Ok(token) => token,
+        Err((_, msg)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": msg})))),
+    };
+
+    // Get region
+    let region = state.user_repository.get_tesla_region(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get Tesla region"}))))?;
+
+    // Get selected vehicle
+    let vehicle_info = state.user_repository.get_selected_vehicle_info(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+
+    let (vehicle_vin, vehicle_name, _) = vehicle_info;
+
+    // Spawn monitoring task
+    let state_clone = state.clone();
+    let user_id = auth_user.user_id;
+    let handle = tokio::spawn(async move {
+        info!("Starting UI-initiated charging monitoring for user {}", user_id);
+        let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
+
+        let monitoring_result = tesla_client.monitor_charging_complete(&access_token, &vehicle_vin).await
+            .map_err(|e| e.to_string());
+
+        match monitoring_result {
+            Ok(Some(battery_level)) => {
+                // Check if user is present in the vehicle before sending notification
+                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
+                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if is_user_present {
+                    info!("User is present in vehicle, skipping charging complete notification for user {}", user_id);
+                } else {
+                    let msg = format!("Your {} has finished charging! Battery is now at {}%.", &vehicle_name, battery_level);
+                    crate::proactive::utils::send_notification(
+                        &state_clone,
+                        user_id,
+                        &msg,
+                        "tesla_charging_complete".to_string(),
+                        Some(format!("Your {} is done charging!", &vehicle_name)),
+                    ).await;
+                }
+            }
+            Ok(None) => {
+                // Timeout or charging stopped
+                info!("Charging monitoring timed out or charging stopped for user {}", user_id);
+            }
+            Err(error_msg) => {
+                error!("Charging monitoring error for user {}: {}", user_id, error_msg);
+            }
         }
-        Err(e) => {
-            error!("Failed to update notify_on_climate_ready: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update setting"})),
-            ))
-        }
+
+        state_clone.tesla_charging_monitor_tasks.remove(&user_id);
+        info!("UI-initiated charging monitoring completed for user {}", user_id);
+    });
+
+    state.tesla_charging_monitor_tasks.insert(auth_user.user_id, handle);
+    Ok(Json(json!({ "success": true, "message": "Charging monitoring started" })))
+}
+
+// Cancel charging monitoring from UI
+pub async fn cancel_charging_notify(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some((_, handle)) = state.tesla_charging_monitor_tasks.remove(&auth_user.user_id) {
+        handle.abort();
+        info!("Cancelled charging monitoring for user {}", auth_user.user_id);
+        Ok(Json(json!({ "success": true, "message": "Charging monitoring cancelled" })))
+    } else {
+        Ok(Json(json!({ "success": true, "message": "No monitoring was active" })))
     }
 }

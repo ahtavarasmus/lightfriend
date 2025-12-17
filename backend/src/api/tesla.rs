@@ -55,6 +55,7 @@ pub struct VehicleState {
     pub locked: Option<bool>,
     pub odometer: Option<f64>,
     pub car_version: Option<String>,
+    pub is_user_present: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -320,6 +321,15 @@ impl TeslaClient {
         Ok("Max defrost activated with heated front seats and steering wheel".to_string())
     }
 
+    // Set cabin overheat protection on/off
+    pub async fn set_cabin_overheat_protection(&self, access_token: &str, vehicle_id: &str, on: bool, fan_only: bool) -> Result<bool, Box<dyn Error>> {
+        let body = serde_json::json!({
+            "on": on,
+            "fan_only": fan_only
+        });
+        self.send_command_with_body(access_token, vehicle_id, "set_cabin_overheat_protection", &body).await
+    }
+
     // Generic command sender
     async fn send_command(&self, access_token: &str, vehicle_id: &str, command: &str) -> Result<bool, Box<dyn Error>> {
         // Use proxy for signed commands if available, otherwise fall back to direct API
@@ -511,6 +521,62 @@ impl TeslaClient {
                 }
                 Err(e) => {
                     tracing::warn!("Error fetching climate data: {}, continuing...", e);
+                }
+            }
+        }
+    }
+
+    // Monitor charging until complete
+    pub async fn monitor_charging_complete(
+        &self,
+        access_token: &str,
+        vehicle_id: &str,
+    ) -> Result<Option<i32>, Box<dyn Error>> {
+        const POLL_INTERVAL_SECS: u64 = 5 * 60; // Poll every 5 minutes (charging takes hours)
+        const MAX_DURATION_SECS: u64 = 12 * 60 * 60; // Max 12 hours
+
+        let start_time = std::time::Instant::now();
+
+        loop {
+            let elapsed = start_time.elapsed().as_secs();
+
+            if elapsed > MAX_DURATION_SECS {
+                tracing::warn!("Charging monitoring timed out after {} hours", MAX_DURATION_SECS / 3600);
+                return Ok(None);
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+            match self.get_vehicle_data(access_token, vehicle_id).await {
+                Ok(vehicle) => {
+                    if let Some(charge_state) = vehicle.charge_state {
+                        let charging_state = charge_state.charging_state.as_str();
+                        let battery_level = charge_state.battery_level;
+
+                        tracing::debug!("Charging check: state={}, battery={}%", charging_state, battery_level);
+
+                        match charging_state {
+                            "Complete" => {
+                                tracing::info!("Charging complete at {}%", battery_level);
+                                return Ok(Some(battery_level));
+                            }
+                            "Stopped" | "Disconnected" | "NoPower" => {
+                                tracing::info!("Charging stopped ({}), battery at {}%", charging_state, battery_level);
+                                return Ok(Some(battery_level));
+                            }
+                            "Charging" => {
+                                // Still charging, continue monitoring
+                            }
+                            _ => {
+                                tracing::warn!("Unknown charging state: {}", charging_state);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("No charge state data available");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Error fetching vehicle data: {}, continuing...", e);
                 }
             }
         }

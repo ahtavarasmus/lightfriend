@@ -55,6 +55,7 @@ pub fn tesla_controls() -> Html {
     let climate_loading = use_state(|| false);
     let defrost_loading = use_state(|| false);
     let remote_start_loading = use_state(|| false);
+    let cabin_overheat_loading = use_state(|| false);
     let command_result = use_state(|| None::<String>);
 
     // Passkey verification state
@@ -76,6 +77,12 @@ pub fn tesla_controls() -> Html {
     let selected_vehicle_name = use_state(|| None::<String>);
     let last_refresh_time: UseStateHandle<Option<String>> = use_state(|| None);
     let last_refresh_epoch: UseStateHandle<Rc<RefCell<f64>>> = use_state(|| Rc::new(RefCell::new(0.0)));
+
+    // Notification monitoring state
+    let climate_notify_active = use_state(|| false);
+    let climate_notify_loading = use_state(|| false);
+    let charging_notify_active = use_state(|| false);
+    let charging_notify_loading = use_state(|| false);
 
     // Auto-hide command result after 10 seconds
     {
@@ -149,6 +156,8 @@ pub fn tesla_controls() -> Html {
         let selected_vehicle_name = selected_vehicle_name.clone();
         let last_refresh_time = last_refresh_time.clone();
         let last_refresh_epoch = last_refresh_epoch.clone();
+        let climate_notify_active = climate_notify_active.clone();
+        let charging_notify_active = charging_notify_active.clone();
 
         use_effect_with_deps(
             move |connected| {
@@ -156,6 +165,8 @@ pub fn tesla_controls() -> Html {
                     let battery_loading = battery_loading.clone();
                     let battery_level = battery_level.clone();
                     let battery_range = battery_range.clone();
+                    let climate_notify_active = climate_notify_active.clone();
+                    let charging_notify_active = charging_notify_active.clone();
                     let charging_state = charging_state.clone();
                     let is_locked = is_locked.clone();
                     let inside_temp = inside_temp.clone();
@@ -232,6 +243,34 @@ pub fn tesla_controls() -> Html {
                                                 .map(|v| v.name.clone());
                                             available_vehicles.set(vehicles);
                                             selected_vehicle_name.set(selected_name);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {}
+                        }
+
+                        // Fetch climate notify status
+                        match Api::get("/api/tesla/climate-notify/status").send().await {
+                            Ok(response) => {
+                                if response.ok() {
+                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Some(active) = data["active"].as_bool() {
+                                            climate_notify_active.set(active);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {}
+                        }
+
+                        // Fetch charging notify status
+                        match Api::get("/api/tesla/charging-notify/status").send().await {
+                            Ok(response) => {
+                                if response.ok() {
+                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Some(active) = data["active"].as_bool() {
+                                            charging_notify_active.set(active);
                                         }
                                     }
                                 }
@@ -491,6 +530,50 @@ pub fn tesla_controls() -> Html {
         })
     };
 
+    // Handle cabin overheat protection
+    let handle_cabin_overheat = {
+        let cabin_overheat_loading = cabin_overheat_loading.clone();
+        let command_result = command_result.clone();
+
+        Callback::from(move |mode: String| {
+            let cabin_overheat_loading = cabin_overheat_loading.clone();
+            let command_result = command_result.clone();
+
+            cabin_overheat_loading.set(true);
+            command_result.set(None);
+
+            spawn_local(async move {
+                let body = serde_json::json!({ "command": mode });
+                let request = match Api::post("/api/tesla/command").json(&body) {
+                    Ok(req) => req.send().await,
+                    Err(e) => {
+                        command_result.set(Some(format!("Failed to create request: {}", e)));
+                        cabin_overheat_loading.set(false);
+                        return;
+                    }
+                };
+
+                match request {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
+                                    command_result.set(Some(msg.to_string()));
+                                }
+                            }
+                        } else {
+                            command_result.set(Some("Failed to execute command".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        command_result.set(Some(format!("Network error: {}", e)));
+                    }
+                }
+                cabin_overheat_loading.set(false);
+            });
+        })
+    };
+
     // Handle refresh
     let handle_refresh = {
         let battery_loading = battery_loading.clone();
@@ -568,6 +651,92 @@ pub fn tesla_controls() -> Html {
                     Err(_) => {}
                 }
                 battery_loading.set(false);
+            });
+        })
+    };
+
+    // Handle climate notification toggle
+    let handle_climate_notify = {
+        let climate_notify_active = climate_notify_active.clone();
+        let climate_notify_loading = climate_notify_loading.clone();
+        let command_result = command_result.clone();
+
+        Callback::from(move |_: MouseEvent| {
+            let climate_notify_active = climate_notify_active.clone();
+            let climate_notify_loading = climate_notify_loading.clone();
+            let command_result = command_result.clone();
+            let is_active = *climate_notify_active;
+
+            climate_notify_loading.set(true);
+
+            spawn_local(async move {
+                let endpoint = if is_active {
+                    "/api/tesla/climate-notify/cancel"
+                } else {
+                    "/api/tesla/climate-notify/start"
+                };
+
+                match Api::post(endpoint).send().await {
+                    Ok(response) => {
+                        if response.ok() {
+                            climate_notify_active.set(!is_active);
+                            if !is_active {
+                                command_result.set(Some("You'll be notified when your car is ready to drive".to_string()));
+                            } else {
+                                command_result.set(Some("Climate notification cancelled".to_string()));
+                            }
+                        } else {
+                            command_result.set(Some("Failed to update notification".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        command_result.set(Some(format!("Error: {}", e)));
+                    }
+                }
+                climate_notify_loading.set(false);
+            });
+        })
+    };
+
+    // Handle charging notification toggle
+    let handle_charging_notify = {
+        let charging_notify_active = charging_notify_active.clone();
+        let charging_notify_loading = charging_notify_loading.clone();
+        let command_result = command_result.clone();
+
+        Callback::from(move |_: MouseEvent| {
+            let charging_notify_active = charging_notify_active.clone();
+            let charging_notify_loading = charging_notify_loading.clone();
+            let command_result = command_result.clone();
+            let is_active = *charging_notify_active;
+
+            charging_notify_loading.set(true);
+
+            spawn_local(async move {
+                let endpoint = if is_active {
+                    "/api/tesla/charging-notify/cancel"
+                } else {
+                    "/api/tesla/charging-notify/start"
+                };
+
+                match Api::post(endpoint).send().await {
+                    Ok(response) => {
+                        if response.ok() {
+                            charging_notify_active.set(!is_active);
+                            if !is_active {
+                                command_result.set(Some("You'll be notified when charging completes".to_string()));
+                            } else {
+                                command_result.set(Some("Charging notification cancelled".to_string()));
+                            }
+                        } else {
+                            command_result.set(Some("Failed to update notification".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        command_result.set(Some(format!("Error: {}", e)));
+                    }
+                }
+                charging_notify_loading.set(false);
             });
         })
     };
@@ -1024,6 +1193,127 @@ pub fn tesla_controls() -> Html {
                 </button>
             </div>
 
+            // Cabin Overheat Protection section
+            <div class="cabin-overheat-section">
+                <h4 class="section-title">{"Cabin Overheat Protection"}</h4>
+                <div class="cabin-overheat-buttons">
+                    <button
+                        onclick={
+                            let cb = handle_cabin_overheat.clone();
+                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_on".to_string()))
+                        }
+                        disabled={*cabin_overheat_loading}
+                        class="cabin-btn"
+                    >
+                        {
+                            if *cabin_overheat_loading {
+                                html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else {
+                                html! { <><i class="fas fa-temperature-high"></i>{" On (A/C)"}</> }
+                            }
+                        }
+                    </button>
+                    <button
+                        onclick={
+                            let cb = handle_cabin_overheat.clone();
+                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_fan_only".to_string()))
+                        }
+                        disabled={*cabin_overheat_loading}
+                        class="cabin-btn"
+                    >
+                        {
+                            if *cabin_overheat_loading {
+                                html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else {
+                                html! { <><i class="fas fa-fan"></i>{" Fan Only"}</> }
+                            }
+                        }
+                    </button>
+                    <button
+                        onclick={
+                            let cb = handle_cabin_overheat.clone();
+                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_off".to_string()))
+                        }
+                        disabled={*cabin_overheat_loading}
+                        class="cabin-btn cabin-btn-off"
+                    >
+                        {
+                            if *cabin_overheat_loading {
+                                html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else {
+                                html! { <><i class="fas fa-power-off"></i>{" Off"}</> }
+                            }
+                        }
+                    </button>
+                </div>
+            </div>
+
+            // Notification buttons section
+            <div class="notify-buttons-section">
+                // Climate notify button - only show when climate is on
+                {
+                    if is_climate_on.unwrap_or(false) {
+                        html! {
+                            <button
+                                onclick={handle_climate_notify}
+                                disabled={*climate_notify_loading}
+                                class={format!("notify-btn {}", if *climate_notify_active { "notify-btn-active" } else { "" })}
+                            >
+                                {
+                                    if *climate_notify_loading {
+                                        html! { <i class="fas fa-spinner fa-spin"></i> }
+                                    } else if *climate_notify_active {
+                                        html! { <><i class="fas fa-bell-slash"></i>{" Cancel Climate Notification"}</> }
+                                    } else {
+                                        html! { <><i class="fas fa-bell"></i>{" Notify When Ready"}</> }
+                                    }
+                                }
+                            </button>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+
+                // Charging notify button - only show when charging
+                {
+                    if charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
+                        html! {
+                            <button
+                                onclick={handle_charging_notify}
+                                disabled={*charging_notify_loading}
+                                class={format!("notify-btn {}", if *charging_notify_active { "notify-btn-active" } else { "" })}
+                            >
+                                {
+                                    if *charging_notify_loading {
+                                        html! { <i class="fas fa-spinner fa-spin"></i> }
+                                    } else if *charging_notify_active {
+                                        html! { <><i class="fas fa-bell-slash"></i>{" Cancel Charging Notification"}</> }
+                                    } else {
+                                        html! { <><i class="fas fa-bell"></i>{" Notify When Charged"}</> }
+                                    }
+                                }
+                            </button>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+
+                // Hint text - show when any notify button is visible
+                {
+                    if is_climate_on.unwrap_or(false) || charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
+                        html! {
+                            <div class="notify-hint">
+                                {"Won't notify if you're in the vehicle"}
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+            </div>
+
             // Command result
             {
                 if let Some(result) = (*command_result).as_ref() {
@@ -1292,6 +1582,98 @@ fn get_styles() -> &'static str {
         }
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+        .notify-buttons-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .notify-btn {
+            padding: 12px 16px;
+            background: rgba(105, 240, 174, 0.1);
+            color: #69f0ae;
+            border: 1px solid rgba(105, 240, 174, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .notify-btn:hover {
+            background: rgba(105, 240, 174, 0.2);
+        }
+        .notify-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .notify-btn-active {
+            background: rgba(255, 152, 0, 0.1);
+            color: #FFB74D;
+            border-color: rgba(255, 152, 0, 0.3);
+        }
+        .notify-btn-active:hover {
+            background: rgba(255, 152, 0, 0.2);
+        }
+        .notify-hint {
+            width: 100%;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 8px;
+            font-style: italic;
+        }
+        .cabin-overheat-section {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .cabin-overheat-section .section-title {
+            color: #7EB2FF;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .cabin-overheat-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .cabin-btn {
+            flex: 1;
+            min-width: 90px;
+            padding: 12px 16px;
+            background: rgba(255, 152, 0, 0.1);
+            color: #FFB74D;
+            border: 1px solid rgba(255, 152, 0, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .cabin-btn:hover {
+            background: rgba(255, 152, 0, 0.2);
+        }
+        .cabin-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .cabin-btn-off {
+            background: rgba(100, 100, 100, 0.1);
+            color: #999;
+            border-color: rgba(100, 100, 100, 0.3);
+        }
+        .cabin-btn-off:hover {
+            background: rgba(100, 100, 100, 0.2);
         }
     "#
 }

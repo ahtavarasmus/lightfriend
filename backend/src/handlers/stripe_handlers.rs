@@ -1338,7 +1338,8 @@ pub async fn stripe_webhook(
                                                     // This tells the frontend to redirect to login instead of auto-logging in
                                                     state.session_to_token.insert(session.id.to_string(), "EXISTING_USER".to_string());
 
-                                                    // Set subscription tier and plan_type from checkout session
+                                                    // Set subscription tier, plan_type, and credits from checkout session
+                                                    // This ensures existing users also get credits allocated reliably
                                                     if let Some(subscription) = &session.subscription {
                                                         let sub_id = match subscription {
                                                             stripe::Expandable::Id(id) => id.clone(),
@@ -1363,6 +1364,49 @@ pub async fn stripe_webhook(
                                                                 };
                                                                 let _ = state.user_repository.update_plan_type(existing_user_by_email.id, Some(plan_type));
                                                                 tracing::info!("Set subscription tier={} and plan_type={} for existing user {} from checkout", sub_info.tier, plan_type, existing_user_by_email.id);
+
+                                                                // Allocate credits based on user's country and plan
+                                                                let credits: f32 = if sub_info.tier == "tier 3" {
+                                                                    0.0
+                                                                } else if sub_info.tier == "tier 2" {
+                                                                    // US/CA users get 400 monthly credits
+                                                                    if existing_user_by_email.phone_number_country == Some("US".to_string())
+                                                                        || existing_user_by_email.phone_number_country == Some("CA".to_string()) {
+                                                                        tracing::info!("US/CA existing user {} subscribing, allocating 400 monthly credits", existing_user_by_email.id);
+                                                                        400.0
+                                                                    }
+                                                                    // Monitor plan (€29) gets credits for ~40 regular messages
+                                                                    else if is_monitor_plan_price(&price_id) {
+                                                                        let country = existing_user_by_email.phone_number_country.as_deref().unwrap_or("FI");
+                                                                        let alloc = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
+                                                                        tracing::info!("Monitor plan existing user {}, allocating {} credits", existing_user_by_email.id, alloc);
+                                                                        alloc
+                                                                    }
+                                                                    // Digest plan (€49) gets credits for ~120 regular messages
+                                                                    else if is_digest_plan_price(&price_id) {
+                                                                        let country = existing_user_by_email.phone_number_country.as_deref().unwrap_or("FI");
+                                                                        let alloc = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
+                                                                        tracing::info!("Digest plan existing user {}, allocating {} credits", existing_user_by_email.id, alloc);
+                                                                        alloc
+                                                                    }
+                                                                    // Other plans (legacy, BYOT) get 0 credits
+                                                                    else {
+                                                                        0.0
+                                                                    }
+                                                                } else {
+                                                                    0.0
+                                                                };
+
+                                                                if let Err(e) = state.user_repository.update_sub_credits(existing_user_by_email.id, credits) {
+                                                                    tracing::error!("Failed to set credits for existing user {}: {}", existing_user_by_email.id, e);
+                                                                } else {
+                                                                    tracing::info!("Set {} monthly credits for existing user {}", credits, existing_user_by_email.id);
+                                                                }
+
+                                                                // Update next billing date
+                                                                if let Err(e) = state.user_core.update_next_billing_date(existing_user_by_email.id, sub.current_period_end as i32) {
+                                                                    tracing::error!("Failed to update next billing date for existing user {}: {}", existing_user_by_email.id, e);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -1377,11 +1421,14 @@ pub async fn stripe_webhook(
                                                         .map(char::from)
                                                         .collect();
 
+                                                    // Set joined timestamp (time_to_live field is used as "joined_at")
+                                                    let joined_at = chrono::Utc::now().timestamp() as i32;
+
                                                     let new_user = NewUser {
                                                         email: email.clone(),
                                                         password_hash: "NOT_SET".to_string(),
                                                         phone_number: phone.clone(),
-                                                        time_to_live: 0,
+                                                        time_to_live: joined_at,
                                                         verified: true,
                                                         credits: 0.0,
                                                         credits_left: 0.0,
@@ -1430,7 +1477,9 @@ pub async fn stripe_webhook(
                                                                 }
                                                             });
 
-                                                            // Set subscription tier and plan_type from checkout session
+                                                            // Set subscription tier, plan_type, and credits from checkout session
+                                                            // This is the authoritative place for new guest users to ensure credits are allocated
+                                                            // even if CustomerSubscriptionCreated webhook arrives before user exists
                                                             if let Some(subscription) = &session.subscription {
                                                                 let sub_id = match subscription {
                                                                     stripe::Expandable::Id(id) => id.clone(),
@@ -1455,6 +1504,54 @@ pub async fn stripe_webhook(
                                                                         };
                                                                         let _ = state.user_repository.update_plan_type(created_user.id, Some(plan_type));
                                                                         tracing::info!("Set subscription tier={} and plan_type={} for new user {} from checkout", sub_info.tier, plan_type, created_user.id);
+
+                                                                        // Allocate credits based on user's country and plan
+                                                                        // Re-fetch user to get the phone_number_country that was just set
+                                                                        if let Ok(Some(user_with_country)) = state.user_core.find_by_id(created_user.id) {
+                                                                            let credits: f32 = if sub_info.tier == "tier 3" {
+                                                                                // Tier 3 (self-hosted) gets 0 credits
+                                                                                0.0
+                                                                            } else if sub_info.tier == "tier 2" {
+                                                                                // US/CA users get 400 monthly credits
+                                                                                if user_with_country.phone_number_country == Some("US".to_string())
+                                                                                    || user_with_country.phone_number_country == Some("CA".to_string()) {
+                                                                                    tracing::info!("US/CA guest checkout user {}, allocating 400 monthly credits", created_user.id);
+                                                                                    400.0
+                                                                                }
+                                                                                // Monitor plan (€29) gets credits for ~40 regular messages
+                                                                                else if is_monitor_plan_price(&price_id) {
+                                                                                    let country = user_with_country.phone_number_country.as_deref().unwrap_or("FI");
+                                                                                    let alloc = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
+                                                                                    tracing::info!("Monitor plan guest checkout user {}, allocating {} credits", created_user.id, alloc);
+                                                                                    alloc
+                                                                                }
+                                                                                // Digest plan (€49) gets credits for ~120 regular messages
+                                                                                else if is_digest_plan_price(&price_id) {
+                                                                                    let country = user_with_country.phone_number_country.as_deref().unwrap_or("FI");
+                                                                                    let alloc = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
+                                                                                    tracing::info!("Digest plan guest checkout user {}, allocating {} credits", created_user.id, alloc);
+                                                                                    alloc
+                                                                                }
+                                                                                // Other plans (legacy, BYOT) get 0 credits
+                                                                                else {
+                                                                                    tracing::info!("Other plan guest checkout user {}, allocating 0 credits", created_user.id);
+                                                                                    0.0
+                                                                                }
+                                                                            } else {
+                                                                                0.0
+                                                                            };
+
+                                                                            if let Err(e) = state.user_repository.update_sub_credits(created_user.id, credits) {
+                                                                                tracing::error!("Failed to set credits for new guest user {}: {}", created_user.id, e);
+                                                                            } else {
+                                                                                tracing::info!("Set {} monthly credits for new guest user {}", credits, created_user.id);
+                                                                            }
+
+                                                                            // Update next billing date
+                                                                            if let Err(e) = state.user_core.update_next_billing_date(created_user.id, sub.current_period_end as i32) {
+                                                                                tracing::error!("Failed to update next billing date for new guest user {}: {}", created_user.id, e);
+                                                                            }
+                                                                        }
                                                                     }
                                                                 }
                                                             }

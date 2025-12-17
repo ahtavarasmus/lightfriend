@@ -166,6 +166,7 @@ pub struct AppState {
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
+    tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
     phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
@@ -300,6 +301,7 @@ async fn main() {
         matrix_sync_tasks,
         matrix_clients,
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
+        tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
         password_reset_otps: DashMap::new(),
@@ -478,8 +480,12 @@ async fn main() {
         .route("/api/tesla/vehicles", get(tesla_auth::tesla_list_vehicles))
         .route("/api/tesla/select-vehicle", post(tesla_auth::tesla_select_vehicle))
         .route("/api/tesla/mark-paired", post(tesla_auth::tesla_mark_paired))
-        .route("/api/tesla/notify-climate-ready", get(tesla_auth::get_notify_on_climate_ready))
-        .route("/api/tesla/notify-climate-ready", post(tesla_auth::update_notify_on_climate_ready))
+        .route("/api/tesla/climate-notify/status", get(tesla_auth::get_climate_notify_status))
+        .route("/api/tesla/climate-notify/start", post(tesla_auth::start_climate_notify))
+        .route("/api/tesla/climate-notify/cancel", post(tesla_auth::cancel_climate_notify))
+        .route("/api/tesla/charging-notify/status", get(tesla_auth::get_charging_notify_status))
+        .route("/api/tesla/charging-notify/start", post(tesla_auth::start_charging_notify))
+        .route("/api/tesla/charging-notify/cancel", post(tesla_auth::cancel_charging_notify))
         .route("/api/auth/youtube/login", get(youtube_auth::youtube_login))
         .route("/api/auth/youtube/status", get(youtube_auth::youtube_status))
         .route("/api/auth/youtube/upgrade", get(youtube_auth::youtube_upgrade_scope))

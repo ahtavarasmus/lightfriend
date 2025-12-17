@@ -166,7 +166,7 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "command".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Command to execute: 'lock', 'unlock', 'climate_on', 'climate_off', 'defrost', 'remote_start', or 'charge_status'".to_string()),
+            description: Some("Command to execute: 'lock', 'unlock', 'climate_on', 'climate_off', 'defrost', 'remote_start', 'charge_status', 'cabin_overheat_on', 'cabin_overheat_off', or 'cabin_overheat_fan_only'".to_string()),
             enum_values: Some(vec![
                 "lock".to_string(),
                 "unlock".to_string(),
@@ -175,7 +175,19 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 "defrost".to_string(),
                 "remote_start".to_string(),
                 "charge_status".to_string(),
+                "cabin_overheat_on".to_string(),
+                "cabin_overheat_off".to_string(),
+                "cabin_overheat_fan_only".to_string(),
             ]),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "notify_when_ready".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("If true for climate_on or defrost commands, send SMS notification when car reaches comfortable temperature. Only set to true if user explicitly asks to be notified.".to_string()),
             ..Default::default()
         }),
     );
@@ -185,7 +197,7 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("control_tesla"),
             description: Some(String::from(
-                "Control Tesla vehicle functions: lock/unlock doors, start/stop climate control, defrost vehicle (max heat + heated seats/steering wheel for deep ice), remote start driving, or check charge status",
+                "Control Tesla vehicle functions: lock/unlock doors, start/stop climate control, defrost vehicle (max heat + heated seats/steering wheel for deep ice), remote start driving, check charge status, or control cabin overheat protection (on/off/fan-only). For climate_on/defrost, can optionally notify user when car is ready.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -217,7 +229,12 @@ pub async fn handle_tesla_command(
         .as_str()
         .unwrap_or("unknown");
 
-    info!("Executing Tesla command '{}' for user {}", command, user_id);
+    // Parse notify_when_ready - defaults to false (user must explicitly request notification)
+    let notify_when_ready = args_value["notify_when_ready"]
+        .as_bool()
+        .unwrap_or(false);
+
+    info!("Executing Tesla command '{}' for user {} (notify_when_ready: {})", command, user_id, notify_when_ready);
 
     // Check if user has Tier 2 subscription
     let user = match state.user_core.find_by_id(user_id) {
@@ -324,6 +341,7 @@ pub async fn handle_tesla_command(
         let vehicle_name_clone = vehicle_name.to_string();
         let command_clone = command.to_string();
         let region_clone = region.clone();
+        let notify_when_ready_clone = notify_when_ready;
 
         tokio::task::spawn(async move {
             let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region_clone);
@@ -359,8 +377,9 @@ pub async fn handle_tesla_command(
                         info!("Skipping notification for dashboard-initiated Tesla command");
                     }
 
-                    // Spawn climate monitoring for defrost and climate_on commands
-                    if command_clone == "defrost" || command_clone == "climate_on" {
+                    // Spawn climate monitoring only if user explicitly requested notification
+                    if notify_when_ready_clone && (command_clone == "defrost" || command_clone == "climate_on") {
+                        info!("User requested climate ready notification, starting monitoring");
                         spawn_climate_monitoring_internal(
                             state_clone.clone(),
                             user_id,
@@ -423,8 +442,9 @@ pub async fn handle_tesla_command(
     // Vehicle is already online, execute command immediately
     let result = execute_tesla_command(&tesla_client, &access_token, vehicle_vin, vehicle_name, command).await;
 
-    // Spawn climate monitoring for defrost and climate_on commands
-    if command == "defrost" || command == "climate_on" {
+    // Spawn climate monitoring only if user explicitly requested notification
+    if notify_when_ready && (command == "defrost" || command == "climate_on") {
+        info!("User requested climate ready notification, starting monitoring");
         spawn_climate_monitoring(state, user_id, region, access_token, vehicle_vin.to_string(), vehicle_name.to_string());
     }
 
@@ -505,13 +525,35 @@ async fn execute_tesla_command(
                 Err(e) => format!("Error getting charge status: {}", e),
             }
         }
+        "cabin_overheat_on" => {
+            match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, true, false).await {
+                Ok(true) => format!("Cabin Overheat Protection enabled for your {}. The car will use A/C to keep the cabin cool when parked in hot conditions.", vehicle_name),
+                Ok(false) => format!("Failed to enable Cabin Overheat Protection for your {}", vehicle_name),
+                Err(e) => format!("Error enabling Cabin Overheat Protection: {}", e),
+            }
+        }
+        "cabin_overheat_off" => {
+            match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, false, false).await {
+                Ok(true) => format!("Cabin Overheat Protection disabled for your {}", vehicle_name),
+                Ok(false) => format!("Failed to disable Cabin Overheat Protection for your {}", vehicle_name),
+                Err(e) => format!("Error disabling Cabin Overheat Protection: {}", e),
+            }
+        }
+        "cabin_overheat_fan_only" => {
+            match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, true, true).await {
+                Ok(true) => format!("Cabin Overheat Protection set to Fan Only for your {}. The car will use only the fan (no A/C) to keep the cabin cool when parked.", vehicle_name),
+                Ok(false) => format!("Failed to set Cabin Overheat Protection to Fan Only for your {}", vehicle_name),
+                Err(e) => format!("Error setting Cabin Overheat Protection to Fan Only: {}", e),
+            }
+        }
         _ => {
-            format!("Unknown Tesla command: '{}'. Available commands are: lock, unlock, climate_on, climate_off, defrost, remote_start, charge_status", command)
+            format!("Unknown Tesla command: '{}'. Available commands are: lock, unlock, climate_on, climate_off, defrost, remote_start, charge_status, cabin_overheat_on, cabin_overheat_off, cabin_overheat_fan_only", command)
         }
     }
 }
 
 // Helper to spawn climate monitoring (for synchronous path)
+// Note: This function is only called when user explicitly requested notification via notify_when_ready=true
 fn spawn_climate_monitoring(
     state: &Arc<AppState>,
     user_id: i32,
@@ -534,12 +576,17 @@ fn spawn_climate_monitoring(
         let monitoring_result = tesla_client.monitor_climate_ready(&access_token, &vehicle_vin).await
             .map_err(|e| e.to_string());
 
-        // Check if user wants notifications at time of sending
-        let should_notify = state_clone.user_core.get_notify_on_climate_ready(user_id).unwrap_or(true);
-
         match monitoring_result {
             Ok(Some(temp)) => {
-                if should_notify {
+                // Check if user is present in the vehicle before sending notification
+                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
+                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if is_user_present {
+                    info!("User is present in vehicle, skipping climate ready notification for user {}", user_id);
+                } else {
                     let msg = format!("Your {} is ready to drive! Cabin temp is {:.1}°C.", &vehicle_name, temp);
                     crate::proactive::utils::send_notification(
                         &state_clone,
@@ -548,12 +595,18 @@ fn spawn_climate_monitoring(
                         "tesla_ready_to_drive".to_string(),
                         Some(format!("Your {} is warmed up and ready to drive!", &vehicle_name)),
                     ).await;
-                } else {
-                    info!("User {} has climate notifications disabled, skipping ready notification", user_id);
                 }
             }
             Ok(None) => {
-                if should_notify {
+                // Check if user is present in the vehicle before sending notification
+                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
+                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if is_user_present {
+                    info!("User is present in vehicle, skipping timeout notification for user {}", user_id);
+                } else {
                     let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", &vehicle_name);
                     crate::proactive::utils::send_notification(
                         &state_clone,
@@ -562,14 +615,12 @@ fn spawn_climate_monitoring(
                         "tesla_ready_timeout".to_string(),
                         Some(format!("Your {} should be warmed up by now.", &vehicle_name)),
                     ).await;
-                } else {
-                    info!("User {} has climate notifications disabled, skipping timeout notification", user_id);
                 }
             }
             Err(error_msg) => {
                 let is_stopped = error_msg.contains("turned off");
                 error!("Climate monitoring error for user {}: {}", user_id, error_msg);
-                if is_stopped && should_notify {
+                if is_stopped {
                     crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
@@ -589,6 +640,7 @@ fn spawn_climate_monitoring(
 }
 
 // Helper for async path (already inside tokio::spawn)
+// Note: This function is only called when user explicitly requested notification via notify_when_ready=true
 fn spawn_climate_monitoring_internal(
     state: Arc<AppState>,
     user_id: i32,
@@ -610,12 +662,17 @@ fn spawn_climate_monitoring_internal(
         let monitoring_result = tesla_client.monitor_climate_ready(&access_token, &vehicle_vin).await
             .map_err(|e| e.to_string());
 
-        // Check if user wants notifications at time of sending
-        let should_notify = state_clone.user_core.get_notify_on_climate_ready(user_id).unwrap_or(true);
-
         match monitoring_result {
             Ok(Some(temp)) => {
-                if should_notify {
+                // Check if user is present in the vehicle before sending notification
+                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
+                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if is_user_present {
+                    info!("User is present in vehicle, skipping climate ready notification for user {}", user_id);
+                } else {
                     let msg = format!("Your {} is ready to drive! Cabin temp is {:.1}°C.", &vehicle_name, temp);
                     crate::proactive::utils::send_notification(
                         &state_clone,
@@ -624,12 +681,18 @@ fn spawn_climate_monitoring_internal(
                         "tesla_ready_to_drive".to_string(),
                         Some(format!("Your {} is warmed up and ready to drive!", &vehicle_name)),
                     ).await;
-                } else {
-                    info!("User {} has climate notifications disabled, skipping ready notification", user_id);
                 }
             }
             Ok(None) => {
-                if should_notify {
+                // Check if user is present in the vehicle before sending notification
+                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
+                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if is_user_present {
+                    info!("User is present in vehicle, skipping timeout notification for user {}", user_id);
+                } else {
                     let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", &vehicle_name);
                     crate::proactive::utils::send_notification(
                         &state_clone,
@@ -638,14 +701,12 @@ fn spawn_climate_monitoring_internal(
                         "tesla_ready_timeout".to_string(),
                         Some(format!("Your {} should be warmed up by now.", &vehicle_name)),
                     ).await;
-                } else {
-                    info!("User {} has climate notifications disabled, skipping timeout notification", user_id);
                 }
             }
             Err(error_msg) => {
                 let is_stopped = error_msg.contains("turned off");
                 error!("Climate monitoring error for user {}: {}", user_id, error_msg);
-                if is_stopped && should_notify {
+                if is_stopped {
                     crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,

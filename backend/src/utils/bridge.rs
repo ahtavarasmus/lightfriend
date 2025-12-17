@@ -498,6 +498,12 @@ pub async fn fetch_bridge_messages(
         .unwrap_or(0) as i64;
 
     let service_rooms = get_service_rooms(&client, service).await?;
+    if user_id == 1 {
+        tracing::info!("DEBUG user 1: Found {} {} rooms", service_rooms.len(), service);
+        for room in &service_rooms {
+            tracing::info!("DEBUG user 1: Room: {} (last_activity: {})", room.display_name, room.last_activity_formatted);
+        }
+    }
     let mut room_infos: Vec<(Room, BridgeRoom, i64)> = Vec::new(); // (room, bridge_room, seen_until)
     for bridge_room in service_rooms {
         let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(bridge_room.room_id.as_str()) {
@@ -524,6 +530,12 @@ pub async fn fetch_bridge_messages(
     }
     // Already sorted by last_activity desc from get_service_rooms
     room_infos.truncate(5);
+    if user_id == 1 {
+        tracing::info!("DEBUG user 1: Processing {} rooms after truncate, start_time={}, unread_only={}", room_infos.len(), start_time, unread_only);
+        for (_, br, seen_until) in &room_infos {
+            tracing::info!("DEBUG user 1: Will check room: {} with seen_until={}", br.display_name, seen_until);
+        }
+    }
     // Fetch messages in parallel
     let user_timezone = user_info.timezone.clone();
     let sender_prefix = get_sender_prefix(service);
@@ -532,6 +544,7 @@ pub async fn fetch_bridge_messages(
         let sender_prefix = sender_prefix.clone();
         let user_timezone = user_timezone.clone();
         let room_name = remove_bridge_suffix(&bridge_room.display_name);
+        let debug_user = user_id == 1;
         if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
             tracing::info!("Skipping message from a muted room");
             continue;
@@ -556,9 +569,15 @@ pub async fn fetch_bridge_messages(
                                 };
                                 // Skip messages that user has already seen (or outside time range)
                                 if timestamp <= seen_until {
+                                    if debug_user {
+                                        tracing::info!("DEBUG user 1: Skipping msg in {} - timestamp {} <= seen_until {}", room_name, timestamp, seen_until);
+                                    }
                                     continue;
                                 }
                                 if !sender.localpart().starts_with(&sender_prefix) {
+                                    if debug_user {
+                                        tracing::info!("DEBUG user 1: Skipping msg in {} - sender {} doesn't start with {}", room_name, sender.localpart(), sender_prefix);
+                                    }
                                     continue;
                                 }
                                 let (msgtype, body) = match content.msgtype {
@@ -578,6 +597,9 @@ pub async fn fetch_bridge_messages(
                                    body.contains("Decrypting message from WhatsApp failed") ||
                                    body.starts_with("* Failed to") {
                                     continue;
+                                }
+                                if debug_user {
+                                    tracing::info!("DEBUG user 1: Including msg in {} - timestamp {}", room_name, timestamp);
                                 }
                                 messages.push(BridgeMessage {
                                     sender: sender.to_string(),
