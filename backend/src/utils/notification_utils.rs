@@ -196,11 +196,12 @@ pub async fn send_admin_alert(
         message, COOLDOWN_HOURS
     );
 
-    // Create email request with CRLF line endings for email compliance
+    // Create email request - lettre handles line ending conversion during SMTP transmission
+    // Don't convert \n to \r\n here as it causes encoding issues with lettre's body builder
     let email_request = crate::handlers::imap_handlers::SendEmailRequest {
         to: admin_email.clone(),
         subject: subject.to_string(),
-        body: enhanced_message.replace("\n", "\r\n"),
+        body: enhanced_message,
     };
 
     // Create admin auth context

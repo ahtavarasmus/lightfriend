@@ -296,49 +296,23 @@ pub async fn tesla_callback(
         }
     };
 
-    // Detect user's actual region using the access token
-    // This is critical for users outside the default region (e.g., NA users when default is EU)
-    let region = match detect_user_region(access_token).await {
-        Ok(detected_region) => {
-            info!("Detected user's Tesla region: {}", detected_region);
-            detected_region
+    // Determine user's Tesla region based on their phone number
+    // This is more reliable than Tesla's region detection API which can be flaky
+    let region = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) if user.phone_number.starts_with("+1") => {
+            // North American phone number (+1 for US/Canada)
+            info!("User {} has +1 phone number, using NA region", user_id);
+            "https://fleet-api.prd.na.vn.cloud.tesla.com".to_string()
         }
-        Err(e) => {
-            // Region detection failed - try to infer from user's phone number
-            let error_msg = e.to_string();
-            error!("Failed to detect user region: {}. Attempting phone-based fallback.", error_msg);
-
-            // Get user's phone number to determine region
-            let fallback_region = match state.user_core.find_by_id(user_id) {
-                Ok(Some(user)) if user.phone_number.starts_with("+1") => {
-                    // North American phone number (+1 for US/Canada)
-                    info!("User {} has +1 phone number, using NA region as fallback", user_id);
-                    "https://fleet-api.prd.na.vn.cloud.tesla.com".to_string()
-                }
-                _ => {
-                    // Default to EU region (original audience_url)
-                    info!("Using default EU region as fallback for user {}", user_id);
-                    audience_url.clone()
-                }
-            };
-
-            // Send admin alert about the region detection failure
-            let state_clone = state.clone();
-            let alert_msg = format!(
-                "Tesla region detection failed for user {}.\n\nError: {}\n\nFallback region used: {}",
-                user_id, error_msg, fallback_region
-            );
-            tokio::spawn(async move {
-                if let Err(e) = crate::utils::notification_utils::send_admin_alert(
-                    &state_clone,
-                    "Tesla Region Detection Failed",
-                    &alert_msg,
-                ).await {
-                    error!("Failed to send admin alert about Tesla region detection: {}", e);
-                }
-            });
-
-            fallback_region
+        Ok(Some(user)) if user.phone_number.starts_with("+86") => {
+            // China phone number
+            info!("User {} has +86 phone number, using China region", user_id);
+            "https://fleet-api.prd.cn.vn.cloud.tesla.cn".to_string()
+        }
+        _ => {
+            // Default to EU region for all other countries
+            info!("User {} using EU region (default)", user_id);
+            "https://fleet-api.prd.eu.vn.cloud.tesla.com".to_string()
         }
     };
     info!("Using Tesla region: {} for user {}", region, user_id);
@@ -621,55 +595,6 @@ pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Er
 
     info!("Successfully obtained Tesla partner authentication token");
     Ok(access_token)
-}
-
-// Detect user's Tesla region using their access token
-// Returns the fleet_api_base_url for the user's region
-pub async fn detect_user_region(access_token: &str) -> Result<String, Box<dyn std::error::Error>> {
-    info!("Detecting user's Tesla region");
-
-    let http_client = reqwest::ClientBuilder::new()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-
-    // Tesla's region detection endpoint - uses global URL without regional subdomain
-    let region_url = "https://fleet-api.prd.vn.cloud.tesla.com/api/1/users/region";
-
-    info!("Calling Tesla region API: {}", region_url);
-
-    let response = match http_client
-        .get(region_url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .send()
-        .await {
-            Ok(resp) => resp,
-            Err(e) => {
-                error!("Failed to send region detection request: {:?}", e);
-                return Err(format!("Region API request failed: {}", e).into());
-            }
-        };
-
-    let status = response.status();
-    info!("Region API response status: {}", status);
-
-    if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Region detection failed with status {}: {}", status, error_text);
-        return Err(format!("Region detection failed ({}): {}", status, error_text).into());
-    }
-
-    let response_text = response.text().await?;
-    info!("Region API raw response: {}", response_text);
-
-    let region_data: serde_json::Value = serde_json::from_str(&response_text)?;
-
-    let fleet_api_base_url = region_data["response"]["fleet_api_base_url"]
-        .as_str()
-        .ok_or("No fleet_api_base_url in region response")?
-        .to_string();
-
-    info!("Detected user's Tesla region: {}", fleet_api_base_url);
-    Ok(fleet_api_base_url)
 }
 
 // Serve Tesla public key for vehicle command signing
