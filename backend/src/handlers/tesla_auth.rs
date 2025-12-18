@@ -25,6 +25,14 @@ use crate::{
     utils::encryption::{encrypt, decrypt},
 };
 
+// Helper to create error redirect for OAuth callback failures
+fn tesla_error_redirect(error_msg: &str) -> Redirect {
+    let frontend_url = std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let encoded_error = urlencoding::encode(error_msg);
+    Redirect::to(&format!("{}/connections?tesla=error&message={}", frontend_url, encoded_error))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TeslaCallbackParams {
     code: String,
@@ -115,92 +123,79 @@ pub async fn tesla_login(
 }
 
 // Tesla OAuth callback endpoint
+// Returns Redirect for both success and error cases so user gets proper feedback
 pub async fn tesla_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<TeslaCallbackParams>,
-) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
+) -> Redirect {
     info!("Tesla OAuth callback received with state: {}", params.state);
 
     // Parse state token
     let state_parts: Vec<&str> = params.state.split(':').collect();
     if state_parts.len() != 2 {
         error!("Invalid state format: {}", params.state);
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid state format"}))
-        ));
+        return tesla_error_redirect("Invalid OAuth state format");
     }
 
     let session_id_str = state_parts[0];
     let state_csrf = state_parts[1];
 
     // Parse session ID
-    let session_id = session_id_str.parse::<i128>()
-        .map_err(|e| {
+    let session_id = match session_id_str.parse::<i128>() {
+        Ok(id) => id,
+        Err(e) => {
             error!("Invalid session ID format: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid session ID"}))
-            )
-        })?;
+            return tesla_error_redirect("Invalid session ID");
+        }
+    };
 
     // Retrieve session
-    let session_record = state.session_store.load(&Id(session_id)).await
-        .map_err(|e| {
-            error!("Failed to load session: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to load session"}))
-            )
-        })?
-        .ok_or_else(|| {
+    let session_record = match state.session_store.load(&Id(session_id)).await {
+        Ok(Some(record)) => record,
+        Ok(None) => {
             error!("Session not found for ID: {}", session_id);
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Session not found or expired"}))
-            )
-        })?;
+            return tesla_error_redirect("Session expired. Please try connecting again.");
+        }
+        Err(e) => {
+            error!("Failed to load session: {}", e);
+            return tesla_error_redirect("Failed to load session");
+        }
+    };
 
     // Validate CSRF token
-    let stored_csrf = session_record.data.get("csrf_token")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "CSRF token not found in session"}))
-            )
-        })?;
+    let stored_csrf = match session_record.data.get("csrf_token").and_then(|v| v.as_str()) {
+        Some(csrf) => csrf,
+        None => {
+            error!("CSRF token not found in session");
+            return tesla_error_redirect("Security token missing");
+        }
+    };
 
     if state_csrf != stored_csrf {
         error!("CSRF token mismatch");
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "CSRF token mismatch"}))
-        ));
+        return tesla_error_redirect("Security token mismatch");
     }
 
     // Get user ID and PKCE verifier from session
-    let user_id = session_record.data.get("user_id")
-        .and_then(|v| v.as_i64())
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "User ID not found in session"}))
-            )
-        })? as i32;
+    let user_id = match session_record.data.get("user_id").and_then(|v| v.as_i64()) {
+        Some(id) => id as i32,
+        None => {
+            error!("User ID not found in session");
+            return tesla_error_redirect("User session invalid");
+        }
+    };
 
-    let pkce_verifier_secret = session_record.data.get("pkce_verifier")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "PKCE verifier not found in session"}))
-            )
-        })?;
+    let pkce_verifier_secret = match session_record.data.get("pkce_verifier").and_then(|v| v.as_str()) {
+        Some(secret) => secret.to_string(),
+        None => {
+            error!("PKCE verifier not found in session");
+            return tesla_error_redirect("Security verification failed");
+        }
+    };
 
     // Exchange authorization code for tokens
     // Note: Tesla uses a different domain for token exchange
-    let pkce_verifier = PkceCodeVerifier::new(pkce_verifier_secret.to_string());
+    let pkce_verifier = PkceCodeVerifier::new(pkce_verifier_secret);
 
     // Build custom HTTP client for token exchange
     let http_client = reqwest::ClientBuilder::new()
@@ -238,72 +233,68 @@ pub async fn tesla_callback(
         ("audience", &audience_url),
     ];
 
-    let token_response = http_client
+    let token_response = match http_client
         .post(token_url)
         .form(&token_params)
         .send()
         .await
-        .map_err(|e| {
+    {
+        Ok(resp) => resp,
+        Err(e) => {
             error!("Failed to send token exchange request: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to exchange code for token: {}", e)}))
-            )
-        })?;
+            return tesla_error_redirect("Failed to exchange authorization code with Tesla");
+        }
+    };
 
     if !token_response.status().is_success() {
         let error_text = token_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Token exchange failed: {}", error_text);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Token exchange failed: {}", error_text)}))
-        ));
+        error!("Token exchange failed for user {}: {}", user_id, error_text);
+        return tesla_error_redirect("Tesla rejected the authorization. Please try again.");
     }
 
-    let token_data: serde_json::Value = token_response.json().await
-        .map_err(|e| {
+    let token_data: serde_json::Value = match token_response.json().await {
+        Ok(data) => data,
+        Err(e) => {
             error!("Failed to parse token response: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to parse token response: {}", e)}))
-            )
-        })?;
+            return tesla_error_redirect("Invalid response from Tesla");
+        }
+    };
 
-    let access_token = token_data["access_token"].as_str()
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "No access token in response"}))
-            )
-        })?;
+    let access_token = match token_data["access_token"].as_str() {
+        Some(token) => token,
+        None => {
+            error!("No access token in Tesla response for user {}", user_id);
+            return tesla_error_redirect("Tesla did not provide access token");
+        }
+    };
 
-    let refresh_token = token_data["refresh_token"].as_str()
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "No refresh token in response"}))
-            )
-        })?;
+    let refresh_token = match token_data["refresh_token"].as_str() {
+        Some(token) => token,
+        None => {
+            error!("No refresh token in Tesla response for user {}", user_id);
+            return tesla_error_redirect("Tesla did not provide refresh token");
+        }
+    };
 
     let expires_in = token_data["expires_in"].as_i64()
         .unwrap_or(3600) as i32;
 
     // Encrypt tokens
-    let encrypted_access_token = encrypt(access_token).map_err(|e| {
-        error!("Failed to encrypt access token: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to encrypt access token: {}", e)}))
-        )
-    })?;
+    let encrypted_access_token = match encrypt(access_token) {
+        Ok(encrypted) => encrypted,
+        Err(e) => {
+            error!("Failed to encrypt access token: {}", e);
+            return tesla_error_redirect("Failed to secure Tesla credentials");
+        }
+    };
 
-    let encrypted_refresh_token = encrypt(refresh_token).map_err(|e| {
-        error!("Failed to encrypt refresh token: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to encrypt refresh token: {}", e)}))
-        )
-    })?;
+    let encrypted_refresh_token = match encrypt(refresh_token) {
+        Ok(encrypted) => encrypted,
+        Err(e) => {
+            error!("Failed to encrypt refresh token: {}", e);
+            return tesla_error_redirect("Failed to secure Tesla credentials");
+        }
+    };
 
     // Detect user's actual region using the access token
     // This is critical for users outside the default region (e.g., NA users when default is EU)
@@ -313,12 +304,44 @@ pub async fn tesla_callback(
             detected_region
         }
         Err(e) => {
-            // Fall back to audience URL if region detection fails
-            error!("Failed to detect user region: {}. Falling back to audience URL: {}", e, audience_url);
-            audience_url.clone()
+            // Region detection failed - try to infer from user's phone number
+            let error_msg = e.to_string();
+            error!("Failed to detect user region: {}. Attempting phone-based fallback.", error_msg);
+
+            // Get user's phone number to determine region
+            let fallback_region = match state.user_core.find_by_id(user_id) {
+                Ok(Some(user)) if user.phone_number.starts_with("+1") => {
+                    // North American phone number (+1 for US/Canada)
+                    info!("User {} has +1 phone number, using NA region as fallback", user_id);
+                    "https://fleet-api.prd.na.vn.cloud.tesla.com".to_string()
+                }
+                _ => {
+                    // Default to EU region (original audience_url)
+                    info!("Using default EU region as fallback for user {}", user_id);
+                    audience_url.clone()
+                }
+            };
+
+            // Send admin alert about the region detection failure
+            let state_clone = state.clone();
+            let alert_msg = format!(
+                "Tesla region detection failed for user {}.\n\nError: {}\n\nFallback region used: {}",
+                user_id, error_msg, fallback_region
+            );
+            tokio::spawn(async move {
+                if let Err(e) = crate::utils::notification_utils::send_admin_alert(
+                    &state_clone,
+                    "Tesla Region Detection Failed",
+                    &alert_msg,
+                ).await {
+                    error!("Failed to send admin alert about Tesla region detection: {}", e);
+                }
+            });
+
+            fallback_region
         }
     };
-    info!("Using Tesla region: {}", region);
+    info!("Using Tesla region: {} for user {}", region, user_id);
 
     // Get current timestamp
     let current_time = std::time::SystemTime::now()
@@ -338,34 +361,21 @@ pub async fn tesla_callback(
         region,
     };
 
-    state.user_repository
-        .create_tesla_connection(new_tesla)
-        .map_err(|e| {
-            error!("Failed to store Tesla connection: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to store Tesla connection: {}", e)}))
-            )
-        })?;
+    if let Err(e) = state.user_repository.create_tesla_connection(new_tesla) {
+        error!("Failed to store Tesla connection for user {}: {}", user_id, e);
+        return tesla_error_redirect("Failed to save Tesla connection. Please try again.");
+    }
 
-    // Clean up session
-    state.session_store.delete(&Id(session_id)).await
-        .map_err(|e| {
-            error!("Failed to delete session: {}", e);
-            // Non-critical error, continue
-            e
-        }).ok();
+    // Clean up session (non-critical)
+    let _ = state.session_store.delete(&Id(session_id)).await;
 
     info!("Tesla OAuth connection successfully established for user {}", user_id);
 
-    // Redirect to frontend home page with success query param
+    // Redirect to frontend connections page with success query param
     let frontend_url = std::env::var("FRONTEND_URL")
         .unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    Ok(Redirect::to(&format!(
-        "{}/?tesla=success",
-        frontend_url
-    )))
+    Redirect::to(&format!("{}/connections?tesla=success", frontend_url))
 }
 
 // Tesla disconnect endpoint

@@ -28,7 +28,6 @@ use crate::handlers::auth_middleware::AuthUser;
 use crate::AppState;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::utils::self_host_twilio;
 // Assuming BuyCreditsRequest is defined in billing_models.rs
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct BuyCreditsRequest {
@@ -110,6 +109,80 @@ async fn calculate_euro_credit_allocation(
             fallback_allocation
         }
     }
+}
+
+/// Idempotent subscription setup. Safe to call multiple times.
+/// Uses billing period end as idempotency key - if already set to current period, skips.
+async fn setup_user_subscription(
+    state: &Arc<AppState>,
+    user_id: i32,
+    price_id: &str,
+    current_period_end: i64,
+    phone_country: Option<&str>,
+) -> Result<(), String> {
+    // Idempotency: skip if billing date already matches this period
+    if let Ok(Some(existing)) = state.user_core.get_next_billing_date(user_id) {
+        if existing == current_period_end as i32 {
+            tracing::info!("User {} already set up for billing period ending {}, skipping", user_id, current_period_end);
+            return Ok(());
+        }
+    }
+
+    let sub_info = extract_subscription_info(price_id);
+
+    // Set subscription tier
+    if let Err(e) = state.user_repository.set_subscription_tier(user_id, Some(sub_info.tier)) {
+        tracing::error!("Failed to set subscription tier for user {}: {}", user_id, e);
+    }
+
+    // Set plan_type
+    use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
+    let plan_type = if is_digest_plan_price(price_id) {
+        "digest"
+    } else if is_byot_plan_price(price_id) {
+        "byot"
+    } else {
+        "monitor"
+    };
+    if let Err(e) = state.user_repository.update_plan_type(user_id, Some(plan_type)) {
+        tracing::error!("Failed to set plan_type for user {}: {}", user_id, e);
+    }
+
+    // Calculate credits based on tier and country
+    let credits: f32 = if sub_info.tier == "tier 3" {
+        0.0
+    } else if sub_info.tier == "tier 2" {
+        let country = phone_country.unwrap_or("FI");
+        if country == "US" || country == "CA" {
+            400.0
+        } else if is_monitor_plan_price(price_id) {
+            calculate_euro_credit_allocation(state, country, 40.0, "Monitor").await
+        } else if is_digest_plan_price(price_id) {
+            calculate_euro_credit_allocation(state, country, 120.0, "Digest").await
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    if let Err(e) = state.user_repository.update_sub_credits(user_id, credits) {
+        tracing::error!("Failed to set credits for user {}: {}", user_id, e);
+    } else {
+        tracing::info!("Set {} monthly credits for user {}", credits, user_id);
+    }
+
+    // Set next billing date (this is what makes it idempotent)
+    if let Err(e) = state.user_core.update_next_billing_date(user_id, current_period_end as i32) {
+        tracing::error!("Failed to update next billing date for user {}: {}", user_id, e);
+    } else {
+        tracing::info!("Updated next billing date for user {}: {}", user_id, current_period_end);
+    }
+
+    tracing::info!("Setup subscription for user {}: tier={}, plan={}, credits={}",
+        user_id, sub_info.tier, plan_type, credits);
+
+    Ok(())
 }
 
 pub async fn create_unified_subscription_checkout(
@@ -234,7 +307,7 @@ pub async fn create_unified_subscription_checkout(
         }
     ];
 
-    let success_url = format!("{}/billing?subscription=success", domain_url);
+    let success_url = format!("{}/home?subscription=success", domain_url);
     let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
     let mut create_params = CreateCheckoutSession {
         success_url: Some(&success_url),
@@ -386,7 +459,7 @@ pub async fn create_guest_checkout(
     ];
 
     // Success URL redirects to password setup page with session_id
-    let success_url = format!("{}/set-password?session_id={{CHECKOUT_SESSION_ID}}", domain_url);
+    let success_url = format!("{}/subscription-success", domain_url);
     let cancel_url = format!("{}/pricing?checkout=canceled", domain_url);
 
     // Build metadata
@@ -735,19 +808,7 @@ struct SubscriptionInfo {
     country: Option<&'static str>,
     tier: &'static str,
 }
-fn base_price_id(items: &[stripe::SubscriptionItem]) -> Option<String> {
-    let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
-    let trial_fee_id = std::env::var("STRIPE_EURO_TRIAL_FEE_PRICE_ID").unwrap_or_default();
-    items.iter()
-         .find(|it| {
-             it.price.as_ref().map(|p| {
-                 let id = p.id.as_str();
-                 id != topup_id.as_str() && id != trial_fee_id.as_str()
-             }).unwrap_or(false)
-         })
-         .and_then(|it| it.price.as_ref())
-         .map(|p| p.id.to_string())
-}
+
 // Helper function to extract subscription info from price ID
 fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     // Default values - all subscriptions map to tier 2 (hosted) unless it's tier 3 (self-hosted)
@@ -864,26 +925,35 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Id(id) => id,
                     stripe::Expandable::Object(customer) => customer.id,
                 };
-                // Get the base price ID from the subscription items
-                let base_price = subscription.items.data.first()
+
+                // Get price ID from subscription
+                let price_id = subscription.items.data.first()
                     .and_then(|item| item.price.as_ref())
                     .map(|price| price.id.to_string())
                     .ok_or_else(|| {
                         tracing::error!("No price found in subscription items");
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "Invalid subscription data"})),
-                        )
+                        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Invalid subscription data"})))
                     })?;
-                let _new_sub_info = extract_subscription_info(&base_price);
-                // Always check and cancel existing subscriptions when a new one is created
+
+                let sub_info = extract_subscription_info(&price_id);
+
+                // Skip subscription updates that are part of a plan change or being cancelled
+                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
+                    let is_plan_change = subscription.metadata.get("plan_change")
+                        .map(|val| val == "true")
+                        .unwrap_or(false);
+                    if is_plan_change {
+                        tracing::info!("Skipping subscription update as it's part of a plan change");
+                        return Ok(StatusCode::OK);
+                    }
+                    if subscription.cancel_at_period_end {
+                        tracing::info!("Skipping subscription update for subscription being cancelled: {}", subscription.id);
+                        return Ok(StatusCode::OK);
+                    }
+                }
+
+                // Cancel existing subscriptions when a new one is created
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
-                    tracing::info!("New subscription created, checking for existing subscriptions to cancel");
-
-                    // Guest checkout user creation is now handled in CheckoutSessionCompleted event
-                    // to ensure we have access to the checkout session ID for the redirect flow
-
-                    // List all active subscriptions for the customer
                     let existing_subscriptions = stripe::Subscription::list(
                         &client,
                         &stripe::ListSubscriptions {
@@ -893,297 +963,229 @@ pub async fn stripe_webhook(
                         },
                     ).await.map_err(|e| {
                         tracing::error!("Failed to list existing subscriptions: {}", e);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "Failed to check existing subscriptions"})),
-                        )
+                        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to check existing subscriptions"})))
                     })?;
-                    // Cancel all existing subscriptions except the new one
+
                     for existing_sub in existing_subscriptions.data.iter() {
                         if existing_sub.id != subscription.id {
                             tracing::info!("Canceling existing subscription: {}", existing_sub.id);
-                            if let Err(e) = Subscription::update(
+                            let _ = Subscription::update(
                                 &client,
                                 &existing_sub.id,
-                                UpdateSubscription {
-                                    cancel_at_period_end: Some(true),
-                                    ..Default::default()
-                                },
-                            ).await {
-                                tracing::error!("Failed to cancel subscription {}: {}", existing_sub.id, e);
-                            } else {
-                                tracing::info!("Successfully scheduled cancellation for subscription: {}", existing_sub.id);
-                            }
+                                UpdateSubscription { cancel_at_period_end: Some(true), ..Default::default() },
+                            ).await;
                         }
                     }
-                    // Automatically create Twilio subaccount for tier 3 (self-hosted) users
-                    if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        let sub_info = extract_subscription_info(&base_price);
-                        if sub_info.tier == "tier 3" {
-                            tracing::info!("Tier 3 subscription detected, creating Twilio subaccount for user {}", user.id);
-                            let state_clone = state.clone();
-                            let user_id = user.id;
+                }
 
-                            tokio::spawn(async move {
-                                let auth_user = AuthUser {
-                                    user_id,
-                                    is_admin: false,
+                // Find or create user (only on Created event, not Updated)
+                let user_id: i32 = match state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    Ok(Some(user)) => user.id,
+                    Ok(None) if event.type_ == stripe::EventType::CustomerSubscriptionCreated => {
+                        // Guest checkout - create user from Stripe customer
+                        tracing::info!("No user found for customer {}, creating from Stripe customer data", customer_id);
+
+                        let customer = Customer::retrieve(&client, &customer_id, &[]).await.map_err(|e| {
+                            tracing::error!("Failed to retrieve Stripe customer: {}", e);
+                            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to retrieve customer"})))
+                        })?;
+
+                        let email = customer.email.clone().unwrap_or_default();
+                        let phone = customer.phone.clone().unwrap_or_default();
+
+                        if email.is_empty() {
+                            tracing::error!("No email found for Stripe customer {}", customer_id);
+                            return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Customer has no email"}))));
+                        }
+
+                        // Check if user with this email already exists
+                        match state.user_core.find_by_email(&email) {
+                            Ok(Some(existing_user)) => {
+                                // Link existing user to Stripe customer
+                                tracing::info!("Found existing user {} with email {}, linking to Stripe customer", existing_user.id, email);
+                                let _ = state.user_repository.set_stripe_customer_id(existing_user.id, &customer_id.to_string());
+
+                                // Update phone if they provided one and don't have one set
+                                if !phone.is_empty() && existing_user.phone_number.is_empty() {
+                                    let _ = state.user_core.update_phone_number(existing_user.id, &phone);
+                                    // Also set phone country
+                                    if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(&state, existing_user.id, &phone).await {
+                                        let _ = state.user_core.set_preferred_number_for_country(existing_user.id, &country);
+                                    }
+                                }
+
+                                // Send welcome back email to let them know subscription is active
+                                let email_clone = email.clone();
+                                let user_repo = state.user_repository.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = crate::utils::email::send_subscription_activated_email(&user_repo, &email_clone).await {
+                                        tracing::error!("Failed to send subscription activated email: {}", e);
+                                    }
+                                });
+
+                                existing_user.id
+                            }
+                            Ok(None) => {
+                                // Create new user
+                                use crate::handlers::auth_dtos::NewUser;
+                                use rand::Rng;
+
+                                let magic_token: String = rand::thread_rng()
+                                    .sample_iter(&rand::distributions::Alphanumeric)
+                                    .take(64)
+                                    .map(char::from)
+                                    .collect();
+
+                                let joined_at = chrono::Utc::now().timestamp() as i32;
+
+                                let new_user = NewUser {
+                                    email: email.clone(),
+                                    password_hash: "NOT_SET".to_string(),
+                                    phone_number: phone.clone(),
+                                    time_to_live: joined_at,
+                                    verified: true,
+                                    credits: 0.0,
+                                    credits_left: 0.0,
+                                    charge_when_under: false,
+                                    waiting_checks_count: 0,
+                                    discount: false,
+                                    sub_tier: None,
                                 };
 
-                                match self_host_twilio::create_twilio_subaccount(
-                                    axum::extract::State(state_clone),
-                                    auth_user,
-                                ).await {
-                                    Ok(_) => {
-                                        tracing::info!("Successfully created Twilio subaccount for tier 3 user {}", user_id);
-                                    },
-                                    Err((status, err)) => {
-                                        tracing::error!("Failed to create Twilio subaccount for user {}: {:?} - {:?}", user_id, status, err);
+                                state.user_core.create_user(new_user).map_err(|e| {
+                                    tracing::error!("Failed to create user: {}", e);
+                                    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"})))
+                                })?;
+
+                                let created_user = state.user_core.find_by_email(&email)
+                                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("DB error: {}", e)}))))?
+                                    .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "User not found after creation"}))))?;
+
+                                tracing::info!("Created new user {} from guest checkout", created_user.id);
+
+                                // Link to Stripe customer
+                                let _ = state.user_repository.set_stripe_customer_id(created_user.id, &customer_id.to_string());
+
+                                // Set phone country and preferred number
+                                if !phone.is_empty() {
+                                    if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(&state, created_user.id, &phone).await {
+                                        let _ = state.user_core.set_preferred_number_for_country(created_user.id, &country);
                                     }
                                 }
-                            });
-                        }
-                    }
-                }
-                // Skip processing subscription updates that are part of a plan change
-                let is_subscription_change = subscription.metadata.get("plan_change")
-                    .map(|val| val == "true")
-                    .unwrap_or(false);
-                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated && is_subscription_change {
-                    tracing::info!("Skipping subscription update as it's part of a plan change");
-                    return Ok(StatusCode::OK);
-                }
-                // Skip processing subscription updates for subscriptions being cancelled
-                // This prevents the old subscription from overwriting the new subscription's settings
-                // when it gets updated with cancel_at_period_end = true during a plan change
-                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated && subscription.cancel_at_period_end {
-                    tracing::info!("Skipping subscription update for subscription being cancelled (cancel_at_period_end=true): {}", subscription.id);
-                    return Ok(StatusCode::OK);
-                }
-                // Get the base price ID from the subscription items
-                let base_price = if let Some(first_item) = subscription.items.data.first() {
-                    if let Some(price) = &first_item.price {
-                        price.id.to_string()
-                    } else {
-                        tracing::warn!("No price found in subscription item");
-                        return Ok(StatusCode::OK);
-                    }
-                } else {
-                    tracing::warn!("No items found in subscription");
-                    return Ok(StatusCode::OK);
-                };
-                // Extract subscription info to determine the tier
-                let _new_sub_info = extract_subscription_info(&base_price);
-                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    let items = &subscription.items.data;
-                    let base_price = match base_price_id(items) {
-                        Some(id) => id,
-                        None => {
-                            tracing::warn!("subscription without base price – skipping");
-                            return Ok(StatusCode::OK);
-                        }
-                    };
-                    let _sub_info = extract_subscription_info(&base_price);
-                    if let Some(price_id) = subscription.items.data.first()
-                        .and_then(|item| item.price.as_ref())
-                        .map(|price| price.id.to_string())
-                    {
-                        // Extract subscription info (both country and tier)
-                        let sub_info = extract_subscription_info(&price_id);
-                        let _is_sentinel_price_id = is_sentinel_price_id(&price_id);
 
-                        // Update subscription country
-                        if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
-                            tracing::error!("Failed to update subscription country: {}", e);
-                        }
-                        // Update subscription tier
-                        if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(sub_info.tier)) {
-                            tracing::error!("Failed to update subscription tier: {}", e);
-                        }
-                        // Credit allocation logic based on plan type
-                        use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_legacy_euro_plan_price, is_byot_plan_price};
+                                // Ensure settings exist
+                                let _ = state.user_core.ensure_user_settings_exist(created_user.id);
+                                let _ = state.user_core.ensure_user_info_exists(created_user.id);
 
-                        let messages: f32;
-                        tracing::debug!("sub_tier: {}", sub_info.tier);
+                                // Set magic token and send email
+                                let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
 
-                        // Tier 3 (self-hosted) gets 0 credits
-                        if sub_info.tier == "tier 3" {
-                            messages = 0.0;
-                            tracing::info!("Self-hosted subscription (tier 3), no monthly credits");
-                        }
-                        // Tier 2 (hosted) - check plan type for credit allocation
-                        else if sub_info.tier == "tier 2" {
-                            // US/CA users get 400 monthly credits (hosted plan)
-                            if user.phone_number_country == Some("US".to_string())
-                                || user.phone_number_country == Some("CA".to_string()) {
-                                messages = 400.0;
-                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
-                                    tracing::error!("Failed to update plan_type: {}", e);
-                                }
-                                tracing::info!("US/CA tier 2 subscription, allocating 400 monthly credits");
-                            }
-                            // Monitor plan (€29) gets credits for ~40 regular messages
-                            else if is_monitor_plan_price(&price_id) {
-                                let country = user.phone_number_country.as_deref().unwrap_or("FI");
-                                messages = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
-                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
-                                    tracing::error!("Failed to update plan_type: {}", e);
-                                }
-                            }
-                            // Digest plan (€49) gets credits for ~120 regular messages
-                            else if is_digest_plan_price(&price_id) {
-                                let country = user.phone_number_country.as_deref().unwrap_or("FI");
-                                messages = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
-                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("digest")) {
-                                    tracing::error!("Failed to update plan_type: {}", e);
-                                }
-                            }
-                            // Legacy euro plans (€19) get 0 credits - treat as monitor
-                            else if is_legacy_euro_plan_price(&price_id) {
-                                messages = 0.0;
-                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("monitor")) {
-                                    tracing::error!("Failed to update plan_type: {}", e);
-                                }
-                                tracing::info!("Legacy euro plan subscription, allocating 0 monthly credits (pay-per-use model)");
-                            }
-                            // BYOT plan (€19) - bring your own Twilio, 0 credits (pay-per-use)
-                            else if is_byot_plan_price(&price_id) {
-                                messages = 0.0;
-                                if let Err(e) = state.user_repository.update_plan_type(user.id, Some("byot")) {
-                                    tracing::error!("Failed to update plan_type: {}", e);
-                                }
-                                tracing::info!("BYOT plan subscription, allocating 0 monthly credits (pay-per-use model)");
-                            }
-                            // Fallback for other regions
-                            else {
-                                messages = 0.0;
-                                tracing::info!("Non-US/CA tier 2 subscription, allocating 0 monthly credits (pay-per-use model)");
-                            }
-                        }
-                        // Fallback (should not happen with migration, but keeping for safety)
-                        else {
-                            messages = 0.0;
-                            tracing::warn!("Unknown subscription tier: {}, defaulting to 0 credits", sub_info.tier);
-                        }
-                        if let Err(e) = state.user_repository.update_sub_credits(user.id, messages) {
-                            tracing::error!("Failed to update subscription credits: {}", e);
-                        } else {
-                            tracing::info!("Set monthly credits to {} for user {}", messages, user.id);
-                        }
-                        // Reset monthly message count for tier 3 users on billing cycle renewal
-                        if sub_info.tier == "tier 3" {
-                            if let Err(e) = state.user_core.reset_monthly_message_count(user.id) {
-                                tracing::error!("Failed to reset monthly message count for tier 3 user {}: {}", user.id, e);
-                            } else {
-                                tracing::info!("Reset monthly message count for tier 3 user {} on billing renewal", user.id);
-                            }
-                        }
-                        // Update next billing date
-                        if let Err(e) = state.user_core.update_next_billing_date(user.id, subscription.current_period_end as i32) {
-                            tracing::error!("Failed to update next billing date: {}", e);
-                        } else {
-                            tracing::info!("Updated next billing date for user {}: {}", user.id, subscription.current_period_end);
-                        }
-                        tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}",
-                            user.id, sub_info.country, sub_info.tier);
-
-                        // Clear BYOT credentials if user is subscribing to a non-BYOT plan
-                        // This ensures users switching from BYOT to Lightfriend-managed plans
-                        // don't have mismatched routing (their credentials vs Lightfriend's)
-                        if !crate::utils::country::is_byot_plan_price(&price_id) {
-                            if state.user_core.has_twilio_credentials(user.id) {
-                                tracing::info!("User {} switching to non-BYOT plan, clearing BYOT credentials", user.id);
-                                if let Err(e) = state.user_core.clear_twilio_credentials(user.id) {
-                                    tracing::error!("Failed to clear BYOT credentials for user {}: {}", user.id, e);
-                                }
-                            }
-                        }
-
-                        // Set preferred Lightfriend number based on user's country (for non-BYOT plans)
-                        if !crate::utils::country::is_byot_plan_price(&price_id) && user.preferred_number.is_none() {
-                            if let Some(ref country) = user.phone_number_country {
-                                match state.user_core.set_preferred_number_for_country(user.id, country) {
-                                    Ok(Some(num)) => {
-                                        tracing::info!("Set preferred Lightfriend number {} for user {} (country: {})", num, user.id, country);
-                                    }
-                                    Ok(None) => {
-                                        tracing::info!("No dedicated Lightfriend number for country {} (user {})", country, user.id);
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Failed to set preferred number for user {}: {}", user.id, e);
-                                    }
-                                }
-                            }
-                        }
-
-                        // Tier 3: Provision subaccount or regenerate Tinfoil key
-                        if sub_info.tier == "tier 3" {
-                            if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
-                                // New tier 3 subscription - provision subaccount
-                                tracing::info!("New tier 3 subscription - provisioning subaccount for user {}", user.id);
-
-                                // Check if user already has a subaccount (shouldn't happen, but check anyway)
-                                match state.user_core.find_subaccount_by_user_id(user.id) {
-                                    Ok(Some(existing_sub)) => {
-                                        tracing::warn!("User {} already has subaccount {}, skipping provisioning",
-                                            user.id, existing_sub.subaccount_sid);
-                                    }
-                                    Ok(None) => {
-                                        // No existing subaccount - create one
-                                        let state_clone = state.clone();
-                                        let user_id_clone = user.id;
-
-                                        // Spawn background task to provision subaccount
-                                        tokio::spawn(async move {
-                                            // Create subaccount using existing function
-                                            // Note: We can't call the handler directly, so we'll need to duplicate some logic
-                                            match crate::utils::self_host_twilio::provision_tier3_subaccount(&state_clone, user_id_clone).await {
-                                                Ok(_) => {
-                                                    tracing::info!("Successfully provisioned tier 3 subaccount for user {}", user_id_clone);
-
-                                                    // Maintain US buffer pool if user is US
-                                                    if let Ok(Some(u)) = state_clone.user_core.find_by_id(user_id_clone) {
-                                                        if u.phone_number_country == Some("US".to_string()) {
-                                                            if let Err(e) = crate::utils::us_number_pool::maintain_us_buffer_pool(&state_clone).await {
-                                                                tracing::error!("Failed to maintain US buffer pool: {}", e);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("Failed to provision tier 3 subaccount for user {}: {}", user_id_clone, e);
-                                                }
-                                            }
-                                        });
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error checking for existing subaccount: {}", e);
-                                    }
-                                }
-                            } else if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
-                                // Renewal - regenerate Tinfoil key
-                                let new_expiry = subscription.current_period_end;
-                                tracing::info!("Tier 3 subscription renewal for user {} - regenerating Tinfoil key", user.id);
-
-                                let state_clone = state.clone();
-                                let user_id_clone = user.id;
+                                let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+                                let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
+                                let email_clone = email.clone();
+                                let user_repo = state.user_repository.clone();
 
                                 tokio::spawn(async move {
-                                    match crate::utils::subaccount_lifecycle::regenerate_tinfoil_key(
-                                        &state_clone,
-                                        user_id_clone,
-                                        new_expiry,
-                                    ).await {
+                                    if let Err(e) = crate::utils::email::send_magic_link_email(&user_repo, &email_clone, &magic_link).await {
+                                        tracing::error!("Failed to send magic link email: {}", e);
+                                    }
+                                });
+
+                                created_user.id
+                            }
+                            Err(e) => {
+                                tracing::error!("Error checking if email exists: {}", e);
+                                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"}))));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Subscription update for non-existent user - shouldn't normally happen
+                        tracing::warn!("Subscription update received for unknown customer {}, skipping", customer_id);
+                        return Ok(StatusCode::OK);
+                    }
+                    Err(e) => {
+                        tracing::error!("Error finding user by customer ID: {}", e);
+                        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"}))));
+                    }
+                };
+
+                // Get fresh user data for subscription setup
+                let user = state.user_core.find_by_id(user_id)
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("DB error: {}", e)}))))?
+                    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "User not found"}))))?;
+
+                // Update subscription country
+                if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
+                    tracing::error!("Failed to update subscription country: {}", e);
+                }
+
+                // Use centralized subscription setup (idempotent)
+                let phone_country = user.phone_number_country.as_deref();
+                if let Err(e) = setup_user_subscription(&state, user.id, &price_id, subscription.current_period_end as i64, phone_country).await {
+                    tracing::error!("Failed to setup subscription: {}", e);
+                }
+
+                // Reset monthly message count for tier 3 users
+                if sub_info.tier == "tier 3" {
+                    if let Err(e) = state.user_core.reset_monthly_message_count(user.id) {
+                        tracing::error!("Failed to reset monthly message count for tier 3 user {}: {}", user.id, e);
+                    }
+                }
+
+                // Clear BYOT credentials if switching to non-BYOT plan
+                if !crate::utils::country::is_byot_plan_price(&price_id) {
+                    if state.user_core.has_twilio_credentials(user.id) {
+                        tracing::info!("User {} switching to non-BYOT plan, clearing BYOT credentials", user.id);
+                        let _ = state.user_core.clear_twilio_credentials(user.id);
+                    }
+                }
+
+                // Set preferred Lightfriend number (for non-BYOT plans)
+                if !crate::utils::country::is_byot_plan_price(&price_id) && user.preferred_number.is_none() {
+                    if let Some(ref country) = user.phone_number_country {
+                        let _ = state.user_core.set_preferred_number_for_country(user.id, country);
+                    }
+                }
+
+                // Tier 3: Provision subaccount or regenerate Tinfoil key
+                if sub_info.tier == "tier 3" {
+                    if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
+                        tracing::info!("New tier 3 subscription - provisioning subaccount for user {}", user.id);
+
+                        match state.user_core.find_subaccount_by_user_id(user.id) {
+                            Ok(Some(existing_sub)) => {
+                                tracing::warn!("User {} already has subaccount {}, skipping", user.id, existing_sub.subaccount_sid);
+                            }
+                            Ok(None) => {
+                                let state_clone = state.clone();
+                                let user_id_clone = user.id;
+                                tokio::spawn(async move {
+                                    match crate::utils::self_host_twilio::provision_tier3_subaccount(&state_clone, user_id_clone).await {
                                         Ok(_) => {
-                                            tracing::info!("Successfully regenerated Tinfoil key for user {}", user_id_clone);
+                                            tracing::info!("Successfully provisioned tier 3 subaccount for user {}", user_id_clone);
+                                            if let Ok(Some(u)) = state_clone.user_core.find_by_id(user_id_clone) {
+                                                if u.phone_number_country == Some("US".to_string()) {
+                                                    let _ = crate::utils::us_number_pool::maintain_us_buffer_pool(&state_clone).await;
+                                                }
+                                            }
                                         }
-                                        Err(e) => {
-                                            tracing::error!("Failed to regenerate Tinfoil key for user {}: {}", user_id_clone, e);
-                                        }
+                                        Err(e) => tracing::error!("Failed to provision tier 3 subaccount for user {}: {}", user_id_clone, e),
                                     }
                                 });
                             }
+                            Err(e) => tracing::error!("Error checking for existing subaccount: {}", e),
                         }
+                    } else if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
+                        tracing::info!("Tier 3 subscription renewal for user {} - regenerating Tinfoil key", user.id);
+                        let state_clone = state.clone();
+                        let user_id_clone = user.id;
+                        let new_expiry = subscription.current_period_end;
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::utils::subaccount_lifecycle::regenerate_tinfoil_key(&state_clone, user_id_clone, new_expiry).await {
+                                tracing::error!("Failed to regenerate Tinfoil key for user {}: {}", user_id_clone, e);
+                            }
+                        });
                     }
                 }
             }
@@ -1292,361 +1294,13 @@ pub async fn stripe_webhook(
                 stripe::EventObject::CheckoutSession(session) => {
                     tracing::info!("Checkout session found: {}", session.id);
 
-                    // Handle guest checkout for subscription mode
+                    // Subscription handling is now done in CustomerSubscriptionCreated webhook
+                    // This handler only processes credit pack purchases (payment mode)
                     if matches!(session.mode, stripe::CheckoutSessionMode::Subscription) {
-                        tracing::info!("Processing subscription checkout session for guest checkout");
-
-                        // Check if this is a guest checkout by looking at metadata
-                        let is_guest = session.metadata.as_ref()
-                            .and_then(|m| m.get("is_guest_checkout"))
-                            .map(|v| v == "true")
-                            .unwrap_or(false);
-
-                        if is_guest {
-                            if let Some(customer) = &session.customer {
-                                let customer_id = match customer {
-                                    stripe::Expandable::Id(id) => id.clone(),
-                                    stripe::Expandable::Object(c) => c.id.clone(),
-                                };
-
-                                // Check if user already exists for this customer
-                                let existing_user = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str());
-                                if let Ok(None) = existing_user {
-                                    tracing::info!("Guest checkout - creating user for customer {}", customer_id);
-
-                                    // Fetch customer details from Stripe
-                                    if let Ok(customer_obj) = Customer::retrieve(&client, &customer_id, &[]).await {
-                                        let email = customer_obj.email.clone().unwrap_or_default();
-                                        let phone = customer_obj.phone.clone().unwrap_or_default();
-
-                                        if !email.is_empty() {
-                                            // Check if user with this email already exists
-                                            let email_exists = state.user_core.find_by_email(&email);
-
-                                            match email_exists {
-                                                Ok(Some(existing_user_by_email)) => {
-                                                    tracing::info!("Found existing user {} with email {}, linking to Stripe customer",
-                                                        existing_user_by_email.id, email);
-                                                    let _ = state.user_repository.set_stripe_customer_id(
-                                                        existing_user_by_email.id,
-                                                        &customer_id.to_string()
-                                                    );
-                                                    if !phone.is_empty() && existing_user_by_email.phone_number.is_empty() {
-                                                        let _ = state.user_core.update_phone_number(existing_user_by_email.id, &phone);
-                                                    }
-                                                    // Store EXISTING_USER flag instead of magic token
-                                                    // This tells the frontend to redirect to login instead of auto-logging in
-                                                    state.session_to_token.insert(session.id.to_string(), "EXISTING_USER".to_string());
-
-                                                    // Set subscription tier, plan_type, and credits from checkout session
-                                                    // This ensures existing users also get credits allocated reliably
-                                                    if let Some(subscription) = &session.subscription {
-                                                        let sub_id = match subscription {
-                                                            stripe::Expandable::Id(id) => id.clone(),
-                                                            stripe::Expandable::Object(s) => s.id.clone(),
-                                                        };
-                                                        if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
-                                                            if let Some(price_id) = sub.items.data.first()
-                                                                .and_then(|item| item.price.as_ref())
-                                                                .map(|price| price.id.to_string())
-                                                            {
-                                                                let sub_info = extract_subscription_info(&price_id);
-                                                                let _ = state.user_repository.set_subscription_tier(existing_user_by_email.id, Some(sub_info.tier));
-
-                                                                // Set plan_type from metadata or derive from price
-                                                                use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
-                                                                let plan_type = if is_digest_plan_price(&price_id) {
-                                                                    "digest"
-                                                                } else if is_byot_plan_price(&price_id) {
-                                                                    "byot"
-                                                                } else {
-                                                                    "monitor"
-                                                                };
-                                                                let _ = state.user_repository.update_plan_type(existing_user_by_email.id, Some(plan_type));
-                                                                tracing::info!("Set subscription tier={} and plan_type={} for existing user {} from checkout", sub_info.tier, plan_type, existing_user_by_email.id);
-
-                                                                // Allocate credits based on user's country and plan
-                                                                let credits: f32 = if sub_info.tier == "tier 3" {
-                                                                    0.0
-                                                                } else if sub_info.tier == "tier 2" {
-                                                                    // US/CA users get 400 monthly credits
-                                                                    if existing_user_by_email.phone_number_country == Some("US".to_string())
-                                                                        || existing_user_by_email.phone_number_country == Some("CA".to_string()) {
-                                                                        tracing::info!("US/CA existing user {} subscribing, allocating 400 monthly credits", existing_user_by_email.id);
-                                                                        400.0
-                                                                    }
-                                                                    // Monitor plan (€29) gets credits for ~40 regular messages
-                                                                    else if is_monitor_plan_price(&price_id) {
-                                                                        let country = existing_user_by_email.phone_number_country.as_deref().unwrap_or("FI");
-                                                                        let alloc = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
-                                                                        tracing::info!("Monitor plan existing user {}, allocating {} credits", existing_user_by_email.id, alloc);
-                                                                        alloc
-                                                                    }
-                                                                    // Digest plan (€49) gets credits for ~120 regular messages
-                                                                    else if is_digest_plan_price(&price_id) {
-                                                                        let country = existing_user_by_email.phone_number_country.as_deref().unwrap_or("FI");
-                                                                        let alloc = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
-                                                                        tracing::info!("Digest plan existing user {}, allocating {} credits", existing_user_by_email.id, alloc);
-                                                                        alloc
-                                                                    }
-                                                                    // Other plans (legacy, BYOT) get 0 credits
-                                                                    else {
-                                                                        0.0
-                                                                    }
-                                                                } else {
-                                                                    0.0
-                                                                };
-
-                                                                if let Err(e) = state.user_repository.update_sub_credits(existing_user_by_email.id, credits) {
-                                                                    tracing::error!("Failed to set credits for existing user {}: {}", existing_user_by_email.id, e);
-                                                                } else {
-                                                                    tracing::info!("Set {} monthly credits for existing user {}", credits, existing_user_by_email.id);
-                                                                }
-
-                                                                // Update next billing date
-                                                                if let Err(e) = state.user_core.update_next_billing_date(existing_user_by_email.id, sub.current_period_end as i32) {
-                                                                    tracing::error!("Failed to update next billing date for existing user {}: {}", existing_user_by_email.id, e);
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                Ok(None) => {
-                                                    use crate::handlers::auth_dtos::NewUser;
-                                                    use rand::Rng;
-
-                                                    let magic_token: String = rand::thread_rng()
-                                                        .sample_iter(&rand::distributions::Alphanumeric)
-                                                        .take(64)
-                                                        .map(char::from)
-                                                        .collect();
-
-                                                    // Set joined timestamp (time_to_live field is used as "joined_at")
-                                                    let joined_at = chrono::Utc::now().timestamp() as i32;
-
-                                                    let new_user = NewUser {
-                                                        email: email.clone(),
-                                                        password_hash: "NOT_SET".to_string(),
-                                                        phone_number: phone.clone(),
-                                                        time_to_live: joined_at,
-                                                        verified: true,
-                                                        credits: 0.0,
-                                                        credits_left: 0.0,
-                                                        charge_when_under: false,
-                                                        waiting_checks_count: 0,
-                                                        discount: false,
-                                                        sub_tier: None,
-                                                    };
-
-                                                    if let Ok(()) = state.user_core.create_user(new_user) {
-                                                        if let Ok(Some(created_user)) = state.user_core.find_by_email(&email) {
-                                                            tracing::info!("Created new user {} from guest checkout", created_user.id);
-
-                                                            let _ = state.user_repository.set_stripe_customer_id(
-                                                                created_user.id,
-                                                                &customer_id.to_string()
-                                                            );
-
-                                                            if !phone.is_empty() {
-                                                                if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(
-                                                                    &state, created_user.id, &phone
-                                                                ).await {
-                                                                    // Also set preferred Lightfriend number based on country
-                                                                    let _ = state.user_core.set_preferred_number_for_country(created_user.id, &country);
-                                                                }
-                                                            }
-
-                                                            let _ = state.user_core.ensure_user_settings_exist(created_user.id);
-                                                            let _ = state.user_core.ensure_user_info_exists(created_user.id);
-                                                            let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
-
-                                                            // Store flag instead of magic token for security
-                                                            // User must use email link to set password
-                                                            state.session_to_token.insert(session.id.to_string(), "NEW_USER_CHECK_EMAIL".to_string());
-                                                            tracing::info!("Stored NEW_USER_CHECK_EMAIL flag for session {}", session.id);
-
-                                                            // Send magic link email
-                                                            let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
-                                                            let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
-                                                            let email_clone = email.clone();
-                                                            let user_repo = state.user_repository.clone();
-
-                                                            tokio::spawn(async move {
-                                                                if let Err(e) = crate::utils::email::send_magic_link_email(&user_repo, &email_clone, &magic_link).await {
-                                                                    tracing::error!("Failed to send magic link email: {}", e);
-                                                                }
-                                                            });
-
-                                                            // Set subscription tier, plan_type, and credits from checkout session
-                                                            // This is the authoritative place for new guest users to ensure credits are allocated
-                                                            // even if CustomerSubscriptionCreated webhook arrives before user exists
-                                                            if let Some(subscription) = &session.subscription {
-                                                                let sub_id = match subscription {
-                                                                    stripe::Expandable::Id(id) => id.clone(),
-                                                                    stripe::Expandable::Object(s) => s.id.clone(),
-                                                                };
-                                                                if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
-                                                                    if let Some(price_id) = sub.items.data.first()
-                                                                        .and_then(|item| item.price.as_ref())
-                                                                        .map(|price| price.id.to_string())
-                                                                    {
-                                                                        let sub_info = extract_subscription_info(&price_id);
-                                                                        let _ = state.user_repository.set_subscription_tier(created_user.id, Some(sub_info.tier));
-
-                                                                        // Set plan_type from price ID
-                                                                        use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
-                                                                        let plan_type = if is_digest_plan_price(&price_id) {
-                                                                            "digest"
-                                                                        } else if is_byot_plan_price(&price_id) {
-                                                                            "byot"
-                                                                        } else {
-                                                                            "monitor"
-                                                                        };
-                                                                        let _ = state.user_repository.update_plan_type(created_user.id, Some(plan_type));
-                                                                        tracing::info!("Set subscription tier={} and plan_type={} for new user {} from checkout", sub_info.tier, plan_type, created_user.id);
-
-                                                                        // Allocate credits based on user's country and plan
-                                                                        // Re-fetch user to get the phone_number_country that was just set
-                                                                        if let Ok(Some(user_with_country)) = state.user_core.find_by_id(created_user.id) {
-                                                                            let credits: f32 = if sub_info.tier == "tier 3" {
-                                                                                // Tier 3 (self-hosted) gets 0 credits
-                                                                                0.0
-                                                                            } else if sub_info.tier == "tier 2" {
-                                                                                // US/CA users get 400 monthly credits
-                                                                                if user_with_country.phone_number_country == Some("US".to_string())
-                                                                                    || user_with_country.phone_number_country == Some("CA".to_string()) {
-                                                                                    tracing::info!("US/CA guest checkout user {}, allocating 400 monthly credits", created_user.id);
-                                                                                    400.0
-                                                                                }
-                                                                                // Monitor plan (€29) gets credits for ~40 regular messages
-                                                                                else if is_monitor_plan_price(&price_id) {
-                                                                                    let country = user_with_country.phone_number_country.as_deref().unwrap_or("FI");
-                                                                                    let alloc = calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await;
-                                                                                    tracing::info!("Monitor plan guest checkout user {}, allocating {} credits", created_user.id, alloc);
-                                                                                    alloc
-                                                                                }
-                                                                                // Digest plan (€49) gets credits for ~120 regular messages
-                                                                                else if is_digest_plan_price(&price_id) {
-                                                                                    let country = user_with_country.phone_number_country.as_deref().unwrap_or("FI");
-                                                                                    let alloc = calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await;
-                                                                                    tracing::info!("Digest plan guest checkout user {}, allocating {} credits", created_user.id, alloc);
-                                                                                    alloc
-                                                                                }
-                                                                                // Other plans (legacy, BYOT) get 0 credits
-                                                                                else {
-                                                                                    tracing::info!("Other plan guest checkout user {}, allocating 0 credits", created_user.id);
-                                                                                    0.0
-                                                                                }
-                                                                            } else {
-                                                                                0.0
-                                                                            };
-
-                                                                            if let Err(e) = state.user_repository.update_sub_credits(created_user.id, credits) {
-                                                                                tracing::error!("Failed to set credits for new guest user {}: {}", created_user.id, e);
-                                                                            } else {
-                                                                                tracing::info!("Set {} monthly credits for new guest user {}", credits, created_user.id);
-                                                                            }
-
-                                                                            // Update next billing date
-                                                                            if let Err(e) = state.user_core.update_next_billing_date(created_user.id, sub.current_period_end as i32) {
-                                                                                tracing::error!("Failed to update next billing date for new guest user {}: {}", created_user.id, e);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                Err(e) => {
-                                                    tracing::error!("Error checking if email exists: {}", e);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            return Ok(StatusCode::OK);
-                        } else {
-                            // Non-guest subscription checkout (plan upgrade/change)
-                            // Check if this is a plan change by looking at subscription_data metadata
-                            let is_plan_change = session.metadata.as_ref()
-                                .and_then(|m| m.get("plan_change"))
-                                .map(|v| v == "true")
-                                .unwrap_or(false);
-
-                            if is_plan_change {
-                                tracing::info!("Processing plan change checkout session");
-                                if let Some(customer) = &session.customer {
-                                    let customer_id = match customer {
-                                        stripe::Expandable::Id(id) => id.clone(),
-                                        stripe::Expandable::Object(c) => c.id.clone(),
-                                    };
-
-                                    if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                                        // Update plan_type based on the new subscription
-                                        if let Some(subscription) = &session.subscription {
-                                            let sub_id = match subscription {
-                                                stripe::Expandable::Id(id) => id.clone(),
-                                                stripe::Expandable::Object(s) => s.id.clone(),
-                                            };
-                                            if let Ok(sub) = Subscription::retrieve(&client, &sub_id, &[]).await {
-                                                if let Some(price_id) = sub.items.data.first()
-                                                    .and_then(|item| item.price.as_ref())
-                                                    .map(|price| price.id.to_string())
-                                                {
-                                                    use crate::utils::country::{is_digest_plan_price, is_byot_plan_price};
-                                                    let plan_type = if is_digest_plan_price(&price_id) {
-                                                        "digest"
-                                                    } else if is_byot_plan_price(&price_id) {
-                                                        "byot"
-                                                    } else {
-                                                        "monitor"
-                                                    };
-                                                    if let Err(e) = state.user_repository.update_plan_type(user.id, Some(plan_type)) {
-                                                        tracing::error!("Failed to update plan_type during plan change: {}", e);
-                                                    } else {
-                                                        tracing::info!("Updated plan_type to '{}' for user {} during plan change", plan_type, user.id);
-                                                    }
-
-                                                    // Also update subscription tier and credits
-                                                    let sub_info = extract_subscription_info(&price_id);
-                                                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(sub_info.tier)) {
-                                                        tracing::error!("Failed to update subscription tier during plan change: {}", e);
-                                                    }
-
-                                                    // Update credits based on new plan
-                                                    if sub_info.tier == "tier 2" {
-                                                        let messages: f32 = if user.phone_number_country == Some("US".to_string())
-                                                            || user.phone_number_country == Some("CA".to_string()) {
-                                                            200.0
-                                                        } else if is_digest_plan_price(&price_id) {
-                                                            let country = user.phone_number_country.as_deref().unwrap_or("FI");
-                                                            calculate_euro_credit_allocation(&state, country, 120.0, "Digest").await
-                                                        } else {
-                                                            let country = user.phone_number_country.as_deref().unwrap_or("FI");
-                                                            calculate_euro_credit_allocation(&state, country, 40.0, "Monitor").await
-                                                        };
-                                                        if let Err(e) = state.user_repository.update_sub_credits(user.id, messages) {
-                                                            tracing::error!("Failed to update subscription credits during plan change: {}", e);
-                                                        } else {
-                                                            tracing::info!("Updated monthly credits to {} for user {} during plan change", messages, user.id);
-                                                        }
-                                                    }
-
-                                                    // Update next billing date
-                                                    if let Err(e) = state.user_core.update_next_billing_date(user.id, sub.current_period_end as i32) {
-                                                        tracing::error!("Failed to update next billing date during plan change: {}", e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            return Ok(StatusCode::OK);
-                        }
+                        tracing::info!("Subscription checkout completed - setup handled by CustomerSubscriptionCreated webhook");
+                        return Ok(StatusCode::OK);
                     }
+
                     // Payment mode (credit pack purchases) - not subscription mode
                     if let Some(customer) = &session.customer {
                     let customer_id = match customer {

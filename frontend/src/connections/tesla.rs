@@ -49,6 +49,41 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
     let show_disconnect_modal = use_state(|| false);
     let is_disconnecting = use_state(|| false);
 
+    // Check for OAuth callback error/success in URL on mount
+    {
+        let error = error.clone();
+        let command_result = command_result.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(search) = window.location().search() {
+                        let params = web_sys::UrlSearchParams::new_with_str(&search).ok();
+                        if let Some(params) = params {
+                            // Check for error from OAuth callback
+                            if let Some(tesla_status) = params.get("tesla") {
+                                if tesla_status == "error" {
+                                    if let Some(message) = params.get("message") {
+                                        error.set(Some(message));
+                                    } else {
+                                        error.set(Some("Failed to connect Tesla. Please try again.".to_string()));
+                                    }
+                                } else if tesla_status == "success" {
+                                    command_result.set(Some("Tesla connected successfully!".to_string()));
+                                }
+                                // Clear URL params after reading
+                                let _ = window.history().and_then(|h| {
+                                    h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/connections"))
+                                });
+                            }
+                        }
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
+
     // Auto-hide command result after 10 seconds
     {
         let command_result_for_effect = command_result.clone();

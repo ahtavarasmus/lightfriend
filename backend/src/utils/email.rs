@@ -150,3 +150,65 @@ The Lightfriend Team"#,
 
     Ok(())
 }
+
+/// Send a subscription activated email to an existing user who subscribed via guest checkout
+///
+/// Uses user 1's IMAP credentials (same as broadcast emails).
+pub async fn send_subscription_activated_email(
+    user_repository: &UserRepository,
+    to_email: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    use lettre::{Message, SmtpTransport, Transport};
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::message::{header::ContentType, SinglePart};
+
+    let (from_email, password, imap_server, _) = user_repository
+        .get_imap_credentials(1)
+        .map_err(|e| format!("Failed to get IMAP credentials: {}", e))?
+        .ok_or("No IMAP credentials found for admin user (id=1)")?;
+
+    let smtp_server = imap_server
+        .as_deref()
+        .unwrap_or("smtp.gmail.com")
+        .replace("imap", "smtp");
+    let smtp_port: u16 = 587;
+
+    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
+
+    let email_body = format!(
+        r#"Your Lightfriend subscription is now active!
+
+We noticed you already have an account with this email. Your subscription has been linked to your existing account.
+
+Log in to get started:
+{}/login
+
+If you have any questions, just reply to this email.
+
+- Rasmus"#,
+        frontend_url
+    );
+
+    let email = Message::builder()
+        .from(from_email.parse()?)
+        .to(to_email.parse()?)
+        .subject("Your Lightfriend subscription is active")
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(email_body)
+        )?;
+
+    let creds = Credentials::new(from_email.clone(), password);
+
+    let mailer = SmtpTransport::starttls_relay(&smtp_server)?
+        .port(smtp_port)
+        .credentials(creds)
+        .build();
+
+    mailer.send(&email)?;
+
+    tracing::info!("Subscription activated email sent to {}", to_email);
+
+    Ok(())
+}

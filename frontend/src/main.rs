@@ -42,6 +42,7 @@ mod pages {
     pub mod lightphone3_whatsapp_guide;
     pub mod blog;
     pub mod change_log;
+    pub mod subscription_success;
 }
 mod components {
     pub mod notification;
@@ -94,6 +95,7 @@ use pages::{
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     blog::Blog,
     change_log::Changelog,
+    subscription_success::SubscriptionSuccess,
 };
 use blog::{
     switch_to_dumbphone::SwitchToDumbphoneGuide,
@@ -158,6 +160,8 @@ pub enum Route {
     SetPassword,
     #[at("/set-password/:token")]
     SetPasswordWithToken { token: String },
+    #[at("/subscription-success")]
+    SubscriptionSuccess,
 }
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
     if matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
@@ -259,6 +263,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::SetPasswordWithToken { token } => {
             info!("Rendering SetPassword page with token");
             html! { <SetPassword token={Some(token)} /> }
+        },
+        Route::SubscriptionSuccess => {
+            info!("Rendering SubscriptionSuccess page");
+            html! { <SubscriptionSuccess /> }
         },
     }
 }
