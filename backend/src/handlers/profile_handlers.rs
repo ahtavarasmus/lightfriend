@@ -26,6 +26,7 @@ use axum::extract::Path;
 use serde_json::json;
 
 use crate::AppState;
+use crate::utils::country::get_country_code_from_phone;
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
@@ -841,6 +842,7 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
 
     tracing::debug!("phone_number: {}, len: {}", phone_number, phone_number.len());
     if phone_number.starts_with("+1") {
+        // US/CA need special handling due to shared +1 prefix
         let area_code = phone_number.get(0..5).unwrap_or_default();
         tracing::debug!("Extracted area code: {}", area_code);
         if ca_area_codes.contains(&area_code.to_string()) {
@@ -848,16 +850,14 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
         } else if us_area_codes.contains(&area_code.to_string()) {
             country = Some("US".to_string());
         }
-    } else if phone_number.starts_with("+358") {
-        country = Some("FI".to_string());
-    } else if phone_number.starts_with("+31") {
-        country = Some("NL".to_string());
-    } else if phone_number.starts_with("+44") {
-        country = Some("GB".to_string());
-    } else if phone_number.starts_with("+61") {
-        country = Some("AU".to_string());
     } else {
-        country = Some("Other".to_string()); // Or None if preferred
+        // Use the country detection function for all other countries
+        // This covers local-number countries (FI, NL, GB, AU) and notification-only countries (DE, FR, ES, IT, etc.)
+        country = get_country_code_from_phone(phone_number);
+        if country.is_none() {
+            // Country not in our supported list
+            country = Some("Other".to_string());
+        }
     }
 
     tracing::debug!("country: {:#?}", country);
@@ -1282,6 +1282,18 @@ pub async fn update_profile(
                     None
                 }
             };
+
+            // Update preferred Lightfriend number if country changed
+            if old_country != new_country {
+                if let Some(ref country) = new_country {
+                    // Only update if user doesn't have BYOT (bring your own Twilio)
+                    if !state.user_core.has_twilio_credentials(auth_user.user_id) {
+                        if let Err(e) = state.user_core.set_preferred_number_for_country(auth_user.user_id, country) {
+                            tracing::error!("Failed to update preferred number for country {}: {}", country, e);
+                        }
+                    }
+                }
+            }
 
             // Recalculate credits if country changed and user has credits_left
             if old_country != new_country && old_credits_left > 0.0 && current_user.sub_tier.is_some() {

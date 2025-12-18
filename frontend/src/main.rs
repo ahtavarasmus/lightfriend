@@ -393,12 +393,30 @@ pub fn pricing_wrapper() -> Html {
     let is_logged_in = use_state(|| false);
 
     let country_map: HashMap<String, String> = [
+        // Local number countries
         ("US".to_string(), "United States".to_string()),
         ("CA".to_string(), "Canada".to_string()),
         ("FI".to_string(), "Finland".to_string()),
         ("NL".to_string(), "Netherlands".to_string()),
         ("UK".to_string(), "United Kingdom".to_string()),
         ("AU".to_string(), "Australia".to_string()),
+        // Notification-only countries
+        ("DE".to_string(), "Germany".to_string()),
+        ("FR".to_string(), "France".to_string()),
+        ("ES".to_string(), "Spain".to_string()),
+        ("IT".to_string(), "Italy".to_string()),
+        ("PT".to_string(), "Portugal".to_string()),
+        ("BE".to_string(), "Belgium".to_string()),
+        ("AT".to_string(), "Austria".to_string()),
+        ("CH".to_string(), "Switzerland".to_string()),
+        ("PL".to_string(), "Poland".to_string()),
+        ("CZ".to_string(), "Czech Republic".to_string()),
+        ("SE".to_string(), "Sweden".to_string()),
+        ("DK".to_string(), "Denmark".to_string()),
+        ("NO".to_string(), "Norway".to_string()),
+        ("IE".to_string(), "Ireland".to_string()),
+        ("NZ".to_string(), "New Zealand".to_string()),
+        // Other
         ("Other".to_string(), "Other".to_string()),
     ].iter().cloned().collect();
 
@@ -432,7 +450,13 @@ pub fn pricing_wrapper() -> Html {
 
                 ip_country_name.set(ip_name.clone());
 
-                let known_countries = ["US", "CA", "FI", "NL", "UK", "AU"];
+                // Local number countries + notification-only countries
+                let known_countries = [
+                    // Local number countries
+                    "US", "CA", "FI", "NL", "UK", "AU",
+                    // Notification-only countries (receive SMS from US number)
+                    "DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ", "SE", "DK", "NO", "IE", "NZ"
+                ];
                 if !known_countries.contains(&ip_code.as_str()) {
                     ip_code = "Other".to_string();
                 }

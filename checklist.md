@@ -25,3 +25,6 @@
 - 9. old user subscribes to digest plan
 - 10. we remove sub tier and plan type and log the user out
 - 11. old user subscribes without being logged in
+
+1. delete sub tier and sub to monitor plan with spanish number
+2. see if we got preferred number as US

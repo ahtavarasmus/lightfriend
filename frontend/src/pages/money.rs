@@ -1373,10 +1373,11 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     </ul>
                 </div>
                 {
-                    if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
+                    // Show BYOT guide link for BYOT plans or "Other" countries
+                    if props.plan_type.as_deref() == Some("byot") || props.selected_country == "Other" {
                         html! {
                             <div class="learn-more-section">
-                                <a href="/bring-own-number" class="learn-more-link">{"How to bring your own number"}</a>
+                                <a href="/bring-own-number" class="learn-more-link">{"Check Twilio availability for your country"}</a>
                             </div>
                             }
                     } else {
@@ -2236,7 +2237,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             />
                         }
                     } else if props.selected_country == "Other" {
-                        // Other countries: BYOT Plan (bring your own Twilio)
+                        // Other countries: BYOT Plan only (bring your own Twilio)
                         let byot_features = vec![
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All features included".to_string(), sub_items: vec![] },
@@ -2271,6 +2272,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         // Euro countries: Show Monitor and Digest plans
                         // Both plans have ALL features - they only differ in prepaid message count
                         let is_local_number_country = matches!(props.selected_country.as_str(), "FI" | "NL" | "UK" | "AU");
+                        let is_notification_only = is_notification_only_country(&props.selected_country);
 
                         let base_features: Vec<Feature> = if is_local_number_country {
                             vec![
@@ -2292,6 +2294,12 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         let mut digest_features = base_features;
                         digest_features.push(Feature { text: "Eliminates FOMO - stay caught up without checking".to_string(), sub_items: vec![] });
                         digest_features.push(Feature { text: "Can purchase overage credits if needed".to_string(), sub_items: vec![] });
+
+                        let byot_features = vec![
+                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
+                            Feature { text: "All features included".to_string(), sub_items: vec![] },
+                            Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
+                        ];
 
                         let selected_country_clone = props.selected_country.clone();
                         let selected_country_clone2 = props.selected_country.clone();
@@ -2350,6 +2358,32 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         country={selected_country_clone2}
                                     />
                                 </PricingCard>
+                                // Show BYOT option for notification-only countries (they may want their own local number)
+                                if is_notification_only {
+                                    <PricingCard
+                                        plan_name={"BYOT Plan"}
+                                        best_for={"Want a local number? Bring Your Own Twilio for two-way messaging."}
+                                        price={19.0}
+                                        currency={"€"}
+                                        period={"/month"}
+                                        features={byot_features}
+                                        subscription_type={"hosted"}
+                                        is_popular={false}
+                                        is_premium={false}
+                                        user_id={props.user_id}
+                                        user_email={props.user_email.clone()}
+                                        is_logged_in={props.is_logged_in}
+                                        verified={props.verified}
+                                        sub_tier={props.sub_tier.clone()}
+                                        user_plan_type={props.user_plan_type.clone()}
+                                        selected_country={props.selected_country.clone()}
+                                        coming_soon={false}
+                                        hosted_prices={hosted_prices.clone()}
+                                        plan_type={Some("byot".to_string())}
+                                    >
+                                        <ByotPricingDisplay />
+                                    </PricingCard>
+                                }
                             </>
                         }
                     }
