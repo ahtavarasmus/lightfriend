@@ -185,3 +185,46 @@ pub struct RefundRequestResponse {
     pub message: String,
     pub refund_id: Option<String>,
 }
+
+// ============================================
+// BYOT Usage Types
+// ============================================
+
+/// Activity count and cost for BYOT users
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct ByotActivityCost {
+    pub count: i32,
+    pub cost_eur: f32,
+}
+
+/// Breakdown of BYOT user's usage
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct ByotUsageBreakdown {
+    pub digests: ByotActivityCost,
+    pub sms_notifications: ByotActivityCost,
+    pub call_notifications: ByotActivityCost,
+    pub messages: ByotActivityCost,
+    pub voice_minutes: f32,
+    pub voice_cost_eur: f32,
+}
+
+/// Percentages for segmented bar display
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct ByotUsagePercentages {
+    pub digests: f32,
+    pub sms_notifications: f32,
+    pub call_notifications: f32,
+    pub messages: f32,
+    pub voice: f32,
+}
+
+/// Response for BYOT usage endpoint
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+pub struct ByotUsageResponse {
+    pub total_cost_eur: f32,
+    pub country_code: String,
+    pub country_name: String,
+    pub days_until_billing: Option<i32>,
+    pub breakdown: ByotUsageBreakdown,
+    pub percentages: ByotUsagePercentages,
+}

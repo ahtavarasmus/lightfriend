@@ -44,6 +44,15 @@ struct UsageRecommendation {
     action_link: Option<String>,
 }
 
+/// BYOT usage response from backend
+#[derive(Clone, PartialEq, Deserialize)]
+struct ByotUsageResponse {
+    total_cost_eur: f32,
+    country_code: String,
+    country_name: String,
+    days_until_billing: Option<i32>,
+}
+
 fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
     html! {
         <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(30, 30, 30, 0.7); border: 1px solid rgba(30, 144, 255, 0.1); border-radius: 12px; margin-bottom: 2rem;">
@@ -269,6 +278,54 @@ fn UsageStatusIndicator(props: &UsageStatusIndicatorProps) -> Html {
     }
 }
 
+/// BYOT usage status indicator component - shows estimated Twilio costs
+#[derive(Properties, PartialEq, Clone)]
+struct ByotUsageStatusIndicatorProps {
+    pub data: Option<ByotUsageResponse>,
+    pub loading: bool,
+    pub on_details_click: Callback<()>,
+}
+
+#[function_component]
+fn ByotUsageStatusIndicator(props: &ByotUsageStatusIndicatorProps) -> Html {
+    let on_details = props.on_details_click.clone();
+
+    if props.loading {
+        return html! {
+            <span style="color: #999; font-size: 0.85rem;">{"..."}</span>
+        };
+    }
+
+    let Some(data) = props.data.clone() else {
+        return html! {};
+    };
+
+    // Determine usage level based on cost
+    let (status_color, status_label) = if data.total_cost_eur < 5.0 {
+        ("#4ade80", "Low usage") // green
+    } else if data.total_cost_eur < 15.0 {
+        ("#fbbf24", "Moderate") // yellow
+    } else {
+        ("#f87171", "High usage") // red/orange
+    };
+
+    html! {
+        <span style="display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;">
+            <span style={format!("color: {}; font-weight: 600; font-size: 0.9rem;", status_color)}>
+                {format!("{:.2}EUR", data.total_cost_eur)}
+            </span>
+            <span style="color: #aaa; font-size: 0.85rem;">{"this month"}</span>
+            <span style="color: #777; font-size: 0.8rem;">{format!("({})", status_label)}</span>
+            <a href="#" onclick={Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                on_details.emit(());
+            })} style="color: #7EB2FF; text-decoration: none; font-size: 0.8rem;">
+                {"details"}
+            </a>
+        </span>
+    }
+}
+
 #[function_component]
 pub fn Home() -> Html {
     let auth_status = use_state(|| None::<bool>); // None = loading, Some(true) = authenticated, Some(false) = not authenticated
@@ -297,6 +354,10 @@ pub fn Home() -> Html {
     // Usage status data - lifted to Home to prevent re-fetching on tab change
     let usage_data = use_state(|| None::<UsageProjectionResponse>);
     let usage_loading = use_state(|| true);
+
+    // BYOT usage data - for users with their own Twilio number
+    let byot_usage_data = use_state(|| None::<ByotUsageResponse>);
+    let byot_usage_loading = use_state(|| true);
 
     // Web chat state - only stores the most recent exchange (user msg, bot reply)
     let chat_user_msg = use_state(|| None::<String>);
@@ -409,6 +470,43 @@ pub fn Home() -> Html {
             refetch_usage.emit(());
             || ()
         }, ());
+    }
+
+    // Refetch BYOT usage data callback
+    let refetch_byot_usage = {
+        let byot_usage_data = byot_usage_data.clone();
+        let byot_usage_loading = byot_usage_loading.clone();
+        Callback::from(move |_: ()| {
+            let byot_usage_data = byot_usage_data.clone();
+            let byot_usage_loading = byot_usage_loading.clone();
+            spawn_local(async move {
+                if let Ok(resp) = Api::get("/api/pricing/byot-usage").send().await {
+                    if resp.ok() {
+                        if let Ok(data) = resp.json::<ByotUsageResponse>().await {
+                            byot_usage_data.set(Some(data));
+                        }
+                    }
+                }
+                byot_usage_loading.set(false);
+            });
+        })
+    };
+
+    // Fetch BYOT usage data when profile loads and user is BYOT
+    {
+        let refetch_byot_usage = refetch_byot_usage.clone();
+        let profile_data = profile_data.clone();
+        let byot_usage_loading = byot_usage_loading.clone();
+        use_effect_with_deps(move |profile| {
+            if let Some(p) = profile.as_ref() {
+                if p.plan_type.as_deref() == Some("byot") {
+                    refetch_byot_usage.emit(());
+                } else {
+                    byot_usage_loading.set(false);
+                }
+            }
+            || ()
+        }, (*profile_data).clone());
     }
 
     let refetch_profile = {
@@ -805,6 +903,11 @@ pub fn Home() -> Html {
                                 if profile.sub_tier.as_deref() != Some("tier 3") {
                                     let active_tab_for_usage = active_tab.clone();
                                     let refetch_usage_for_details = refetch_usage.clone();
+                                    let is_byot = profile.plan_type.as_deref() == Some("byot");
+                                    let byot_data = (*byot_usage_data).clone();
+                                    let byot_loading = *byot_usage_loading;
+                                    let active_tab_for_byot = active_tab.clone();
+                                    let refetch_byot_for_details = refetch_byot_usage.clone();
                                     html! {
                                         <div class="credits-info">
                                             {
@@ -820,6 +923,15 @@ pub fn Home() -> Html {
                                                                         html! {
                                                                             <span style="color: #7EB2FF; font-weight: 500;">{num}</span>
                                                                         }
+                                                                    } else if profile.plan_type.as_deref() == Some("byot") {
+                                                                        // BYOT users need to set up their Twilio number
+                                                                        html! {
+                                                                            <span style="color: #ff4444;">
+                                                                                <Link<Route> to={Route::TwilioHostedInstructions} classes="setup-link">
+                                                                                    {"Set up your Twilio number →"}
+                                                                                </Link<Route>>
+                                                                            </span>
+                                                                        }
                                                                     } else {
                                                                         html! {
                                                                             <span style="color: #ff4444;">{"Not configured"}</span>
@@ -827,17 +939,34 @@ pub fn Home() -> Html {
                                                                     }
                                                                 }
                                                             </div>
-                                                            // Usage status row
+                                                            // Usage status row - show BYOT indicator for BYOT users
                                                             <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                                                                 <span style="color: #888; font-size: 0.85rem;">{"Usage:"}</span>
-                                                                <UsageStatusIndicator
-                                                                    data={(*usage_data).clone()}
-                                                                    loading={*usage_loading}
-                                                                    on_details_click={Callback::from(move |_| {
-                                                                        active_tab_for_usage.set(DashboardTab::Billing);
-                                                                        refetch_usage_for_details.emit(());
-                                                                    })}
-                                                                />
+                                                                {
+                                                                    if is_byot {
+                                                                        html! {
+                                                                            <ByotUsageStatusIndicator
+                                                                                data={byot_data}
+                                                                                loading={byot_loading}
+                                                                                on_details_click={Callback::from(move |_| {
+                                                                                    active_tab_for_byot.set(DashboardTab::Billing);
+                                                                                    refetch_byot_for_details.emit(());
+                                                                                })}
+                                                                            />
+                                                                        }
+                                                                    } else {
+                                                                        html! {
+                                                                            <UsageStatusIndicator
+                                                                                data={(*usage_data).clone()}
+                                                                                loading={*usage_loading}
+                                                                                on_details_click={Callback::from(move |_| {
+                                                                                    active_tab_for_usage.set(DashboardTab::Billing);
+                                                                                    refetch_usage_for_details.emit(());
+                                                                                })}
+                                                                            />
+                                                                        }
+                                                                    }
+                                                                }
                                                             </div>
                                                         </div>
                                                     }

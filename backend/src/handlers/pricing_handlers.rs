@@ -993,3 +993,221 @@ pub async fn get_usage_projection(
         actual_digests_used,
     }))
 }
+
+// ============================================
+// BYOT Usage Tracking
+// ============================================
+
+/// Activity count and cost for BYOT users
+#[derive(Serialize)]
+pub struct ByotActivityCost {
+    pub count: i32,
+    pub cost_eur: f32,
+}
+
+/// Breakdown of BYOT user's usage
+#[derive(Serialize)]
+pub struct ByotUsageBreakdown {
+    pub digests: ByotActivityCost,
+    pub sms_notifications: ByotActivityCost,
+    pub call_notifications: ByotActivityCost,
+    pub messages: ByotActivityCost,
+    pub voice_minutes: f32,
+    pub voice_cost_eur: f32,
+}
+
+/// Percentages for segmented bar display
+#[derive(Serialize)]
+pub struct ByotUsagePercentages {
+    pub digests: f32,
+    pub sms_notifications: f32,
+    pub call_notifications: f32,
+    pub messages: f32,
+    pub voice: f32,
+}
+
+/// Response for BYOT usage endpoint
+#[derive(Serialize)]
+pub struct ByotUsageResponse {
+    pub total_cost_eur: f32,
+    pub country_code: String,
+    pub country_name: String,
+    pub days_until_billing: Option<i32>,
+    pub breakdown: ByotUsageBreakdown,
+    pub percentages: ByotUsagePercentages,
+}
+
+/// GET /api/pricing/byot-usage
+/// Returns BYOT user's usage and estimated costs for the current billing period
+pub async fn get_byot_usage(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ByotUsageResponse>, (axum::http::StatusCode, String)> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use diesel::sql_types::Float;
+
+    // Get user from database
+    let user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    // Verify this is a BYOT user
+    if user.plan_type.as_deref() != Some("byot") {
+        return Err((axum::http::StatusCode::BAD_REQUEST, "This endpoint is only for BYOT users".to_string()));
+    }
+
+    // Get user's country for pricing
+    let country_code = user.phone_number_country.clone()
+        .ok_or((axum::http::StatusCode::BAD_REQUEST, "Country not set. Please update your profile.".to_string()))?;
+
+    // Fetch BYOT pricing for user's country
+    let pricing = get_byot_pricing(&state, &country_code)
+        .await
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get pricing: {}", e)))?;
+
+    // Get pricing rates
+    let sms_per_segment = pricing.sms_price_per_segment.unwrap_or(0.0);
+    let notification_cost = sms_per_segment * 1.5;  // 1.5 segments per notification
+    let message_cost = sms_per_segment * 3.0;       // 3 segments per message
+    let digest_cost = sms_per_segment * 3.0;        // 3 segments per digest
+
+    // Voice cost includes ElevenLabs AI ($0.11/min)
+    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
+    let voice_per_min = pricing.voice_price_per_minute.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
+
+    // Calculate billing period
+    let now: i64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let billing_period_start: i64 = if let Some(next_billing) = user.next_billing_date_timestamp {
+        (next_billing as i64) - 2_592_000 // 30 days before next billing
+    } else {
+        now - 2_592_000 // Default to 30 days ago
+    };
+
+    let days_until_billing = user.next_billing_date_timestamp.map(|ts| {
+        ((ts as i64 - now) / 86_400).max(0) as i32
+    });
+
+    // Query usage from database
+    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+
+    // Digests
+    let digest_count: i64 = usage_logs::table
+        .filter(usage_logs::user_id.eq(auth_user.user_id))
+        .filter(usage_logs::activity_type.eq("digest"))
+        .filter(usage_logs::created_at.ge(billing_period_start as i32))
+        .count()
+        .get_result(&mut conn)
+        .unwrap_or(0);
+
+    // SMS notifications
+    let sms_noti_count: i64 = usage_logs::table
+        .filter(usage_logs::user_id.eq(auth_user.user_id))
+        .filter(
+            usage_logs::activity_type.like("%_critical")
+                .or(usage_logs::activity_type.like("%_priority_sms"))
+                .or(usage_logs::activity_type.eq("noti_msg"))
+        )
+        .filter(usage_logs::activity_type.not_like("%_priority_call"))
+        .filter(usage_logs::created_at.ge(billing_period_start as i32))
+        .count()
+        .get_result(&mut conn)
+        .unwrap_or(0);
+
+    // Call notifications
+    let call_noti_count: i64 = usage_logs::table
+        .filter(usage_logs::user_id.eq(auth_user.user_id))
+        .filter(
+            usage_logs::activity_type.like("%_priority_call")
+                .or(usage_logs::activity_type.eq("noti_call"))
+        )
+        .filter(usage_logs::created_at.ge(billing_period_start as i32))
+        .count()
+        .get_result(&mut conn)
+        .unwrap_or(0);
+
+    // Regular messages
+    let message_count: i64 = usage_logs::table
+        .filter(usage_logs::user_id.eq(auth_user.user_id))
+        .filter(
+            usage_logs::activity_type.eq("sms")
+                .or(usage_logs::activity_type.eq("message"))
+        )
+        .filter(usage_logs::created_at.ge(billing_period_start as i32))
+        .count()
+        .get_result(&mut conn)
+        .unwrap_or(0);
+
+    // Voice minutes
+    let voice_seconds: Option<f32> = usage_logs::table
+        .select(sql::<diesel::sql_types::Nullable<Float>>("SUM(COALESCE(call_duration, 0))"))
+        .filter(usage_logs::user_id.eq(auth_user.user_id))
+        .filter(
+            usage_logs::activity_type.like("%voice%")
+                .or(usage_logs::activity_type.like("%call%"))
+        )
+        .filter(usage_logs::created_at.ge(billing_period_start as i32))
+        .first(&mut conn)
+        .unwrap_or(None);
+
+    let voice_minutes = voice_seconds.unwrap_or(0.0) / 60.0;
+
+    // Calculate costs
+    let digest_total = digest_count as f32 * digest_cost;
+    let sms_noti_total = sms_noti_count as f32 * notification_cost;
+    let call_noti_total = call_noti_count as f32 * voice_per_min * 0.5; // ~30 sec per call notification
+    let message_total = message_count as f32 * message_cost;
+    let voice_total = voice_minutes * voice_per_min;
+
+    let total_cost = digest_total + sms_noti_total + call_noti_total + message_total + voice_total;
+
+    // Calculate percentages for segmented bar
+    let (digest_pct, sms_noti_pct, call_noti_pct, message_pct, voice_pct) = if total_cost > 0.0 {
+        (
+            (digest_total / total_cost) * 100.0,
+            (sms_noti_total / total_cost) * 100.0,
+            (call_noti_total / total_cost) * 100.0,
+            (message_total / total_cost) * 100.0,
+            (voice_total / total_cost) * 100.0,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0)
+    };
+
+    Ok(Json(ByotUsageResponse {
+        total_cost_eur: (total_cost * 100.0).round() / 100.0, // Round to 2 decimals
+        country_code: country_code.clone(),
+        country_name: get_country_name(&country_code),
+        days_until_billing,
+        breakdown: ByotUsageBreakdown {
+            digests: ByotActivityCost {
+                count: digest_count as i32,
+                cost_eur: (digest_total * 100.0).round() / 100.0,
+            },
+            sms_notifications: ByotActivityCost {
+                count: sms_noti_count as i32,
+                cost_eur: (sms_noti_total * 100.0).round() / 100.0,
+            },
+            call_notifications: ByotActivityCost {
+                count: call_noti_count as i32,
+                cost_eur: (call_noti_total * 100.0).round() / 100.0,
+            },
+            messages: ByotActivityCost {
+                count: message_count as i32,
+                cost_eur: (message_total * 100.0).round() / 100.0,
+            },
+            voice_minutes: (voice_minutes * 10.0).round() / 10.0, // Round to 1 decimal
+            voice_cost_eur: (voice_total * 100.0).round() / 100.0,
+        },
+        percentages: ByotUsagePercentages {
+            digests: digest_pct,
+            sms_notifications: sms_noti_pct,
+            call_notifications: call_noti_pct,
+            messages: message_pct,
+            voice: voice_pct,
+        },
+    }))
+}

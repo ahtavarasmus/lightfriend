@@ -1,6 +1,8 @@
 use yew::prelude::*;
+use yew_router::prelude::Link;
 use web_sys::HtmlInputElement;
 use crate::utils::api::Api;
+use crate::Route;
 use serde_json::{Value, json};
 use chrono::{Utc, Duration};
 use crate::profile::billing_models::{ // Import from the new file
@@ -12,6 +14,7 @@ use crate::profile::billing_models::{ // Import from the new file
     MIN_TOPUP_AMOUNT_CREDITS,
     RefundEligibilityResponse,
     RefundRequestResponse,
+    ByotUsageResponse,
 };
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
@@ -40,6 +43,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
     // Usage projection state
     let usage_projection = use_state(|| None::<UsageProjection>);
+
+    // BYOT usage state - for users with their own Twilio number
+    let byot_usage = use_state(|| None::<ByotUsageResponse>);
 
     // State for cycling through quota display metrics (notifications, voice, messages, digests)
     let quota_display_index = use_state(|| 0_usize);
@@ -71,6 +77,34 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     }
                 }
             });
+            || ()
+        }, ());
+    }
+
+    // Fetch BYOT usage on mount if user is BYOT
+    {
+        let byot_usage = byot_usage.clone();
+        let is_byot = user_profile.plan_type.as_deref() == Some("byot");
+        use_effect_with_deps(move |_| {
+            if is_byot {
+                spawn_local(async move {
+                    match Api::get("/api/pricing/byot-usage")
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<ByotUsageResponse>().await {
+                                    byot_usage.set(Some(data));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            web_sys::console::log_1(&format!("Failed to fetch BYOT usage: {:?}", e).into());
+                        }
+                    }
+                });
+            }
             || ()
         }, ());
     }
@@ -564,10 +598,149 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 {
                     html! {
                         <>
-                            // Usage Projection Section - only show if user has an active subscription
+                            // Usage Section - show BYOT usage for BYOT users, otherwise regular usage projection
                             {
                                 if user_profile.sub_tier.is_some() {
-                                if let Some(projection) = (*usage_projection).as_ref() {
+                                // BYOT users get their own usage display
+                                if user_profile.plan_type.as_deref() == Some("byot") {
+                                    if let Some(byot_data) = (*byot_usage).as_ref() {
+                                        // Build segments for the segmented bar (cost-based percentages)
+                                        let mut segments: Vec<(&str, f32, &str, String)> = vec![];
+
+                                        if byot_data.breakdown.digests.cost_eur > 0.0 {
+                                            segments.push((
+                                                "#9333ea", // purple
+                                                byot_data.percentages.digests,
+                                                "Digests",
+                                                format!("{} ({:.2}€)", byot_data.breakdown.digests.count, byot_data.breakdown.digests.cost_eur)
+                                            ));
+                                        }
+                                        if byot_data.breakdown.sms_notifications.cost_eur > 0.0 {
+                                            segments.push((
+                                                "#3b82f6", // blue
+                                                byot_data.percentages.sms_notifications,
+                                                "SMS Notifications",
+                                                format!("{} ({:.2}€)", byot_data.breakdown.sms_notifications.count, byot_data.breakdown.sms_notifications.cost_eur)
+                                            ));
+                                        }
+                                        if byot_data.breakdown.call_notifications.cost_eur > 0.0 {
+                                            segments.push((
+                                                "#f97316", // orange
+                                                byot_data.percentages.call_notifications,
+                                                "Call Notifications",
+                                                format!("{} ({:.2}€)", byot_data.breakdown.call_notifications.count, byot_data.breakdown.call_notifications.cost_eur)
+                                            ));
+                                        }
+                                        if byot_data.breakdown.messages.cost_eur > 0.0 {
+                                            segments.push((
+                                                "#22c55e", // green
+                                                byot_data.percentages.messages,
+                                                "Messages",
+                                                format!("{} ({:.2}€)", byot_data.breakdown.messages.count, byot_data.breakdown.messages.cost_eur)
+                                            ));
+                                        }
+                                        if byot_data.breakdown.voice_cost_eur > 0.0 {
+                                            segments.push((
+                                                "#ef4444", // red
+                                                byot_data.percentages.voice,
+                                                "Voice",
+                                                format!("{:.1} min ({:.2}€)", byot_data.breakdown.voice_minutes, byot_data.breakdown.voice_cost_eur)
+                                            ));
+                                        }
+
+                                        html! {
+                                            <div class="section-container usage-projection-section">
+                                                <div class="usage-projection-card">
+                                                    <div class="usage-header">
+                                                        <h3>{"BYOT Usage This Month"}</h3>
+                                                        <div class="usage-summary">
+                                                            <span class="total-cost" style="color: #7EB2FF; font-weight: 600; font-size: 1.2rem;">
+                                                                {format!("{:.2}€", byot_data.total_cost_eur)}
+                                                            </span>
+                                                            <span style="color: #888; font-size: 0.85rem; margin-left: 8px;">
+                                                                {"estimated Twilio costs"}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    // Segmented usage bar
+                                                    {
+                                                        if !segments.is_empty() {
+                                                            html! {
+                                                                <div class="segmented-bar-container" style="margin: 16px 0;">
+                                                                    <div class="segmented-bar" style="display: flex; height: 24px; border-radius: 4px; overflow: hidden; background: rgba(255,255,255,0.1);">
+                                                                        { for segments.iter().map(|(color, pct, label, detail)| {
+                                                                            let show_label = *pct >= 15.0;
+                                                                            html! {
+                                                                                <div
+                                                                                    style={format!("width: {}%; background: {}; display: flex; align-items: center; justify-content: center; transition: width 0.3s;", pct, color)}
+                                                                                    title={format!("{}: {}", label, detail)}
+                                                                                >
+                                                                                    { if show_label {
+                                                                                        html! { <span style="color: white; font-size: 0.7rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px;">{*label}</span> }
+                                                                                    } else {
+                                                                                        html! {}
+                                                                                    }}
+                                                                                </div>
+                                                                            }
+                                                                        })}
+                                                                    </div>
+                                                                    // Legend
+                                                                    <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px;">
+                                                                        { for segments.iter().map(|(color, _pct, label, detail)| {
+                                                                            html! {
+                                                                                <div style="display: flex; align-items: center; gap: 6px;">
+                                                                                    <div style={format!("width: 12px; height: 12px; border-radius: 2px; background: {};", color)}></div>
+                                                                                    <span style="color: #aaa; font-size: 0.8rem;">{format!("{}: {}", label, detail)}</span>
+                                                                                </div>
+                                                                            }
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                        } else {
+                                                            html! {
+                                                                <div style="padding: 16px; color: #666; text-align: center;">
+                                                                    {"No usage recorded this month"}
+                                                                </div>
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // Footer info
+                                                    <div class="plan-info-footer" style="margin-top: 12px; color: #888; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                                        <span>
+                                                            {format!("Based on Twilio pricing for {}", byot_data.country_name)}
+                                                            {
+                                                                if let Some(days) = byot_data.days_until_billing {
+                                                                    format!(" ({} days until billing resets)", days)
+                                                                } else {
+                                                                    String::new()
+                                                                }
+                                                            }
+                                                        </span>
+                                                        <span style="color: #7EB2FF;">
+                                                            <Link<Route> to={Route::TwilioHostedInstructions}>
+                                                                {"Manage Twilio Settings"}
+                                                            </Link<Route>>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        // Loading or no data
+                                        html! {
+                                            <div class="section-container usage-projection-section">
+                                                <div class="usage-projection-card">
+                                                    <div style="padding: 16px; color: #666; text-align: center;">
+                                                        {"Loading usage data..."}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                } else if let Some(projection) = (*usage_projection).as_ref() {
                                     let percentage = projection.usage_percentage.min(100.0);
                                     let bar_color = if projection.usage_percentage <= 60.0 {
                                         "#4CAF50" // Green
@@ -966,7 +1139,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             }
 
                             // Purchased Credits & Payment Management - unified card style
-                            <div class="usage-projection-card" style="margin-top: 16px;">
+                            <div class="usage-projection-card" style={format!("margin-top: 16px;{}", if user_profile.plan_type.as_deref() == Some("byot") { " opacity: 0.6;" } else { "" })}>
                                 <div class="usage-header">
                                     <h3>{"Overage Credits"}</h3>
                                     <span class="usage-percentage" style="font-size: 1.2rem;">{format!("{:.2}€", one_time_credits)}</span>
@@ -983,6 +1156,25 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             <div class="tooltip" style="color: #888; font-size: 0.85rem;">
                                                 {"Overage credits are available on the Digest plan. Upgrade to get more capacity and the ability to buy extra credits."}
                                             </div>
+                                        }
+                                    } else if user_profile.plan_type.as_deref() == Some("byot") {
+                                        // BYOT users don't need overage credits - they pay Twilio directly
+                                        html! {
+                                            <>
+                                                <div class="buy-credits-disabled">
+                                                    <button
+                                                        class="buy-credits-button disabled"
+                                                        title="Not needed on BYOT plan"
+                                                        disabled=true
+                                                        style="opacity: 0.5; cursor: not-allowed;"
+                                                    >
+                                                        {"Buy Credits"}
+                                                    </button>
+                                                </div>
+                                                <div class="tooltip" style="color: #888; font-size: 0.85rem;">
+                                                    {"On the BYOT plan, you pay Twilio directly for usage - no overage credits needed. Your existing credits will be available if you switch plans."}
+                                                </div>
+                                            </>
                                         }
                                     } else if user_profile.sub_tier.is_some() || user_profile.discount {
                                         html! {

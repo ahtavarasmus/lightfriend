@@ -437,6 +437,7 @@ async fn main() {
         .route("/api/profile", get(profile_handlers::get_profile))
         .route("/api/pricing/dashboard-credits", get(handlers::pricing_handlers::get_dashboard_credits))
         .route("/api/pricing/usage-projection", get(handlers::pricing_handlers::get_usage_projection))
+        .route("/api/pricing/byot-usage", get(handlers::pricing_handlers::get_byot_usage))
         .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
         .route("/api/profile/digests", post(profile_handlers::update_digests))
         .route("/api/profile/digests", get(profile_handlers::get_digests))

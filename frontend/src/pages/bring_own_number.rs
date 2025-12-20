@@ -1562,80 +1562,81 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     fetch_error={fetch_error.clone()}
                     country_info={country_info.clone()}
                 />
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Alternative: TextBee for SMS Messaging"}</h2>
-                        <p>{"If you have a spare Android phone (version 7.0+) with a secondary phone number lying around, connect it to Lightfriend via TextBee. This lets your AI send and receive texts using your existing phone plan, supporting up to 300 messages per month on the free tier at no extra cost beyond your carrier's standard SMS charges."}</p>
-                        <p>{"Note: TextBee is for texting only. If you need phone calls, set up Twilio in addition."}</p>
-                        <p>{"Note: TextBee does not support sending images or other media."}</p>
-                        <p>{"TextBee also offers a Pro plan ($6.99/month currently) for higher limits (up to 5,000 messages/month) and additional features like multi-device support."}</p>
-                        <h3>{"Setup Steps"}</h3>
-                        <ul>
-                            <li>{"Register for a free account at "}<a href="https://textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"textbee.dev"}</a>{" using email/password or Google."}</li>
-                            <li>{"Download and install the TextBee app on your Android phone from "}<a href="https://dl.textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"dl.textbee.dev"}</a>{"."}</li>
-                            <li>{"Grant SMS permissions in the app."}</li>
-                            <li>{"Link the device:"}
-                                <ul>
-                                    <li>{"Recommended: In the dashboard, click 'Register Device', scan the QR code with the app."}</li>
-                                    <li>{"Alternative: Generate an API key in the dashboard, enter it in the app."}</li>
-                                </ul>
-                            </li>
-                            <li>{"Once linked, note your Device ID from the devices list in the dashboard."}</li>
-                            <li>{"Generate or use your API Key from the dashboard."}</li>
-                        </ul>
-                        {
-                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
-                                html! {
-                                    <>
-                                        <div class="input-field">
-                                            <label for="textbee-device-id">{"Your TextBee Device ID:"}</label>
-                                            <div class="input-with-button">
-                                                <input
-                                                    type="text"
-                                                    id="textbee-device-id"
-                                                    placeholder="your_device_id_here"
-                                                    value={(*textbee_device_id).clone()}
-                                                    onchange={on_textbee_id_change.clone()}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div class="input-field">
-                                            <label for="textbee-api-key">{"Your TextBee API Key:"}</label>
-                                            <div class="input-with-button">
-                                                <input
-                                                    type="text"
-                                                    id="textbee-api-key"
-                                                    placeholder="your_api_key_here"
-                                                    value={(*textbee_api_key).clone()}
-                                                    onchange={on_textbee_key_change.clone()}
-                                                />
-                                            </div>
-                                        </div>
-                                        <button
-                                            class={classes!("save-button", if !(is_textbee_key_valid && is_textbee_id_valid) { "invalid" } else { "" })}
-                                            onclick={on_save_textbee.clone()}
-                                        >
-                                            {"Save TextBee Credentials"}
-                                        </button>
-                                        {
-                                            match &*textbee_save_status {
-                                                Some(Ok(_)) => html! {
-                                                    <span class="save-status success">{"✓ Saved"}</span>
-                                                },
-                                                Some(Err(err)) => html! {
-                                                    <span class="save-status error">{format!("Error: {}", err)}</span>
-                                                },
-                                                None => html! {}
-                                            }
-                                        }
-                                    </>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
-                    </div>
-                </div>
+                // TextBee section temporarily hidden
+                // <div class="instruction-block">
+                //     <div class="instruction-content">
+                //         <h2>{"Alternative: TextBee for SMS Messaging"}</h2>
+                //         <p>{"If you have a spare Android phone (version 7.0+) with a secondary phone number lying around, connect it to Lightfriend via TextBee. This lets your AI send and receive texts using your existing phone plan, supporting up to 300 messages per month on the free tier at no extra cost beyond your carrier's standard SMS charges."}</p>
+                //         <p>{"Note: TextBee is for texting only. If you need phone calls, set up Twilio in addition."}</p>
+                //         <p>{"Note: TextBee does not support sending images or other media."}</p>
+                //         <p>{"TextBee also offers a Pro plan ($6.99/month currently) for higher limits (up to 5,000 messages/month) and additional features like multi-device support."}</p>
+                //         <h3>{"Setup Steps"}</h3>
+                //         <ul>
+                //             <li>{"Register for a free account at "}<a href="https://textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"textbee.dev"}</a>{" using email/password or Google."}</li>
+                //             <li>{"Download and install the TextBee app on your Android phone from "}<a href="https://dl.textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"dl.textbee.dev"}</a>{"."}</li>
+                //             <li>{"Grant SMS permissions in the app."}</li>
+                //             <li>{"Link the device:"}
+                //                 <ul>
+                //                     <li>{"Recommended: In the dashboard, click 'Register Device', scan the QR code with the app."}</li>
+                //                     <li>{"Alternative: Generate an API key in the dashboard, enter it in the app."}</li>
+                //                 </ul>
+                //             </li>
+                //             <li>{"Once linked, note your Device ID from the devices list in the dashboard."}</li>
+                //             <li>{"Generate or use your API Key from the dashboard."}</li>
+                //         </ul>
+                //         {
+                //             if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
+                //                 html! {
+                //                     <>
+                //                         <div class="input-field">
+                //                             <label for="textbee-device-id">{"Your TextBee Device ID:"}</label>
+                //                             <div class="input-with-button">
+                //                                 <input
+                //                                     type="text"
+                //                                     id="textbee-device-id"
+                //                                     placeholder="your_device_id_here"
+                //                                     value={(*textbee_device_id).clone()}
+                //                                     onchange={on_textbee_id_change.clone()}
+                //                                 />
+                //                             </div>
+                //                         </div>
+                //                         <div class="input-field">
+                //                             <label for="textbee-api-key">{"Your TextBee API Key:"}</label>
+                //                             <div class="input-with-button">
+                //                                 <input
+                //                                     type="text"
+                //                                     id="textbee-api-key"
+                //                                     placeholder="your_api_key_here"
+                //                                     value={(*textbee_api_key).clone()}
+                //                                     onchange={on_textbee_key_change.clone()}
+                //                                 />
+                //                             </div>
+                //                         </div>
+                //                         <button
+                //                             class={classes!("save-button", if !(is_textbee_key_valid && is_textbee_id_valid) { "invalid" } else { "" })}
+                //                             onclick={on_save_textbee.clone()}
+                //                         >
+                //                             {"Save TextBee Credentials"}
+                //                         </button>
+                //                         {
+                //                             match &*textbee_save_status {
+                //                                 Some(Ok(_)) => html! {
+                //                                     <span class="save-status success">{"✓ Saved"}</span>
+                //                                 },
+                //                                 Some(Err(err)) => html! {
+                //                                     <span class="save-status error">{format!("Error: {}", err)}</span>
+                //                                 },
+                //                                 None => html! {}
+                //                             }
+                //                         }
+                //                     </>
+                //                 }
+                //             } else {
+                //                 html! {}
+                //             }
+                //         }
+                //     </div>
+                // </div>
                 <InstructionsComponent
                     can_edit={can_edit}
                     phone_number={phone_number.clone()}
