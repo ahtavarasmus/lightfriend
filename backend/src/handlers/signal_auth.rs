@@ -603,106 +603,27 @@ pub async fn disconnect_signal(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🔌 Starting Signal disconnection process for user {}", auth_user.user_id);
+    tracing::info!("🔌 Starting Signal disconnection process for user {}", auth_user.user_id);
+
     // Get the bridge information first
     let bridge = state.user_repository.get_bridge(auth_user.user_id, "signal")
         .map_err(|e| {
-            tracing::error!("Failed to get Signal bridge: {}", e);
+            tracing::error!("Failed to get Signal bridge info: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": "Failed to get Signal bridge info"})),
             )
         })?;
+
     let Some(bridge) = bridge else {
         return Ok(AxumJson(json!({
             "message": "Signal was not connected"
         })));
     };
-    // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get or create Matrix client: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
-            )
-        })?;
-    // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
-    if let Some(room) = client.get_room(&room_id) {
-        tracing::debug!("📱 Setting up temporary Matrix event handler for disconnection");
-        // Set up event handler to log bot responses (expand for waits if needed)
-        client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
-            match ev {
-                SyncRoomMessageEvent::Original(msg) => {
-                    tracing::info!("Received bridge bot message: {:?}", msg.content.body());
-                    // Optionally, parse for success/error and signal via channel
-                },
-                SyncRoomMessageEvent::Redacted(_) => {
-                    tracing::info!("Received redacted message event");
-                }
-            }
-        });
 
-        // Start a short-lived sync in the background to receive responses
-        let sync_client = client.clone();
-        let sync_task = tokio::spawn(async move {
-            tracing::info!("🔄 Starting temporary Matrix sync for Signal disconnection");
-            let sync_settings = MatrixSyncSettings::default()
-                .timeout(Duration::from_secs(30))
-                .full_state(true);
-            if let Err(e) = sync_client.sync(sync_settings).await {
-                tracing::error!("❌ Matrix sync error during disconnect: {}", e);
-            }
-            tracing::info!("🛑 Temporary sync ended");
-        });
+    let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-        // Give sync a moment to start
-        sleep(Duration::from_secs(2)).await;
-
-        tracing::debug!("📤 Sending Signal logout command");
-        // Send logout command
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal logout")).await {
-            tracing::error!("Failed to send logout command: {}", e);
-        }
-        // Wait for processing (adjust based on typical response time)
-        sleep(Duration::from_secs(5)).await;
-
-        // Send delete-all-portals
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal delete-all-portals")).await {
-            tracing::error!("Failed to send delete-all-portals command: {}", e);
-        }
-        sleep(Duration::from_secs(5)).await;
-
-        // Send clean-rooms for thorough cleanup
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal clean-rooms")).await {
-            tracing::error!("Failed to send clean-rooms command: {}", e);
-        }
-        sleep(Duration::from_secs(5)).await;
-
-        tracing::debug!("🗑️ Sending delete-session command");
-        // Send delete-session command as a final cleanup
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal delete-session")).await {
-            tracing::error!("Failed to send delete-session command: {}", e);
-        }
-        sleep(Duration::from_secs(5)).await;
-
-        // Explicitly leave the management room
-        if let Err(e) = room.leave().await {
-            tracing::error!("Failed to leave Signal management room: {}", e);
-        } else {
-            tracing::info!("🧹 Left Signal bridge management room");
-        }
-
-        // Abort the temporary sync task
-        sync_task.abort();
-    }
-    // Delete the bridge record
+    // Delete the bridge record IMMEDIATELY - user sees instant response
     state.user_repository.delete_bridge(auth_user.user_id, "signal")
         .map_err(|e| {
             tracing::error!("Failed to delete Signal bridge: {}", e);
@@ -711,33 +632,101 @@ pub async fn disconnect_signal(
                 AxumJson(json!({"error": "Failed to delete bridge record"})),
             )
         })?;
-    // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to check active bridges: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to check active bridges"})),
-            )
-        })?;
-    if !has_active_bridges {
-        // No active bridges left, remove client and sync task
-        let mut matrix_clients = state.matrix_clients.lock().await;
-        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-        // Remove and abort the sync task if it exists
-        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
-            task.abort();
-            tracing::debug!("Aborted sync task for user {}", auth_user.user_id);
+
+    tracing::info!("✅ Signal bridge record deleted for user {}", auth_user.user_id);
+
+    // Spawn background task for cleanup - don't block the response
+    let state_clone = state.clone();
+    let user_id = auth_user.user_id;
+    tokio::spawn(async move {
+        tracing::info!("🧹 Starting background cleanup for Signal user {}", user_id);
+
+        // Get Matrix client for cleanup
+        let client = match matrix_auth::get_cached_client(user_id, &state_clone).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                return;
+            }
+        };
+
+        // Get the room and send cleanup commands
+        if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
+            if let Some(room) = client.get_room(&room_id) {
+                // Send logout command
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal logout")).await {
+                    tracing::error!("Background cleanup: Failed to send logout command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send delete-all-portals
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal delete-all-portals")).await {
+                    tracing::error!("Background cleanup: Failed to send delete-all-portals command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send clean-rooms for thorough cleanup
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal clean-rooms")).await {
+                    tracing::error!("Background cleanup: Failed to send clean-rooms command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send delete-session command as a final cleanup
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!signal delete-session")).await {
+                    tracing::error!("Background cleanup: Failed to send delete-session command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Explicitly leave the management room
+                if let Err(e) = room.leave().await {
+                    tracing::error!("Background cleanup: Failed to leave Signal management room: {}", e);
+                } else {
+                    tracing::info!("Background cleanup: Left Signal bridge management room");
+                }
+            }
         }
-        // Remove the client if it exists
-        if matrix_clients.remove(&auth_user.user_id).is_some() {
-            tracing::debug!("Removed Matrix client for user {}", auth_user.user_id);
+
+        // Check for remaining active bridges and cleanup if none left
+        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
+            .unwrap_or(false);
+
+        if !has_active_bridges {
+            // Clear user store if no other bridges
+            if let Some(user_id_matrix) = client.user_id() {
+                let username = user_id_matrix.localpart().to_string();
+                let store_path = match get_store_path(&username) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("Background cleanup: Failed to get store path: {}", e);
+                        return;
+                    }
+                };
+                if Path::new(&store_path).exists() {
+                    if let Err(e) = fs::remove_dir_all(&store_path).await {
+                        tracing::error!("Background cleanup: Failed to clear user store: {}", e);
+                    } else {
+                        tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
+                    }
+                }
+            }
+
+            // Remove client and sync task
+            let mut matrix_clients = state_clone.matrix_clients.lock().await;
+            let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
+
+            if let Some(task) = sync_tasks.remove(&user_id) {
+                task.abort();
+                tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
+            }
+            if matrix_clients.remove(&user_id).is_some() {
+                tracing::debug!("Background cleanup: Removed Matrix client for user {}", user_id);
+            }
         }
-    } else {
-        tracing::debug!("Other active bridges exist for user {}, keeping Matrix client", auth_user.user_id);
-    }
-    tracing::debug!("✅ Signal disconnection completed for user {}", auth_user.user_id);
+
+        tracing::info!("🧹 Background cleanup completed for Signal user {}", user_id);
+    });
+
     Ok(AxumJson(json!({
-        "message": "Signal disconnected successfully with full cleanup"
+        "message": "Signal disconnected successfully"
     })))
 }

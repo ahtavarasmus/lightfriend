@@ -41,7 +41,7 @@ const CONTACT_EMAIL: &str = "rasmus@ahtava.com";
 
 /// Calculate max credits_left for a user based on country and plan type
 /// Mirrors logic from profile_handlers.rs:recalculate_credits_for_country_change
-async fn get_max_credits_left(
+pub async fn get_max_credits_left(
     state: &Arc<AppState>,
     country: Option<&str>,
     plan_type: Option<&str>,
@@ -266,6 +266,63 @@ pub async fn get_refund_eligibility(
             usage_percent: None,
             days_remaining: None,
             refund_amount_cents: None,
+            already_refunded: false,
+            contact_email: CONTACT_EMAIL.to_string(),
+        }));
+    }
+
+    // Check if BYOT plan - no credit usage check needed, only 7-day window
+    if user.plan_type.as_deref() == Some("byot") {
+        let first_paid_timestamp = get_first_paid_invoice_timestamp(&client, &customer_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+        let first_paid_timestamp = match first_paid_timestamp {
+            Some(ts) => ts,
+            None => {
+                return Ok(Json(RefundEligibilityResponse {
+                    eligible: false,
+                    refund_type: Some("subscription".to_string()),
+                    reason: "Your trial hasn't ended yet, no payment to refund.".to_string(),
+                    usage_percent: None,
+                    days_remaining: None,
+                    refund_amount_cents: None,
+                    already_refunded: false,
+                    contact_email: CONTACT_EMAIL.to_string(),
+                }));
+            }
+        };
+
+        let days_since_payment = (now - first_paid_timestamp) / 86400;
+
+        if days_since_payment > REFUND_WINDOW_DAYS {
+            return Ok(Json(RefundEligibilityResponse {
+                eligible: false,
+                refund_type: Some("subscription".to_string()),
+                reason: format!("Refund window expired {} days ago.", days_since_payment - REFUND_WINDOW_DAYS),
+                usage_percent: None,
+                days_remaining: Some(0),
+                refund_amount_cents: None,
+                already_refunded: false,
+                contact_email: CONTACT_EMAIL.to_string(),
+            }));
+        }
+
+        // BYOT is eligible - no usage check needed
+        let payment_info = get_latest_subscription_payment_intent(&client, &customer_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+        let refund_amount_cents = payment_info.map(|(_, amount)| amount);
+        let days_remaining = (REFUND_WINDOW_DAYS - days_since_payment) as i32;
+
+        return Ok(Json(RefundEligibilityResponse {
+            eligible: true,
+            refund_type: Some("subscription".to_string()),
+            reason: "BYOT plan - eligible for refund within 7 days.".to_string(),
+            usage_percent: None,
+            days_remaining: Some(days_remaining),
+            refund_amount_cents,
             already_refunded: false,
             contact_email: CONTACT_EMAIL.to_string(),
         }));

@@ -185,6 +185,77 @@ async fn setup_user_subscription(
     Ok(())
 }
 
+/// Check if user is eligible for automatic upgrade refund when switching from Monitor/BYOT to Digest.
+/// Returns Some((payment_intent_id, amount_cents)) if eligible, None otherwise.
+///
+/// Eligibility criteria:
+/// - Old subscription was Monitor or BYOT
+/// - Within 7 days of last payment on old subscription
+/// - For Monitor users: usage < 30%
+/// - For BYOT users: no usage check needed
+async fn check_upgrade_refund_eligibility(
+    client: &Client,
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    old_subscription: &stripe::Subscription,
+) -> Option<(String, i64)> {
+    use crate::utils::country::{is_byot_plan_price, is_monitor_plan_price};
+    use crate::handlers::refund_handlers::get_max_credits_left;
+
+    // Get old price ID
+    let old_price_id = old_subscription.items.data.first()
+        .and_then(|item| item.price.as_ref())
+        .map(|p| p.id.to_string())?;
+
+    let was_byot = is_byot_plan_price(&old_price_id);
+    let was_monitor = is_monitor_plan_price(&old_price_id);
+
+    if !was_byot && !was_monitor {
+        tracing::debug!("Old subscription was not Monitor or BYOT, not eligible for upgrade refund");
+        return None;
+    }
+
+    // Get last payment timestamp for old subscription
+    let invoices = stripe::Invoice::list(client, &stripe::ListInvoices {
+        subscription: Some(old_subscription.id.clone()),
+        status: Some(stripe::InvoiceStatus::Paid),
+        limit: Some(1),
+        ..Default::default()
+    }).await.ok()?;
+
+    let last_invoice = invoices.data.first()?;
+    let last_payment_ts = last_invoice.created?;
+
+    let now = chrono::Utc::now().timestamp();
+    let days_since_payment = (now - last_payment_ts) / 86400;
+
+    if days_since_payment > 7 {
+        tracing::debug!("Outside 7-day refund window ({} days since payment)", days_since_payment);
+        return None;
+    }
+
+    // For Monitor users, check credit usage
+    if was_monitor {
+        let max_credits = get_max_credits_left(state, user.phone_number_country.as_deref(), Some("monitor")).await;
+        let credits_used = max_credits - user.credits_left;
+        let usage_percent = if max_credits > 0.0 { (credits_used / max_credits * 100.0).max(0.0) } else { 0.0 };
+
+        if usage_percent >= 30.0 {
+            tracing::info!("User {} not eligible for upgrade refund: Monitor usage {:.1}% >= 30%", user.id, usage_percent);
+            return None;
+        }
+        tracing::debug!("Monitor user {} usage {:.1}% < 30%, eligible for refund", user.id, usage_percent);
+    } else {
+        tracing::debug!("BYOT user {}, no usage check needed for refund", user.id);
+    }
+
+    // Get payment intent for refund
+    match &last_invoice.payment_intent {
+        Some(stripe::Expandable::Id(id)) => Some((id.to_string(), last_invoice.amount_paid.unwrap_or(0))),
+        _ => None
+    }
+}
+
 pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -307,8 +378,8 @@ pub async fn create_unified_subscription_checkout(
         }
     ];
 
-    let success_url = format!("{}/home?subscription=success", domain_url);
-    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
+    let success_url = format!("{}/?subscription=success", domain_url);
+    let cancel_url = format!("{}/?subscription=canceled", domain_url);
     let mut create_params = CreateCheckoutSession {
         success_url: Some(&success_url),
         cancel_url: Some(&cancel_url),
@@ -344,7 +415,7 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     };
     // Handle metadata for plan changes
-    let success_url1 = format!("{}/billing?subscription=changed", domain_url);
+    let success_url1 = format!("{}/?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
 
@@ -708,8 +779,8 @@ pub async fn create_checkout_session(
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
-            success_url: Some(&format!("{}/billing", domain_url)), // Redirect after success
-            cancel_url: Some(&format!("{}/billing", domain_url)), // Redirect after cancellation
+            success_url: Some(&format!("{}/?credits=success", domain_url)), // Redirect after success
+            cancel_url: Some(&format!("{}/?credits=canceled", domain_url)), // Redirect after cancellation
             payment_method_types: Some(vec![stripe::CreateCheckoutSessionPaymentMethodTypes::Card]), // Allow card payments
             mode: Some(stripe::CheckoutSessionMode::Payment), // One-time payment mode
             line_items: Some(vec![
@@ -954,6 +1025,8 @@ pub async fn stripe_webhook(
 
                 // Cancel existing subscriptions when a new one is created
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
+                    use crate::utils::country::is_digest_plan_price;
+
                     let existing_subscriptions = stripe::Subscription::list(
                         &client,
                         &stripe::ListSubscriptions {
@@ -968,6 +1041,36 @@ pub async fn stripe_webhook(
 
                     for existing_sub in existing_subscriptions.data.iter() {
                         if existing_sub.id != subscription.id {
+                            // Check if upgrading to Digest and eligible for automatic refund
+                            if is_digest_plan_price(&price_id) {
+                                // Get user for credit usage check
+                                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                                    if let Some((payment_intent_id, amount)) = check_upgrade_refund_eligibility(
+                                        &client, &state, &user, existing_sub
+                                    ).await {
+                                        // Process automatic refund
+                                        match stripe::Refund::create(&client, stripe::CreateRefund {
+                                            payment_intent: Some(payment_intent_id.parse().unwrap()),
+                                            reason: Some(stripe::RefundReasonFilter::RequestedByCustomer),
+                                            ..Default::default()
+                                        }).await {
+                                            Ok(refund) => {
+                                                tracing::info!(
+                                                    "Automatic upgrade refund processed for user {}: {} cents, refund_id={}",
+                                                    user.id, amount, refund.id
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Failed to process automatic upgrade refund for user {}: {}",
+                                                    user.id, e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             tracing::info!("Canceling existing subscription: {}", existing_sub.id);
                             let _ = Subscription::update(
                                 &client,

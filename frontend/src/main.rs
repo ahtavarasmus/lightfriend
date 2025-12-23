@@ -57,6 +57,7 @@ mod proactive {
     pub mod agent_on;
 }
 mod connections {
+    pub mod bridge_connect;
     pub mod email;
     pub mod calendar;
     pub mod whatsapp;

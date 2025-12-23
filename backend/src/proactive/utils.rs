@@ -1,5 +1,6 @@
 use crate::models::user_models::WaitingCheck;
 use crate::AppState;
+use crate::{AiProvider, ModelPurpose};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use openai_api_rs::v1::{
@@ -7,9 +8,8 @@ use openai_api_rs::v1::{
     types,
 };
 
-const GPT4_O: &str = "openai/gpt-4o-2024-11-20";
 use chrono::Timelike;
-use crate::tool_call_utils::utils::create_openai_client;
+use crate::tool_call_utils::utils::create_openai_client_for_user;
 use serde::{Deserialize, Serialize};
 use chrono::{Utc, Duration};
 
@@ -119,10 +119,11 @@ pub struct WaitingCheckMatchResponse {
 /// Returns `(waiting_check_id, sms_message, first_message)`.
 pub async fn check_waiting_check_match(
     state: &Arc<AppState>,
+    user_id: i32,
     message: &str,
     waiting_checks: &Vec<WaitingCheck>,
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let client = create_openai_client(&state)?;
+    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
 
     let waiting_checks_str = waiting_checks
         .iter()
@@ -190,8 +191,9 @@ pub async fn check_waiting_check_match(
         },
     }];
 
+    let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
     let request = chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
+        model,
         messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
@@ -277,7 +279,7 @@ pub async fn check_message_importance(
         }
     }
     // Build the chat payload ----------------------------------------------
-    let client = create_openai_client(&state)?;
+    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -335,8 +337,9 @@ pub async fn check_message_importance(
             },
         },
     }];
+    let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
     let request = chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
+        model,
         messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
@@ -769,7 +772,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
+            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
@@ -1126,7 +1129,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
+            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
@@ -1503,7 +1506,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
+            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
@@ -1544,10 +1547,11 @@ Return JSON with a single field:
 "#;
 pub async fn generate_digest(
     state: &Arc<AppState>,
+    user_id: i32,
     data: DigestData,
     priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let client = create_openai_client(&state)?;
+    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
     // Format messages for the prompt
     let messages_str = data.messages
         .iter()
@@ -1634,8 +1638,9 @@ pub async fn generate_digest(
             },
         },
     }];
+    let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
     let request = chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
+        model,
         messages,
     )
     .tools(tools)

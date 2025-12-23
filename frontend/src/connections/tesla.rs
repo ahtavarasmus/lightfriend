@@ -49,6 +49,12 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
     let show_disconnect_modal = use_state(|| false);
     let is_disconnecting = use_state(|| false);
 
+    // Scope picker modal state
+    let show_scope_picker = use_state(|| false);
+    let scope_vehicle_data = use_state(|| true);    // Default: checked
+    let scope_vehicle_cmds = use_state(|| true);    // Default: checked
+    let scope_charging_cmds = use_state(|| true);   // Default: checked
+
     // Check for OAuth callback error/success in URL on mount
     {
         let error = error.clone();
@@ -265,17 +271,46 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         );
     }
 
-    // Handle connect button click
+    // Handle connect button click - shows scope picker modal
     let onclick_connect = {
+        let show_scope_picker = show_scope_picker.clone();
+        Callback::from(move |_: MouseEvent| {
+            show_scope_picker.set(true);
+        })
+    };
+
+    // Handle proceeding to Tesla after scope selection
+    let onclick_proceed_to_tesla = {
         let error = error.clone();
         let connecting = connecting.clone();
+        let show_scope_picker = show_scope_picker.clone();
+        let scope_vehicle_data = scope_vehicle_data.clone();
+        let scope_vehicle_cmds = scope_vehicle_cmds.clone();
+        let scope_charging_cmds = scope_charging_cmds.clone();
         Callback::from(move |_: MouseEvent| {
             let error = error.clone();
             let connecting = connecting.clone();
+            let show_scope_picker = show_scope_picker.clone();
 
+            // Build scopes string from selected checkboxes
+            let mut scopes = Vec::new();
+            if *scope_vehicle_data { scopes.push("vehicle_device_data"); }
+            if *scope_vehicle_cmds { scopes.push("vehicle_cmds"); }
+            if *scope_charging_cmds { scopes.push("vehicle_charging_cmds"); }
+
+            // Require at least one scope
+            if scopes.is_empty() {
+                error.set(Some("Please select at least one permission".to_string()));
+                return;
+            }
+
+            let scopes_param = scopes.join(",");
+            show_scope_picker.set(false);
             connecting.set(true);
+
             spawn_local(async move {
-                match Api::get("/api/auth/tesla/login")
+                let url = format!("/api/auth/tesla/login?scopes={}", urlencoding::encode(&scopes_param));
+                match Api::get(&url)
                     .send()
                     .await
                 {
@@ -304,6 +339,14 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                 }
                 connecting.set(false);
             });
+        })
+    };
+
+    // Handle cancel scope picker
+    let onclick_cancel_scope_picker = {
+        let show_scope_picker = show_scope_picker.clone();
+        Callback::from(move |_: MouseEvent| {
+            show_scope_picker.set(false);
         })
     };
 
@@ -591,6 +634,90 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                     >
                         {if *connecting { "Connecting..." } else { "Connect Tesla" }}
                     </button>
+
+                    // Scope picker modal
+                    if *show_scope_picker {
+                        <div class="modal-overlay">
+                            <div class="scope-picker-modal">
+                                <h3>{"Choose Tesla Permissions"}</h3>
+                                <p class="scope-picker-subtitle">{"Select which features you want to enable. You can change these later by reconnecting."}</p>
+
+                                <div class="scope-options">
+                                    <label class="scope-checkbox">
+                                        <input
+                                            type="checkbox"
+                                            checked={*scope_vehicle_data}
+                                            onchange={{
+                                                let scope_vehicle_data = scope_vehicle_data.clone();
+                                                Callback::from(move |e: web_sys::Event| {
+                                                    if let Some(target) = e.target() {
+                                                        if let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() {
+                                                            scope_vehicle_data.set(input.checked());
+                                                        }
+                                                    }
+                                                })
+                                            }}
+                                        />
+                                        <div class="scope-info">
+                                            <strong>{"Vehicle Data"}</strong>
+                                            <span>{"View battery level, range, temperature, and charging status"}</span>
+                                        </div>
+                                    </label>
+
+                                    <label class="scope-checkbox">
+                                        <input
+                                            type="checkbox"
+                                            checked={*scope_vehicle_cmds}
+                                            onchange={{
+                                                let scope_vehicle_cmds = scope_vehicle_cmds.clone();
+                                                Callback::from(move |e: web_sys::Event| {
+                                                    if let Some(target) = e.target() {
+                                                        if let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() {
+                                                            scope_vehicle_cmds.set(input.checked());
+                                                        }
+                                                    }
+                                                })
+                                            }}
+                                        />
+                                        <div class="scope-info">
+                                            <strong>{"Vehicle Commands"}</strong>
+                                            <span>{"Lock/unlock, climate control, defrost, remote start"}</span>
+                                        </div>
+                                    </label>
+
+                                    <label class="scope-checkbox">
+                                        <input
+                                            type="checkbox"
+                                            checked={*scope_charging_cmds}
+                                            onchange={{
+                                                let scope_charging_cmds = scope_charging_cmds.clone();
+                                                Callback::from(move |e: web_sys::Event| {
+                                                    if let Some(target) = e.target() {
+                                                        if let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() {
+                                                            scope_charging_cmds.set(input.checked());
+                                                        }
+                                                    }
+                                                })
+                                            }}
+                                        />
+                                        <div class="scope-info">
+                                            <strong>{"Charging Commands"}</strong>
+                                            <span>{"Charging notifications, start/stop charging"}</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="modal-buttons">
+                                    <button onclick={onclick_cancel_scope_picker.clone()} class="cancel-button">
+                                        {"Cancel"}
+                                    </button>
+                                    <button onclick={onclick_proceed_to_tesla.clone()} class="proceed-button">
+                                        {"Continue to Tesla"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
                 } else {
                     <div class="connection-actions">
                         // Main Tesla section
@@ -1020,6 +1147,83 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                     }
                     @keyframes spin {
                         to { transform: rotate(360deg); }
+                    }
+
+                    /* Scope picker modal styles */
+                    .scope-picker-modal {
+                        background: #1a1a1a;
+                        border: 1px solid rgba(30, 144, 255, 0.3);
+                        border-radius: 16px;
+                        padding: 2rem;
+                        max-width: 480px;
+                        width: 90%;
+                        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+                    }
+                    .scope-picker-modal h3 {
+                        color: #fff;
+                        margin-bottom: 0.5rem;
+                        font-size: 1.3rem;
+                    }
+                    .scope-picker-subtitle {
+                        color: #999;
+                        font-size: 0.9rem;
+                        margin-bottom: 1.5rem;
+                    }
+                    .scope-options {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                        margin-bottom: 1.5rem;
+                    }
+                    .scope-checkbox {
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 12px;
+                        padding: 16px;
+                        background: rgba(30, 144, 255, 0.05);
+                        border: 1px solid rgba(30, 144, 255, 0.15);
+                        border-radius: 10px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                    }
+                    .scope-checkbox:hover {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+                    .scope-checkbox input[type="checkbox"] {
+                        width: 20px;
+                        height: 20px;
+                        margin-top: 2px;
+                        accent-color: #1E90FF;
+                        cursor: pointer;
+                    }
+                    .scope-info {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 4px;
+                    }
+                    .scope-info strong {
+                        color: #fff;
+                        font-size: 0.95rem;
+                    }
+                    .scope-info span {
+                        color: #888;
+                        font-size: 0.85rem;
+                        line-height: 1.4;
+                    }
+                    .proceed-button {
+                        background: linear-gradient(45deg, #1E90FF, #4169E1);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 0.95rem;
+                        transition: all 0.3s ease;
+                    }
+                    .proceed-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
                     }
                 "#}
             </style>

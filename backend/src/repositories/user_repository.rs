@@ -1311,6 +1311,19 @@ impl UserRepository {
         Ok(paired == 1)
     }
 
+    /// Get the granted scopes for a user's Tesla connection
+    pub fn get_tesla_granted_scopes(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        use crate::schema::tesla;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let scopes = tesla::table
+            .filter(tesla::user_id.eq(user_id))
+            .filter(tesla::status.eq("active"))
+            .select(tesla::granted_scopes)
+            .first::<Option<String>>(&mut conn)?;
+
+        Ok(scopes)
+    }
 
     pub fn get_google_tasks_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_tasks;

@@ -1,5 +1,6 @@
 use crate::handlers::imap_handlers::ImapError;
 use crate::AppState;
+use crate::{AiProvider, ModelPurpose};
 use std::sync::Arc;
 
 pub fn get_fetch_emails_tool() -> openai_api_rs::v1::chat_completion::Tool {
@@ -441,9 +442,9 @@ pub async fn handle_respond_to_email(
 }
 
 pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, query: &str) -> String {
-    // Create OpenAI client for email selection
-    let client = match crate::tool_call_utils::utils::create_openai_client(&state) {
-        Ok(client) => client,
+    // Create OpenAI client for email selection (user-based routing)
+    let (client, provider) = match crate::tool_call_utils::utils::create_openai_client_for_user(&state, user_id) {
+        Ok(result) => result,
         Err(e) => {
             eprintln!("Failed to create OpenAI client: {}", e);
             return "Failed to process email search".to_string();
@@ -474,9 +475,10 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
                 formatted_emails.push_str(&formatted_email);
             }
 
-            // Use LLM to select the most relevant email
-            match crate::tool_call_utils::utils::select_most_relevant_email(&client, 
-                openai_api_rs::v1::common::GPT4_O.to_string(),
+            // Use LLM to select the most relevant email (user-based routing)
+            let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
+            match crate::tool_call_utils::utils::select_most_relevant_email(&client,
+                model,
                 query, &formatted_emails).await {
                 Ok((selected_email_id, _)) => selected_email_id,
                 Err(e) => {

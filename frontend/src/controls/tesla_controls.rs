@@ -84,6 +84,11 @@ pub fn tesla_controls() -> Html {
     let charging_notify_active = use_state(|| false);
     let charging_notify_loading = use_state(|| false);
 
+    // Scope-based feature gating state
+    let has_vehicle_device_data = use_state(|| true);  // Default true for backwards compat
+    let has_vehicle_cmds = use_state(|| true);
+    let has_vehicle_charging_cmds = use_state(|| true);
+
     // Auto-hide command result after 10 seconds
     {
         let command_result_for_effect = command_result.clone();
@@ -279,6 +284,45 @@ pub fn tesla_controls() -> Html {
                         }
 
                         battery_loading.set(false);
+                    });
+                }
+                || ()
+            },
+            tesla_connected.clone(),
+        );
+    }
+
+    // Fetch granted scopes when connected for feature gating
+    {
+        let tesla_connected = tesla_connected.clone();
+        let has_vehicle_device_data = has_vehicle_device_data.clone();
+        let has_vehicle_cmds = has_vehicle_cmds.clone();
+        let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
+
+        use_effect_with_deps(
+            move |connected| {
+                if **connected {
+                    spawn_local(async move {
+                        match Api::get("/api/auth/tesla/scopes").send().await {
+                            Ok(response) => {
+                                if response.ok() {
+                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Some(v) = data["has_vehicle_device_data"].as_bool() {
+                                            has_vehicle_device_data.set(v);
+                                        }
+                                        if let Some(v) = data["has_vehicle_cmds"].as_bool() {
+                                            has_vehicle_cmds.set(v);
+                                        }
+                                        if let Some(v) = data["has_vehicle_charging_cmds"].as_bool() {
+                                            has_vehicle_charging_cmds.set(v);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // If fetch fails, default to allowing everything (backwards compat)
+                            }
+                        }
                     });
                 }
                 || ()
@@ -1118,201 +1162,239 @@ pub fn tesla_controls() -> Html {
 
             // Control buttons
             <div class="tesla-control-buttons">
-                <button
-                    onclick={handle_lock}
-                    disabled={*lock_loading}
-                    class="control-btn"
-                >
-                    {
-                        if *lock_loading {
-                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                        } else if let Some(locked) = *is_locked {
-                            if locked {
-                                html! { <><i class="fas fa-lock"></i>{" Locked"}</> }
-                            } else {
-                                html! { <><i class="fas fa-unlock"></i>{" Unlocked"}</> }
-                            }
-                        } else {
-                            html! { <><i class="fas fa-lock"></i>{" Lock"}</> }
-                        }
-                    }
-                </button>
-
-                <button
-                    onclick={handle_climate}
-                    disabled={*climate_loading}
-                    class="control-btn"
-                >
-                    {
-                        if *climate_loading {
-                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                        } else if let Some(on) = *is_climate_on {
-                            if on {
-                                html! { <><i class="fas fa-fan"></i>{" Climate On"}</> }
-                            } else {
-                                html! { <><i class="fas fa-fan"></i>{" Climate Off"}</> }
-                            }
-                        } else {
-                            html! { <><i class="fas fa-fan"></i>{" Climate"}</> }
-                        }
-                    }
-                </button>
-
-                <button
-                    onclick={handle_defrost}
-                    disabled={*defrost_loading}
-                    class="control-btn"
-                >
-                    {
-                        if *defrost_loading {
-                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                        } else {
-                            let front_on = is_front_defroster_on.unwrap_or(false);
-                            let rear_on = is_rear_defroster_on.unwrap_or(false);
-                            if front_on || rear_on {
-                                html! { <><i class="fas fa-snowflake"></i>{" Defrost On"}</> }
-                            } else {
-                                html! { <><i class="fas fa-snowflake"></i>{" Defrost"}</> }
-                            }
-                        }
-                    }
-                </button>
-
-                <button
-                    onclick={handle_remote_start}
-                    disabled={*remote_start_loading}
-                    class="control-btn control-btn-warning"
-                >
-                    {
-                        if *remote_start_loading {
-                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                        } else {
-                            html! { <><i class="fas fa-key"></i>{" Start"}</> }
-                        }
-                    }
-                </button>
-            </div>
-
-            // Cabin Overheat Protection section
-            <div class="cabin-overheat-section">
-                <h4 class="section-title">{"Cabin Overheat Protection"}</h4>
-                <div class="cabin-overheat-buttons">
+                <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                     <button
-                        onclick={
-                            let cb = handle_cabin_overheat.clone();
-                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_on".to_string()))
-                        }
-                        disabled={*cabin_overheat_loading}
-                        class="cabin-btn"
+                        onclick={handle_lock}
+                        disabled={*lock_loading || !*has_vehicle_cmds}
+                        class={format!("control-btn {} {}",
+                            if is_locked.map(|l| !l).unwrap_or(false) { "control-btn-attention" } else { "" },
+                            if !*has_vehicle_cmds { "control-btn-disabled" } else { "" }
+                        )}
                     >
                         {
-                            if *cabin_overheat_loading {
+                            if *lock_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else if let Some(locked) = *is_locked {
+                                if locked {
+                                    html! { <><i class="fas fa-lock"></i>{" Locked"}</> }
+                                } else {
+                                    html! { <><i class="fas fa-unlock"></i>{" Unlocked"}</> }
+                                }
                             } else {
-                                html! { <><i class="fas fa-temperature-high"></i>{" On (A/C)"}</> }
+                                html! { <><i class="fas fa-lock"></i>{" Lock"}</> }
                             }
                         }
                     </button>
-                    <button
-                        onclick={
-                            let cb = handle_cabin_overheat.clone();
-                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_fan_only".to_string()))
+                </div>
+
+                // Climate button - splits into two when climate is on
+                {
+                    if is_climate_on.unwrap_or(false) {
+                        html! {
+                            <div class="climate-split-buttons">
+                                <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission" } else { "" }}>
+                                    <button
+                                        onclick={handle_climate.clone()}
+                                        disabled={*climate_loading || !*has_vehicle_cmds}
+                                        class={format!("control-btn control-btn-active control-btn-half {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                                    >
+                                        {
+                                            if *climate_loading {
+                                                html! { <i class="fas fa-spinner fa-spin"></i> }
+                                            } else {
+                                                html! { <><i class="fas fa-fan"></i>{" Off"}</> }
+                                            }
+                                        }
+                                    </button>
+                                </div>
+                                <button
+                                    onclick={handle_climate_notify.clone()}
+                                    disabled={*climate_notify_loading}
+                                    class={format!("control-btn control-btn-half {}", if *climate_notify_active { "control-btn-active" } else { "" })}
+                                >
+                                    {
+                                        if *climate_notify_loading {
+                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else if *climate_notify_active {
+                                            html! { <><i class="fas fa-bell-slash"></i>{" Cancel"}</> }
+                                        } else {
+                                            html! { <><i class="fas fa-bell"></i>{" Notify"}</> }
+                                        }
+                                    }
+                                </button>
+                            </div>
                         }
-                        disabled={*cabin_overheat_loading}
-                        class="cabin-btn"
+                    } else {
+                        html! {
+                            <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
+                                <button
+                                    onclick={handle_climate.clone()}
+                                    disabled={*climate_loading || !*has_vehicle_cmds}
+                                    class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                                >
+                                    {
+                                        if *climate_loading {
+                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else {
+                                            html! { <><i class="fas fa-fan"></i>{" Climate"}</> }
+                                        }
+                                    }
+                                </button>
+                            </div>
+                        }
+                    }
+                }
+
+                <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
+                    <button
+                        onclick={handle_defrost}
+                        disabled={*defrost_loading || !*has_vehicle_cmds}
+                        class={format!("control-btn {} {}",
+                            if is_front_defroster_on.unwrap_or(false) || is_rear_defroster_on.unwrap_or(false) { "control-btn-active" } else { "" },
+                            if !*has_vehicle_cmds { "control-btn-disabled" } else { "" }
+                        )}
                     >
                         {
-                            if *cabin_overheat_loading {
+                            if *defrost_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
                             } else {
-                                html! { <><i class="fas fa-fan"></i>{" Fan Only"}</> }
+                                let front_on = is_front_defroster_on.unwrap_or(false);
+                                let rear_on = is_rear_defroster_on.unwrap_or(false);
+                                if front_on || rear_on {
+                                    html! { <><i class="fas fa-snowflake"></i>{" Defrost On"}</> }
+                                } else {
+                                    html! { <><i class="fas fa-snowflake"></i>{" Defrost"}</> }
+                                }
                             }
                         }
                     </button>
+                </div>
+
+                <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                     <button
-                        onclick={
-                            let cb = handle_cabin_overheat.clone();
-                            Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_off".to_string()))
-                        }
-                        disabled={*cabin_overheat_loading}
-                        class="cabin-btn cabin-btn-off"
+                        onclick={handle_remote_start}
+                        disabled={*remote_start_loading || !*has_vehicle_cmds}
+                        class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
                     >
                         {
-                            if *cabin_overheat_loading {
+                            if *remote_start_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
                             } else {
-                                html! { <><i class="fas fa-power-off"></i>{" Off"}</> }
+                                html! { <><i class="fas fa-key"></i>{" Start"}</> }
                             }
                         }
                     </button>
                 </div>
             </div>
 
-            // Notification buttons section
-            <div class="notify-buttons-section">
-                // Climate notify button - only show when climate is on
-                {
-                    if is_climate_on.unwrap_or(false) {
-                        html! {
-                            <button
-                                onclick={handle_climate_notify}
-                                disabled={*climate_notify_loading}
-                                class={format!("notify-btn {}", if *climate_notify_active { "notify-btn-active" } else { "" })}
-                            >
-                                {
-                                    if *climate_notify_loading {
-                                        html! { <i class="fas fa-spinner fa-spin"></i> }
-                                    } else if *climate_notify_active {
-                                        html! { <><i class="fas fa-bell-slash"></i>{" Cancel Climate Notification"}</> }
-                                    } else {
-                                        html! { <><i class="fas fa-bell"></i>{" Notify When Ready"}</> }
-                                    }
+            // Cabin Overheat Protection section
+            <div class="cabin-overheat-section">
+                <h4 class="section-title">{"Cabin Overheat Protection"}</h4>
+                <div class="cabin-overheat-buttons">
+                    <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission" } else { "" }}>
+                        <button
+                            onclick={
+                                let cb = handle_cabin_overheat.clone();
+                                Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_on".to_string()))
+                            }
+                            disabled={*cabin_overheat_loading || !*has_vehicle_cmds}
+                            class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                        >
+                            {
+                                if *cabin_overheat_loading {
+                                    html! { <i class="fas fa-spinner fa-spin"></i> }
+                                } else {
+                                    html! { <><i class="fas fa-temperature-high"></i>{" On (A/C)"}</> }
                                 }
-                            </button>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-
-                // Charging notify button - only show when charging
-                {
-                    if charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
-                        html! {
-                            <button
-                                onclick={handle_charging_notify}
-                                disabled={*charging_notify_loading}
-                                class={format!("notify-btn {}", if *charging_notify_active { "notify-btn-active" } else { "" })}
-                            >
-                                {
-                                    if *charging_notify_loading {
-                                        html! { <i class="fas fa-spinner fa-spin"></i> }
-                                    } else if *charging_notify_active {
-                                        html! { <><i class="fas fa-bell-slash"></i>{" Cancel Charging Notification"}</> }
-                                    } else {
-                                        html! { <><i class="fas fa-bell"></i>{" Notify When Charged"}</> }
-                                    }
+                            }
+                        </button>
+                    </div>
+                    <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission" } else { "" }}>
+                        <button
+                            onclick={
+                                let cb = handle_cabin_overheat.clone();
+                                Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_fan_only".to_string()))
+                            }
+                            disabled={*cabin_overheat_loading || !*has_vehicle_cmds}
+                            class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                        >
+                            {
+                                if *cabin_overheat_loading {
+                                    html! { <i class="fas fa-spinner fa-spin"></i> }
+                                } else {
+                                    html! { <><i class="fas fa-fan"></i>{" Fan Only"}</> }
                                 }
-                            </button>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
+                            }
+                        </button>
+                    </div>
+                    <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission" } else { "" }}>
+                        <button
+                            onclick={
+                                let cb = handle_cabin_overheat.clone();
+                                Callback::from(move |_: MouseEvent| cb.emit("cabin_overheat_off".to_string()))
+                            }
+                            disabled={*cabin_overheat_loading || !*has_vehicle_cmds}
+                            class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                        >
+                            {
+                                if *cabin_overheat_loading {
+                                    html! { <i class="fas fa-spinner fa-spin"></i> }
+                                } else {
+                                    html! { <><i class="fas fa-power-off"></i>{" Off"}</> }
+                                }
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
 
-                // Hint text - show when any notify button is visible
-                {
-                    if is_climate_on.unwrap_or(false) || charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
-                        html! {
+            // Charging notification - only show when charging
+            {
+                if charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
+                    html! {
+                        <div class="charging-notify-section">
+                            <div class="control-btn-wrapper" title={if !*has_vehicle_charging_cmds { "Requires Charging Commands permission. Reconnect Tesla to grant." } else { "" }}>
+                                <button
+                                    onclick={handle_charging_notify}
+                                    disabled={*charging_notify_loading || !*has_vehicle_charging_cmds}
+                                    class={format!("control-btn control-btn-full {} {}",
+                                        if *charging_notify_active { "control-btn-active" } else { "" },
+                                        if !*has_vehicle_charging_cmds { "control-btn-disabled" } else { "" }
+                                    )}
+                                >
+                                    {
+                                        if *charging_notify_loading {
+                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else if *charging_notify_active {
+                                            html! { <><i class="fas fa-bell-slash"></i>{" Cancel Charging Notification"}</> }
+                                        } else {
+                                            html! { <><i class="fas fa-bell"></i>{" Notify When Charged"}</> }
+                                        }
+                                    }
+                                </button>
+                            </div>
                             <div class="notify-hint">
                                 {"Won't notify if you're in the vehicle"}
                             </div>
-                        }
-                    } else {
-                        html! {}
+                        </div>
                     }
+                } else {
+                    html! {}
                 }
-            </div>
+            }
+
+            // Hint for climate notify when visible
+            {
+                if is_climate_on.unwrap_or(false) && !charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
+                    html! {
+                        <div class="notify-hint">
+                            {"Climate notification won't send if you're in the vehicle"}
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
 
             // Command result
             {
@@ -1471,14 +1553,74 @@ fn get_styles() -> &'static str {
             opacity: 0.6;
             cursor: not-allowed;
         }
-        .control-btn-warning {
-            background: rgba(255, 152, 0, 0.1);
-            color: #FFB74D;
-            border-color: rgba(255, 152, 0, 0.2);
+        .control-btn-attention {
+            background: rgba(255, 107, 107, 0.15);
+            color: #ff6b6b;
+            border-color: rgba(255, 107, 107, 0.4);
+            animation: pulse-attention 2s infinite;
         }
-        .control-btn-warning:hover:not(:disabled) {
-            background: rgba(255, 152, 0, 0.2);
+        .control-btn-attention:hover:not(:disabled) {
+            background: rgba(255, 107, 107, 0.25);
+        }
+        @keyframes pulse-attention {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+        }
+        .control-btn-active {
+            background: rgba(255, 152, 0, 0.15);
+            color: #FFB74D;
             border-color: rgba(255, 152, 0, 0.4);
+        }
+        .control-btn-active:hover:not(:disabled) {
+            background: rgba(255, 152, 0, 0.25);
+        }
+
+        /* Disabled button for scope-gated features */
+        .control-btn-wrapper {
+            position: relative;
+            display: contents;
+        }
+        .control-btn-disabled {
+            opacity: 0.35 !important;
+            cursor: not-allowed !important;
+            background: rgba(128, 128, 128, 0.1) !important;
+            color: #666 !important;
+            border-color: rgba(128, 128, 128, 0.2) !important;
+        }
+        .control-btn-wrapper[title]:not([title=""]):hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            max-width: 250px;
+            text-align: center;
+        }
+
+        .climate-split-buttons {
+            display: flex;
+            gap: 4px;
+        }
+        .control-btn-half {
+            flex: 1;
+            min-width: 0;
+            padding: 14px 12px;
+        }
+        .control-btn-full {
+            width: 100%;
+        }
+        .charging-notify-section {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
         }
         .command-result {
             margin-top: 1rem;
@@ -1583,43 +1725,6 @@ fn get_styles() -> &'static str {
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        .notify-buttons-section {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid rgba(30, 144, 255, 0.1);
-        }
-        .notify-btn {
-            padding: 12px 16px;
-            background: rgba(105, 240, 174, 0.1);
-            color: #69f0ae;
-            border: 1px solid rgba(105, 240, 174, 0.3);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .notify-btn:hover {
-            background: rgba(105, 240, 174, 0.2);
-        }
-        .notify-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        .notify-btn-active {
-            background: rgba(255, 152, 0, 0.1);
-            color: #FFB74D;
-            border-color: rgba(255, 152, 0, 0.3);
-        }
-        .notify-btn-active:hover {
-            background: rgba(255, 152, 0, 0.2);
-        }
         .notify-hint {
             width: 100%;
             text-align: center;
@@ -1644,36 +1749,9 @@ fn get_styles() -> &'static str {
             gap: 10px;
             flex-wrap: wrap;
         }
-        .cabin-btn {
+        .cabin-overheat-buttons .control-btn {
             flex: 1;
             min-width: 90px;
-            padding: 12px 16px;
-            background: rgba(255, 152, 0, 0.1);
-            color: #FFB74D;
-            border: 1px solid rgba(255, 152, 0, 0.3);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .cabin-btn:hover {
-            background: rgba(255, 152, 0, 0.2);
-        }
-        .cabin-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        .cabin-btn-off {
-            background: rgba(100, 100, 100, 0.1);
-            color: #999;
-            border-color: rgba(100, 100, 100, 0.3);
-        }
-        .cabin-btn-off:hover {
-            background: rgba(100, 100, 100, 0.2);
         }
     "#
 }

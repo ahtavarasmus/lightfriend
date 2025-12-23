@@ -1969,7 +1969,7 @@ pub async fn get_instant_digest(
     };
 
     // Generate digest
-    let digest_message = match generate_digest(&state, digest_data, priority_map).await {
+    let digest_message = match generate_digest(&state, auth_user.user_id, digest_data, priority_map).await {
         Ok(digest) => digest,
         Err(e) => {
             tracing::error!("Failed to generate digest: {}", e);
@@ -1986,4 +1986,189 @@ pub async fn get_instant_digest(
     }))
 }
 
+/// Web Chat with Image support - allows users to send messages with images through the dashboard
+pub async fn web_chat_with_image(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    mut multipart: axum::extract::Multipart,
+) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
 
+    // Parse multipart form data
+    let mut message = String::new();
+    let mut image_data_url: Option<String> = None;
+    let mut image_content_type: Option<String> = None;
+
+    const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": format!("Failed to process form data: {}", e)}))
+    ))? {
+        let name = field.name().unwrap_or("").to_string();
+
+        tracing::debug!("Processing multipart field: {}", name);
+        match name.as_str() {
+            "message" => {
+                message = field.text().await.map_err(|e| (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Failed to read message: {}", e)}))
+                ))?;
+                tracing::debug!("Received message text: '{}'", message);
+            }
+            "image" => {
+                let content_type = field.content_type()
+                    .map(|ct| ct.to_string())
+                    .unwrap_or_else(|| "image/png".to_string());
+
+                // Validate it's an image
+                if !content_type.starts_with("image/") {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "Only image files are allowed"}))
+                    ));
+                }
+
+                let data = field.bytes().await.map_err(|e| (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Failed to read image data: {}", e)}))
+                ))?;
+
+                // Check file size
+                if data.len() > MAX_IMAGE_SIZE {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "Image size exceeds 10MB limit"}))
+                    ));
+                }
+
+                // Convert to base64 data URL
+                let base64 = STANDARD.encode(&data);
+                image_data_url = Some(format!("data:{};base64,{}", content_type, base64));
+                image_content_type = Some(content_type);
+            }
+            _ => continue,
+        }
+    }
+
+    // Get the user
+    let user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Check subscription - only subscribed users can use web chat
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Please subscribe to use the web chat feature"}))
+        ));
+    }
+
+    // Determine cost based on region
+    let is_us_or_ca = user.phone_number.starts_with("+1");
+    let (credits_left_cost, credits_cost) = if is_us_or_ca {
+        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+    } else {
+        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
+    };
+
+    // Check if user has sufficient credits
+    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+    if !has_credits {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+        ));
+    }
+
+    // Deduct credits
+    let charged_amount = if user.credits_left >= credits_left_cost {
+        let new_credits_left = user.credits_left - credits_left_cost;
+        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_left_cost
+    } else {
+        let new_credits = user.credits - credits_cost;
+        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
+            ))?;
+        credits_cost
+    };
+
+    // Log the usage
+    let _ = state.user_repository.log_usage(
+        auth_user.user_id,
+        None,
+        "web_chat".to_string(),
+        Some(charged_amount),
+        None,
+        Some(true),
+        Some(format!("Web chat{}: {}",
+            if image_data_url.is_some() { " with image" } else { "" },
+            message.chars().take(50).collect::<String>()
+        )),
+        None,
+        None,
+        None,
+    );
+
+    // Create mock Twilio payload with image support
+    // If there's an image but no text, provide a default prompt
+    tracing::info!("web_chat_with_image - message: '{}', has_image: {}", message, image_data_url.is_some());
+    let body = if message.trim().is_empty() && image_data_url.is_some() {
+        "What's in this image?".to_string()
+    } else {
+        message
+    };
+    tracing::info!("web_chat_with_image - final body: '{}'", body);
+
+    let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+        body,
+        num_media: image_data_url.as_ref().map(|_| "1".to_string()),
+        media_url0: image_data_url,
+        media_content_type0: image_content_type,
+        message_sid: "".to_string(),
+    };
+
+    // Process using existing SMS handler with test mode
+    let (status, _, response) = crate::api::twilio_sms::process_sms(
+        &state,
+        mock_payload,
+        true,
+    ).await;
+
+    if status == StatusCode::OK {
+        Ok(Json(WebChatResponse {
+            message: response.message.clone(),
+            credits_charged: charged_amount,
+        }))
+    } else {
+        // Refund the credits if processing failed
+        if user.credits_left >= credits_left_cost {
+            let _ = state.user_repository.update_user_credits_left(auth_user.user_id, user.credits_left);
+        } else {
+            let _ = state.user_repository.update_user_credits(auth_user.user_id, user.credits);
+        }
+
+        Err((
+            status,
+            Json(json!({
+                "error": "Failed to process message",
+                "details": response.message
+            }))
+        ))
+    }
+}

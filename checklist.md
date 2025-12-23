@@ -28,3 +28,11 @@
 
 1. delete sub tier and sub to monitor plan with spanish number
 2. see if we got preferred number as US
+
+
+1. test connect/disconnect on whatsapp, telegram, signal
+- 2. test subbing to digest while not subbed before at all
+- 3. test subbing to digest while on BYOT/monitor plan
+- 4. test chatting with tinfoil model with different questions
+5. add selector between providers to settings page
+6. check that AI is selected correctly according to user_id in handle bridge message, digests, perplexity tool and email specific search

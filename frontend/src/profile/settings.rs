@@ -1,6 +1,6 @@
 use yew::prelude::*;
 use log::info;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, KeyboardEvent};
 use yew_router::prelude::*;
 use crate::Route;
 use crate::utils::api::Api;
@@ -352,6 +352,55 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         });
     }
 
+    // Helper function to save nickname
+    fn save_nickname(
+        nickname: UseStateHandle<String>,
+        nickname_original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *nickname != *nickname_original {
+            let new_val = (*nickname).clone();
+            let save_state = save_state.clone();
+            let nickname_original = nickname_original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "nickname".to_string(),
+                    value: serde_json::Value::String(new_val.clone())
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        nickname_original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.nickname = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        }
+    }
+
     // Nickname blur handler
     let on_nickname_blur = {
         let nickname = nickname.clone();
@@ -360,47 +409,85 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
         Callback::from(move |_: FocusEvent| {
-            if *nickname != *nickname_original {
-                let new_val = (*nickname).clone();
-                let save_state = save_state.clone();
-                let nickname_original = nickname_original.clone();
-                let user_profile = user_profile.clone();
-                let on_profile_update = on_profile_update.clone();
-                save_state.set(FieldSaveState::Saving);
-                spawn_local(async move {
-                    let request = PatchFieldRequest {
-                        field: "nickname".to_string(),
-                        value: serde_json::Value::String(new_val.clone())
-                    };
-                    match Api::patch("/api/profile/field")
-                        .json(&request)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) if response.ok() => {
-                            nickname_original.set(new_val.clone());
-                            let mut profile = (*user_profile).clone();
-                            profile.nickname = Some(new_val);
-                            on_profile_update.emit(profile);
-                            save_state.set(FieldSaveState::Success);
-                            let save_state_clone = save_state.clone();
-                            spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                save_state_clone.set(FieldSaveState::Idle);
-                            });
-                        }
-                        Ok(_) => {
-                            save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                        }
-                        Err(_) => {
-                            save_state.set(FieldSaveState::Error("Network error".to_string()));
-                        }
-                    }
-                });
+            save_nickname(
+                nickname.clone(),
+                nickname_original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    // Nickname keypress handler (save on Enter)
+    let on_nickname_keypress = {
+        let nickname = nickname.clone();
+        let nickname_original = nickname_original.clone();
+        let save_state = nickname_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                save_nickname(
+                    nickname.clone(),
+                    nickname_original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
             }
         })
     };
+
+    // Helper function to save info
+    fn save_info(
+        info: UseStateHandle<String>,
+        info_original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *info != *info_original {
+            let new_val = (*info).clone();
+            let save_state = save_state.clone();
+            let info_original = info_original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "info".to_string(),
+                    value: serde_json::Value::String(new_val.clone())
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        info_original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.info = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        }
+    }
 
     // Info blur handler
     let on_info_blur = {
@@ -410,47 +497,86 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
         Callback::from(move |_: FocusEvent| {
-            if *info != *info_original {
-                let new_val = (*info).clone();
-                let save_state = save_state.clone();
-                let info_original = info_original.clone();
-                let user_profile = user_profile.clone();
-                let on_profile_update = on_profile_update.clone();
-                save_state.set(FieldSaveState::Saving);
-                spawn_local(async move {
-                    let request = PatchFieldRequest {
-                        field: "info".to_string(),
-                        value: serde_json::Value::String(new_val.clone())
-                    };
-                    match Api::patch("/api/profile/field")
-                        .json(&request)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) if response.ok() => {
-                            info_original.set(new_val.clone());
-                            let mut profile = (*user_profile).clone();
-                            profile.info = Some(new_val);
-                            on_profile_update.emit(profile);
-                            save_state.set(FieldSaveState::Success);
-                            let save_state_clone = save_state.clone();
-                            spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                save_state_clone.set(FieldSaveState::Idle);
-                            });
-                        }
-                        Ok(_) => {
-                            save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                        }
-                        Err(_) => {
-                            save_state.set(FieldSaveState::Error("Network error".to_string()));
-                        }
-                    }
-                });
+            save_info(
+                info.clone(),
+                info_original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    // Info keypress handler (save on Ctrl+Enter for textarea)
+    let on_info_keypress = {
+        let info = info.clone();
+        let info_original = info_original.clone();
+        let save_state = info_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            // Use Ctrl+Enter or Cmd+Enter for textarea to allow regular Enter for newlines
+            if e.key() == "Enter" && (e.ctrl_key() || e.meta_key()) {
+                e.prevent_default();
+                save_info(
+                    info.clone(),
+                    info_original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
             }
         })
     };
+
+    // Helper function to save location
+    fn save_location(
+        location: UseStateHandle<String>,
+        location_original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *location != *location_original {
+            let new_val = (*location).clone();
+            let save_state = save_state.clone();
+            let location_original = location_original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "location".to_string(),
+                    value: serde_json::Value::String(new_val.clone())
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        location_original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.location = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        }
+    }
 
     // Location blur handler
     let on_location_blur = {
@@ -460,47 +586,85 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
         Callback::from(move |_: FocusEvent| {
-            if *location != *location_original {
-                let new_val = (*location).clone();
-                let save_state = save_state.clone();
-                let location_original = location_original.clone();
-                let user_profile = user_profile.clone();
-                let on_profile_update = on_profile_update.clone();
-                save_state.set(FieldSaveState::Saving);
-                spawn_local(async move {
-                    let request = PatchFieldRequest {
-                        field: "location".to_string(),
-                        value: serde_json::Value::String(new_val.clone())
-                    };
-                    match Api::patch("/api/profile/field")
-                        .json(&request)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) if response.ok() => {
-                            location_original.set(new_val.clone());
-                            let mut profile = (*user_profile).clone();
-                            profile.location = Some(new_val);
-                            on_profile_update.emit(profile);
-                            save_state.set(FieldSaveState::Success);
-                            let save_state_clone = save_state.clone();
-                            spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                save_state_clone.set(FieldSaveState::Idle);
-                            });
-                        }
-                        Ok(_) => {
-                            save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                        }
-                        Err(_) => {
-                            save_state.set(FieldSaveState::Error("Network error".to_string()));
-                        }
-                    }
-                });
+            save_location(
+                location.clone(),
+                location_original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    // Location keypress handler (save on Enter)
+    let on_location_keypress = {
+        let location = location.clone();
+        let location_original = location_original.clone();
+        let save_state = location_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                save_location(
+                    location.clone(),
+                    location_original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
             }
         })
     };
+
+    // Helper function to save nearby_places
+    fn save_nearby_places(
+        nearby_places: UseStateHandle<String>,
+        nearby_places_original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *nearby_places != *nearby_places_original {
+            let new_val = (*nearby_places).clone();
+            let save_state = save_state.clone();
+            let nearby_places_original = nearby_places_original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "nearby_places".to_string(),
+                    value: serde_json::Value::String(new_val.clone())
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        nearby_places_original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.nearby_places = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        }
+    }
 
     // Nearby places blur handler
     let on_nearby_places_blur = {
@@ -510,44 +674,34 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
         Callback::from(move |_: FocusEvent| {
-            if *nearby_places != *nearby_places_original {
-                let new_val = (*nearby_places).clone();
-                let save_state = save_state.clone();
-                let nearby_places_original = nearby_places_original.clone();
-                let user_profile = user_profile.clone();
-                let on_profile_update = on_profile_update.clone();
-                save_state.set(FieldSaveState::Saving);
-                spawn_local(async move {
-                    let request = PatchFieldRequest {
-                        field: "nearby_places".to_string(),
-                        value: serde_json::Value::String(new_val.clone())
-                    };
-                    match Api::patch("/api/profile/field")
-                        .json(&request)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) if response.ok() => {
-                            nearby_places_original.set(new_val.clone());
-                            let mut profile = (*user_profile).clone();
-                            profile.nearby_places = Some(new_val);
-                            on_profile_update.emit(profile);
-                            save_state.set(FieldSaveState::Success);
-                            let save_state_clone = save_state.clone();
-                            spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                save_state_clone.set(FieldSaveState::Idle);
-                            });
-                        }
-                        Ok(_) => {
-                            save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                        }
-                        Err(_) => {
-                            save_state.set(FieldSaveState::Error("Network error".to_string()));
-                        }
-                    }
-                });
+            save_nearby_places(
+                nearby_places.clone(),
+                nearby_places_original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    // Nearby places keypress handler (save on Ctrl+Enter for textarea)
+    let on_nearby_places_keypress = {
+        let nearby_places = nearby_places.clone();
+        let nearby_places_original = nearby_places_original.clone();
+        let save_state = nearby_places_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            // Use Ctrl+Enter or Cmd+Enter for textarea to allow regular Enter for newlines
+            if e.key() == "Enter" && (e.ctrl_key() || e.meta_key()) {
+                e.prevent_default();
+                save_nearby_places(
+                    nearby_places.clone(),
+                    nearby_places_original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
             }
         })
     };
@@ -850,6 +1004,23 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         })
     };
 
+    // Email keypress handler - shows confirmation dialog on Enter
+    let on_email_keypress = {
+        let email = email.clone();
+        let email_original = email_original.clone();
+        let show_email_confirm = show_email_confirm.clone();
+        let pending_email = pending_email.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                if *email != *email_original {
+                    pending_email.set(Some((*email).clone()));
+                    show_email_confirm.set(true);
+                }
+            }
+        })
+    };
+
     // Phone blur handler - shows confirmation dialog
     let on_phone_blur = {
         let phone_number = phone_number.clone();
@@ -860,6 +1031,23 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             if *phone_number != *phone_number_original {
                 pending_phone.set(Some((*phone_number).clone()));
                 show_phone_confirm.set(true);
+            }
+        })
+    };
+
+    // Phone keypress handler - shows confirmation dialog on Enter
+    let on_phone_keypress = {
+        let phone_number = phone_number.clone();
+        let phone_number_original = phone_number_original.clone();
+        let show_phone_confirm = show_phone_confirm.clone();
+        let pending_phone = pending_phone.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                if *phone_number != *phone_number_original {
+                    pending_phone.set(Some((*phone_number).clone()));
+                    show_phone_confirm.set(true);
+                }
             }
         })
     };
@@ -1497,6 +1685,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                         email.set(input.value());
                                     }}
                                     onblur={on_email_blur.clone()}
+                                    onkeypress={on_email_keypress.clone()}
                                 />
                                 {render_save_indicator(&*email_save_state)}
                             </div>
@@ -1521,6 +1710,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             phone_number.set(input.value());
                         }}
                         onblur={on_phone_blur.clone()}
+                        onkeypress={on_phone_keypress.clone()}
                     />
                     {render_save_indicator(&*phone_save_state)}
                 </div>
@@ -1589,6 +1779,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 }
                             }}
                             onblur={on_nickname_blur.clone()}
+                            onkeypress={on_nickname_keypress.clone()}
                         />
                         <span class="char-count">
                             {format!("{}/{}", (*nickname).chars().count(), MAX_NICKNAME_LENGTH)}
@@ -1624,6 +1815,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 }
                             }}
                             onblur={on_info_blur.clone()}
+                            onkeypress={on_info_keypress.clone()}
                         />
                         <span class="char-count">
                             {format!("{}/{}", (*info).chars().count(), MAX_INFO_LENGTH)}
@@ -1655,6 +1847,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             location.set(input.value());
                         }}
                         onblur={on_location_blur.clone()}
+                        onkeypress={on_location_keypress.clone()}
                     />
                     {render_save_indicator(&*location_save_state)}
                 </div>
@@ -1682,6 +1875,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 nearby_places.set(input.value());
                             }}
                             onblur={on_nearby_places_blur.clone()}
+                            onkeypress={on_nearby_places_keypress.clone()}
                         />
                         <button class="fill-button" onclick={on_fill_nearby_places.clone()}>
                             {"Fill from Location"}

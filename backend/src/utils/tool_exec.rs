@@ -232,12 +232,14 @@ pub async fn get_weather(
     Ok(response)
 }
 
+/// Ask Perplexity - always uses OpenRouter since Perplexity models are only on OpenRouter
 pub async fn ask_perplexity(
     state: &Arc<AppState>,
-    message: &str, 
+    message: &str,
     system_prompt: &str
 ) -> Result<String, Box<dyn Error>> {
 
+    // Always use OpenRouter for Perplexity since it's an OpenRouter-specific model
     let client = create_openai_client(&state)?;
 
     let messages = vec![

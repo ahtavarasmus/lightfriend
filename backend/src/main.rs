@@ -130,6 +130,8 @@ mod schema;
 mod jobs {
     pub mod scheduler;
 }
+mod ai_config;
+pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
 use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use repositories::totp_repository::TotpRepository;
@@ -145,6 +147,21 @@ use handlers::{
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
+
+/// SQLite connection customizer that sets busy_timeout on each connection.
+/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
+#[derive(Debug)]
+struct SqliteConnectionCustomizer;
+
+impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnectionCustomizer {
+    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
+        diesel::sql_query("PRAGMA busy_timeout = 5000;")
+            .execute(conn)
+            .map_err(diesel::r2d2::Error::QueryError)?;
+        Ok(())
+    }
+}
+
 async fn health_check() -> &'static str {
     "OK"
 }
@@ -154,6 +171,7 @@ pub struct AppState {
     db_pool: DbPool,
     user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
+    ai_config: AiConfig,
     google_calendar_oauth_client: GoogleOAuthClient,
     google_tasks_oauth_client: GoogleOAuthClient,
     youtube_oauth_client: GoogleOAuthClient,
@@ -229,6 +247,7 @@ async fn main() {
         .expect("DATABASE_URL must be set in environment");
     let manager = ConnectionManager::<SqliteConnection>::new(database_url);
     let pool = r2d2::Pool::builder()
+        .connection_customizer(Box::new(SqliteConnectionCustomizer))
         .build(manager)
         .expect("Failed to create pool");
     let user_core= Arc::new(UserCore::new(pool.clone()));
@@ -288,6 +307,7 @@ async fn main() {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
+        ai_config: AiConfig::from_env(),
         google_calendar_oauth_client,
         google_tasks_oauth_client,
         uber_oauth_client,
@@ -447,6 +467,7 @@ async fn main() {
         .route("/api/profile/proactive-agent", get(profile_handlers::get_proactive_agent_on))
         .route("/api/profile/get_nearby_places", get(profile_handlers::get_nearby_places))
         .route("/api/chat/web", post(profile_handlers::web_chat))
+        .route("/api/chat/web-with-image", post(profile_handlers::web_chat_with_image))
         .route("/api/chat/digest", get(profile_handlers::get_instant_digest))
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
@@ -475,6 +496,7 @@ async fn main() {
         .route("/api/auth/tesla/login", get(tesla_auth::tesla_login))
         .route("/api/auth/tesla/connection", delete(tesla_auth::tesla_disconnect))
         .route("/api/auth/tesla/status", get(tesla_auth::tesla_status))
+        .route("/api/auth/tesla/scopes", get(tesla_auth::tesla_scopes))
         .route("/api/auth/tesla/virtual-key", get(tesla_auth::get_virtual_key_link))
         .route("/api/tesla/command", post(tesla_auth::tesla_command))
         .route("/api/tesla/battery-status", get(tesla_auth::tesla_battery_status))

@@ -27,6 +27,11 @@ use crate::{
 
 use tokio::fs;
 use std::path::Path;
+use matrix_sdk::media::MediaFormat;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::media::MediaRequestParameters;
+use base64::engine::general_purpose::STANDARD as Base64Engine;
+use base64::Engine;
 
 
 // Helper function to detect the one-time key conflict error
@@ -65,7 +70,6 @@ async fn clear_user_store(username: &str) -> Result<()> {
 async fn connect_whatsapp_with_retry(
     client: &mut Arc<MatrixClient>,
     bridge_bot: &str,
-    phone_number: &str,
     user_id: i32,
     state: &Arc<AppState>,
 ) -> Result<(OwnedRoomId, String)> {
@@ -78,7 +82,7 @@ async fn connect_whatsapp_with_retry(
         .to_string();
 
     for retry_count in 0..MAX_RETRIES {
-        match connect_whatsapp(client, bridge_bot, phone_number).await {
+        match connect_whatsapp(client, bridge_bot).await {
             Ok(result) => return Ok(result),
             Err(e) => {
                 if retry_count < MAX_RETRIES - 1 && is_one_time_key_conflict(&e) {
@@ -124,33 +128,32 @@ async fn connect_whatsapp_with_retry(
 
 #[derive(Serialize)]
 pub struct WhatsappConnectionResponse {
-    pairing_code: String, 
+    qr_code_url: String,
 }
 
 
 async fn connect_whatsapp(
     client: &MatrixClient,
     bridge_bot: &str,
-    phone_number: &str,
 ) -> Result<(OwnedRoomId, String)> {
     tracing::debug!("🚀 Starting WhatsApp connection process");
-    
+
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
-    
+
     let request = CreateRoomRequest::new();
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
 
     tracing::debug!("🏠 Created room with ID: {}", room_id);
-    
+
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
-    
+
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
-    
+
     // Single sync to get the invitation processed
     client.sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5))).await?;
-    
+
     // Reduced wait time and more frequent checks
     let mut attempt = 0;
     for _ in 0..15 { // Reduced from 30 to 15
@@ -163,43 +166,40 @@ async fn connect_whatsapp(
         }
         sleep(Duration::from_millis(500)).await; // Reduced from 1 second to 500ms
     }
-    
+
     // Quick membership check
     let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
     if !members.iter().any(|m| m.user_id() == bot_user_id) {
         println!("❌ Bot failed to join room after all attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
-    // Send cancel command  to get rid of hte previous login
-    let cancel_command = format!("!wa cancel");
+    // Send cancel command to get rid of the previous login
+    let cancel_command = "!wa cancel".to_string();
     room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
 
-
-    // Send login command with phone number
-    let login_command = format!("!wa login phone {}", phone_number);
-    tracing::debug!("📤 Sending WhatsApp login command: {}", login_command);
+    // Send login command for QR code
+    let login_command = "!wa login qr".to_string();
+    tracing::info!("📤 Sending WhatsApp login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
 
-    // Optimized pairing code detection with event handler
-    let mut pairing_code = None;
-    tracing::debug!("⏳ Starting pairing code monitoring");
-    
+    // QR code detection - look for image message from bot
+    let mut qr_code_url = None;
+    tracing::info!("⏳ Starting QR code monitoring");
+
     // Use shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
 
-    for attempt in 1..=60 { // Increased to 60 attempts for longer user input time
+    for attempt in 1..=60 { // Try for about 30 seconds
         println!("📡 Sync attempt #{}/60", attempt);
-        tracing::debug!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
-
 
         if let Some(room) = client.get_room(&room_id) {
             // Get only the most recent messages to reduce processing time
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from 10 to 5
+            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
             let messages = room.messages(options).await?;
-            
-            for (_i, msg) in messages.chunk.iter().enumerate() {
+
+            for msg in messages.chunk.iter() {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
@@ -215,65 +215,50 @@ async fn connect_whatsapp(
                                 },
                             };
 
-                            let message_body = match event_content.msgtype {
+                            match event_content.msgtype {
+                                MessageType::Image(image_content) => {
+                                    tracing::info!("Received Image message from bot");
+                                    if let matrix_sdk::ruma::events::room::MediaSource::Plain(url) = &image_content.source {
+                                        qr_code_url = Some(url.to_string());
+                                        tracing::info!("🔑 Found QR code URL");
+                                        break;
+                                    } else {
+                                        tracing::error!("Unexpected encrypted QR code");
+                                    }
+                                },
                                 MessageType::Notice(text_content) => {
-                                    text_content.body
+                                    tracing::info!("Received Notice message: {}", text_content.body);
+                                    if text_content.body.to_lowercase().contains("error") {
+                                        return Err(anyhow!("Error from bot: {}", text_content.body));
+                                    }
                                 },
                                 MessageType::Text(text_content) => {
-                                    text_content.body
+                                    tracing::info!("Received Text message: {}", text_content.body);
+                                    if text_content.body.to_lowercase().contains("error") {
+                                        return Err(anyhow!("Error from bot: {}", text_content.body));
+                                    }
                                 },
                                 _ => {
-                                    continue;
-                                },
-                            };
-
-                            
-                            // More efficient pairing code extraction
-                            if !message_body.contains("Input the pairing code") {
-                                // Look for pattern like "XXXX-XXXX" in the message
-                                if let Some(code) = extract_pairing_code(&message_body) {
-                                    pairing_code = Some(code);
-                                    tracing::debug!("🔑 Found pairing code");
-                                    break;
+                                    tracing::info!("Received other message type");
+                                    continue
                                 }
-                            }
+                            };
                         }
                     }
                 }
             }
+
+            if qr_code_url.is_some() {
+                break;
+            }
         }
 
-        if pairing_code.is_some() {
-            break;
-        }
-        
-        // Balanced delay - fast enough for responsiveness, long enough for user input
-        sleep(Duration::from_millis(500)).await; // 500ms gives good balance
+        // Balanced delay
+        sleep(Duration::from_millis(500)).await;
     }
 
-    let pairing_code = pairing_code.ok_or(anyhow!("WhatsApp pairing code not received within 30 seconds. Please try again."))?;
-    Ok((room_id.into(), pairing_code))
-}
-
-// Helper function to extract pairing code more efficiently
-fn extract_pairing_code(message: &str) -> Option<String> {
-    // Remove backticks and other formatting
-    let clean_message = message.replace('`', "").replace("*", "");
-    
-    // Look for pattern: 4 alphanumeric characters, dash, 4 alphanumeric characters
-    let re = regex::Regex::new(r"([A-Z0-9]{4}-[A-Z0-9]{4})").ok()?;
-    
-    if let Some(captures) = re.captures(&clean_message) {
-        return Some(captures[1].to_string());
-    }
-    
-    // Fallback: look for any sequence that looks like a pairing code
-    let re_flexible = regex::Regex::new(r"([A-Z0-9]{4}-[A-Z0-9]{4})").ok()?;
-    if let Some(captures) = re_flexible.captures(&clean_message) {
-        return Some(captures[1].to_string());
-    }
-    
-    None
+    let qr_code_url = qr_code_url.ok_or(anyhow!("WhatsApp QR code not received within timeout. Please try again."))?;
+    Ok((room_id.into(), qr_code_url))
 }
 
 // Internal cleanup helper (callable from connect; no response needed)
@@ -349,24 +334,6 @@ pub async fn start_whatsapp_connection(
         tracing::warn!("No existing bridge to delete or error deleting: {}", e);
     }
 
-    // Fetch user's phone number
-    let phone_number = state
-        .user_core
-        .find_by_id(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to fetch phone number: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                AxumJson(json!({"error": "Phone number not found"})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                AxumJson(json!({"error": "Phone number not set"})),
-            )
-        })?.phone_number;
-
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
@@ -390,14 +357,12 @@ pub async fn start_whatsapp_connection(
     let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT")
         .expect("WHATSAPP_BRIDGE_BOT not set");
 
-
     tracing::debug!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
     let mut client_clone = Arc::clone(&client);
-    let (room_id, pairing_code) = connect_whatsapp_with_retry(
+    let (room_id, qr_code_mxc) = connect_whatsapp_with_retry(
         &mut client_clone,
         &bridge_bot,
-        &phone_number,
         auth_user.user_id,
         &state,
     )
@@ -410,9 +375,36 @@ pub async fn start_whatsapp_connection(
         )
     })?;
 
+    // Fetch QR code media bytes and convert to base64 data URL
+    tracing::info!("📥 Fetching QR code media bytes via SDK...");
+    let mxc = matrix_sdk::ruma::OwnedMxcUri::try_from(qr_code_mxc.as_str()).map_err(|e| {
+        tracing::error!("Invalid MXC URI: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid QR code URI"})),
+        )
+    })?;
 
-    // Debug: Log the pairing code
-    tracing::info!("Generated pairing code");
+    let request = MediaRequestParameters {
+        source: MediaSource::Plain(mxc.to_owned()),
+        format: MediaFormat::File,
+    };
+
+    let bytes = client.media()
+        .get_media_content(&request, false)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to download QR code media: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to fetch QR code image: {}", e)})),
+            )
+        })?;
+
+    let base64_str = Base64Engine.encode(&bytes);
+    let qr_code_url = format!("data:image/png;base64,{}", base64_str);
+
+    tracing::info!("Generated QR code data URL for user {}", auth_user.user_id);
 
     // Create bridge record
     let current_time = std::time::SystemTime::now()
@@ -444,7 +436,7 @@ pub async fn start_whatsapp_connection(
     let room_id_clone = room_id.clone();
     let bridge_bot_clone = bridge_bot.to_string();
     let client_clone = client.clone();
-    
+
     tokio::spawn(async move {
         match monitor_whatsapp_connection(
             &client_clone,
@@ -462,7 +454,7 @@ pub async fn start_whatsapp_connection(
         }
     });
 
-    Ok(AxumJson(WhatsappConnectionResponse { pairing_code }))
+    Ok(AxumJson(WhatsappConnectionResponse { qr_code_url }))
 }
 
 
@@ -774,7 +766,8 @@ pub async fn disconnect_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
+    tracing::info!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
+
     // Get the bridge information first
     let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
@@ -784,50 +777,16 @@ pub async fn disconnect_whatsapp(
                 AxumJson(json!({"error": "Failed to get WhatsApp bridge info"})),
             )
         })?;
+
     let Some(bridge) = bridge else {
         return Ok(AxumJson(json!({
             "message": "WhatsApp was not connected"
         })));
     };
-    // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get or create Matrix client: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
-            )
-        })?;
-    // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
-    if let Some(room) = client.get_room(&room_id) {
-        tracing::debug!("📤 Sending WhatsApp logout command");
-        // Send logout command
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa logout")).await {
-            tracing::error!("Failed to send logout command: {}", e);
-        }
-        // Wait a moment for the logout to process
-        sleep(Duration::from_secs(5)).await;
-        tracing::debug!("🧹 Cleaning up WhatsApp portals");
-        // Send command to delete all portals
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-all-portals")).await {
-            tracing::error!("Failed to send delete-portals command: {}", e);
-        }
-        // Wait a moment for the cleanup to process
-        sleep(Duration::from_secs(5)).await;
-        tracing::debug!("🗑️ Sending delete-session command");
-        // Send delete-session command as a final cleanup
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-session")).await {
-            tracing::error!("Failed to send delete-session command: {}", e);
-        }
-        sleep(Duration::from_secs(5)).await;
-    }
-    // Delete the bridge record
+
+    let room_id_str = bridge.room_id.clone().unwrap_or_default();
+
+    // Delete the bridge record IMMEDIATELY - user sees instant response
     state.user_repository.delete_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to delete WhatsApp bridge: {}", e);
@@ -836,45 +795,77 @@ pub async fn disconnect_whatsapp(
                 AxumJson(json!({"error": "Failed to delete bridge record"})),
             )
         })?;
-    
-    // UPDATED: Check for remaining active bridges and clear store if none left
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to check active bridges: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to check active bridges"})),
-            )
-        })?;
-    if !has_active_bridges {
-        // FIXED: Properly propagate error type for ? operator
-        let user_id_opt = client.user_id().ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "User ID not available"})),
-        ))?;
-        let username = user_id_opt.localpart().to_string();
-        if let Err(e) = clear_user_store(&username).await {
-            tracing::error!("Failed to clear user store on final disconnect: {}", e);
-            // Don't fail the operation; log and continue
-        } else {
-            tracing::info!("Cleared Matrix store for user {} (no active bridges left)", auth_user.user_id);
+
+    tracing::info!("✅ WhatsApp bridge record deleted for user {}", auth_user.user_id);
+
+    // Spawn background task for cleanup - don't block the response
+    let state_clone = state.clone();
+    let user_id = auth_user.user_id;
+    tokio::spawn(async move {
+        tracing::info!("🧹 Starting background cleanup for WhatsApp user {}", user_id);
+
+        // Get Matrix client for cleanup
+        let client = match matrix_auth::get_cached_client(user_id, &state_clone).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                return;
+            }
+        };
+
+        // Get the room and send cleanup commands
+        if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
+            if let Some(room) = client.get_room(&room_id) {
+                // Send logout command
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa logout")).await {
+                    tracing::error!("Background cleanup: Failed to send logout command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send command to delete all portals
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-all-portals")).await {
+                    tracing::error!("Background cleanup: Failed to send delete-portals command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send delete-session command
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-session")).await {
+                    tracing::error!("Background cleanup: Failed to send delete-session command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+            }
         }
-        // No active bridges left, remove client and sync task
-        let mut matrix_clients = state.matrix_clients.lock().await;
-        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-        // Remove and abort the sync task if it exists
-        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
-            task.abort();
-            tracing::debug!("Aborted sync task for user {}", auth_user.user_id);
+
+        // Check for remaining active bridges and cleanup if none left
+        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
+            .unwrap_or(false);
+
+        if !has_active_bridges {
+            if let Some(user_id_matrix) = client.user_id() {
+                let username = user_id_matrix.localpart().to_string();
+                if let Err(e) = clear_user_store(&username).await {
+                    tracing::error!("Background cleanup: Failed to clear user store: {}", e);
+                } else {
+                    tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
+                }
+            }
+
+            // Remove client and sync task
+            let mut matrix_clients = state_clone.matrix_clients.lock().await;
+            let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
+
+            if let Some(task) = sync_tasks.remove(&user_id) {
+                task.abort();
+                tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
+            }
+            if matrix_clients.remove(&user_id).is_some() {
+                tracing::debug!("Background cleanup: Removed Matrix client for user {}", user_id);
+            }
         }
-        // Remove the client if it exists
-        if matrix_clients.remove(&auth_user.user_id).is_some() {
-            tracing::debug!("Removed Matrix client for user {}", auth_user.user_id);
-        }
-    } else {
-        tracing::debug!("Other active bridges exist for user {}, keeping Matrix client", auth_user.user_id);
-    }
-    tracing::debug!("✅ WhatsApp disconnection completed for user {}", auth_user.user_id);
+
+        tracing::info!("🧹 Background cleanup completed for WhatsApp user {}", user_id);
+    });
+
     Ok(AxumJson(json!({
         "message": "WhatsApp disconnected successfully"
     })))

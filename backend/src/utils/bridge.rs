@@ -955,8 +955,21 @@ pub async fn handle_bridge_message(
                 return;
             }
         };
+        // Send debug email to admin for user 1's bridge bot messages
         if user_id == 1 {
             println!("bridge bot management room content: {}", content);
+            let state_clone = Arc::clone(&state);
+            let bridge_type = bridge.bridge_type.clone();
+            let content_clone = content.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::utils::notification_utils::send_bridge_debug_email(
+                    &state_clone,
+                    &bridge_type,
+                    &content_clone,
+                ).await {
+                    tracing::error!("Failed to send bridge debug email: {}", e);
+                }
+            });
         }
       
         // Define disconnection patterns (customize per bridge if needed)
@@ -1331,6 +1344,7 @@ pub async fn handle_bridge_message(
         // Check if any waiting checks match the message
         if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
             &state,
+            user_id,
             &format!("{} from {}: {}", service_cap, chat_name, content),
             &waiting_checks,
         ).await {

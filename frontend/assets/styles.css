@@ -1596,3 +1596,70 @@ button[type="submit"].loading::after {
         padding: 1.5rem;
     }
 }
+
+/* Chat image attachment styles */
+.chat-image-preview {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    background: rgba(30, 30, 30, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    max-width: 200px;
+}
+
+.chat-image-preview img {
+    max-width: 120px;
+    max-height: 80px;
+    border-radius: 4px;
+    object-fit: cover;
+}
+
+.remove-image-btn {
+    background: rgba(255, 60, 60, 0.8);
+    border: none;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: bold;
+    transition: background 0.2s ease;
+}
+
+.remove-image-btn:hover {
+    background: rgba(255, 60, 60, 1);
+}
+
+.image-attach-button {
+    background: rgba(30, 144, 255, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.4);
+    color: #1e90ff;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-attach-button:hover:not(:disabled) {
+    background: rgba(30, 144, 255, 0.3);
+    border-color: rgba(30, 144, 255, 0.6);
+}
+
+.image-attach-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.image-attach-button i {
+    font-size: 1rem;
+}

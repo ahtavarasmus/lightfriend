@@ -628,7 +628,8 @@ pub struct Tesla {
     pub selected_vehicle_vin: Option<String>,
     pub selected_vehicle_name: Option<String>,
     pub selected_vehicle_id: Option<String>,
-    pub virtual_key_paired: i32,  
+    pub virtual_key_paired: i32,
+    pub granted_scopes: Option<String>,  // Space-separated scopes granted by user
 }
 
 #[derive(Insertable, Debug)]
@@ -642,6 +643,7 @@ pub struct NewTesla {
     pub created_on: i32,
     pub expires_in: i32,
     pub region: String,
+    pub granted_scopes: Option<String>,  // Space-separated scopes granted by user
 }
 
 // TOTP 2FA models

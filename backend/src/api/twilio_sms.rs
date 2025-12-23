@@ -10,8 +10,9 @@ use axum::{
     Json,
 };
 use crate::tool_call_utils::utils::{
-    ChatMessage, create_openai_client,
+    ChatMessage, create_openai_client_for_user,
 };
+use crate::{ModelPurpose, AiProvider};
 use chrono::Utc;
 
 // Thread-local storage for media SID mapping
@@ -53,8 +54,10 @@ pub struct TextBeeWebhookPayload {
     pub body: String,
 }
 
-pub fn get_model() -> String {
-    "openai/gpt-4o-2024-11-20".to_string()
+/// Get the model to use based on provider and purpose.
+/// Uses centralized AiConfig from AppState.
+pub fn get_model(state: &Arc<AppState>, provider: AiProvider, purpose: ModelPurpose) -> String {
+    state.ai_config.model(provider, purpose).to_string()
 }
 
 /// Truncate a string nicely at word boundaries, adding "..." if truncated
@@ -98,6 +101,7 @@ async fn condense_response(
     client: &openai_api_rs::v1::api::OpenAIClient,
     original: &str,
     max_chars: usize,
+    model: &str,
 ) -> Result<String, String> {
     use openai_api_rs::v1::chat_completion::{ChatCompletionRequest, ChatCompletionMessage, MessageRole, Content};
 
@@ -109,7 +113,7 @@ async fn condense_response(
     );
 
     let req = ChatCompletionRequest::new(
-        get_model(), // Use same model as main responses (gpt-4o)
+        model.to_string(),
         vec![ChatCompletionMessage {
             role: MessageRole::user,
             content: Content::Text(prompt),
@@ -634,6 +638,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     _ => continue,
                 };
 
+                // Skip messages with empty content (can cause API errors)
+                if msg.encrypted_content.trim().is_empty() {
+                    continue;
+                }
+
                 // Regular messages (user, final assistant responses)
                 let chat_msg = ChatMessage {
                     role: role.to_string(),
@@ -652,9 +661,13 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         println!("history: {:#?}", chat_messages);
     }
 
+    // Get the provider for this user (admin gets Tinfoil for testing)
+    let provider = state.ai_config.provider_for_user(user.id);
+    let needs_two_step = state.ai_config.needs_two_step_vision(provider);
+
     // Handle image if present
     let mut image_url = None;
-    
+
     if let (Some(num_media), Some(media_url), Some(content_type)) = (
         payload.num_media.as_ref(),
         payload.media_url0.as_ref(),
@@ -662,30 +675,85 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     ) {
         if num_media != "0" && content_type.starts_with("image/") {
             image_url = Some(media_url.clone());
-            
+
             tracing::debug!("setting image_url var to: {:#?}", image_url);
-            // Add the image URL message with the text
-            chat_messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: chat_completion::Content::ImageUrl(vec![
-                    chat_completion::ImageUrl {
-                        r#type: chat_completion::ContentType::image_url,
+
+            // For providers that need two-step vision (e.g., Tinfoil):
+            // Step 1: Call vision model to describe image
+            // Step 2: Add description as text for tool-calling model
+            if needs_two_step {
+                tracing::info!("Using two-step vision for {:?} provider (user {})", provider, user.id);
+
+                match state.ai_config.describe_image(provider, &media_url, &processed_body).await {
+                    Ok(description) => {
+                        tracing::info!("Got vision description: {}", &description[..description.len().min(100)]);
+
+                        // Build the message with image description + user's question
+                        let combined_content = if processed_body.trim().is_empty() {
+                            format!("[Image description: {}]", description)
+                        } else {
+                            format!("[Image description: {}]\n\nUser's question: {}", description, processed_body)
+                        };
+
+                        chat_messages.push(ChatMessage {
+                            role: "user".to_string(),
+                            content: chat_completion::Content::Text(combined_content),
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Vision description failed, falling back to direct image: {}", e);
+                        // Fall back to direct image if vision description fails
+                        let mut content_parts = vec![];
+                        if !processed_body.trim().is_empty() {
+                            content_parts.push(chat_completion::ImageUrl {
+                                r#type: chat_completion::ContentType::text,
+                                text: Some(processed_body.clone()),
+                                image_url: None,
+                            });
+                        }
+                        content_parts.push(chat_completion::ImageUrl {
+                            r#type: chat_completion::ContentType::image_url,
+                            text: None,
+                            image_url: Some(chat_completion::ImageUrlType {
+                                url: media_url.clone(),
+                            }),
+                        });
+                        chat_messages.push(ChatMessage {
+                            role: "user".to_string(),
+                            content: chat_completion::Content::ImageUrl(content_parts),
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                    }
+                }
+            } else {
+                // Provider supports vision + tools together (e.g., OpenRouter GPT-4o)
+                // Build content parts for vision: text (if any) + image
+                let mut content_parts = vec![];
+
+                // Add text part first if there's accompanying text
+                if !processed_body.trim().is_empty() {
+                    content_parts.push(chat_completion::ImageUrl {
+                        r#type: chat_completion::ContentType::text,
                         text: Some(processed_body.clone()),
-                        image_url: Some(chat_completion::ImageUrlType {
-                            url: media_url.clone(),
-                        }),
-                    },
-                ]),
-                tool_calls: None,
-                tool_call_id: None,
+                        image_url: None,
+                    });
+                }
 
-            });
+                // Add image part
+                content_parts.push(chat_completion::ImageUrl {
+                    r#type: chat_completion::ContentType::image_url,
+                    text: None,
+                    image_url: Some(chat_completion::ImageUrlType {
+                        url: media_url.clone(),
+                    }),
+                });
 
-            // Also add the text as a separate message if it's not empty 
-            if !processed_body.trim().is_empty() {
                 chat_messages.push(ChatMessage {
                     role: "user".to_string(),
-                    content: chat_completion::Content::Text(format!("Text accompanying the image: {}", processed_body)),
+                    content: chat_completion::Content::ImageUrl(content_parts),
                     tool_calls: None,
                     tool_call_id: None,
                 });
@@ -734,10 +802,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         crate::tool_call_utils::tesla::get_tesla_switch_vehicle_tool(),
     ];
 
-    let client = match create_openai_client(&state) {
-        Ok(client) => client,
+    // Create client for the user's provider
+    let client = match create_openai_client_for_user(&state, user.id) {
+        Ok((client, _)) => client,
         Err(e) => {
-            tracing::error!("Failed to create OpenAI client: {}", e);
+            tracing::error!("Failed to create AI client: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -766,8 +835,13 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         .collect();
 
 
+    // Get the model for this provider
+    // For two-step vision providers, images were already converted to text,
+    // so we always use the Default (tool-calling) model
+    let model = get_model(&state, provider, ModelPurpose::Default);
+
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-            get_model(),
+            model.clone(),
         completion_messages.clone(),
     )
     .tools(tools)
@@ -1400,9 +1474,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
 
             tracing::debug!("Making follow-up request to model with tool call answers");
-            let model = get_model();
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                model,
+                model.clone(),
                 follow_up_messages,
             )
             .max_tokens(250); // Allow up to ~480 chars for follow-up messages
@@ -1446,18 +1519,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     };
 
-    // Perform evaluation
-    let (eval_result, eval_reason) = crate::tool_call_utils::utils::perform_evaluation(
-        &client,
-        &chat_messages,
-        &payload.body,
-        &final_response,
-        fail
-    ).await;
-
     // Ensure response is within 480 char limit - regenerate if too long
     let final_response = if final_response.chars().count() > 480 && !fail {
-        condense_response(&client, &final_response, 480).await.unwrap_or_else(|_| {
+        condense_response(&client, &final_response, 480, &model).await.unwrap_or_else(|_| {
             // If condensing fails, truncate intelligently
             truncate_nicely(&final_response, 480)
         })
@@ -1466,11 +1530,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     };
 
     let final_response_with_notice = final_response.clone();
-
-    let mut final_eval: String = "".to_string();
-    if let Some(eval) = eval_reason {
-        final_eval = format!("success reason: {}", eval);
-    }
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
@@ -1513,8 +1572,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             "sms_test".to_string(),
             None,
             Some(processing_time_secs as i32),
-            Some(eval_result),
-            Some(final_eval),
+            None,
+            None,
             None,
             None,
             None
@@ -1576,8 +1635,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 "sms".to_string(),
                 None,
                 Some(processing_time_secs as i32),
-                Some(eval_result),
-                Some(final_eval.clone()),
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -1636,7 +1695,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 None,
                 Some(processing_time_secs as i32),
                 Some(false),  // Mark as unsuccessful
-                Some(final_eval),
+                None,
                 Some(error_status),
                 None,
                 None,

@@ -3,7 +3,6 @@ use openai_api_rs::v1::{
     chat_completion,
     types,
 };
-use std::env;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::AppState;
@@ -17,61 +16,78 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
 }
 
-// Function to create OpenAI client
-pub fn create_openai_client(
+/// Creates an OpenAI-compatible client for a specific user.
+/// Routes to the appropriate provider based on user_id (admin gets Tinfoil for testing).
+/// For self-hosted (tier 3) deployments, uses the user's own API key.
+pub fn create_openai_client_for_user(
     state: &Arc<AppState>,
-) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
+    user_id: i32,
+) -> Result<(OpenAIClient, crate::AiProvider), Box<dyn std::error::Error>> {
+    let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-    let api_key: String;
     if is_self_hosted {
-
-        api_key = match state.user_core.get_settings_for_tier3() {
+        // Self-hosted tier 3 users provide their own OpenRouter API key
+        let api_key = match state.user_core.get_settings_for_tier3() {
             Ok((_, _, Some(api_key), _, _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
+                tracing::info!("✅ Successfully retrieved self hosted API key");
                 api_key
             },
             Err(e) => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
-                return Err("❌ Failed to get self hosted Twilio Auth Token".into());
+                tracing::error!("❌ Failed to get self hosted API key: {}", e);
+                return Err("❌ Failed to get self hosted API key".into());
             },
             _ => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
-                return Err("❌ Failed to get self hosted Twilio Auth Token".into());
+                tracing::error!("❌ Failed to get self hosted API key");
+                return Err("❌ Failed to get self hosted API key".into());
             }
         };
+        // Self-hosted always uses OpenRouter
+        let client = OpenAIClient::builder()
+            .with_endpoint("https://openrouter.ai/api/v1")
+            .with_api_key(api_key)
+            .build()?;
+        Ok((client, crate::AiProvider::OpenRouter))
     } else {
-        api_key = env::var("OPENROUTER_API_KEY")?;
-        
+        // Cloud deployment uses user-based provider routing
+        let provider = state.ai_config.provider_for_user(user_id);
+        let client = state.ai_config.create_client(provider)?;
+        Ok((client, provider))
     }
+}
 
+/// Creates an OpenAI-compatible client using OpenRouter (for background tasks without user context)
+/// This is used by proactive notifications and other system tasks.
+pub fn create_openai_client(
+    state: &Arc<AppState>,
+) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
+    let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
+
+    if is_self_hosted {
+        // Self-hosted tier 3 users provide their own OpenRouter API key
+        let api_key = match state.user_core.get_settings_for_tier3() {
+            Ok((_, _, Some(api_key), _, _, _)) => {
+                tracing::info!("✅ Successfully retrieved self hosted API key");
+                api_key
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get self hosted API key: {}", e);
+                return Err("❌ Failed to get self hosted API key".into());
+            },
+            _ => {
+                tracing::error!("❌ Failed to get self hosted API key");
+                return Err("❌ Failed to get self hosted API key".into());
+            }
+        };
         OpenAIClient::builder()
             .with_endpoint("https://openrouter.ai/api/v1")
             .with_api_key(api_key)
             .build()
             .map_err(|e| e.into())
-}
-
-// Function to create evaluation tool properties
-pub fn create_eval_properties() -> HashMap<String, Box<types::JSONSchemaDefine>> {
-    let mut eval_properties = HashMap::new();
-    eval_properties.insert(
-        "success".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the response was successful and provided the information user asked for. Note that the information might not look like success(whatsapp message fetch returns missed call notice), but should still be considered successful.".to_string()),
-            ..Default::default()
-        }),
-    );
-    eval_properties.insert(
-        "reason".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Reason for failure if success is false, explaining the issue without revealing conversation content".to_string()),
-            ..Default::default()
-        }),
-    );
-    eval_properties
+    } else {
+        // Cloud deployment uses OpenRouter for background tasks
+        state.ai_config.create_client(crate::AiProvider::OpenRouter)
+            .map_err(|e| e as Box<dyn std::error::Error>)
+    }
 }
 
 pub async fn cancel_pending_message(
@@ -86,152 +102,6 @@ pub async fn cancel_pending_message(
         Ok(false)  // No pending message to cancel
     }
 }
-
-// Helper function for boolean deserialization
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum BoolValue {
-    Bool(bool),
-    String(String),
-}
-
-impl From<BoolValue> for bool {
-    fn from(value: BoolValue) -> Self {
-        match value {
-            BoolValue::Bool(b) => b,
-            BoolValue::String(s) => s.to_lowercase() == "true",
-        }
-    }
-}
-
-pub fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(BoolValue::deserialize(deserializer)?.into())
-}
-
-#[derive(Deserialize)]
-pub struct EvalResponse {
-    #[serde(deserialize_with = "deserialize_bool")]
-    pub success: bool,
-    pub reason: Option<String>,
-}
-
-fn extract_text_from_content(content: &chat_completion::Content) -> String {
-    match content {
-        chat_completion::Content::Text(text) => text.clone(),
-        chat_completion::Content::ImageUrl(urls) => {
-            urls.iter()
-                .filter_map(|url| url.text.as_ref().map(|t| t.clone()))
-                .collect::<Vec<String>>()
-                .join(" ")
-        },
-    }
-}
-
-pub async fn perform_evaluation(
-    client: &OpenAIClient,
-    messages: &[ChatMessage],
-    user_message: &str,
-    ai_response: &str,
-    fail: bool,
-) -> (bool, Option<String>) {
-    let eval_messages = vec![
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are a conversation evaluator. Assess the latest user's query in the context of the conversation history and the AI's response to it. Use the evaluate_response function to provide feedback.\n\n\
-                ### Guidelines:\n\
-                - **Success**: True if the AI successfully answered the user's request; false otherwise.".to_string(),
-            ),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Conversation history: {}\nLatest user message: {}\nAI response: {}",
-                messages
-                    .iter()
-                    .filter(|msg| msg.role == "user" || msg.role == "assistant")
-                    .map(|msg| {
-                        let role = match msg.role.as_str() {
-                            "user" => "User",
-                            "assistant" => "AI",
-                            _ => "Unknown", // Shouldn't happen due to filter
-                        };
-                        let text = extract_text_from_content(&msg.content);
-                        let display_text = if text.chars().count() > 50 {
-                            format!("{}...", text.chars().take(50).collect::<String>())
-                        } else {
-                            text
-                        };
-                        format!("[{}]: {}", role, display_text)
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-                user_message,
-                ai_response
-            )),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-    ];
-
-    let eval_req = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
-        eval_messages,
-    )
-    .tools(create_eval_tools())
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
-
-    match client.chat_completion(eval_req).await {
-        Ok(result) => {
-            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
-                if let Some(first_call) = tool_calls.first() {
-                    if let Some(args) = &first_call.function.arguments {
-                        tracing::debug!("Tool call arguments: {}", args);
-                        match serde_json::from_str::<EvalResponse>(args) {
-                            Ok(eval) => {
-                                tracing::debug!(
-                                    "Successfully parsed evaluation response: success={}, reason={:?}",
-                                    eval.success,
-                                    eval.reason
-                                );
-                                (eval.success, eval.reason)
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failed to parse evaluation response: {}, falling back to default",
-                                    e
-                                );
-                                (!fail, Some("Failed to parse evaluation response".to_string()))
-                            }
-                        }
-                    } else {
-                        tracing::error!("No arguments found in tool call");
-                        (!fail, Some("Missing evaluation arguments".to_string()))
-                    }
-                } else {
-                    tracing::error!("No tool calls found in response");
-                    (!fail, Some("No evaluation tool calls found".to_string()))
-                }
-            } else {
-                tracing::error!("No tool calls section in response");
-                (!fail, Some("No evaluation tool calls received".to_string()))
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to get evaluation response: {}", e);
-            (!fail, Some("Failed to get evaluation response".to_string()))
-        }
-    }
-}
-
 
 // Helper function to check if a tool is accessible based on user's status
 // Only tier 2 (hosted) subscribers get full access to all tools
@@ -350,23 +220,4 @@ pub async fn select_most_relevant_email(
         }
         Err(e) => Err(format!("Failed to get email selection response: {}", e).into())
     }
-}
-
-pub fn create_eval_tools() -> Vec<chat_completion::Tool> {
-    vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("evaluate_response"),
-                description: Some(String::from(
-                    "Evaluates the AI response based on success."
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(create_eval_properties()),
-                    required: Some(vec![String::from("success")]),
-                },
-            },
-        },
-    ]
 }

@@ -416,7 +416,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             } else {
                 None
             };
-            if search.contains("subscription=success") || search.contains("subscription=changed") {
+            if search.contains("subscription=success") || search.contains("subscription=changed") || search.contains("credits=success") {
                 need_refresh = true;
             }
             if need_refresh {

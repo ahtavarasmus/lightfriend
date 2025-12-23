@@ -608,9 +608,7 @@ pub async fn fetch_emails_imap(
         // Mark email as processed if unprocessed is true
         if unprocessed {
             match state.user_repository.mark_email_as_processed(user_id, &uid) {
-                Ok(_) => {
-                    tracing::info!("Marked email {} as processed", uid);
-                }
+                Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to mark email {} as processed: {}", uid, e);
                     // Continue processing other emails even if marking as processed fails

@@ -92,6 +92,74 @@ pub async fn send_tinfoil_renewal_notification(
     }
 }
 
+/// Sends a debug email to admin for logging bridge bot messages (no cooldown).
+/// This is specifically for debugging WhatsApp bridge disconnection issues.
+///
+/// # Arguments
+/// * `state` - The application state
+/// * `bridge_type` - The bridge type (e.g., "whatsapp", "signal")
+/// * `message_content` - The message content from the bridge bot
+///
+/// # Returns
+/// * `Ok(())` - Email sent successfully
+/// * `Err(Box<dyn Error>)` - Error sending email
+pub async fn send_bridge_debug_email(
+    state: &Arc<AppState>,
+    bridge_type: &str,
+    message_content: &str,
+) -> Result<(), Box<dyn Error>> {
+    use axum::extract::{Json, State as AxumState};
+
+    let admin_email = std::env::var("ADMIN_ALERT_EMAIL")
+        .unwrap_or_else(|_| "rasmus@ahtava.com".to_string());
+
+    if admin_email.is_empty() {
+        return Ok(());
+    }
+
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+
+    let body = format!(
+        "Bridge Bot Debug Log\n\
+        =====================\n\n\
+        Timestamp: {}\n\
+        Bridge Type: {}\n\n\
+        Message Content:\n\
+        ----------------\n\
+        {}",
+        timestamp,
+        bridge_type,
+        message_content
+    );
+
+    let email_request = crate::handlers::imap_handlers::SendEmailRequest {
+        to: admin_email,
+        subject: format!("[Bridge Debug] {} - {}", bridge_type.to_uppercase(), &timestamp),
+        body,
+    };
+
+    let auth_user = crate::handlers::auth_middleware::AuthUser {
+        user_id: 1,
+        is_admin: true,
+    };
+
+    match crate::handlers::imap_handlers::send_email(
+        AxumState(state.clone()),
+        auth_user,
+        Json(email_request),
+    ).await {
+        Ok(_) => {
+            tracing::debug!("Sent bridge debug email for {}", bridge_type);
+            Ok(())
+        }
+        Err((status, err)) => {
+            let error_msg = format!("Failed to send bridge debug email: {:?} - {:?}", status, err);
+            tracing::error!("{}", error_msg);
+            Err(error_msg.into())
+        }
+    }
+}
+
 /// Sends an alert email to the admin with a custom subject and message.
 /// This is a generic function that can be used anywhere in the codebase
 /// to notify the admin of important events, errors, or issues.

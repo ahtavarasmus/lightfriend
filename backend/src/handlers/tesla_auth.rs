@@ -44,10 +44,17 @@ pub struct TeslaStatusResponse {
     has_tesla: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TeslaLoginParams {
+    /// Comma-separated scopes to request (e.g., "vehicle_device_data,vehicle_cmds")
+    pub scopes: Option<String>,
+}
+
 // Tesla OAuth login endpoint - requires Tier 2
 pub async fn tesla_login(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    Query(params): Query<TeslaLoginParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     info!("Tesla OAuth login initiated for user {}", auth_user.user_id);
 
@@ -102,19 +109,36 @@ pub async fn tesla_login(
 
     let state_token = format!("{}:{}", record.id.0, csrf_token.secret());
 
-    // Build authorization URL
-    let (auth_url, _) = state
+    // Build authorization URL with user-selected scopes
+    // Always include openid and offline_access for token refresh
+    let mut auth_url_builder = state
         .tesla_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
         .add_scope(Scope::new("openid".to_string()))
         .add_scope(Scope::new("offline_access".to_string()))
-        .add_scope(Scope::new("vehicle_device_data".to_string()))
-        .add_scope(Scope::new("vehicle_cmds".to_string()))
-        .add_scope(Scope::new("vehicle_charging_cmds".to_string()))
-        .set_pkce_challenge(pkce_challenge)
-        .url();
+        .add_extra_param("prompt", "consent")  // Force consent screen to show every time
+        .set_pkce_challenge(pkce_challenge);
 
-    info!("Tesla OAuth URL generated with state: {}", state_token);
+    // Add user-selected scopes from query param, or default to all scopes
+    let valid_scopes = ["vehicle_device_data", "vehicle_cmds", "vehicle_charging_cmds"];
+    let requested_scopes: Vec<String> = if let Some(scopes_str) = &params.scopes {
+        scopes_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| valid_scopes.contains(&s.as_str()))
+            .collect()
+    } else {
+        // Default to all scopes if none specified
+        valid_scopes.iter().map(|s| s.to_string()).collect()
+    };
+
+    for scope in &requested_scopes {
+        auth_url_builder = auth_url_builder.add_scope(Scope::new(scope.clone()));
+    }
+
+    let (auth_url, _) = auth_url_builder.url();
+
+    info!("Tesla OAuth URL generated with state: {} and scopes: {:?}", state_token, requested_scopes);
 
     Ok(Json(json!({
         "auth_url": auth_url.to_string(),
@@ -279,6 +303,10 @@ pub async fn tesla_callback(
     let expires_in = token_data["expires_in"].as_i64()
         .unwrap_or(3600) as i32;
 
+    // Extract granted scopes from token response
+    let granted_scopes = token_data["scope"].as_str().map(|s| s.to_string());
+    info!("Tesla granted scopes for user {}: {:?}", user_id, granted_scopes);
+
     // Encrypt tokens
     let encrypted_access_token = match encrypt(access_token) {
         Ok(encrypted) => encrypted,
@@ -333,6 +361,7 @@ pub async fn tesla_callback(
         created_on: current_time,
         expires_in,
         region,
+        granted_scopes,
     };
 
     if let Err(e) = state.user_repository.create_tesla_connection(new_tesla) {
@@ -382,6 +411,36 @@ pub async fn tesla_status(
     let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id).unwrap_or(false);
 
     Ok(Json(TeslaStatusResponse { has_tesla }))
+}
+
+#[derive(Serialize)]
+pub struct TeslaScopesResponse {
+    pub granted_scopes: Option<String>,
+    pub has_vehicle_device_data: bool,
+    pub has_vehicle_cmds: bool,
+    pub has_vehicle_charging_cmds: bool,
+}
+
+/// Tesla scopes endpoint - returns granted scopes for feature gating in UI
+pub async fn tesla_scopes(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<TeslaScopesResponse>, (StatusCode, String)> {
+    let scopes = state.user_repository
+        .get_tesla_granted_scopes(auth_user.user_id)
+        .unwrap_or(None);
+
+    let scope_str = scopes.as_deref().unwrap_or("");
+    let has_vehicle_device_data = scope_str.contains("vehicle_device_data");
+    let has_vehicle_cmds = scope_str.contains("vehicle_cmds");
+    let has_vehicle_charging_cmds = scope_str.contains("vehicle_charging_cmds");
+
+    Ok(Json(TeslaScopesResponse {
+        granted_scopes: scopes,
+        has_vehicle_device_data,
+        has_vehicle_cmds,
+        has_vehicle_charging_cmds,
+    }))
 }
 
 // Helper function to get valid Tesla access token (with auto-refresh)

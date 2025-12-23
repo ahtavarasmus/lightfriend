@@ -291,6 +291,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             // Check if any waiting checks match the message
                                             if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
                                                 &state,
+                                                user.id,
                                                 &email_content,
                                                 &waiting_checks,
                                             ).await {
@@ -501,8 +502,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     return;
                 }
             };
-            tracing::info!("users: {}", users.len());
-
             let now = chrono::Utc::now();
             let window_end = now + chrono::Duration::minutes(30);
 

@@ -632,12 +632,12 @@ pub async fn disconnect_telegram(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🔌 Starting Telegram disconnection process for user {}", auth_user.user_id);
+    tracing::info!("🔌 Starting Telegram disconnection process for user {}", auth_user.user_id);
 
     // Get the bridge information first
     let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
-            tracing::error!("Failed to get Telegram bridge: {}", e);
+            tracing::error!("Failed to get Telegram bridge info: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": "Failed to get Telegram bridge info"})),
@@ -650,62 +650,9 @@ pub async fn disconnect_telegram(
         })));
     };
 
-    // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get or create Matrix client: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
-            )
-        })?;
+    let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-    // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
-
-    if let Some(room) = client.get_room(&room_id) {
-        tracing::debug!("📤 Sending Telegram logout command");
-        // Send logout command
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("logout")).await {
-            tracing::error!("Failed to send logout command: {}", e);
-        }
-
-        // Wait a moment for the logout to process
-        sleep(Duration::from_secs(5)).await;
-
-        tracing::debug!("🧹 Cleaning up Telegram portals");
-        // Send command to clean rooms
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("clean-rooms")).await {
-            tracing::error!("Failed to send clean-rooms command: {}", e);
-        }
-
-        // Wait a moment for the cleanup to process
-        sleep(Duration::from_secs(5)).await;
-    }
-
-    // Remove client and sync task from app state
-    {
-        let mut matrix_clients = state.matrix_clients.lock().await;
-        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-
-        // Remove and abort the sync task if it exists
-        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
-            task.abort();
-            tracing::debug!("Aborted sync task for user {}", auth_user.user_id);
-        }
-
-        // Remove the client if it exists
-        if matrix_clients.remove(&auth_user.user_id).is_some() {
-            tracing::debug!("Removed Matrix client for user {}", auth_user.user_id);
-        }
-    }
-
-    // Delete the bridge record
+    // Delete the bridge record IMMEDIATELY - user sees instant response
     state.user_repository.delete_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to delete Telegram bridge: {}", e);
@@ -715,7 +662,80 @@ pub async fn disconnect_telegram(
             )
         })?;
 
-    tracing::debug!("✅ Telegram disconnection completed for user {}", auth_user.user_id);
+    tracing::info!("✅ Telegram bridge record deleted for user {}", auth_user.user_id);
+
+    // Spawn background task for cleanup - don't block the response
+    let state_clone = state.clone();
+    let user_id = auth_user.user_id;
+    tokio::spawn(async move {
+        tracing::info!("🧹 Starting background cleanup for Telegram user {}", user_id);
+
+        // Get Matrix client for cleanup
+        let client = match matrix_auth::get_cached_client(user_id, &state_clone).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                return;
+            }
+        };
+
+        // Get the room and send cleanup commands
+        if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
+            if let Some(room) = client.get_room(&room_id) {
+                // Send logout command
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("logout")).await {
+                    tracing::error!("Background cleanup: Failed to send logout command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+
+                // Send command to clean rooms
+                if let Err(e) = room.send(RoomMessageEventContent::text_plain("clean-rooms")).await {
+                    tracing::error!("Background cleanup: Failed to send clean-rooms command: {}", e);
+                }
+                sleep(Duration::from_secs(2)).await;
+            }
+        }
+
+        // Check for remaining active bridges and cleanup if none left
+        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
+            .unwrap_or(false);
+
+        if !has_active_bridges {
+            // Clear user store if no other bridges
+            if let Some(user_id_matrix) = client.user_id() {
+                let username = user_id_matrix.localpart().to_string();
+                let store_path = match get_store_path(&username) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("Background cleanup: Failed to get store path: {}", e);
+                        return;
+                    }
+                };
+                if Path::new(&store_path).exists() {
+                    if let Err(e) = fs::remove_dir_all(&store_path).await {
+                        tracing::error!("Background cleanup: Failed to clear user store: {}", e);
+                    } else {
+                        tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
+                    }
+                }
+            }
+
+            // Remove client and sync task
+            let mut matrix_clients = state_clone.matrix_clients.lock().await;
+            let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
+
+            if let Some(task) = sync_tasks.remove(&user_id) {
+                task.abort();
+                tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
+            }
+            if matrix_clients.remove(&user_id).is_some() {
+                tracing::debug!("Background cleanup: Removed Matrix client for user {}", user_id);
+            }
+        }
+
+        tracing::info!("🧹 Background cleanup completed for Telegram user {}", user_id);
+    });
+
     Ok(AxumJson(json!({
         "message": "Telegram disconnected successfully"
     })))

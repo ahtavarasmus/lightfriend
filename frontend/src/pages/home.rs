@@ -4,6 +4,7 @@ use yew_router::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
 use crate::utils::api::Api;
+use crate::config;
 use web_sys::{window, HtmlInputElement, UrlSearchParams};
 use serde_json::{json, Value};
 use serde::Deserialize;
@@ -366,26 +367,38 @@ pub fn Home() -> Html {
     let chat_loading = use_state(|| false);
     let chat_error = use_state(|| None::<String>);
     let chat_input_ref = use_node_ref();
+    let has_focused_chat = use_state(|| false);
+    // Image attachment state for web chat
+    let chat_image: UseStateHandle<Option<web_sys::File>> = use_state(|| None);
+    let chat_image_preview: UseStateHandle<Option<String>> = use_state(|| None);
+    let chat_file_input_ref = use_node_ref();
 
     // Auto-focus chat input when profile loads (input is conditionally rendered)
+    // Only focus once on initial load, not on subsequent profile updates
     {
         let chat_input_ref = chat_input_ref.clone();
         let profile_data = profile_data.clone();
-        use_effect_with_deps(move |profile| {
-            // Only focus when profile is loaded and has subscription
-            if let Some(p) = profile.as_ref() {
-                if p.sub_tier.is_some() && p.sub_tier.as_deref() != Some("tier 3") {
-                    // Small delay to ensure DOM is updated
-                    let chat_input_ref = chat_input_ref.clone();
-                    gloo_timers::callback::Timeout::new(100, move || {
-                        if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
-                            let _ = input.focus();
-                        }
-                    }).forget();
+        let has_focused_chat_inner = has_focused_chat.clone();
+        let has_focused_chat_dep = has_focused_chat.clone();
+        use_effect_with_deps(move |(profile, already_focused)| {
+            // Only focus when profile is loaded, has subscription, and we haven't focused yet
+            if !**already_focused {
+                if let Some(p) = profile.as_ref() {
+                    if p.sub_tier.is_some() && p.sub_tier.as_deref() != Some("tier 3") {
+                        // Small delay to ensure DOM is updated
+                        let chat_input_ref = chat_input_ref.clone();
+                        let has_focused_chat = has_focused_chat_inner.clone();
+                        gloo_timers::callback::Timeout::new(100, move || {
+                            if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                                let _ = input.focus();
+                                has_focused_chat.set(true);
+                            }
+                        }).forget();
+                    }
                 }
             }
             || ()
-        }, profile_data);
+        }, (profile_data, has_focused_chat_dep));
     }
 
     // Web call state
@@ -586,13 +599,24 @@ pub fn Home() -> Html {
     {
         let success = success.clone();
         let active_tab = active_tab.clone();
-        let navigator = navigator.clone();
         use_effect_with_deps(move |_| {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
-                // Check for subscription success - redirect to set-password page
+                // Check for subscription success - show success message on Billing tab
                 if params.get("subscription").as_deref() == Some("success") {
-                    navigator.push(&Route::SetPassword);
+                    success.set(Some("Subscription activated successfully!".to_string()));
+                    active_tab.set(DashboardTab::Billing);
+
+                    // Clean up the URL
+                    if let Some(window) = window() {
+                        if let Ok(history) = window.history() {
+                            let _ = history.replace_state_with_url(
+                                &wasm_bindgen::JsValue::NULL,
+                                "",
+                                Some("/")
+                            );
+                        }
+                    }
                 } else if params.get("subscription").as_deref() == Some("canceled") {
                     // Check for subscription canceled - show on Billing tab
                     success.set(Some("Subscription canceled successfully.".to_string()));
@@ -1070,9 +1094,14 @@ pub fn Home() -> Html {
                                     let chat_loading = chat_loading.clone();
                                     let chat_error = chat_error.clone();
                                     let refetch_usage = refetch_usage.clone();
+                                    let chat_image = chat_image.clone();
+                                    let chat_image_preview = chat_image_preview.clone();
                                     Callback::from(move |_| {
                                         let message = (*chat_input).clone();
-                                        if message.trim().is_empty() {
+                                        let has_image = (*chat_image).is_some();
+
+                                        // Allow send if there's text OR an image
+                                        if message.trim().is_empty() && !has_image {
                                             return;
                                         }
 
@@ -1082,21 +1111,51 @@ pub fn Home() -> Html {
                                         let chat_loading = chat_loading.clone();
                                         let chat_error = chat_error.clone();
                                         let refetch_usage = refetch_usage.clone();
+                                        let chat_image = chat_image.clone();
+                                        let chat_image_preview = chat_image_preview.clone();
+                                        let image_file = (*chat_image).clone();
 
                                         // Set user message and clear previous reply
-                                        chat_user_msg.set(Some(message.clone()));
+                                        let display_msg = if has_image {
+                                            if message.trim().is_empty() {
+                                                "[Image]".to_string()
+                                            } else {
+                                                format!("[Image] {}", message)
+                                            }
+                                        } else {
+                                            message.clone()
+                                        };
+                                        chat_user_msg.set(Some(display_msg));
                                         chat_bot_reply.set(None);
                                         chat_input.set(String::new());
+                                        chat_image.set(None);
+                                        chat_image_preview.set(None);
                                         chat_loading.set(true);
                                         chat_error.set(None);
 
                                         spawn_local(async move {
-                                            match Api::post("/api/chat/web")
-                                                .json(&json!({"message": message}))
-                                                .expect("Failed to serialize")
-                                                .send()
-                                                .await
-                                            {
+                                            let result = if let Some(file) = image_file {
+                                                // Use multipart FormData for image upload
+                                                let form_data = web_sys::FormData::new().unwrap();
+                                                form_data.append_with_str("message", &message).unwrap();
+                                                form_data.append_with_blob("image", &file).unwrap();
+
+                                                // Use credentials (cookies) for authentication like the Api utility does
+                                                gloo_net::http::Request::post(&format!("{}/api/chat/web-with-image", config::get_backend_url()))
+                                                    .credentials(web_sys::RequestCredentials::Include)
+                                                    .body(form_data)
+                                                    .send()
+                                                    .await
+                                            } else {
+                                                // Regular JSON request without image
+                                                Api::post("/api/chat/web")
+                                                    .json(&json!({"message": message}))
+                                                    .expect("Failed to serialize")
+                                                    .send()
+                                                    .await
+                                            };
+
+                                            match result {
                                                 Ok(response) => {
                                                     if response.ok() {
                                                         match response.json::<Value>().await {
@@ -1329,7 +1388,88 @@ pub fn Home() -> Html {
                                                 html! {}
                                             }
                                         }
+                                        // Image preview above input
+                                        {
+                                            if let Some(preview_url) = (*chat_image_preview).clone() {
+                                                let chat_image_clear = chat_image.clone();
+                                                let chat_image_preview_clear = chat_image_preview.clone();
+                                                html! {
+                                                    <div class="chat-image-preview">
+                                                        <img src={preview_url} alt="Attached image" />
+                                                        <button
+                                                            class="remove-image-btn"
+                                                            onclick={Callback::from(move |_: MouseEvent| {
+                                                                chat_image_clear.set(None);
+                                                                chat_image_preview_clear.set(None);
+                                                            })}
+                                                            title="Remove image"
+                                                        >
+                                                            {"×"}
+                                                        </button>
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
                                         <div class="web-chat-input">
+                                            // Hidden file input for image selection
+                                            <input
+                                                type="file"
+                                                ref={chat_file_input_ref.clone()}
+                                                accept="image/*"
+                                                style="display: none;"
+                                                onchange={{
+                                                    let chat_image = chat_image.clone();
+                                                    let chat_image_preview = chat_image_preview.clone();
+                                                    let chat_error = chat_error.clone();
+                                                    Callback::from(move |e: Event| {
+                                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                                        if let Some(files) = input.files() {
+                                                            if let Some(file) = files.get(0) {
+                                                                // Check file size (10MB limit)
+                                                                if file.size() > 10.0 * 1024.0 * 1024.0 {
+                                                                    chat_error.set(Some("Image must be less than 10MB".to_string()));
+                                                                    return;
+                                                                }
+                                                                // Generate preview
+                                                                let chat_image = chat_image.clone();
+                                                                let chat_image_preview = chat_image_preview.clone();
+                                                                let file_clone = file.clone();
+                                                                wasm_bindgen_futures::spawn_local(async move {
+                                                                    let array_buffer = wasm_bindgen_futures::JsFuture::from(file_clone.array_buffer()).await;
+                                                                    if let Ok(buffer) = array_buffer {
+                                                                        let uint8_array = js_sys::Uint8Array::new(&buffer);
+                                                                        let bytes: Vec<u8> = uint8_array.to_vec();
+                                                                        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                                                                        let content_type = file_clone.type_();
+                                                                        let data_url = format!("data:{};base64,{}", content_type, base64);
+                                                                        chat_image_preview.set(Some(data_url));
+                                                                        chat_image.set(Some(file_clone));
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                        // Clear the input so same file can be selected again
+                                                        input.set_value("");
+                                                    })
+                                                }}
+                                            />
+                                            <button
+                                                class="image-attach-button"
+                                                onclick={{
+                                                    let chat_file_input_ref = chat_file_input_ref.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        if let Some(input) = chat_file_input_ref.cast::<HtmlInputElement>() {
+                                                            input.click();
+                                                        }
+                                                    })
+                                                }}
+                                                disabled={*chat_loading || *call_active}
+                                                title="Attach an image"
+                                            >
+                                                <i class="fas fa-paperclip"></i>
+                                            </button>
                                             <button
                                                 class="digest-button"
                                                 onclick={{
@@ -1365,7 +1505,7 @@ pub fn Home() -> Html {
                                                     }
                                                 } else if *call_connecting {
                                                     html! {
-                                                        <button
+                                                                <button
                                                             class="call-button call-connecting"
                                                             disabled=true
                                                             title="Connecting..."
@@ -1399,9 +1539,9 @@ pub fn Home() -> Html {
                                                 value={(*chat_input).clone()}
                                                 placeholder="Ask your assistant..."
                                                 disabled={*chat_loading || *call_active}
-                                                onchange={{
+                                                oninput={{
                                                     let chat_input = chat_input.clone();
-                                                    Callback::from(move |e: Event| {
+                                                    Callback::from(move |e: InputEvent| {
                                                         let input: HtmlInputElement = e.target_unchecked_into();
                                                         chat_input.set(input.value());
                                                     })
@@ -1411,6 +1551,50 @@ pub fn Home() -> Html {
                                                     Callback::from(move |e: KeyboardEvent| {
                                                         if e.key() == "Enter" {
                                                             on_send.emit(());
+                                                        }
+                                                    })
+                                                }}
+                                                onpaste={{
+                                                    let chat_image = chat_image.clone();
+                                                    let chat_image_preview = chat_image_preview.clone();
+                                                    let chat_error = chat_error.clone();
+                                                    Callback::from(move |e: Event| {
+                                                        use wasm_bindgen::JsCast;
+                                                        // Cast to ClipboardEvent to access clipboard_data
+                                                        if let Some(clipboard_event) = e.dyn_ref::<web_sys::ClipboardEvent>() {
+                                                            if let Some(clipboard_data) = clipboard_event.clipboard_data() {
+                                                                if let Some(items) = clipboard_data.files() {
+                                                                    for i in 0..items.length() {
+                                                                        if let Some(file) = items.get(i) {
+                                                                            if file.type_().starts_with("image/") {
+                                                                                e.prevent_default();
+                                                                                // Check file size (10MB limit)
+                                                                                if file.size() > 10.0 * 1024.0 * 1024.0 {
+                                                                                    chat_error.set(Some("Image must be less than 10MB".to_string()));
+                                                                                    return;
+                                                                                }
+                                                                                // Generate preview
+                                                                                let chat_image = chat_image.clone();
+                                                                                let chat_image_preview = chat_image_preview.clone();
+                                                                                let file_clone = file.clone();
+                                                                                wasm_bindgen_futures::spawn_local(async move {
+                                                                                    let array_buffer = wasm_bindgen_futures::JsFuture::from(file_clone.array_buffer()).await;
+                                                                                    if let Ok(buffer) = array_buffer {
+                                                                                        let uint8_array = js_sys::Uint8Array::new(&buffer);
+                                                                                        let bytes: Vec<u8> = uint8_array.to_vec();
+                                                                                        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                                                                                        let content_type = file_clone.type_();
+                                                                                        let data_url = format!("data:{};base64,{}", content_type, base64);
+                                                                                        chat_image_preview.set(Some(data_url));
+                                                                                        chat_image.set(Some(file_clone));
+                                                                                    }
+                                                                                });
+                                                                                return;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     })
                                                 }}
