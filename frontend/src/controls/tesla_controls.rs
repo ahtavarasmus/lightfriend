@@ -94,6 +94,13 @@ pub fn tesla_controls() -> Html {
     let auto_refresh_paused = use_state(|| false);
     let refresh_count = use_state(|| 0u32);  // Count refreshes, pause after 60 (30 min at 30s interval)
 
+    // Track if we just turned climate on (to detect auto-defrost)
+    let climate_just_activated = use_state(|| false);
+    let defrost_was_off_before_climate = use_state(|| false);
+
+    // Remote start countdown timer (seconds remaining)
+    let remote_start_countdown = use_state(|| None::<u32>);
+
     // Auto-hide command result after 10 seconds
     {
         let command_result_for_effect = command_result.clone();
@@ -116,6 +123,88 @@ pub fn tesla_controls() -> Html {
                 || ()
             },
             (*command_result_for_dep).clone(),
+        );
+    }
+
+    // Remote start countdown timer effect
+    {
+        let remote_start_countdown = remote_start_countdown.clone();
+        let remote_start_countdown_dep = remote_start_countdown.clone();
+
+        use_effect_with_deps(
+            move |countdown: &Option<u32>| {
+                let interval_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+
+                if let Some(secs) = countdown {
+                    if *secs > 0 {
+                        if let Some(window) = web_sys::window() {
+                            let remote_start_countdown = remote_start_countdown.clone();
+                            let interval_id_inner = interval_id.clone();
+
+                            let interval_callback = Closure::wrap(Box::new(move || {
+                                let current = *remote_start_countdown;
+                                if let Some(secs) = current {
+                                    if secs > 1 {
+                                        remote_start_countdown.set(Some(secs - 1));
+                                    } else {
+                                        remote_start_countdown.set(None);
+                                        // Clear the interval when done
+                                        if let Some(id) = *interval_id_inner.borrow() {
+                                            if let Some(w) = web_sys::window() {
+                                                w.clear_interval_with_handle(id);
+                                            }
+                                        }
+                                    }
+                                }
+                            }) as Box<dyn Fn()>);
+
+                            if let Ok(id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                                interval_callback.as_ref().unchecked_ref(),
+                                1000, // 1 second
+                            ) {
+                                *interval_id.borrow_mut() = Some(id);
+                            }
+                            interval_callback.forget();
+                        }
+                    }
+                }
+
+                // Cleanup
+                let interval_id_cleanup = interval_id;
+                move || {
+                    if let Some(id) = *interval_id_cleanup.borrow() {
+                        if let Some(window) = web_sys::window() {
+                            window.clear_interval_with_handle(id);
+                        }
+                    }
+                }
+            },
+            (*remote_start_countdown_dep).clone(),
+        );
+    }
+
+    // Detect auto-defrost activation when climate is turned on
+    {
+        let is_front_defroster_on = is_front_defroster_on.clone();
+        let is_rear_defroster_on = is_rear_defroster_on.clone();
+        let climate_just_activated = climate_just_activated.clone();
+        let defrost_was_off_before_climate = defrost_was_off_before_climate.clone();
+        let command_result = command_result.clone();
+
+        use_effect_with_deps(
+            move |(front, rear)| {
+                let defrost_now_on = front.unwrap_or(false) || rear.unwrap_or(false);
+
+                // If climate was just activated, defrost was off before, and now defrost is on
+                if *climate_just_activated && *defrost_was_off_before_climate && defrost_now_on {
+                    command_result.set(Some("Defrost auto-activated by Tesla (cold weather)".to_string()));
+                    // Reset the tracking flags
+                    climate_just_activated.set(false);
+                    defrost_was_off_before_climate.set(false);
+                }
+                || ()
+            },
+            (*is_front_defroster_on, *is_rear_defroster_on),
         );
     }
 
@@ -576,14 +665,25 @@ pub fn tesla_controls() -> Html {
         let climate_loading = climate_loading.clone();
         let command_result = command_result.clone();
         let is_climate_on = is_climate_on.clone();
+        let is_front_defroster_on = is_front_defroster_on.clone();
+        let is_rear_defroster_on = is_rear_defroster_on.clone();
+        let climate_just_activated = climate_just_activated.clone();
+        let defrost_was_off_before_climate = defrost_was_off_before_climate.clone();
 
         Callback::from(move |_: MouseEvent| {
             let climate_loading = climate_loading.clone();
             let command_result = command_result.clone();
             let is_climate_on = is_climate_on.clone();
+            let is_front_defroster_on = is_front_defroster_on.clone();
+            let is_rear_defroster_on = is_rear_defroster_on.clone();
+            let climate_just_activated = climate_just_activated.clone();
+            let defrost_was_off_before_climate = defrost_was_off_before_climate.clone();
 
             climate_loading.set(true);
             command_result.set(None);
+
+            // Remember if defrost was off before we turn climate on
+            let defrost_currently_off = !is_front_defroster_on.unwrap_or(false) && !is_rear_defroster_on.unwrap_or(false);
 
             spawn_local(async move {
                 let command = match *is_climate_on {
@@ -607,8 +707,19 @@ pub fn tesla_controls() -> Html {
                     Ok(response) => {
                         if response.ok() {
                             match command {
-                                "climate_on" => is_climate_on.set(Some(true)),
-                                "climate_off" => is_climate_on.set(Some(false)),
+                                "climate_on" => {
+                                    is_climate_on.set(Some(true));
+                                    // Track that we just activated climate and defrost was off
+                                    climate_just_activated.set(true);
+                                    defrost_was_off_before_climate.set(defrost_currently_off);
+                                }
+                                "climate_off" => {
+                                    is_climate_on.set(Some(false));
+                                    // Turning off climate also turns off defrost
+                                    is_front_defroster_on.set(Some(false));
+                                    is_rear_defroster_on.set(Some(false));
+                                    climate_just_activated.set(false);
+                                }
                                 _ => {}
                             }
                             if let Ok(data) = response.json::<serde_json::Value>().await {
@@ -706,6 +817,7 @@ pub fn tesla_controls() -> Html {
         let passkey_state = passkey_state.clone();
         let pending_passkey_options = pending_passkey_options.clone();
         let pending_command = pending_command.clone();
+        let remote_start_countdown = remote_start_countdown.clone();
 
         Callback::from(move |_: MouseEvent| {
             let remote_start_loading = remote_start_loading.clone();
@@ -713,6 +825,7 @@ pub fn tesla_controls() -> Html {
             let passkey_state = passkey_state.clone();
             let pending_passkey_options = pending_passkey_options.clone();
             let pending_command = pending_command.clone();
+            let remote_start_countdown = remote_start_countdown.clone();
 
             // Remote start requires passkey verification - check if user has 2FA
             passkey_state.set(PasskeyVerifyState::Loading);
@@ -734,7 +847,7 @@ pub fn tesla_controls() -> Html {
                                 passkey_state.set(PasskeyVerifyState::Hidden);
                                 remote_start_loading.set(true);
                                 command_result.set(None);
-                                execute_tesla_command("remote_start", remote_start_loading, command_result, None).await;
+                                execute_tesla_command_with_countdown("remote_start", remote_start_loading, command_result, None, Some(remote_start_countdown)).await;
                             }
                         } else {
                             passkey_state.set(PasskeyVerifyState::Error("Failed to check 2FA requirements".to_string()));
@@ -987,6 +1100,7 @@ pub fn tesla_controls() -> Html {
         let remote_start_loading = remote_start_loading.clone();
         let command_result = command_result.clone();
         let is_locked = is_locked.clone();
+        let remote_start_countdown = remote_start_countdown.clone();
 
         Callback::from(move |_: MouseEvent| {
             let passkey_state = passkey_state.clone();
@@ -996,6 +1110,7 @@ pub fn tesla_controls() -> Html {
             let remote_start_loading = remote_start_loading.clone();
             let command_result = command_result.clone();
             let is_locked = is_locked.clone();
+            let remote_start_countdown = remote_start_countdown.clone();
 
             passkey_state.set(PasskeyVerifyState::WaitingForPasskey);
 
@@ -1018,7 +1133,7 @@ pub fn tesla_controls() -> Html {
                                 "remote_start" => {
                                     remote_start_loading.set(true);
                                     command_result.set(None);
-                                    execute_tesla_command("remote_start", remote_start_loading, command_result, None).await;
+                                    execute_tesla_command_with_countdown("remote_start", remote_start_loading, command_result, None, Some(remote_start_countdown)).await;
                                 }
                                 _ => {}
                             }
@@ -1050,6 +1165,7 @@ pub fn tesla_controls() -> Html {
         let remote_start_loading = remote_start_loading.clone();
         let command_result = command_result.clone();
         let is_locked = is_locked.clone();
+        let remote_start_countdown = remote_start_countdown.clone();
 
         Callback::from(move |_: MouseEvent| {
             let code = (*totp_code_input).clone();
@@ -1064,6 +1180,7 @@ pub fn tesla_controls() -> Html {
             let command_result = command_result.clone();
             let is_locked = is_locked.clone();
             let totp_code_input = totp_code_input.clone();
+            let remote_start_countdown = remote_start_countdown.clone();
 
             passkey_state.set(PasskeyVerifyState::Verifying);
 
@@ -1087,7 +1204,7 @@ pub fn tesla_controls() -> Html {
                             "remote_start" => {
                                 remote_start_loading.set(true);
                                 command_result.set(None);
-                                execute_tesla_command("remote_start", remote_start_loading, command_result, None).await;
+                                execute_tesla_command_with_countdown("remote_start", remote_start_loading, command_result, None, Some(remote_start_countdown)).await;
                             }
                             _ => {}
                         }
@@ -1563,12 +1680,19 @@ pub fn tesla_controls() -> Html {
                 <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                     <button
                         onclick={handle_remote_start}
-                        disabled={*remote_start_loading || !*has_vehicle_cmds}
-                        class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                        disabled={*remote_start_loading || !*has_vehicle_cmds || remote_start_countdown.is_some()}
+                        class={format!("control-btn {} {}",
+                            if !*has_vehicle_cmds { "control-btn-disabled" } else { "" },
+                            if remote_start_countdown.is_some() { "control-btn-countdown" } else { "" }
+                        )}
                     >
                         {
                             if *remote_start_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else if let Some(secs) = *remote_start_countdown {
+                                let mins = secs / 60;
+                                let remaining_secs = secs % 60;
+                                html! { <><i class="fas fa-car"></i>{format!(" {}:{:02}", mins, remaining_secs)}</> }
                             } else {
                                 html! { <><i class="fas fa-key"></i>{" Start"}</> }
                             }
@@ -1873,6 +1997,15 @@ fn get_styles() -> &'static str {
             background: rgba(255, 152, 0, 0.25);
         }
 
+        /* Countdown button for remote start timer */
+        .control-btn-countdown {
+            background: rgba(105, 240, 174, 0.15);
+            color: #69f0ae;
+            border-color: rgba(105, 240, 174, 0.4);
+            font-family: monospace;
+            font-size: 16px;
+        }
+
         /* Disabled button for scope-gated features */
         .control-btn-wrapper {
             position: relative;
@@ -2107,6 +2240,17 @@ async fn execute_tesla_command(
     command_result: UseStateHandle<Option<String>>,
     is_locked: Option<UseStateHandle<Option<bool>>>,
 ) {
+    execute_tesla_command_with_countdown(command, loading, command_result, is_locked, None).await;
+}
+
+// Helper function to execute Tesla command with optional countdown timer (for remote start)
+async fn execute_tesla_command_with_countdown(
+    command: &str,
+    loading: UseStateHandle<bool>,
+    command_result: UseStateHandle<Option<String>>,
+    is_locked: Option<UseStateHandle<Option<bool>>>,
+    countdown: Option<UseStateHandle<Option<u32>>>,
+) {
     let body = serde_json::json!({ "command": command });
 
     let request = match Api::post("/api/tesla/command").json(&body) {
@@ -2127,6 +2271,12 @@ async fn execute_tesla_command(
                         "lock" => is_locked.set(Some(true)),
                         "unlock" => is_locked.set(Some(false)),
                         _ => {}
+                    }
+                }
+                // Start 2-minute countdown for remote_start
+                if command == "remote_start" {
+                    if let Some(countdown) = countdown {
+                        countdown.set(Some(120)); // 2 minutes = 120 seconds
                     }
                 }
                 if let Ok(data) = response.json::<serde_json::Value>().await {
