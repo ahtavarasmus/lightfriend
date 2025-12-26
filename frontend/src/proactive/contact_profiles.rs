@@ -1336,9 +1336,10 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                     "all" => "All",
                                     "critical" => "Critical",
                                     "digest" => "Digest",
+                                    "ignore" => "Ignore",
                                     _ => &exc.notification_mode
                                 };
-                                if exc.notification_mode != "digest" {
+                                if exc.notification_mode != "digest" && exc.notification_mode != "ignore" {
                                     let via = match exc.notification_type.as_str() {
                                         "sms" => "SMS",
                                         "call" => "Call",
@@ -1620,6 +1621,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                                 <option value="all">{"All"}</option>
                                                 <option value="critical">{"Critical"}</option>
                                                 <option value="digest">{"Digest"}</option>
+                                                <option value="ignore">{"Ignore"}</option>
                                             </select>
                                             <span style="color: #666; font-size: 0.8rem;">{"via"}</span>
                                             <select
@@ -1752,6 +1754,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                                 <option value="all">{"All"}</option>
                                                 <option value="critical">{"Critical"}</option>
                                                 <option value="digest">{"Digest"}</option>
+                                                <option value="ignore">{"Ignore"}</option>
                                             </select>
                                             <span style="color: #666; font-size: 0.8rem;">{"via"}</span>
                                             <select
@@ -1883,6 +1886,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                                 <option value="all">{"All"}</option>
                                                 <option value="critical">{"Critical"}</option>
                                                 <option value="digest">{"Digest"}</option>
+                                                <option value="ignore">{"Ignore"}</option>
                                             </select>
                                             <span style="color: #666; font-size: 0.8rem;">{"via"}</span>
                                             <select
@@ -1985,6 +1989,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                                 <option value="all">{"All"}</option>
                                                 <option value="critical">{"Critical"}</option>
                                                 <option value="digest">{"Digest"}</option>
+                                                <option value="ignore">{"Ignore"}</option>
                                             </select>
                                             <span style="color: #666; font-size: 0.8rem;">{"via"}</span>
                                             <select

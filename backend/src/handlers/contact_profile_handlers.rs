@@ -215,7 +215,7 @@ pub async fn create_contact_profile(
                     if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str()) {
                         continue;
                     }
-                    if !["all", "critical", "digest"].contains(&exc.notification_mode.as_str()) {
+                    if !["all", "critical", "digest", "ignore"].contains(&exc.notification_mode.as_str()) {
                         continue;
                     }
                     if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {
@@ -302,7 +302,7 @@ pub async fn update_contact_profile(
                     if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str()) {
                         continue;
                     }
-                    if !["all", "critical", "digest"].contains(&exc.notification_mode.as_str()) {
+                    if !["all", "critical", "digest", "ignore"].contains(&exc.notification_mode.as_str()) {
                         continue;
                     }
                     if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {

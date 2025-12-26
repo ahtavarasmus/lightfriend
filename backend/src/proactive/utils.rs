@@ -274,33 +274,46 @@ fn build_contact_maps_and_filter_messages(
     let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
 
     for profile in &profiles {
-        // Check if this profile is set to "ignore" mode
-        let is_ignored = profile.notification_mode == "ignore";
+        let profile_id = profile.id.unwrap_or(0);
+        // Get all exceptions for this profile
+        let exceptions = state.user_repository.get_profile_exceptions(profile_id).unwrap_or(Vec::new());
+
+        // Helper to check if a platform has an exception and get its mode
+        let get_effective_mode = |platform: &str| -> String {
+            exceptions.iter()
+                .find(|e| e.platform == platform)
+                .map(|e| e.notification_mode.clone())
+                .unwrap_or_else(|| profile.notification_mode.clone())
+        };
 
         if let Some(ref wa) = profile.whatsapp_chat {
-            if is_ignored {
+            let mode = get_effective_mode("whatsapp");
+            if mode == "ignore" {
                 ignore_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
             } else {
                 priority_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
             }
         }
         if let Some(ref tg) = profile.telegram_chat {
-            if is_ignored {
+            let mode = get_effective_mode("telegram");
+            if mode == "ignore" {
                 ignore_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
             } else {
                 priority_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
             }
         }
         if let Some(ref sig) = profile.signal_chat {
-            if is_ignored {
+            let mode = get_effective_mode("signal");
+            if mode == "ignore" {
                 ignore_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
             } else {
                 priority_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
             }
         }
         if let Some(ref emails) = profile.email_addresses {
+            let mode = get_effective_mode("email");
             for email in emails.split(',') {
-                if is_ignored {
+                if mode == "ignore" {
                     ignore_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());
                 } else {
                     priority_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());

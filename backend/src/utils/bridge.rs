@@ -1386,8 +1386,10 @@ pub async fn handle_bridge_message(
         None => {
             let default_mode = user_settings.default_notification_mode.clone()
                 .unwrap_or_else(|| "critical".to_string());
+            let default_noti_type = user_settings.default_notification_type.clone()
+                .unwrap_or_else(|| "sms".to_string());
             let default_notify_on_call = user_settings.default_notify_on_call != 0;
-            (default_mode, "sms".to_string(), default_notify_on_call, None)
+            (default_mode, default_noti_type, default_notify_on_call, None)
         }
     };
 
@@ -1395,6 +1397,34 @@ pub async fn handle_bridge_message(
         println!("notification_mode: {}", notification_mode);
         println!("notification_type: {}", notification_type_str);
         println!("profile_nickname: {:?}", profile_nickname);
+    }
+
+    // Handle incoming/missed calls using per-profile notify_on_call setting
+    if content.contains("Incoming call") || content.contains("Missed call") {
+        if notify_on_call {
+            let suffix = match notification_type_str.as_str() {
+                "call" => "_call",
+                "call_sms" => "_call_sms",
+                _ => "_sms",
+            };
+            let notification_type = format!("{}_incoming_call{}", service, suffix);
+            let what_to_inform = format!("You have an incoming {} call from {}", service_cap, chat_name);
+            let first_message = format!("Hello, you have an incoming {} call from {}.", service_cap, chat_name);
+
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                crate::proactive::utils::send_notification(
+                    &state_clone,
+                    user_id,
+                    &what_to_inform,
+                    notification_type,
+                    Some(first_message),
+                ).await;
+            });
+        } else {
+            tracing::debug!("Skipping incoming call notification for user {} (notify_on_call=false)", user_id);
+        }
+        return;
     }
 
     // Handle based on notification mode
@@ -1496,9 +1526,9 @@ pub async fn handle_bridge_message(
         }
         "digest" | "ignore" => {
             // For digest mode: message will be picked up by digest job, no immediate notification
-            // For ignore mode (only applicable to default, not profiles): skip entirely
+            // For ignore mode: skip entirely (applies to both default settings and profile exceptions)
             if notification_mode == "ignore" {
-                tracing::debug!("Message from unknown sender ignored (default_notification_mode=ignore)");
+                tracing::debug!("Message ignored (notification_mode=ignore)");
             } else {
                 tracing::debug!("Message will be included in digest (notification_mode=digest)");
             }

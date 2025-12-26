@@ -17,7 +17,7 @@ use crate::{
 #[derive(Serialize)]
 pub struct RefundEligibilityResponse {
     pub eligible: bool,
-    pub refund_type: Option<String>,  // "subscription" or "credit_pack"
+    pub refund_type: Option<String>,  // "subscription"
     pub reason: String,
     pub usage_percent: Option<f32>,
     pub days_remaining: Option<i32>,
@@ -35,7 +35,6 @@ pub struct RefundRequestResponse {
 }
 
 const SUBSCRIPTION_USAGE_THRESHOLD: f32 = 30.0;  // 30%
-const CREDIT_PACK_USAGE_THRESHOLD: f32 = 20.0;   // 20%
 const REFUND_WINDOW_DAYS: i64 = 7;
 const CONTACT_EMAIL: &str = "rasmus@ahtava.com";
 
@@ -53,9 +52,9 @@ pub async fn get_max_credits_left(
         _ => 40.0, // monitor or default
     };
 
-    // US/CA: credits_left is message count
+    // US/CA: credits_left is message count (always 400 for all plans)
     if matches!(country, Some("US") | Some("CA")) {
-        if plan_messages >= 120.0 { 400.0 } else { 200.0 }
+        400.0
     } else if let Some(c) = country {
         // Euro: credits_left is € value based on SMS pricing
         match get_euro_country_pricing(state, c).await {
@@ -213,49 +212,6 @@ pub async fn get_refund_eligibility(
     let client = Client::new(stripe_secret_key);
 
     let now = chrono::Utc::now().timestamp();
-
-    // Check credit pack refund eligibility first
-    if let Some(ref info) = refund_info {
-        if let (Some(pack_amount), Some(pack_timestamp)) = (info.last_credit_pack_amount, info.last_credit_pack_purchase_timestamp) {
-            let days_since_purchase = (now - pack_timestamp as i64) / 86400;
-
-            if days_since_purchase <= REFUND_WINDOW_DAYS {
-                // Calculate how much of the pack was used
-                // We track pack purchases, so we check if credits decreased significantly
-                let credits_consumed = pack_amount - user.credits.max(0.0);
-                let usage_percent = if pack_amount > 0.0 {
-                    (credits_consumed / pack_amount * 100.0).max(0.0)
-                } else {
-                    0.0
-                };
-
-                if usage_percent < CREDIT_PACK_USAGE_THRESHOLD {
-                    let days_remaining = (REFUND_WINDOW_DAYS - days_since_purchase) as i32;
-                    return Ok(Json(RefundEligibilityResponse {
-                        eligible: true,
-                        refund_type: Some("credit_pack".to_string()),
-                        reason: format!("You've used {:.0}% of your credit pack (max {}% for refund).", usage_percent, CREDIT_PACK_USAGE_THRESHOLD as i32),
-                        usage_percent: Some(usage_percent),
-                        days_remaining: Some(days_remaining),
-                        refund_amount_cents: Some((pack_amount * 100.0) as i64),
-                        already_refunded: false,
-                        contact_email: CONTACT_EMAIL.to_string(),
-                    }));
-                } else {
-                    return Ok(Json(RefundEligibilityResponse {
-                        eligible: false,
-                        refund_type: Some("credit_pack".to_string()),
-                        reason: format!("You've used {:.0}% of your credit pack. Refunds require less than {}% usage.", usage_percent, CREDIT_PACK_USAGE_THRESHOLD as i32),
-                        usage_percent: Some(usage_percent),
-                        days_remaining: Some((REFUND_WINDOW_DAYS - days_since_purchase) as i32),
-                        refund_amount_cents: None,
-                        already_refunded: false,
-                        contact_email: CONTACT_EMAIL.to_string(),
-                    }));
-                }
-            }
-        }
-    }
 
     // Check subscription refund eligibility
     if user.sub_tier.is_none() {
@@ -442,22 +398,11 @@ pub async fn request_refund(
         .expect("STRIPE_SECRET_KEY must be set");
     let client = Client::new(stripe_secret_key);
 
-    let refund_type = eligibility.refund_type.as_deref().unwrap_or("subscription");
-
     // Get payment intent to refund
-    let (payment_intent_id, _amount) = if refund_type == "credit_pack" {
-        // For credit packs, we need the payment intent from the checkout session
-        // This is trickier - for now we'll get the most recent one
-        get_latest_subscription_payment_intent(&client, customer_id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No payment found to refund"}))))?
-    } else {
-        get_latest_subscription_payment_intent(&client, customer_id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No payment found to refund"}))))?
-    };
+    let (payment_intent_id, _amount) = get_latest_subscription_payment_intent(&client, customer_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No payment found to refund"}))))?;
 
     // Create the refund
     let refund = stripe::Refund::create(
@@ -473,30 +418,17 @@ pub async fn request_refund(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to create refund: {}", e)}))))?;
 
-    // If subscription refund, cancel the subscription
-    if refund_type == "subscription" {
-        if let Ok(Some(sub_id)) = get_active_subscription_id(&client, customer_id).await {
-            let _ = stripe::Subscription::cancel(
-                &client,
-                &sub_id.parse().unwrap(),
-                stripe::CancelSubscription::default(),
-            ).await;
+    // Cancel the subscription
+    if let Ok(Some(sub_id)) = get_active_subscription_id(&client, customer_id).await {
+        let _ = stripe::Subscription::cancel(
+            &client,
+            &sub_id.parse().unwrap(),
+            stripe::CancelSubscription::default(),
+        ).await;
 
-            // Clear subscription data
-            let _ = state.user_repository.set_subscription_tier(user_id, None);
-            let _ = state.user_repository.update_sub_credits(user_id, 0.0);
-        }
-    }
-
-    // If credit pack refund, deduct the credits
-    if refund_type == "credit_pack" {
-        if let Some(ref info) = state.user_repository.get_refund_info(user_id).ok().flatten() {
-            if let Some(pack_amount) = info.last_credit_pack_amount {
-                // Remove the pack credits (user may have used some)
-                let new_credits = (user.credits - pack_amount).max(0.0);
-                let _ = state.user_repository.update_user_credits(user_id, new_credits);
-            }
-        }
+        // Clear subscription data
+        let _ = state.user_repository.set_subscription_tier(user_id, None);
+        let _ = state.user_repository.update_sub_credits(user_id, 0.0);
     }
 
     // Mark as refunded
@@ -505,8 +437,8 @@ pub async fn request_refund(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to update refund status: {}", e)}))))?;
 
     tracing::info!(
-        "Refund processed for user {}: type={}, refund_id={}",
-        user_id, refund_type, refund.id
+        "Refund processed for user {}: refund_id={}",
+        user_id, refund.id
     );
 
     Ok(Json(RefundRequestResponse {

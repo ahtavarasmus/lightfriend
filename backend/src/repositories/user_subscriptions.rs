@@ -46,9 +46,10 @@ impl crate::repositories::user_repository::UserRepository {
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
-        
-        let new_credits = user.credits - amount;
-        
+
+        // Prevent negative balance
+        let new_credits = (user.credits - amount).max(0.0);
+
         diesel::update(users::table.find(user_id))
             .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;

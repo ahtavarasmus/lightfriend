@@ -40,6 +40,13 @@ struct TeslaJwtClaims {
 /// Extract scopes from a Tesla JWT access token without verifying signature
 /// Tesla tokens are JWTs that contain the granted scopes in the "scp" claim
 fn extract_scopes_from_jwt(access_token: &str) -> Option<String> {
+    // Check if it's a JWT (has 3 parts)
+    let token_parts: Vec<&str> = access_token.split('.').collect();
+    if token_parts.len() != 3 {
+        // Not a JWT - Tesla sometimes uses opaque tokens
+        return None;
+    }
+
     // Create a validation that doesn't verify the signature (we just want to read claims)
     let mut validation = Validation::new(Algorithm::RS256);
     validation.insecure_disable_signature_validation();
@@ -70,11 +77,11 @@ fn extract_scopes_from_jwt(access_token: &str) -> Option<String> {
                 }
             }
 
-            warn!("JWT decoded but no scopes found in claims");
+            // JWT decoded but no scopes found
             None
         }
-        Err(e) => {
-            warn!("Failed to decode Tesla JWT for scope extraction: {}", e);
+        Err(_) => {
+            // Failed to decode JWT - not an error, Tesla may use different token format
             None
         }
     }
@@ -153,6 +160,22 @@ pub async fn tesla_login(
     record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
     record.data.insert("user_id".to_string(), json!(auth_user.user_id));
 
+    // Build scopes list early so we can store it in session
+    let valid_scopes = ["vehicle_device_data", "vehicle_cmds", "vehicle_charging_cmds"];
+    let requested_scopes: Vec<String> = if let Some(scopes_str) = &params.scopes {
+        scopes_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| valid_scopes.contains(&s.as_str()))
+            .collect()
+    } else {
+        // Default to all scopes if none specified
+        valid_scopes.iter().map(|s| s.to_string()).collect()
+    };
+
+    // Store requested scopes in session so callback can use them
+    record.data.insert("requested_scopes".to_string(), json!(requested_scopes.join(" ")));
+
     // Store session
     if let Err(e) = state.session_store.create(&mut record).await {
         error!("Failed to store session record: {}", e);
@@ -174,19 +197,7 @@ pub async fn tesla_login(
         .add_extra_param("prompt", "consent")  // Force consent screen to show every time
         .set_pkce_challenge(pkce_challenge);
 
-    // Add user-selected scopes from query param, or default to all scopes
-    let valid_scopes = ["vehicle_device_data", "vehicle_cmds", "vehicle_charging_cmds"];
-    let requested_scopes: Vec<String> = if let Some(scopes_str) = &params.scopes {
-        scopes_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| valid_scopes.contains(&s.as_str()))
-            .collect()
-    } else {
-        // Default to all scopes if none specified
-        valid_scopes.iter().map(|s| s.to_string()).collect()
-    };
-
+    // Add user-selected scopes (already computed above and stored in session)
     for scope in &requested_scopes {
         auth_url_builder = auth_url_builder.add_scope(Scope::new(scope.clone()));
     }
@@ -272,6 +283,13 @@ pub async fn tesla_callback(
         }
     };
 
+    // Get requested scopes from session (these are the scopes user selected in the UI)
+    let requested_scopes = session_record.data.get("requested_scopes")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "vehicle_device_data vehicle_cmds vehicle_charging_cmds".to_string());
+    info!("Retrieved requested scopes from session for user {}: {}", user_id, requested_scopes);
+
     // Exchange authorization code for tokens
     // Note: Tesla uses a different domain for token exchange
     let pkce_verifier = PkceCodeVerifier::new(pkce_verifier_secret);
@@ -300,7 +318,8 @@ pub async fn tesla_callback(
         .unwrap_or_else(|_| "https://fleet-api.prd.eu.vn.cloud.tesla.com".to_string());
 
     // Manual token exchange request for Tesla's specific requirements
-    let scope = "openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds";
+    // Use the scopes that user selected (from session), plus openid and offline_access
+    let scope_for_token = format!("openid offline_access {}", requested_scopes);
     let token_params = [
         ("grant_type", "authorization_code"),
         ("code", &params.code),
@@ -308,7 +327,7 @@ pub async fn tesla_callback(
         ("client_secret", &client_secret),
         ("redirect_uri", &redirect_uri),
         ("code_verifier", pkce_verifier.secret()),
-        ("scope", scope),
+        ("scope", &scope_for_token),
         ("audience", &audience_url),
     ];
 
@@ -358,9 +377,17 @@ pub async fn tesla_callback(
     let expires_in = token_data["expires_in"].as_i64()
         .unwrap_or(3600) as i32;
 
-    // Extract granted scopes - first try JWT token claims, then fallback to token response
+    // Determine granted scopes - try multiple sources:
+    // 1. JWT token claims (scp or scope)
+    // 2. Token response body (scope field)
+    // 3. Fall back to requested_scopes from session (what user selected in UI)
     let granted_scopes = extract_scopes_from_jwt(access_token)
-        .or_else(|| token_data["scope"].as_str().map(|s| s.to_string()));
+        .or_else(|| token_data["scope"].as_str().map(|s| s.to_string()))
+        .or_else(|| {
+            // Use the scopes user requested - Tesla approved them or would have failed
+            info!("Using requested_scopes as granted_scopes for user {}", user_id);
+            Some(requested_scopes.clone())
+        });
     info!("Tesla granted scopes for user {}: {:?}", user_id, granted_scopes);
 
     // Encrypt tokens

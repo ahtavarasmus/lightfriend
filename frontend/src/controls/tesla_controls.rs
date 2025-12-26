@@ -89,10 +89,10 @@ pub fn tesla_controls() -> Html {
     let has_vehicle_device_data = use_state(|| true);
     let has_vehicle_cmds = use_state(|| true);
     let has_vehicle_charging_cmds = use_state(|| true);
-    let scopes_checked = use_state(|| false);  // Track if we've fetched scopes from API
-    let scope_refresh_loading = use_state(|| false);
-    let scope_refresh_error = use_state(|| None::<String>);
-    let granted_scopes_str = use_state(|| None::<String>);  // Raw scopes string for display
+
+    // Auto-refresh state - pauses after 30 minutes of inactivity
+    let auto_refresh_paused = use_state(|| false);
+    let refresh_count = use_state(|| 0u32);  // Count refreshes, pause after 60 (30 min at 30s interval)
 
     // Auto-hide command result after 10 seconds
     {
@@ -297,14 +297,181 @@ pub fn tesla_controls() -> Html {
         );
     }
 
+    // Auto-refresh status every 30 seconds when visible (pauses after 30 min)
+    {
+        let tesla_connected = tesla_connected.clone();
+        let battery_level = battery_level.clone();
+        let battery_range = battery_range.clone();
+        let charging_state = charging_state.clone();
+        let is_locked = is_locked.clone();
+        let inside_temp = inside_temp.clone();
+        let outside_temp = outside_temp.clone();
+        let is_climate_on = is_climate_on.clone();
+        let is_front_defroster_on = is_front_defroster_on.clone();
+        let is_rear_defroster_on = is_rear_defroster_on.clone();
+        let last_refresh_time = last_refresh_time.clone();
+        let last_refresh_epoch = last_refresh_epoch.clone();
+        let climate_notify_active = climate_notify_active.clone();
+        let charging_notify_active = charging_notify_active.clone();
+        let auto_refresh_paused = auto_refresh_paused.clone();
+        let refresh_count = refresh_count.clone();
+
+        use_effect_with_deps(
+            move |connected| {
+                let interval_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+
+                if **connected {
+                    if let Some(window) = web_sys::window() {
+                        let battery_level = battery_level.clone();
+                        let battery_range = battery_range.clone();
+                        let charging_state = charging_state.clone();
+                        let is_locked = is_locked.clone();
+                        let inside_temp = inside_temp.clone();
+                        let outside_temp = outside_temp.clone();
+                        let is_climate_on = is_climate_on.clone();
+                        let is_front_defroster_on = is_front_defroster_on.clone();
+                        let is_rear_defroster_on = is_rear_defroster_on.clone();
+                        let last_refresh_time = last_refresh_time.clone();
+                        let last_refresh_epoch = last_refresh_epoch.clone();
+                        let climate_notify_active = climate_notify_active.clone();
+                        let charging_notify_active = charging_notify_active.clone();
+                        let auto_refresh_paused = auto_refresh_paused.clone();
+                        let refresh_count = refresh_count.clone();
+
+                        let interval_callback = Closure::wrap(Box::new(move || {
+                            // Don't refresh if paused
+                            if *auto_refresh_paused {
+                                return;
+                            }
+
+                            // Check if document is visible
+                            let is_visible = web_sys::window()
+                                .and_then(|w| w.document())
+                                .map(|d| !d.hidden())
+                                .unwrap_or(false);
+
+                            if !is_visible {
+                                return;
+                            }
+
+                            // Check refresh count - pause after 60 refreshes (30 min)
+                            let count = *refresh_count + 1;
+                            if count >= 60 {
+                                auto_refresh_paused.set(true);
+                                return;
+                            }
+                            refresh_count.set(count);
+
+                            let battery_level = battery_level.clone();
+                            let battery_range = battery_range.clone();
+                            let charging_state = charging_state.clone();
+                            let is_locked = is_locked.clone();
+                            let inside_temp = inside_temp.clone();
+                            let outside_temp = outside_temp.clone();
+                            let is_climate_on = is_climate_on.clone();
+                            let is_front_defroster_on = is_front_defroster_on.clone();
+                            let is_rear_defroster_on = is_rear_defroster_on.clone();
+                            let last_refresh_time = last_refresh_time.clone();
+                            let last_refresh_epoch = last_refresh_epoch.clone();
+                            let climate_notify_active = climate_notify_active.clone();
+                            let charging_notify_active = charging_notify_active.clone();
+
+                            spawn_local(async move {
+                                // Silent refresh - no loading indicator
+                                if let Ok(response) = Api::get("/api/tesla/battery-status").send().await {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(level) = data["battery_level"].as_i64() {
+                                                battery_level.set(Some(level as i32));
+                                            }
+                                            if let Some(range) = data["battery_range"].as_f64() {
+                                                battery_range.set(Some(range));
+                                            }
+                                            if let Some(state) = data["charging_state"].as_str() {
+                                                charging_state.set(Some(state.to_string()));
+                                            }
+                                            if let Some(locked) = data["locked"].as_bool() {
+                                                is_locked.set(Some(locked));
+                                            }
+                                            if let Some(temp) = data["inside_temp"].as_f64() {
+                                                inside_temp.set(Some(temp));
+                                            }
+                                            if let Some(temp) = data["outside_temp"].as_f64() {
+                                                outside_temp.set(Some(temp));
+                                            }
+                                            if let Some(climate) = data["is_climate_on"].as_bool() {
+                                                is_climate_on.set(Some(climate));
+                                            }
+                                            if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
+                                                is_front_defroster_on.set(Some(front_defrost));
+                                            }
+                                            if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
+                                                is_rear_defroster_on.set(Some(rear_defrost));
+                                            }
+                                            let now = web_sys::js_sys::Date::new_0();
+                                            let time_str = format!(
+                                                "{:02}:{:02}",
+                                                now.get_hours() as u32,
+                                                now.get_minutes() as u32,
+                                            );
+                                            last_refresh_time.set(Some(time_str));
+                                            *last_refresh_epoch.borrow_mut() = now.get_time();
+                                        }
+                                    }
+                                }
+
+                                // Also refresh notify statuses
+                                if let Ok(response) = Api::get("/api/tesla/climate-notify/status").send().await {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(active) = data["active"].as_bool() {
+                                                climate_notify_active.set(active);
+                                            }
+                                        }
+                                    }
+                                }
+                                if let Ok(response) = Api::get("/api/tesla/charging-notify/status").send().await {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(active) = data["active"].as_bool() {
+                                                charging_notify_active.set(active);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }) as Box<dyn Fn()>);
+
+                        if let Ok(id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                            interval_callback.as_ref().unchecked_ref(),
+                            30000, // 30 seconds
+                        ) {
+                            *interval_id.borrow_mut() = Some(id);
+                        }
+                        interval_callback.forget();
+                    }
+                }
+
+                // Cleanup
+                let interval_id_cleanup = interval_id;
+                move || {
+                    if let Some(id) = *interval_id_cleanup.borrow() {
+                        if let Some(window) = web_sys::window() {
+                            window.clear_interval_with_handle(id);
+                        }
+                    }
+                }
+            },
+            tesla_connected.clone(),
+        );
+    }
+
     // Fetch granted scopes when connected for feature gating
     {
         let tesla_connected = tesla_connected.clone();
         let has_vehicle_device_data = has_vehicle_device_data.clone();
         let has_vehicle_cmds = has_vehicle_cmds.clone();
         let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
-        let scopes_checked = scopes_checked.clone();
-        let granted_scopes_str = granted_scopes_str.clone();
 
         use_effect_with_deps(
             move |connected| {
@@ -323,16 +490,11 @@ pub fn tesla_controls() -> Html {
                                         if let Some(v) = data["has_vehicle_charging_cmds"].as_bool() {
                                             has_vehicle_charging_cmds.set(v);
                                         }
-                                        if let Some(scopes) = data["granted_scopes"].as_str() {
-                                            granted_scopes_str.set(Some(scopes.to_string()));
-                                        }
-                                        scopes_checked.set(true);
                                     }
                                 }
                             }
                             Err(_) => {
                                 // If fetch fails, default to allowing everything (backwards compat)
-                                scopes_checked.set(true);
                             }
                         }
                     });
@@ -644,8 +806,16 @@ pub fn tesla_controls() -> Html {
         let is_rear_defroster_on = is_rear_defroster_on.clone();
         let last_refresh_time = last_refresh_time.clone();
         let last_refresh_epoch = last_refresh_epoch.clone();
+        let auto_refresh_paused = auto_refresh_paused.clone();
+        let refresh_count = refresh_count.clone();
 
         Callback::from(move |_: MouseEvent| {
+            // Reset auto-refresh counter on manual refresh (user is active)
+            refresh_count.set(0);
+            if *auto_refresh_paused {
+                auto_refresh_paused.set(false);
+            }
+
             let battery_loading = battery_loading.clone();
             let battery_level = battery_level.clone();
             let battery_range = battery_range.clone();
@@ -968,69 +1138,86 @@ pub fn tesla_controls() -> Html {
         };
     }
 
-    // Check for missing scopes (outside html! block to avoid macro issues)
-    let missing_cmds = *scopes_checked && !*has_vehicle_cmds;
-    let missing_data = *scopes_checked && !*has_vehicle_device_data;
-    let missing_charging = *scopes_checked && !*has_vehicle_charging_cmds;
-    let any_scope_missing = missing_cmds || missing_data || missing_charging;
 
-    // Build human-readable list of missing permissions
-    let missing_permissions: Vec<&str> = vec![
-        if missing_cmds { Some("Vehicle Commands") } else { None },
-        if missing_data { Some("Vehicle Data") } else { None },
-        if missing_charging { Some("Charging Commands") } else { None },
-    ].into_iter().flatten().collect();
-    let missing_permissions_str = missing_permissions.join(", ");
-
-    // Create scope refresh handler
-    let handle_scope_refresh = {
-        let scope_refresh_loading = scope_refresh_loading.clone();
-        let scope_refresh_error = scope_refresh_error.clone();
-        let has_vehicle_device_data = has_vehicle_device_data.clone();
-        let has_vehicle_cmds = has_vehicle_cmds.clone();
-        let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
-        let granted_scopes_str = granted_scopes_str.clone();
+    // Handler to resume auto-refresh (also triggers immediate refresh)
+    let handle_resume_refresh = {
+        let auto_refresh_paused = auto_refresh_paused.clone();
+        let refresh_count = refresh_count.clone();
+        let battery_level = battery_level.clone();
+        let battery_range = battery_range.clone();
+        let charging_state = charging_state.clone();
+        let is_locked = is_locked.clone();
+        let inside_temp = inside_temp.clone();
+        let outside_temp = outside_temp.clone();
+        let is_climate_on = is_climate_on.clone();
+        let is_front_defroster_on = is_front_defroster_on.clone();
+        let is_rear_defroster_on = is_rear_defroster_on.clone();
+        let last_refresh_time = last_refresh_time.clone();
+        let last_refresh_epoch = last_refresh_epoch.clone();
+        let battery_loading = battery_loading.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let scope_refresh_loading = scope_refresh_loading.clone();
-            let scope_refresh_error = scope_refresh_error.clone();
-            let has_vehicle_device_data = has_vehicle_device_data.clone();
-            let has_vehicle_cmds = has_vehicle_cmds.clone();
-            let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
-            let granted_scopes_str = granted_scopes_str.clone();
+            refresh_count.set(0);
+            auto_refresh_paused.set(false);
 
-            scope_refresh_loading.set(true);
-            scope_refresh_error.set(None);
+            // Trigger immediate refresh
+            let battery_level = battery_level.clone();
+            let battery_range = battery_range.clone();
+            let charging_state = charging_state.clone();
+            let is_locked = is_locked.clone();
+            let inside_temp = inside_temp.clone();
+            let outside_temp = outside_temp.clone();
+            let is_climate_on = is_climate_on.clone();
+            let is_front_defroster_on = is_front_defroster_on.clone();
+            let is_rear_defroster_on = is_rear_defroster_on.clone();
+            let last_refresh_time = last_refresh_time.clone();
+            let last_refresh_epoch = last_refresh_epoch.clone();
+            let battery_loading = battery_loading.clone();
 
             spawn_local(async move {
-                match Api::post("/api/auth/tesla/scopes/refresh").send().await {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(v) = data["has_vehicle_device_data"].as_bool() {
-                                    has_vehicle_device_data.set(v);
-                                }
-                                if let Some(v) = data["has_vehicle_cmds"].as_bool() {
-                                    has_vehicle_cmds.set(v);
-                                }
-                                if let Some(v) = data["has_vehicle_charging_cmds"].as_bool() {
-                                    has_vehicle_charging_cmds.set(v);
-                                }
-                                if let Some(scopes) = data["granted_scopes"].as_str() {
-                                    granted_scopes_str.set(Some(scopes.to_string()));
-                                }
+                battery_loading.set(true);
+                if let Ok(response) = Api::get("/api/tesla/battery-status").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(level) = data["battery_level"].as_i64() {
+                                battery_level.set(Some(level as i32));
                             }
-                        } else if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(error) = data["error"].as_str() {
-                                scope_refresh_error.set(Some(error.to_string()));
+                            if let Some(range) = data["battery_range"].as_f64() {
+                                battery_range.set(Some(range));
                             }
+                            if let Some(state) = data["charging_state"].as_str() {
+                                charging_state.set(Some(state.to_string()));
+                            }
+                            if let Some(locked) = data["locked"].as_bool() {
+                                is_locked.set(Some(locked));
+                            }
+                            if let Some(temp) = data["inside_temp"].as_f64() {
+                                inside_temp.set(Some(temp));
+                            }
+                            if let Some(temp) = data["outside_temp"].as_f64() {
+                                outside_temp.set(Some(temp));
+                            }
+                            if let Some(climate) = data["is_climate_on"].as_bool() {
+                                is_climate_on.set(Some(climate));
+                            }
+                            if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
+                                is_front_defroster_on.set(Some(front_defrost));
+                            }
+                            if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
+                                is_rear_defroster_on.set(Some(rear_defrost));
+                            }
+                            let now = web_sys::js_sys::Date::new_0();
+                            let time_str = format!(
+                                "{:02}:{:02}",
+                                now.get_hours() as u32,
+                                now.get_minutes() as u32,
+                            );
+                            last_refresh_time.set(Some(time_str));
+                            *last_refresh_epoch.borrow_mut() = now.get_time();
                         }
                     }
-                    Err(e) => {
-                        scope_refresh_error.set(Some(format!("Network error: {}", e)));
-                    }
                 }
-                scope_refresh_loading.set(false);
+                battery_loading.set(false);
             });
         })
     };
@@ -1038,6 +1225,23 @@ pub fn tesla_controls() -> Html {
     // Connected - show controls
     html! {
         <div class="tesla-controls-container">
+            // Auto-refresh paused overlay
+            {
+                if *auto_refresh_paused {
+                    html! {
+                        <div class="refresh-paused-overlay" onclick={handle_resume_refresh}>
+                            <div class="refresh-paused-content">
+                                <i class="fas fa-pause-circle"></i>
+                                <span>{"Auto-refresh paused"}</span>
+                                <span class="refresh-paused-hint">{"Tap to resume"}</span>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+
             // Passkey verification modal
             {
                 match &*passkey_state {
@@ -1152,50 +1356,6 @@ pub fn tesla_controls() -> Html {
                 }
             }
 
-            // Missing scopes warning banner
-            {
-                if any_scope_missing {
-                    html! {
-                        <div class="scope-warning-banner">
-                            <div class="scope-warning-icon">
-                                <i class="fas fa-exclamation-triangle"></i>
-                            </div>
-                            <div class="scope-warning-content">
-                                <strong>{format!("Missing permission: {}. Reconnect Tesla to grant.", missing_permissions_str)}</strong>
-                                {
-                                    if let Some(error) = (*scope_refresh_error).as_ref() {
-                                        html! { <p class="scope-error">{error}</p> }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                            </div>
-                            <div class="scope-warning-actions">
-                                <button
-                                    class="scope-btn scope-btn-check"
-                                    onclick={handle_scope_refresh.clone()}
-                                    disabled={*scope_refresh_loading}
-                                    title="Re-check permissions from your Tesla token"
-                                >
-                                    {
-                                        if *scope_refresh_loading {
-                                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                                        } else {
-                                            html! { <><i class="fas fa-sync-alt"></i>{" Check"}</> }
-                                        }
-                                    }
-                                </button>
-                                <a href="/" class="scope-btn scope-btn-reconnect" title="Disconnect and reconnect with all permissions">
-                                    <i class="fas fa-link"></i>{" Reconnect"}
-                                </a>
-                            </div>
-                        </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-
             <div class="tesla-controls-header">
                 <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="32" height="32"/>
                 <span class="vehicle-name">
@@ -1269,12 +1429,12 @@ pub fn tesla_controls() -> Html {
                             <div class="temp-row">
                                 {
                                     if let Some(temp) = *inside_temp {
-                                        html! { <span class="temp-item">{"🏠 "}{format!("{:.1}°C", temp)}</span> }
+                                        html! { <span class="temp-item"><i class="fas fa-car" title="Inside"></i>{format!(" {:.1}°C", temp)}</span> }
                                     } else { html! {} }
                                 }
                                 {
                                     if let Some(temp) = *outside_temp {
-                                        html! { <span class="temp-item">{"🌡️ "}{format!("{:.1}°C", temp)}</span> }
+                                        html! { <span class="temp-item"><i class="fas fa-cloud" title="Outside"></i>{format!(" {:.1}°C", temp)}</span> }
                                     } else { html! {} }
                                 }
                             </div>
@@ -1288,7 +1448,7 @@ pub fn tesla_controls() -> Html {
                 <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                     <button
                         onclick={handle_lock}
-                        disabled={*lock_loading || !*has_vehicle_cmds}
+                        disabled={*lock_loading || *battery_loading || !*has_vehicle_cmds}
                         class={format!("control-btn {} {}",
                             if is_locked.map(|l| !l).unwrap_or(false) { "control-btn-attention" } else { "" },
                             if !*has_vehicle_cmds { "control-btn-disabled" } else { "" }
@@ -1297,6 +1457,9 @@ pub fn tesla_controls() -> Html {
                         {
                             if *lock_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else if *battery_loading && is_locked.is_none() {
+                                // Show lock icon with spinner while loading initial state
+                                html! { <><i class="fas fa-lock"></i><i class="fas fa-spinner fa-spin btn-status-spinner"></i></> }
                             } else if let Some(locked) = *is_locked {
                                 if locked {
                                     html! { <><i class="fas fa-lock"></i>{" Locked"}</> }
@@ -1352,12 +1515,14 @@ pub fn tesla_controls() -> Html {
                             <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                                 <button
                                     onclick={handle_climate.clone()}
-                                    disabled={*climate_loading || !*has_vehicle_cmds}
+                                    disabled={*climate_loading || *battery_loading || !*has_vehicle_cmds}
                                     class={format!("control-btn {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
                                 >
                                     {
                                         if *climate_loading {
                                             html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else if *battery_loading && is_climate_on.is_none() {
+                                            html! { <><i class="fas fa-fan"></i><i class="fas fa-spinner fa-spin btn-status-spinner"></i></> }
                                         } else {
                                             html! { <><i class="fas fa-fan"></i>{" Climate"}</> }
                                         }
@@ -1371,7 +1536,7 @@ pub fn tesla_controls() -> Html {
                 <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission. Reconnect Tesla to grant." } else { "" }}>
                     <button
                         onclick={handle_defrost}
-                        disabled={*defrost_loading || !*has_vehicle_cmds}
+                        disabled={*defrost_loading || *battery_loading || !*has_vehicle_cmds}
                         class={format!("control-btn {} {}",
                             if is_front_defroster_on.unwrap_or(false) || is_rear_defroster_on.unwrap_or(false) { "control-btn-active" } else { "" },
                             if !*has_vehicle_cmds { "control-btn-disabled" } else { "" }
@@ -1380,6 +1545,8 @@ pub fn tesla_controls() -> Html {
                         {
                             if *defrost_loading {
                                 html! { <i class="fas fa-spinner fa-spin"></i> }
+                            } else if *battery_loading && is_front_defroster_on.is_none() {
+                                html! { <><i class="fas fa-snowflake"></i><i class="fas fa-spinner fa-spin btn-status-spinner"></i></> }
                             } else {
                                 let front_on = is_front_defroster_on.unwrap_or(false);
                                 let rear_on = is_rear_defroster_on.unwrap_or(false);
@@ -1538,6 +1705,7 @@ pub fn tesla_controls() -> Html {
 fn get_styles() -> &'static str {
     r#"
         .tesla-controls-container {
+            position: relative;
             background: rgba(30, 30, 30, 0.7);
             border: 1px solid rgba(30, 144, 255, 0.1);
             border-radius: 16px;
@@ -1640,7 +1808,7 @@ fn get_styles() -> &'static str {
         }
         .temp-row {
             display: flex;
-            gap: 1rem;
+            gap: 1.25rem;
             margin-top: 0.75rem;
             padding-top: 0.75rem;
             border-top: 1px solid rgba(30, 144, 255, 0.1);
@@ -1648,6 +1816,13 @@ fn get_styles() -> &'static str {
         .temp-item {
             color: #999;
             font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .temp-item i {
+            color: #7EB2FF;
+            font-size: 14px;
         }
         .tesla-control-buttons {
             display: grid;
@@ -1740,6 +1915,12 @@ fn get_styles() -> &'static str {
         .control-btn-full {
             width: 100%;
         }
+        /* Small spinner shown next to icon while loading state */
+        .btn-status-spinner {
+            margin-left: 6px;
+            font-size: 12px;
+            opacity: 0.7;
+        }
         .charging-notify-section {
             margin-top: 1rem;
             padding-top: 1rem;
@@ -1760,6 +1941,45 @@ fn get_styles() -> &'static str {
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Auto-refresh paused overlay */
+        .refresh-paused-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .refresh-paused-overlay:hover {
+            background: rgba(0, 0, 0, 0.75);
+        }
+        .refresh-paused-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            color: #999;
+        }
+        .refresh-paused-content i {
+            font-size: 32px;
+            color: #7EB2FF;
+        }
+        .refresh-paused-content span {
+            font-size: 14px;
+        }
+        .refresh-paused-hint {
+            font-size: 12px !important;
+            color: #666 !important;
+        }
+
         .passkey-dialog-overlay {
             position: fixed;
             top: 0;
@@ -1877,84 +2097,6 @@ fn get_styles() -> &'static str {
             min-width: 90px;
         }
 
-        /* Scope warning banner styles */
-        .scope-warning-banner {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            background: rgba(255, 152, 0, 0.1);
-            border: 1px solid rgba(255, 152, 0, 0.3);
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin-bottom: 1rem;
-        }
-        .scope-warning-icon {
-            color: #FFB74D;
-            font-size: 18px;
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
-        .scope-warning-content {
-            flex: 1;
-            color: #FFB74D;
-            font-size: 13px;
-            line-height: 1.4;
-        }
-        .scope-warning-content strong {
-            display: block;
-            margin-bottom: 4px;
-        }
-        .scope-error {
-            color: #ff6b6b;
-            margin-top: 6px;
-            font-size: 12px;
-        }
-        .scope-warning-actions {
-            display: flex;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-        .scope-btn {
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            text-decoration: none;
-            transition: all 0.2s;
-            border: none;
-        }
-        .scope-btn-check {
-            background: rgba(255, 255, 255, 0.1);
-            color: #FFB74D;
-            border: 1px solid rgba(255, 152, 0, 0.3);
-        }
-        .scope-btn-check:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.15);
-        }
-        .scope-btn-check:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        .scope-btn-reconnect {
-            background: rgba(30, 144, 255, 0.2);
-            color: #7EB2FF;
-            border: 1px solid rgba(30, 144, 255, 0.3);
-        }
-        .scope-btn-reconnect:hover {
-            background: rgba(30, 144, 255, 0.3);
-        }
-        @media (max-width: 480px) {
-            .scope-warning-banner {
-                flex-direction: column;
-            }
-            .scope-warning-actions {
-                width: 100%;
-                justify-content: flex-end;
-            }
-        }
     "#
 }
 

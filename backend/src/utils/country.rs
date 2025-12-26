@@ -95,14 +95,14 @@ pub fn is_euro_plan_country(country: &str) -> bool {
     )
 }
 
-/// Check if a Stripe price ID is the Monitor plan (€29/mo, 50 messages)
+/// Check if a Stripe price ID is the Monitor plan (€29/mo, 40 messages)
 pub fn is_monitor_plan_price(price_id: &str) -> bool {
     std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
         .map(|p| p == price_id)
         .unwrap_or(false)
 }
 
-/// Check if a Stripe price ID is the Digest plan (€59/mo, 150 messages)
+/// Check if a Stripe price ID is the Digest plan (€49/mo, 120 messages)
 pub fn is_digest_plan_price(price_id: &str) -> bool {
     std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
         .map(|p| p == price_id)

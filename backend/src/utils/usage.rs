@@ -301,17 +301,25 @@ pub fn deduct_user_credits(
         (cost, cost) // Same value for both since both are euro-based
     };
 
+    // Verify sufficient balance before deducting (prevents race condition where check passed but balance changed)
+    // User must have enough in EITHER credits_left OR credits
+    if user.credits_left < credits_left_deduction && user.credits < credits_deduction {
+        eprintln!("Insufficient credits at deduction time for user {}: credits_left={}, credits={}, needed={}/{}",
+            user_id, user.credits_left, user.credits, credits_left_deduction, credits_deduction);
+        return Err("Insufficient credits".to_string());
+    }
+
     // Deduct credits: prefer credits_left, fall back to credits
     if user.credits_left >= credits_left_deduction && credits_left_deduction > 0.0 {
         // Deduct from credits_left
-        let new_credits_left = (user.credits_left - credits_left_deduction).max(0.0);
+        let new_credits_left = user.credits_left - credits_left_deduction;
         if let Err(e) = state.user_repository.update_user_credits_left(user_id, new_credits_left) {
             eprintln!("Failed to update user credits_left: {}", e);
             return Err("Failed to process credits".to_string());
         }
     } else {
         // Deduct from regular credits
-        let new_credits = (user.credits - credits_deduction).max(0.0);
+        let new_credits = user.credits - credits_deduction;
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());

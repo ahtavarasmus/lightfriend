@@ -881,7 +881,7 @@ async fn recalculate_credits_for_country_change(
     old_credits_left: f32,
     plan_type: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use crate::api::twilio_availability::get_byot_pricing;
+    use crate::api::twilio_pricing::get_euro_country_pricing;
 
     // Determine plan messages (40 for monitor, 120 for digest)
     let plan_messages: f32 = match plan_type {
@@ -894,24 +894,21 @@ async fn recalculate_credits_for_country_change(
 
     // Get max credits for a country
     // US/CA: always 400 messages (hosted plan)
-    // Euro: credits_left is € value = plan_messages × 3 × sms_price × 1.3
+    // Euro: credits_left is € value = plan_messages × regular_message_price
     let get_max_credits = async |country: Option<&str>| -> f32 {
         if is_us_ca(country) {
             // US/CA: always 400 messages (hosted plan)
             400.0
         } else if let Some(c) = country {
-            // Euro: € value based on SMS pricing
-            if let Ok(pricing) = get_byot_pricing(state, c).await {
-                if let Some(sms_price) = pricing.sms_price_per_segment {
-                    // Max credits = plan_messages × 3 segments × sms_price × 1.3 VAT
-                    return plan_messages * 3.0 * sms_price * 1.3;
-                }
+            // Euro: € value based on SMS pricing (regular_message_price already includes segments × margin)
+            if let Ok(pricing) = get_euro_country_pricing(state, c).await {
+                return plan_messages * pricing.regular_message_price;
             }
-            // Fallback: assume €0.10 per segment
-            plan_messages * 3.0 * 0.10 * 1.3
+            // Fallback: €0.39 per message (same as stripe_handlers.rs)
+            plan_messages * 0.39
         } else {
             // Unknown country fallback
-            plan_messages * 3.0 * 0.10 * 1.3
+            plan_messages * 0.39
         }
     };
 
@@ -1740,13 +1737,7 @@ pub async fn web_chat(
             credits_charged: charged_amount,
         }))
     } else {
-        // Refund the credits if processing failed
-        if user.credits_left >= credits_left_cost {
-            let _ = state.user_repository.update_user_credits_left(auth_user.user_id, user.credits_left);
-        } else {
-            let _ = state.user_repository.update_user_credits(auth_user.user_id, user.credits);
-        }
-
+        // No refund - credits are consumed on attempt
         Err((
             status,
             Json(json!({
@@ -2156,13 +2147,7 @@ pub async fn web_chat_with_image(
             credits_charged: charged_amount,
         }))
     } else {
-        // Refund the credits if processing failed
-        if user.credits_left >= credits_left_cost {
-            let _ = state.user_repository.update_user_credits_left(auth_user.user_id, user.credits_left);
-        } else {
-            let _ = state.user_repository.update_user_credits(auth_user.user_id, user.credits);
-        }
-
+        // No refund - credits are consumed on attempt
         Err((
             status,
             Json(json!({

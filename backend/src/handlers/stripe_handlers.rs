@@ -152,7 +152,13 @@ async fn setup_user_subscription(
     let credits: f32 = if sub_info.tier == "tier 3" {
         0.0
     } else if sub_info.tier == "tier 2" {
-        let country = phone_country.unwrap_or("FI");
+        let country = match phone_country {
+            Some(c) => c,
+            None => {
+                tracing::warn!("No phone country for user {}, using FI as fallback for credit calculation", user_id);
+                "FI"
+            }
+        };
         if country == "US" || country == "CA" {
             400.0
         } else if is_monitor_plan_price(price_id) || is_legacy_euro_plan_price(price_id) {
@@ -1077,10 +1083,17 @@ pub async fn stripe_webhook(
                             }
 
                             tracing::info!("Canceling existing subscription: {}", existing_sub.id);
+                            // Add plan_change metadata so the deletion webhook knows to skip processing
+                            let mut metadata = std::collections::HashMap::new();
+                            metadata.insert("plan_change".to_string(), "true".to_string());
                             let _ = Subscription::update(
                                 &client,
                                 &existing_sub.id,
-                                UpdateSubscription { cancel_at_period_end: Some(true), ..Default::default() },
+                                UpdateSubscription {
+                                    cancel_at_period_end: Some(true),
+                                    metadata: Some(metadata),
+                                    ..Default::default()
+                                },
                             ).await;
                         }
                     }
@@ -1359,7 +1372,7 @@ pub async fn stripe_webhook(
                             });
                         }
 
-                        // No active subscriptions left, clear subscription tier, country, plan_type, and credits
+                        // No active subscriptions left, clear subscription tier, country, plan_type, credits, and billing date
                         tracing::info!("No active subscriptions remaining, clearing subscription info");
                         if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
                             tracing::error!("Failed to clear subscription tier: {}", e);
@@ -1374,6 +1387,10 @@ pub async fn stripe_webhook(
                         // Clear monthly credits
                         if let Err(e) = state.user_repository.update_sub_credits(user.id, 0.0) {
                             tracing::error!("Failed to clear subscription credits: {}", e);
+                        }
+                        // Clear next billing date
+                        if let Err(e) = state.user_core.update_next_billing_date(user.id, 0) {
+                            tracing::error!("Failed to clear next billing date: {}", e);
                         }
                     } else {
                         // User still has active subscriptions - update to the first one found

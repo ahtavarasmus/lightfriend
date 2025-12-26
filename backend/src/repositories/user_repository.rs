@@ -339,8 +339,10 @@ impl UserRepository {
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
-        
-        Ok(user.credits < charge_back_threshold)
+
+        // Only trigger auto-recharge if BOTH credits AND credits_left are low
+        // This prevents unnecessary charges when user still has monthly allowance
+        Ok(user.credits < charge_back_threshold && user.credits_left < charge_back_threshold)
     }
 
     pub fn get_usage_data(&self, _user_id: i32, from_timestamp: i32) -> Result<Vec<UsageDataPoint>, DieselError> {
