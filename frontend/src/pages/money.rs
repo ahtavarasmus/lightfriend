@@ -2330,7 +2330,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     plan_type={Some("monitor".to_string())}
                                 >
                                     <MessageEquivalentDisplay
-                                        plan_messages={30}
+                                        plan_messages={40}
                                         country={selected_country_clone}
                                     />
                                 </PricingCard>

@@ -134,6 +134,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let show_disconnect_modal = use_state(|| false);
     let is_checking_health = use_state(|| false);
     let health_message = use_state(|| None::<String>);
+    let show_reset_modal = use_state(|| false);
+    let is_resetting = use_state(|| false);
+    let reset_success = use_state(|| false);
 
     // Function to fetch status
     let fetch_status = {
@@ -410,6 +413,58 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         })
     };
 
+    // Function to reset Matrix connection
+    let reset_matrix = {
+        let is_resetting = is_resetting.clone();
+        let show_reset_modal = show_reset_modal.clone();
+        let reset_success = reset_success.clone();
+        let error = error.clone();
+        let connection_status = connection_status.clone();
+        let fetch_status = fetch_status.clone();
+        Callback::from(move |_| {
+            let is_resetting = is_resetting.clone();
+            let show_reset_modal = show_reset_modal.clone();
+            let reset_success = reset_success.clone();
+            let error = error.clone();
+            let connection_status = connection_status.clone();
+            let fetch_status = fetch_status.clone();
+            is_resetting.set(true);
+            spawn_local(async move {
+                match Api::delete("/api/auth/matrix/reset").send().await {
+                    Ok(response) => {
+                        is_resetting.set(false);
+                        show_reset_modal.set(false);
+                        if response.status() == 200 {
+                            reset_success.set(true);
+                            error.set(None);
+                            // Update connection status to disconnected
+                            connection_status.set(Some(BridgeStatus {
+                                connected: false,
+                                status: "not_connected".to_string(),
+                                created_at: (js_sys::Date::now() / 1000.0) as i32,
+                                connected_account: None,
+                            }));
+                            // Auto-hide success message after 5 seconds
+                            let reset_success_clone = reset_success.clone();
+                            spawn_local(async move {
+                                TimeoutFuture::new(5_000).await;
+                                reset_success_clone.set(false);
+                            });
+                            // Refresh status
+                            fetch_status.emit(());
+                        } else {
+                            error.set(Some("Failed to reset Matrix connection".to_string()));
+                        }
+                    }
+                    Err(_) => {
+                        is_resetting.set(false);
+                        error.set(Some("Failed to reset Matrix connection".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
     // Generate info section id
     let info_id = format!("{}-info", bridge_id);
     let info_id_clone = info_id.clone();
@@ -613,9 +668,53 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             } else {
                 <p>{"Loading connection status..."}</p>
             }
+            if *reset_success {
+                <div class="reset-success-banner">
+                    {"Matrix connection has been reset. You can now try reconnecting."}
+                </div>
+            }
             if let Some(error_msg) = (*error).clone() {
                 <div class="error-message">
-                    {error_msg}
+                    <div class="error-content">
+                        <span>{error_msg}</span>
+                    </div>
+                    <div class="error-actions">
+                        <p class="reset-hint">{"If you're having persistent connection issues, try resetting the Matrix connection."}</p>
+                        <button onclick={
+                            let show_reset_modal = show_reset_modal.clone();
+                            Callback::from(move |_| show_reset_modal.set(true))
+                        } class="reset-button">
+                            {"Reset Matrix Connection"}
+                        </button>
+                    </div>
+                </div>
+            }
+            if *show_reset_modal {
+                <div class="modal-overlay">
+                    <div class="modal-content">
+                        <h3>{"Reset Matrix Connection?"}</h3>
+                        <p>{"This will clear all Matrix authentication credentials and allow you to reconnect fresh. This affects all messaging bridges (WhatsApp, Signal, Telegram)."}</p>
+                        <p class="warning-text">{"You will need to reconnect each bridge after resetting."}</p>
+                        <div class="modal-buttons">
+                            <button onclick={
+                                let show_reset_modal = show_reset_modal.clone();
+                                Callback::from(move |_| show_reset_modal.set(false))
+                            } class="cancel-button" disabled={*is_resetting}>
+                                {"Cancel"}
+                            </button>
+                            <button onclick={
+                                let reset_matrix = reset_matrix.clone();
+                                Callback::from(move |_| reset_matrix.emit(()))
+                            } class="confirm-reset-button" disabled={*is_resetting}>
+                                if *is_resetting {
+                                    <span class="button-spinner"></span>
+                                    {"Resetting..."}
+                                } else {
+                                    {"Yes, Reset Connection"}
+                                }
+                            </button>
+                        </div>
+                    </div>
                 </div>
             }
             <style>
@@ -987,6 +1086,68 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         border-radius: 8px;
                         padding: 1rem;
                         margin-top: 1rem;
+                    }
+                    .error-content {
+                        margin-bottom: 0.75rem;
+                    }
+                    .error-actions {
+                        border-top: 1px solid rgba(255, 75, 75, 0.2);
+                        padding-top: 0.75rem;
+                        margin-top: 0.5rem;
+                    }
+                    .reset-hint {
+                        color: #CCC;
+                        font-size: 0.85rem;
+                        margin: 0 0 0.75rem 0;
+                    }
+                    .reset-button {
+                        background: transparent;
+                        border: 1px solid rgba(255, 165, 0, 0.5);
+                        color: #FFA500;
+                        padding: 0.5rem 1rem;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        transition: all 0.3s ease;
+                    }
+                    .reset-button:hover {
+                        background: rgba(255, 165, 0, 0.1);
+                        border-color: #FFA500;
+                        transform: translateY(-1px);
+                    }
+                    .reset-success-banner {
+                        color: #4CAF50;
+                        background: rgba(76, 175, 80, 0.1);
+                        border: 1px solid rgba(76, 175, 80, 0.3);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-top: 1rem;
+                        text-align: center;
+                    }
+                    .confirm-reset-button {
+                        background: linear-gradient(45deg, #FFA500, #FF8C00);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+                    .confirm-reset-button:hover:not(:disabled) {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(255, 165, 0, 0.3);
+                    }
+                    .confirm-reset-button:disabled {
+                        opacity: 0.7;
+                        cursor: not-allowed;
+                    }
+                    .warning-text {
+                        color: #FFA500;
+                        font-size: 0.9rem;
+                        margin-top: 0.5rem;
                     }
                     .success-banner {
                         color: #4CAF50;

@@ -1470,6 +1470,20 @@ impl UserRepository {
         Ok(scopes)
     }
 
+    /// Update the granted scopes for a user's Tesla connection
+    pub fn update_tesla_granted_scopes(&self, user_id: i32, scopes: String) -> Result<(), DieselError> {
+        use crate::schema::tesla;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(tesla::table)
+            .filter(tesla::user_id.eq(user_id))
+            .filter(tesla::status.eq("active"))
+            .set(tesla::granted_scopes.eq(Some(scopes)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn get_google_tasks_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1627,6 +1641,24 @@ impl UserRepository {
             ))
             .execute(&mut conn)?;
 
+        Ok(())
+    }
+
+    /// Clear all Matrix credentials for a user - used when Matrix auth fails and user needs to re-register
+    pub fn clear_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::matrix_username.eq(None::<String>),
+                users::encrypted_matrix_access_token.eq(None::<String>),
+                users::matrix_device_id.eq(None::<String>),
+                users::encrypted_matrix_password.eq(None::<String>),
+                users::encrypted_matrix_secret_storage_recovery_key.eq(None::<String>),
+            ))
+            .execute(&mut conn)?;
+
+        tracing::info!("Cleared Matrix credentials for user {}", user_id);
         Ok(())
     }
 

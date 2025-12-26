@@ -144,7 +144,7 @@ use handlers::{
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
     signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
     messenger_auth, messenger_handlers, instagram_auth, instagram_handlers,
-    tesla_auth, youtube_auth, youtube, contact_profile_handlers,
+    tesla_auth, youtube_auth, youtube, contact_profile_handlers, bridge_auth_common,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -498,6 +498,7 @@ async fn main() {
         .route("/api/auth/tesla/connection", delete(tesla_auth::tesla_disconnect))
         .route("/api/auth/tesla/status", get(tesla_auth::tesla_status))
         .route("/api/auth/tesla/scopes", get(tesla_auth::tesla_scopes))
+        .route("/api/auth/tesla/scopes/refresh", post(tesla_auth::tesla_refresh_scopes))
         .route("/api/auth/tesla/virtual-key", get(tesla_auth::get_virtual_key_link))
         .route("/api/tesla/command", post(tesla_auth::tesla_command))
         .route("/api/tesla/battery-status", get(tesla_auth::tesla_battery_status))
@@ -583,6 +584,8 @@ async fn main() {
         .route("/api/whatsapp/send", post(whatsapp_handlers::send_message))
         .route("/api/whatsapp/search-rooms", post(whatsapp_handlers::search_whatsapp_rooms_handler))
         .route("/api/whatsapp/search-rooms", get(whatsapp_handlers::search_rooms_handler))
+        // Matrix connection reset route (clears all Matrix credentials when auth fails)
+        .route("/api/auth/matrix/reset", delete(bridge_auth_common::reset_matrix_connection))
         // Filter routes
         .route("/api/filters/waiting-checks", get(filter_handlers::get_waiting_checks))
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))

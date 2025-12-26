@@ -85,9 +85,14 @@ pub fn tesla_controls() -> Html {
     let charging_notify_loading = use_state(|| false);
 
     // Scope-based feature gating state
-    let has_vehicle_device_data = use_state(|| true);  // Default true for backwards compat
+    // Default to true until we've checked - prevents flashing disabled state
+    let has_vehicle_device_data = use_state(|| true);
     let has_vehicle_cmds = use_state(|| true);
     let has_vehicle_charging_cmds = use_state(|| true);
+    let scopes_checked = use_state(|| false);  // Track if we've fetched scopes from API
+    let scope_refresh_loading = use_state(|| false);
+    let scope_refresh_error = use_state(|| None::<String>);
+    let granted_scopes_str = use_state(|| None::<String>);  // Raw scopes string for display
 
     // Auto-hide command result after 10 seconds
     {
@@ -298,6 +303,8 @@ pub fn tesla_controls() -> Html {
         let has_vehicle_device_data = has_vehicle_device_data.clone();
         let has_vehicle_cmds = has_vehicle_cmds.clone();
         let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
+        let scopes_checked = scopes_checked.clone();
+        let granted_scopes_str = granted_scopes_str.clone();
 
         use_effect_with_deps(
             move |connected| {
@@ -316,11 +323,16 @@ pub fn tesla_controls() -> Html {
                                         if let Some(v) = data["has_vehicle_charging_cmds"].as_bool() {
                                             has_vehicle_charging_cmds.set(v);
                                         }
+                                        if let Some(scopes) = data["granted_scopes"].as_str() {
+                                            granted_scopes_str.set(Some(scopes.to_string()));
+                                        }
+                                        scopes_checked.set(true);
                                     }
                                 }
                             }
                             Err(_) => {
                                 // If fetch fails, default to allowing everything (backwards compat)
+                                scopes_checked.set(true);
                             }
                         }
                     });
@@ -956,6 +968,73 @@ pub fn tesla_controls() -> Html {
         };
     }
 
+    // Check for missing scopes (outside html! block to avoid macro issues)
+    let missing_cmds = *scopes_checked && !*has_vehicle_cmds;
+    let missing_data = *scopes_checked && !*has_vehicle_device_data;
+    let missing_charging = *scopes_checked && !*has_vehicle_charging_cmds;
+    let any_scope_missing = missing_cmds || missing_data || missing_charging;
+
+    // Build human-readable list of missing permissions
+    let missing_permissions: Vec<&str> = vec![
+        if missing_cmds { Some("Vehicle Commands") } else { None },
+        if missing_data { Some("Vehicle Data") } else { None },
+        if missing_charging { Some("Charging Commands") } else { None },
+    ].into_iter().flatten().collect();
+    let missing_permissions_str = missing_permissions.join(", ");
+
+    // Create scope refresh handler
+    let handle_scope_refresh = {
+        let scope_refresh_loading = scope_refresh_loading.clone();
+        let scope_refresh_error = scope_refresh_error.clone();
+        let has_vehicle_device_data = has_vehicle_device_data.clone();
+        let has_vehicle_cmds = has_vehicle_cmds.clone();
+        let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
+        let granted_scopes_str = granted_scopes_str.clone();
+
+        Callback::from(move |_: MouseEvent| {
+            let scope_refresh_loading = scope_refresh_loading.clone();
+            let scope_refresh_error = scope_refresh_error.clone();
+            let has_vehicle_device_data = has_vehicle_device_data.clone();
+            let has_vehicle_cmds = has_vehicle_cmds.clone();
+            let has_vehicle_charging_cmds = has_vehicle_charging_cmds.clone();
+            let granted_scopes_str = granted_scopes_str.clone();
+
+            scope_refresh_loading.set(true);
+            scope_refresh_error.set(None);
+
+            spawn_local(async move {
+                match Api::post("/api/auth/tesla/scopes/refresh").send().await {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                if let Some(v) = data["has_vehicle_device_data"].as_bool() {
+                                    has_vehicle_device_data.set(v);
+                                }
+                                if let Some(v) = data["has_vehicle_cmds"].as_bool() {
+                                    has_vehicle_cmds.set(v);
+                                }
+                                if let Some(v) = data["has_vehicle_charging_cmds"].as_bool() {
+                                    has_vehicle_charging_cmds.set(v);
+                                }
+                                if let Some(scopes) = data["granted_scopes"].as_str() {
+                                    granted_scopes_str.set(Some(scopes.to_string()));
+                                }
+                            }
+                        } else if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(error) = data["error"].as_str() {
+                                scope_refresh_error.set(Some(error.to_string()));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        scope_refresh_error.set(Some(format!("Network error: {}", e)));
+                    }
+                }
+                scope_refresh_loading.set(false);
+            });
+        })
+    };
+
     // Connected - show controls
     html! {
         <div class="tesla-controls-container">
@@ -1070,6 +1149,50 @@ pub fn tesla_controls() -> Html {
                             </div>
                         </div>
                     },
+                }
+            }
+
+            // Missing scopes warning banner
+            {
+                if any_scope_missing {
+                    html! {
+                        <div class="scope-warning-banner">
+                            <div class="scope-warning-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="scope-warning-content">
+                                <strong>{format!("Missing permission: {}. Reconnect Tesla to grant.", missing_permissions_str)}</strong>
+                                {
+                                    if let Some(error) = (*scope_refresh_error).as_ref() {
+                                        html! { <p class="scope-error">{error}</p> }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </div>
+                            <div class="scope-warning-actions">
+                                <button
+                                    class="scope-btn scope-btn-check"
+                                    onclick={handle_scope_refresh.clone()}
+                                    disabled={*scope_refresh_loading}
+                                    title="Re-check permissions from your Tesla token"
+                                >
+                                    {
+                                        if *scope_refresh_loading {
+                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else {
+                                            html! { <><i class="fas fa-sync-alt"></i>{" Check"}</> }
+                                        }
+                                    }
+                                </button>
+                                <a href="/" class="scope-btn scope-btn-reconnect" title="Disconnect and reconnect with all permissions">
+                                    <i class="fas fa-link"></i>{" Reconnect"}
+                                </a>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
                 }
             }
 
@@ -1752,6 +1875,85 @@ fn get_styles() -> &'static str {
         .cabin-overheat-buttons .control-btn {
             flex: 1;
             min-width: 90px;
+        }
+
+        /* Scope warning banner styles */
+        .scope-warning-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            background: rgba(255, 152, 0, 0.1);
+            border: 1px solid rgba(255, 152, 0, 0.3);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 1rem;
+        }
+        .scope-warning-icon {
+            color: #FFB74D;
+            font-size: 18px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .scope-warning-content {
+            flex: 1;
+            color: #FFB74D;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .scope-warning-content strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .scope-error {
+            color: #ff6b6b;
+            margin-top: 6px;
+            font-size: 12px;
+        }
+        .scope-warning-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .scope-btn {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: none;
+        }
+        .scope-btn-check {
+            background: rgba(255, 255, 255, 0.1);
+            color: #FFB74D;
+            border: 1px solid rgba(255, 152, 0, 0.3);
+        }
+        .scope-btn-check:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .scope-btn-check:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .scope-btn-reconnect {
+            background: rgba(30, 144, 255, 0.2);
+            color: #7EB2FF;
+            border: 1px solid rgba(30, 144, 255, 0.3);
+        }
+        .scope-btn-reconnect:hover {
+            background: rgba(30, 144, 255, 0.3);
+        }
+        @media (max-width: 480px) {
+            .scope-warning-banner {
+                flex-direction: column;
+            }
+            .scope-warning-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
         }
     "#
 }

@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 use time::OffsetDateTime;
-use tracing::{info, error};
+use tracing::{info, error, warn};
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 
 use crate::{
     AppState,
@@ -25,12 +26,66 @@ use crate::{
     utils::encryption::{encrypt, decrypt},
 };
 
+/// JWT claims structure for Tesla access token
+#[derive(Debug, Deserialize)]
+struct TeslaJwtClaims {
+    /// Scopes are in the "scp" claim as an array of strings
+    #[serde(default)]
+    scp: Vec<String>,
+    /// Alternative: some tokens use "scope" as space-separated string
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+/// Extract scopes from a Tesla JWT access token without verifying signature
+/// Tesla tokens are JWTs that contain the granted scopes in the "scp" claim
+fn extract_scopes_from_jwt(access_token: &str) -> Option<String> {
+    // Create a validation that doesn't verify the signature (we just want to read claims)
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_exp = false;
+    validation.set_audience::<&str>(&[]); // Don't validate audience
+
+    // Decode without verification (we trust Tesla issued the token)
+    match decode::<TeslaJwtClaims>(
+        access_token,
+        &DecodingKey::from_secret(&[]), // Not used when signature validation is disabled
+        &validation,
+    ) {
+        Ok(token_data) => {
+            let claims = token_data.claims;
+
+            // First try the scp array (standard Tesla format)
+            if !claims.scp.is_empty() {
+                let scopes = claims.scp.join(" ");
+                info!("Extracted scopes from JWT scp claim: {}", scopes);
+                return Some(scopes);
+            }
+
+            // Fallback to scope string
+            if let Some(scope) = claims.scope {
+                if !scope.is_empty() {
+                    info!("Extracted scopes from JWT scope claim: {}", scope);
+                    return Some(scope);
+                }
+            }
+
+            warn!("JWT decoded but no scopes found in claims");
+            None
+        }
+        Err(e) => {
+            warn!("Failed to decode Tesla JWT for scope extraction: {}", e);
+            None
+        }
+    }
+}
+
 // Helper to create error redirect for OAuth callback failures
 fn tesla_error_redirect(error_msg: &str) -> Redirect {
     let frontend_url = std::env::var("FRONTEND_URL")
         .unwrap_or_else(|_| "http://localhost:8080".to_string());
     let encoded_error = urlencoding::encode(error_msg);
-    Redirect::to(&format!("{}/connections?tesla=error&message={}", frontend_url, encoded_error))
+    Redirect::to(&format!("{}?tesla=error&message={}", frontend_url, encoded_error))
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,8 +358,9 @@ pub async fn tesla_callback(
     let expires_in = token_data["expires_in"].as_i64()
         .unwrap_or(3600) as i32;
 
-    // Extract granted scopes from token response
-    let granted_scopes = token_data["scope"].as_str().map(|s| s.to_string());
+    // Extract granted scopes - first try JWT token claims, then fallback to token response
+    let granted_scopes = extract_scopes_from_jwt(access_token)
+        .or_else(|| token_data["scope"].as_str().map(|s| s.to_string()));
     info!("Tesla granted scopes for user {}: {:?}", user_id, granted_scopes);
 
     // Encrypt tokens
@@ -374,11 +430,11 @@ pub async fn tesla_callback(
 
     info!("Tesla OAuth connection successfully established for user {}", user_id);
 
-    // Redirect to frontend connections page with success query param
+    // Redirect to frontend home page with success query param
     let frontend_url = std::env::var("FRONTEND_URL")
         .unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    Redirect::to(&format!("{}/connections?tesla=success", frontend_url))
+    Redirect::to(&format!("{}?tesla=success", frontend_url))
 }
 
 // Tesla disconnect endpoint
@@ -429,6 +485,55 @@ pub async fn tesla_scopes(
     let scopes = state.user_repository
         .get_tesla_granted_scopes(auth_user.user_id)
         .unwrap_or(None);
+
+    let scope_str = scopes.as_deref().unwrap_or("");
+    let has_vehicle_device_data = scope_str.contains("vehicle_device_data");
+    let has_vehicle_cmds = scope_str.contains("vehicle_cmds");
+    let has_vehicle_charging_cmds = scope_str.contains("vehicle_charging_cmds");
+
+    Ok(Json(TeslaScopesResponse {
+        granted_scopes: scopes,
+        has_vehicle_device_data,
+        has_vehicle_cmds,
+        has_vehicle_charging_cmds,
+    }))
+}
+
+/// Refresh Tesla scopes by decoding the current JWT access token
+/// This is useful for users who connected before scope tracking was added
+pub async fn tesla_refresh_scopes(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<TeslaScopesResponse>, (StatusCode, Json<serde_json::Value>)> {
+    info!("Refreshing Tesla scopes for user {}", auth_user.user_id);
+
+    // Get valid access token (will refresh if expired)
+    let access_token = get_valid_tesla_access_token(&state, auth_user.user_id).await
+        .map_err(|(status, msg)| (status, Json(json!({"error": msg}))))?;
+
+    // Extract scopes from the JWT
+    let scopes = extract_scopes_from_jwt(&access_token);
+
+    if let Some(ref scope_str) = scopes {
+        // Update scopes in database
+        if let Err(e) = state.user_repository.update_tesla_granted_scopes(auth_user.user_id, scope_str.clone()) {
+            error!("Failed to update Tesla scopes in DB: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to save scopes"}))
+            ));
+        }
+        info!("Updated Tesla scopes for user {}: {}", auth_user.user_id, scope_str);
+    } else {
+        warn!("Could not extract scopes from Tesla JWT for user {}", auth_user.user_id);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Could not extract scopes from token. You may need to reconnect Tesla with desired permissions.",
+                "needs_reconnect": true
+            }))
+        ));
+    }
 
     let scope_str = scopes.as_deref().unwrap_or("");
     let has_vehicle_device_data = scope_str.contains("vehicle_device_data");
