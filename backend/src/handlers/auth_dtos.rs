@@ -37,6 +37,7 @@ pub struct UserResponse {
     pub id: i32,
     pub email: String,
     pub phone_number: String,
+    pub phone_number_country: Option<String>,
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
     pub verified: bool,
@@ -45,9 +46,9 @@ pub struct UserResponse {
     pub preferred_number: Option<String>,
     pub sub_tier: Option<String>,
     pub credits_left: f32,
-    pub discount: bool,
     pub discount_tier: Option<String>,
     pub plan_type: Option<String>,
+    pub has_twilio_credentials: bool,
 }
 
 #[derive(Debug, Deserialize)]

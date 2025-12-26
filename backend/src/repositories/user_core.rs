@@ -443,6 +443,48 @@ impl UserCore {
         }
     }
 
+    pub fn get_default_notification_mode(&self, user_id: i32) -> Result<String, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings.default_notification_mode.unwrap_or_else(|| "critical".to_string()))
+    }
+
+    pub fn set_default_notification_mode(&self, user_id: i32, mode: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::default_notification_mode.eq(mode))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_default_notification_type(&self, user_id: i32) -> Result<String, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings.default_notification_type.unwrap_or_else(|| "sms".to_string()))
+    }
+
+    pub fn set_default_notification_type(&self, user_id: i32, noti_type: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::default_notification_type.eq(noti_type))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_default_notify_on_call(&self, user_id: i32) -> Result<bool, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings.default_notify_on_call != 0)
+    }
+
+    pub fn set_default_notify_on_call(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::default_notify_on_call.eq(if notify { 1 } else { 0 }))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     // Helper function to ensure user settings exist
     pub fn ensure_user_settings_exist(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::user_settings;

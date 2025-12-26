@@ -43,6 +43,8 @@ pub struct UpdateDigestsRequest {
 #[derive(Properties, PartialEq)]
 pub struct DigestSectionProps {
     pub phone_number: String,
+    #[prop_or(false)]
+    pub disabled: bool,
 }
 #[function_component(DigestSection)]
 pub fn digest_section(props: &DigestSectionProps) -> Html {
@@ -589,8 +591,16 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
                     border-color: #999;
                     color: #fff;
                 }
+                .digest-section-wrapper {
+                    transition: opacity 0.3s ease;
+                }
+                .digest-section-wrapper.disabled {
+                    opacity: 0.5;
+                    pointer-events: none;
+                }
             "#}
         </style>
+        <div class={classes!("digest-section-wrapper", if props.disabled { "disabled" } else { "" })}>
         <div class="filter-header">
             <div class="filter-title">
                 <i class="fas fa-newspaper" style="color: #4ECDC4;"></i>
@@ -762,6 +772,7 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
                 </div>
             </div>
         </div>
+        </div> // Close digest-section-wrapper
         </>
     }
 }

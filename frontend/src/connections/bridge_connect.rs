@@ -96,6 +96,18 @@ struct BridgeStatus {
     #[allow(dead_code)]
     status: String,
     created_at: i32,
+    connected_account: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct HealthCheckResponse {
+    healthy: bool,
+    message: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct ErrorResponse {
+    error: String,
 }
 
 #[derive(Properties, PartialEq)]
@@ -120,6 +132,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let is_connecting = use_state(|| false);
     let was_connecting = use_state(|| false);
     let show_disconnect_modal = use_state(|| false);
+    let is_checking_health = use_state(|| false);
+    let health_message = use_state(|| None::<String>);
 
     // Function to fetch status
     let fetch_status = {
@@ -146,21 +160,25 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     Ok(response) => {
                         match response.json::<BridgeStatus>().await {
                             Ok(status) => {
-                                // Check if we just connected (was connecting and now connected)
-                                if *was_connecting && status.connected {
-                                    was_connecting.set(false);
+                                // When connected, always clear QR and update UI
+                                if status.connected {
                                     is_connecting.set(false);
+                                    was_connecting.set(false);
                                     auth_data.set(None);
-                                    success_message.set(Some(format!("{} connected successfully!", bridge_name)));
-                                    // Auto-hide success message after 3 seconds
-                                    let success_message_clone = success_message.clone();
-                                    spawn_local(async move {
-                                        TimeoutFuture::new(3_000).await;
-                                        success_message_clone.set(None);
-                                    });
+                                    // Show success message only if we were actively connecting
+                                    if *is_connecting || *was_connecting {
+                                        success_message.set(Some(format!("{} connected successfully!", bridge_name)));
+                                        // Auto-hide success message after 3 seconds
+                                        let success_message_clone = success_message.clone();
+                                        spawn_local(async move {
+                                            TimeoutFuture::new(3_000).await;
+                                            success_message_clone.set(None);
+                                        });
+                                    }
                                 }
-                                // Reset connecting state if disconnected
-                                if !status.connected {
+                                // Only reset connecting state if truly disconnected (not just "connecting")
+                                // The "connecting" status means we're waiting for QR scan, so keep the QR visible
+                                if !status.connected && status.status == "not_connected" {
                                     is_connecting.set(false);
                                     was_connecting.set(false);
                                     auth_data.set(None);
@@ -304,6 +322,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 connected: false,
                 status: "not_connected".to_string(),
                 created_at: (js_sys::Date::now() / 1000.0) as i32,
+                connected_account: None,
             }));
             show_disconnect_modal.set(false);
             // Fire and forget - backend cleanup happens in background
@@ -315,6 +334,79 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 }
             });
             error.set(None);
+        })
+    };
+
+    // Function to check health
+    let check_health = {
+        let connection_status = connection_status.clone();
+        let is_checking_health = is_checking_health.clone();
+        let health_message = health_message.clone();
+        let error = error.clone();
+        let bridge_id = bridge_id.to_string();
+        let bridge_name = bridge_name.to_string();
+        Callback::from(move |_| {
+            let connection_status = connection_status.clone();
+            let is_checking_health = is_checking_health.clone();
+            let health_message = health_message.clone();
+            let error = error.clone();
+            let bridge_id = bridge_id.clone();
+            let bridge_name = bridge_name.clone();
+            is_checking_health.set(true);
+            health_message.set(None);
+            spawn_local(async move {
+                let url = format!("/api/auth/{}/health", bridge_id);
+                match Api::get(&url).send().await {
+                    Ok(response) => {
+                        let status = response.status();
+                        // First try to parse as a success response
+                        if status == 200 {
+                            match response.json::<HealthCheckResponse>().await {
+                                Ok(health_response) => {
+                                    is_checking_health.set(false);
+                                    if health_response.healthy {
+                                        health_message.set(Some(format!("Connection healthy: {}", health_response.message)));
+                                        // Auto-hide success message after 5 seconds
+                                        let health_message_clone = health_message.clone();
+                                        spawn_local(async move {
+                                            TimeoutFuture::new(5_000).await;
+                                            health_message_clone.set(None);
+                                        });
+                                    } else {
+                                        // Connection is not healthy - update UI to show disconnected
+                                        connection_status.set(Some(BridgeStatus {
+                                            connected: false,
+                                            status: "not_connected".to_string(),
+                                            created_at: (js_sys::Date::now() / 1000.0) as i32,
+                                            connected_account: None,
+                                        }));
+                                        error.set(Some(format!("{} disconnected: {}", bridge_name, health_response.message)));
+                                    }
+                                }
+                                Err(_) => {
+                                    is_checking_health.set(false);
+                                    error.set(Some("Failed to parse health check response".to_string()));
+                                }
+                            }
+                        } else {
+                            // Error response - try to parse error message
+                            is_checking_health.set(false);
+                            match response.json::<ErrorResponse>().await {
+                                Ok(err_response) => {
+                                    error.set(Some(format!("{} health check failed: {}", bridge_name, err_response.error)));
+                                }
+                                Err(_) => {
+                                    error.set(Some(format!("{} health check failed (status {})", bridge_name, status)));
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        is_checking_health.set(false);
+                        error.set(Some(format!("Failed to check {} health", bridge_name)));
+                    }
+                }
+            });
         })
     };
 
@@ -336,7 +428,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 </div>
                 if let Some(status) = (*connection_status).clone() {
                     if status.connected {
-                        <span class="service-status">{"Connected ✓"}</span>
+                        <span class="service-status">
+                            {
+                                if let Some(account) = &status.connected_account {
+                                    format!("{} ✓", account)
+                                } else {
+                                    "Connected ✓".to_string()
+                                }
+                            }
+                        </span>
                     }
                 }
                 <button class="info-button" onclick={
@@ -395,12 +495,30 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 <p class="service-description">
                                     {format!("Send and receive {} messages through SMS or voice calls.", bridge_name)}
                                 </p>
-                                <button onclick={
-                                    let show_disconnect_modal = show_disconnect_modal.clone();
-                                    Callback::from(move |_| show_disconnect_modal.set(true))
-                                } class="disconnect-button">
-                                    {"Disconnect"}
-                                </button>
+                                if let Some(msg) = (*health_message).as_ref() {
+                                    <div class="health-message health-success">
+                                        {msg}
+                                    </div>
+                                }
+                                <div class="action-buttons">
+                                    <button onclick={
+                                        let check_health = check_health.clone();
+                                        Callback::from(move |_| check_health.emit(()))
+                                    } class="check-health-button" disabled={*is_checking_health}>
+                                        if *is_checking_health {
+                                            <span class="button-spinner"></span>
+                                            {"Checking..."}
+                                        } else {
+                                            {"Check Connection"}
+                                        }
+                                    </button>
+                                    <button onclick={
+                                        let show_disconnect_modal = show_disconnect_modal.clone();
+                                        Callback::from(move |_| show_disconnect_modal.set(true))
+                                    } class="disconnect-button">
+                                        {"Disconnect"}
+                                    </button>
+                                </div>
                                 if *show_disconnect_modal {
                                     <div class="modal-overlay">
                                         <div class="modal-content">
@@ -639,7 +757,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         color: #DDD;
                         margin: 0;
                     }
-                    .connect-button, .disconnect-button {
+                    .connect-button {
                         background: linear-gradient(45deg, #1E90FF, #4169E1);
                         color: white;
                         border: none;
@@ -657,11 +775,61 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         background: transparent;
                         border: 1px solid rgba(255, 99, 71, 0.3);
                         color: #FF6347;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
                     }
                     .disconnect-button:hover {
                         background: rgba(255, 99, 71, 0.1);
                         border-color: rgba(255, 99, 71, 0.5);
                         transform: translateY(-2px);
+                    }
+                    .action-buttons {
+                        display: flex;
+                        gap: 0.75rem;
+                        flex-wrap: wrap;
+                        margin-top: 1rem;
+                    }
+                    .check-health-button {
+                        background: transparent;
+                        border: 1px solid rgba(30, 144, 255, 0.3);
+                        color: #1E90FF;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+                    .check-health-button:hover:not(:disabled) {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-color: rgba(30, 144, 255, 0.5);
+                        transform: translateY(-2px);
+                    }
+                    .check-health-button:disabled {
+                        opacity: 0.7;
+                        cursor: not-allowed;
+                    }
+                    .button-spinner {
+                        display: inline-block;
+                        width: 14px;
+                        height: 14px;
+                        border: 2px solid rgba(30, 144, 255, 0.2);
+                        border-radius: 50%;
+                        border-top-color: #1E90FF;
+                        animation: spin 1s ease-in-out infinite;
+                    }
+                    .health-message {
+                        padding: 0.75rem 1rem;
+                        border-radius: 8px;
+                        margin-bottom: 0.5rem;
+                    }
+                    .health-success {
+                        color: #4CAF50;
+                        background: rgba(76, 175, 80, 0.1);
+                        border: 1px solid rgba(76, 175, 80, 0.3);
                     }
                     .modal-overlay {
                         position: fixed;

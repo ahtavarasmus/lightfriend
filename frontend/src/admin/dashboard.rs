@@ -27,6 +27,7 @@ struct UserInfo {
     id: i32,
     email: String,
     phone_number: String,
+    phone_number_country: Option<String>,
     time_to_live: Option<i32>,
     verified: bool,
     credits: f32,
@@ -34,9 +35,9 @@ struct UserInfo {
     preferred_number: Option<String>,
     sub_tier: Option<String>,
     credits_left: f32,
-    discount: bool,
     discount_tier: Option<String>,
     plan_type: Option<String>,
+    has_twilio_credentials: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -579,14 +580,13 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
                                                 <th>{"Phone"}</th>
+                                                <th>{"Country"}</th>
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Monthly Credits"}</th>
                                                 <th>{"Tier"}</th>
                                                 <th>{"Plan"}</th>
-                                                <th>{"BYON"}</th>
-                                                <th>{"Verified"}</th>
+                                                <th>{"Twilio"}</th>
                                                 <th>{"Notify"}</th>
-                                                <th>{"Discount"}</th>
                                                 <th>{"Joined"}</th>
                                             </tr>
                                         </thead>
@@ -648,6 +648,7 @@ pub fn admin_dashboard() -> Html {
                                                                     </div>
                                                                 </td>
                                                                 <td>{&user.phone_number}</td>
+                                                                <td>{user.phone_number_country.clone().unwrap_or_else(|| "?".to_string())}</td>
                                                                 <td>{format!("{:.2}€", user.credits)}</td>
                                                                 <td>{format!("{:.2}€", user.credits_left)}</td>
                                                                 <td>
@@ -678,33 +679,21 @@ pub fn admin_dashboard() -> Html {
                                                                     </span>
                                                                 </td>
                                                                 <td>
-                                                                    <span class={classes!(
-                                                                        "status-badge",
-                                                                        match user.discount_tier.as_deref() {
-                                                                            Some("msg") => "discount-msg",
-                                                                            Some("voice") => "discount-voice",
-                                                                            Some("full") => "discount-full",
-                                                                            _ => "disabled"
-                                                                        }
-                                                                    )}>
-
-                                                                        {
-                                                                            match user.discount_tier.as_deref() {
-                                                                                Some("msg") => "MSG",
-                                                                                Some("voice") => "VOICE",
-                                                                                Some("full") => "FULL",
-                                                                                _ => "NORMAL"
+                                                                    {
+                                                                        // Only show Twilio status for BYOT users
+                                                                        if user.plan_type.as_deref() == Some("byot") {
+                                                                            html! {
+                                                                                <span class={classes!(
+                                                                                    "status-badge",
+                                                                                    if user.has_twilio_credentials { "verified" } else { "unverified" }
+                                                                                )}>
+                                                                                    {if user.has_twilio_credentials { "Yes" } else { "No" }}
+                                                                                </span>
                                                                             }
+                                                                        } else {
+                                                                            html! { <span class="status-badge disabled">{"-"}</span> }
                                                                         }
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    <span class={classes!(
-                                                                        "status-badge",
-                                                                        if user.verified { "verified" } else { "unverified" }
-                                                                    )}>
-                                                                        {if user.verified { "Yes" } else { "No" }}
-                                                                    </span>
+                                                                    }
                                                                 </td>
                                                                 <td>
                                                                     <span class={classes!(
@@ -712,14 +701,6 @@ pub fn admin_dashboard() -> Html {
                                                                         if user.notify { "enabled" } else { "disabled" }
                                                                     )}>
                                                                         {if user.notify { "Yes" } else { "No" }}
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    <span class={classes!(
-                                                                        "status-badge",
-                                                                        if user.discount { "enabled" } else { "disabled" }
-                                                                    )}>
-                                                                        {if user.discount { "Yes" } else { "No" }}
                                                                     </span>
                                                                 </td>
                                                                 <td>

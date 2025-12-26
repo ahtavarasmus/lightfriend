@@ -1,6 +1,6 @@
 use dotenvy::dotenv;
 use axum::{
-    routing::{get, post, delete, patch},
+    routing::{get, post, delete, patch, put},
     Router,
     middleware
 };
@@ -75,6 +75,7 @@ mod handlers {
     pub mod totp_handlers;
     pub mod pricing_handlers;
     pub mod webauthn_handlers;
+    pub mod contact_profile_handlers;
 }
 mod utils {
     pub mod encryption;
@@ -143,7 +144,7 @@ use handlers::{
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
     signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
     messenger_auth, messenger_handlers, instagram_auth, instagram_handlers,
-    tesla_auth, youtube_auth, youtube,
+    tesla_auth, youtube_auth, youtube, contact_profile_handlers,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -543,6 +544,7 @@ async fn main() {
         .route("/api/auth/telegram/connect", get(telegram_auth::start_telegram_connection))
         .route("/api/auth/telegram/disconnect", delete(telegram_auth::disconnect_telegram))
         .route("/api/auth/telegram/resync", post(telegram_auth::resync_telegram))
+        .route("/api/auth/telegram/health", get(telegram_auth::check_telegram_health))
         .route("/api/telegram/test-messages", get(telegram_handlers::test_fetch_messages))
         .route("/api/telegram/send", post(telegram_handlers::send_message))
         .route("/api/telegram/search-rooms", post(telegram_handlers::search_telegram_rooms_handler))
@@ -551,6 +553,7 @@ async fn main() {
         .route("/api/auth/signal/connect", get(signal_auth::start_signal_connection))
         .route("/api/auth/signal/disconnect", delete(signal_auth::disconnect_signal))
         .route("/api/auth/signal/resync", post(signal_auth::resync_signal))
+        .route("/api/auth/signal/health", get(signal_auth::check_signal_health))
         .route("/api/signal/test-messages", get(signal_handlers::test_fetch_messages))
         .route("/api/signal/send", post(signal_handlers::send_message))
         .route("/api/signal/search-rooms", post(signal_handlers::search_signal_rooms_handler))
@@ -575,6 +578,7 @@ async fn main() {
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
         .route("/api/auth/whatsapp/resync", post(whatsapp_auth::resync_whatsapp))
+        .route("/api/auth/whatsapp/health", get(whatsapp_auth::check_whatsapp_health))
         .route("/api/whatsapp/test-messages", get(whatsapp_handlers::test_fetch_messages))
         .route("/api/whatsapp/send", post(whatsapp_handlers::send_message))
         .route("/api/whatsapp/search-rooms", post(whatsapp_handlers::search_whatsapp_rooms_handler))
@@ -591,6 +595,13 @@ async fn main() {
         .route("/api/filters/priority-senders/{service_type}", get(filter_handlers::get_priority_senders))
         .route("/api/filters/keyword/{service_type}", post(filter_handlers::create_keyword))
         .route("/api/filters/keyword/{service_type}/{keyword}", delete(filter_handlers::delete_keyword))
+        // Contact Profiles routes
+        .route("/api/contact-profiles", get(contact_profile_handlers::get_contact_profiles))
+        .route("/api/contact-profiles", post(contact_profile_handlers::create_contact_profile))
+        .route("/api/contact-profiles/default-mode", put(contact_profile_handlers::update_default_mode))
+        .route("/api/contact-profiles/search/{service}", get(contact_profile_handlers::search_chats))
+        .route("/api/contact-profiles/{id}", put(contact_profile_handlers::update_contact_profile))
+        .route("/api/contact-profiles/{id}", delete(contact_profile_handlers::delete_contact_profile))
         // WhatsApp filter toggle routes
         // Generic filter toggle routes
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))

@@ -256,6 +256,144 @@ pub struct MatchResponse {
     pub first_message: Option<String>,
 }
 
+/// Result of processing contact profiles for digest filtering
+pub struct DigestContactMaps {
+    pub priority_map: HashMap<String, HashSet<String>>,
+    pub ignore_map: HashMap<String, HashSet<String>>,
+}
+
+/// Builds priority and ignore maps from contact profiles, then filters messages
+/// Returns the maps and mutates the messages vec to remove ignored contacts
+fn build_contact_maps_and_filter_messages(
+    state: &Arc<AppState>,
+    user_id: i32,
+    messages: &mut Vec<MessageInfo>,
+) -> DigestContactMaps {
+    let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+
+    for profile in &profiles {
+        // Check if this profile is set to "ignore" mode
+        let is_ignored = profile.notification_mode == "ignore";
+
+        if let Some(ref wa) = profile.whatsapp_chat {
+            if is_ignored {
+                ignore_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
+            } else {
+                priority_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
+            }
+        }
+        if let Some(ref tg) = profile.telegram_chat {
+            if is_ignored {
+                ignore_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
+            } else {
+                priority_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
+            }
+        }
+        if let Some(ref sig) = profile.signal_chat {
+            if is_ignored {
+                ignore_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
+            } else {
+                priority_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
+            }
+        }
+        if let Some(ref emails) = profile.email_addresses {
+            for email in emails.split(',') {
+                if is_ignored {
+                    ignore_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());
+                } else {
+                    priority_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());
+                }
+            }
+        }
+    }
+
+    if !profiles.is_empty() {
+        tracing::debug!("Loaded {} contact profiles for digest", profiles.len());
+    }
+
+    // Filter out messages from ignored contacts
+    let original_count = messages.len();
+    messages.retain(|msg| {
+        let sender_lower = msg.sender.to_lowercase();
+        !ignore_map.get(&msg.platform).map_or(false, |set| {
+            set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
+        })
+    });
+    if messages.len() < original_count {
+        tracing::debug!("Filtered out {} messages from ignored contacts", original_count - messages.len());
+    }
+
+    DigestContactMaps { priority_map, ignore_map }
+}
+
+/// Formats disconnection events into a notice string for digest inclusion
+/// Returns formatted notice and deletes the events from the database
+fn format_disconnection_notice(
+    state: &Arc<AppState>,
+    user_id: i32,
+    timezone: &str,
+) -> Option<String> {
+    let events = match state.user_repository.get_pending_disconnection_events(user_id) {
+        Ok(events) => events,
+        Err(e) => {
+            tracing::error!("Failed to get disconnection events for user {}: {}", user_id, e);
+            return None;
+        }
+    };
+
+    if events.is_empty() {
+        return None;
+    }
+
+    // Parse the timezone
+    let tz: chrono_tz::Tz = match timezone.parse() {
+        Ok(tz) => tz,
+        Err(_) => {
+            tracing::warn!("Invalid timezone for user {}, using UTC", user_id);
+            chrono_tz::UTC
+        }
+    };
+
+    // Format each disconnection event
+    let notices: Vec<String> = events.iter().map(|event| {
+        // Convert timestamp to user's timezone
+        let datetime = chrono::DateTime::from_timestamp(event.detected_at as i64, 0)
+            .unwrap_or_else(|| Utc::now())
+            .with_timezone(&tz);
+
+        // Format time as "2pm" or "10am"
+        let hour = datetime.hour();
+        let (hour12, ampm) = if hour == 0 {
+            (12, "am")
+        } else if hour < 12 {
+            (hour, "am")
+        } else if hour == 12 {
+            (12, "pm")
+        } else {
+            (hour - 12, "pm")
+        };
+
+        // Capitalize bridge type
+        let bridge_name = match event.bridge_type.as_str() {
+            "whatsapp" => "WhatsApp",
+            "telegram" => "Telegram",
+            "signal" => "Signal",
+            other => other,
+        };
+
+        format!("NOTICE: {} disconnected at {}{}", bridge_name, hour12, ampm)
+    }).collect();
+
+    // Delete the events after formatting
+    if let Err(e) = state.user_repository.delete_disconnection_events(user_id) {
+        tracing::error!("Failed to delete disconnection events for user {}: {}", user_id, e);
+    }
+
+    Some(notices.join(". "))
+}
+
 /// Checks whether a single message is critical.
 /// Returns `(is_critical, what_to_inform, first_message)`.
 pub async fn check_message_importance(
@@ -730,27 +868,25 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 messages.len()
             );
 
-            // return if no new nothing
+            // Build contact maps and filter out ignored contacts
+            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+
+            // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
                 return Ok(());
-            }
-
-            // Fetch priority senders for each platform and build a lookup map
-            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
-            for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
-                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
-                if !set.is_empty() {
-                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
-                }
-                priority_map.insert(platform.to_string(), set);
             }
 
             messages.sort_by(|a, b| {
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    let sender_lower = a.sender.to_lowercase();
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
+                    );
+                    let sender_lower_b = b.sender.to_lowercase();
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
+                    );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
                 } else {
                     plat_cmp
@@ -772,7 +908,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
@@ -780,9 +916,14 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 ),
             };
 
+            // Append disconnection notices if any
+            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+                digest_message = format!("{} {}", digest_message, notice);
+            }
+
             tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
-                
+
             send_notification(
                 state,
                 user_id,
@@ -792,7 +933,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             ).await;
         }
     }
-    
+
     Ok(())
 }
 
@@ -1089,27 +1230,25 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 messages.len()
             );
 
-            // return if no new nothing
+            // Build contact maps and filter out ignored contacts
+            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+
+            // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
                 return Ok(());
-            }
-
-            // Fetch priority senders for each platform and build a lookup map
-            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
-            for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
-                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
-                if !set.is_empty() {
-                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
-                }
-                priority_map.insert(platform.to_string(), set);
             }
 
             messages.sort_by(|a, b| {
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    let sender_lower = a.sender.to_lowercase();
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
+                    );
+                    let sender_lower_b = b.sender.to_lowercase();
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
+                    );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
                 } else {
                     plat_cmp
@@ -1129,7 +1268,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
@@ -1137,9 +1276,14 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 ),
             };
 
+            // Append disconnection notices if any
+            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+                digest_message = format!("{} {}", digest_message, notice);
+            }
+
             tracing::info!("Sending day digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
-                
+
             send_notification(
                 state,
                 user_id,
@@ -1149,7 +1293,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             ).await;
         }
     }
-    
+
     Ok(())
 }
 
@@ -1466,27 +1610,25 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 messages.len()
             );
 
-            // return if no new nothing
+            // Build contact maps and filter out ignored contacts
+            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+
+            // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
                 return Ok(());
-            }
-
-                        // Fetch priority senders for each platform and build a lookup map
-            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
-            for platform in ["email", "whatsapp", "telegram", "signal"] {
-                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
-                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
-                if !set.is_empty() {
-                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
-                }
-                priority_map.insert(platform.to_string(), set);
             }
 
             messages.sort_by(|a, b| {
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    let sender_lower = a.sender.to_lowercase();
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
+                    );
+                    let sender_lower_b = b.sender.to_lowercase();
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                        set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
+                    );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
                 } else {
                     plat_cmp
@@ -1506,7 +1648,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
@@ -1514,9 +1656,14 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 ),
             };
 
+            // Append disconnection notices if any
+            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+                digest_message = format!("{} {}", digest_message, notice);
+            }
+
             tracing::info!("Sending evening digest for user {} at {}:00 in timezone {}",
                 user_id, digest_hour, timezone);
-                
+
             send_notification(
                 state,
                 user_id,
@@ -1526,7 +1673,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             ).await;
         }
     }
-    
+
     Ok(())
 }
 
@@ -1731,7 +1878,10 @@ pub async fn send_notification(
     };
 
     // Check user's notification preference from settings
-    let notification_type = if content_type.contains("critical") {
+    // Note: Order matters - check "_call_sms" before "_call" to avoid false match
+    let notification_type = if content_type.contains("_call_sms") {
+        "call_sms"
+    } else if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
     } else if content_type.contains("_call") {
         "call"
@@ -1768,7 +1918,7 @@ pub async fn send_notification(
                         }
                     }
                     tracing::debug!("Successfully initiated call notification for user {}", user.id);
-                    
+
                     // Store notification in message history
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
                         user_id: user.id,
@@ -1809,7 +1959,7 @@ pub async fn send_notification(
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
                     println!("Failed to send call notification for user {}", user_id);
-                    
+
                     // Log failed call notification
                     if let Err(e) = state.user_repository.log_usage(
                         user_id,
@@ -1825,6 +1975,117 @@ pub async fn send_notification(
                     ) {
                         tracing::error!("Failed to log failed call notification: {}", e);
                     }
+                }
+            }
+        }
+        "call_sms" => {
+            // Call + SMS: Send SMS first (always charged), then initiate call (conditionally charged)
+            // The call acts as a loud alert; SMS contains the actual message content.
+            // If the user doesn't answer the call (call_initiation_failure webhook),
+            // we don't charge for the call - only for the SMS.
+
+            // Step 1: Check credits for SMS (always required)
+            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+                tracing::warn!("User {} has insufficient credits for Call+SMS notification: {}", user.id, e);
+                return;
+            }
+
+            // Step 2: Send SMS first (this is always charged)
+            let sms_success = match crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &notification,
+                None,
+                &user,
+            ).await {
+                Ok(response_sid) => {
+                    tracing::info!("Call+SMS: SMS sent successfully for user {}", user_id);
+
+                    // Store notification in message history
+                    let assistant_notification = crate::models::user_models::NewMessageHistory {
+                        user_id: user.id,
+                        role: "assistant".to_string(),
+                        encrypted_content: notification.to_string(),
+                        tool_name: None,
+                        tool_call_id: None,
+                        tool_calls_json: None,
+                        created_at: current_time,
+                        conversation_id: "".to_string(),
+                    };
+
+                    if let Err(e) = state.user_repository.create_message_history(&assistant_notification) {
+                        tracing::error!("Failed to store Call+SMS notification in history: {}", e);
+                    }
+
+                    // Log SMS usage
+                    if let Err(e) = state.user_repository.log_usage(
+                        user_id,
+                        Some(response_sid),
+                        format!("{}_sms", content_type),
+                        None,
+                        None,
+                        Some(true),
+                        None,
+                        Some("delivered".to_string()),
+                        None,
+                        None,
+                    ) {
+                        tracing::error!("Failed to log Call+SMS SMS usage: {}", e);
+                    }
+
+                    // Deduct credits for SMS
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_msg", None) {
+                        tracing::error!("Failed to deduct SMS credits for Call+SMS user {}: {}", user_id, e);
+                    }
+
+                    true
+                }
+                Err(e) => {
+                    tracing::error!("Call+SMS: Failed to send SMS for user {}: {}", user_id, e);
+                    false
+                }
+            };
+
+            // Step 3: Initiate call as alert (only if we have credits, charged conditionally via webhook)
+            // The call will only be charged if the user answers (post_call_transcription webhook)
+            // If declined/no-answer (call_initiation_failure webhook), no charge for call
+            if sms_success {
+                // Check if user has credits for call (but don't charge yet - webhook handles it)
+                if crate::utils::usage::check_user_credits(&state, &user, "noti_call", None).await.is_ok() {
+                    match crate::api::elevenlabs::make_notification_call(
+                        &state.clone(),
+                        format!("{}_call_conditional", content_type), // Mark as conditional for webhook
+                        first_message.clone().unwrap_or("Hello, you have a notification. Check your SMS for details.".to_string()),
+                        notification.to_string(),
+                        user.id.to_string(),
+                        user_info.timezone.clone(),
+                    ).await {
+                        Ok(response) => {
+                            tracing::info!("Call+SMS: Call initiated for user {} (will be charged if answered)", user_id);
+
+                            // Log call usage as "ongoing" - it will be updated by webhook
+                            // Don't deduct credits here - the webhook will handle it based on answer status
+                            if let Err(e) = state.user_repository.log_usage(
+                                user_id,
+                                response.get("sid").and_then(|v| v.as_str()).map(String::from),
+                                format!("{}_call_conditional", content_type),
+                                None,
+                                None,
+                                None, // Don't set success yet
+                                None,
+                                Some("ongoing".to_string()),
+                                None,
+                                None,
+                            ) {
+                                tracing::error!("Failed to log Call+SMS call usage: {}", e);
+                            }
+                        }
+                        Err((_, json_err)) => {
+                            tracing::error!("Call+SMS: Failed to initiate call for user {}: {:?}", user_id, json_err);
+                            // Call failed but SMS was already sent successfully, so notification is partially delivered
+                        }
+                    }
+                } else {
+                    tracing::info!("Call+SMS: Skipping call for user {} (insufficient credits), SMS already sent", user_id);
                 }
             }
         }

@@ -136,13 +136,13 @@ async fn setup_user_subscription(
     }
 
     // Set plan_type
-    use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price};
+    use crate::utils::country::{is_monitor_plan_price, is_digest_plan_price, is_byot_plan_price, is_legacy_euro_plan_price};
     let plan_type = if is_digest_plan_price(price_id) {
         "digest"
     } else if is_byot_plan_price(price_id) {
         "byot"
     } else {
-        "monitor"
+        "monitor"  // includes legacy sentinel price IDs
     };
     if let Err(e) = state.user_repository.update_plan_type(user_id, Some(plan_type)) {
         tracing::error!("Failed to set plan_type for user {}: {}", user_id, e);
@@ -155,12 +155,17 @@ async fn setup_user_subscription(
         let country = phone_country.unwrap_or("FI");
         if country == "US" || country == "CA" {
             400.0
-        } else if is_monitor_plan_price(price_id) {
+        } else if is_monitor_plan_price(price_id) || is_legacy_euro_plan_price(price_id) {
+            // Legacy sentinel price IDs (€19) get same credits as Monitor plan (40 messages)
             calculate_euro_credit_allocation(state, country, 40.0, "Monitor").await
         } else if is_digest_plan_price(price_id) {
             calculate_euro_credit_allocation(state, country, 120.0, "Digest").await
+        } else if is_byot_plan_price(price_id) {
+            0.0  // BYOT users pay as they go
         } else {
-            0.0
+            // Unknown price ID - log warning but give Monitor credits as fallback
+            tracing::warn!("Unknown price_id {} for user {}, giving Monitor credits as fallback", price_id, user_id);
+            calculate_euro_credit_allocation(state, country, 40.0, "Monitor").await
         }
     } else {
         0.0

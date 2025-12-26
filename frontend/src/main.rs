@@ -55,6 +55,7 @@ mod proactive {
     pub mod digest;
     pub mod critical;
     pub mod agent_on;
+    pub mod contact_profiles;
 }
 mod connections {
     pub mod bridge_connect;

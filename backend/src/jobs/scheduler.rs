@@ -89,6 +89,16 @@ pub async fn check_all_bridges_health(state: &Arc<AppState>) -> Result<(), Box<d
         for bridge in bridges {
             if !is_bridge_healthy(state, user_id, &bridge).await {
                 tracing::info!("Bridge {} for user {} is unhealthy, deleting", bridge.bridge_type, user_id);
+
+                // Record disconnection event for digest notification
+                let current_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+                if let Err(e) = state.user_repository.record_bridge_disconnection(user_id, &bridge.bridge_type, current_time) {
+                    error!("Failed to record disconnection event for user {}: {}", user_id, e);
+                }
+
                 if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
                     error!("Failed to delete unhealthy bridge {} for user {}: {}", bridge.bridge_type, user_id, e);
                 }

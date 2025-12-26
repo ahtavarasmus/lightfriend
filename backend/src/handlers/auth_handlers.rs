@@ -71,10 +71,14 @@ pub async fn get_users(
             )
         })?;
 
+        // Check if user has their own Twilio credentials (for BYOT plan)
+        let has_twilio_credentials = state.user_core.has_twilio_credentials(user.id);
+
         users_response.push(UserResponse {
             id: user.id,
             email: user.email,
-            phone_number: user.phone_number,
+            phone_number: user.phone_number.clone(),
+            phone_number_country: user.phone_number_country,
             nickname: user.nickname,
             time_to_live: user.time_to_live,
             verified: user.verified,
@@ -83,9 +87,9 @@ pub async fn get_users(
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
             credits_left: user.credits_left,
-            discount: user.discount,
             discount_tier: user.discount_tier,
             plan_type: user.plan_type,
+            has_twilio_credentials,
         });
     }
 

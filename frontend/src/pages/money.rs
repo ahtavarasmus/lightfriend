@@ -16,7 +16,7 @@ fn is_notification_only_country(country: &str) -> bool {
 
 /// Check if country has local number (can receive inbound calls)
 fn is_local_number_country(country: &str) -> bool {
-    matches!(country, "FI" | "NL" | "UK" | "AU")
+    matches!(country, "FI" | "NL" | "GB" | "AU")
 }
 
 /// Message equivalent display that fetches real pricing from backend
@@ -1398,7 +1398,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text: String = match props.selected_country.as_str() {
         "US" => "400 Messages per month included".to_string(),
         "CA" => "400 Messages per month included".to_string(),
-        "FI" | "NL" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
+        "FI" | "NL" | "GB" | "AU" => "Messages via prepaid credits".to_string(),
         c if is_notification_only_country(c) => "Notification service via US number - prepaid credits".to_string(),
         _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
     };
@@ -1644,39 +1644,41 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 }
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
+    // Monitor plan prices (€29 for euro countries, $29 for US/CA)
     let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
         ("CA".to_string(), 29.00),
-        ("FI".to_string(), 19.00),
-        ("NL".to_string(), 19.00),
-        ("UK".to_string(), 19.00),
-        ("AU".to_string(), 19.00),
-        // Notification-only countries (same price as FI/NL/UK/AU)
-        ("DE".to_string(), 19.00),
-        ("FR".to_string(), 19.00),
-        ("ES".to_string(), 19.00),
-        ("IT".to_string(), 19.00),
-        ("PT".to_string(), 19.00),
-        ("BE".to_string(), 19.00),
-        ("AT".to_string(), 19.00),
-        ("CH".to_string(), 19.00),
-        ("PL".to_string(), 19.00),
-        ("CZ".to_string(), 19.00),
-        ("SE".to_string(), 19.00),
-        ("DK".to_string(), 19.00),
-        ("NO".to_string(), 19.00),
-        ("IE".to_string(), 19.00),
-        ("NZ".to_string(), 19.00),
-        ("Other".to_string(), 19.00),
+        ("FI".to_string(), 29.00),
+        ("NL".to_string(), 29.00),
+        ("GB".to_string(), 29.00),
+        ("AU".to_string(), 29.00),
+        // Notification-only countries
+        ("DE".to_string(), 29.00),
+        ("FR".to_string(), 29.00),
+        ("ES".to_string(), 29.00),
+        ("IT".to_string(), 29.00),
+        ("PT".to_string(), 29.00),
+        ("BE".to_string(), 29.00),
+        ("AT".to_string(), 29.00),
+        ("CH".to_string(), 29.00),
+        ("PL".to_string(), 29.00),
+        ("CZ".to_string(), 29.00),
+        ("SE".to_string(), 29.00),
+        ("DK".to_string(), 29.00),
+        ("NO".to_string(), 29.00),
+        ("IE".to_string(), 29.00),
+        ("NZ".to_string(), 29.00),
+        ("Other".to_string(), 19.00),  // BYOT plan stays at €19
     ]);
+    // Digest plan prices (€49 for euro countries)
     let guaranteed_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 59.00),
         ("CA".to_string(), 59.00),
-        ("FI".to_string(), 59.00),
-        ("NL".to_string(), 59.00),
-        ("UK".to_string(), 59.00),
-        ("AU".to_string(), 59.00),
-        ("Other".to_string(), 59.00),
+        ("FI".to_string(), 49.00),
+        ("NL".to_string(), 49.00),
+        ("GB".to_string(), 49.00),
+        ("AU".to_string(), 49.00),
+        ("Other".to_string(), 49.00),
     ]);
     let hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
     let guaranteed_total_price = guaranteed_prices.get(&props.selected_country).unwrap_or(&0.0);
@@ -2175,7 +2177,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
                                         <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
                                         <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
-                                        <option value="UK" selected={props.selected_country == "UK"}>{"United Kingdom"}</option>
+                                        <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
                                         <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
                                     </optgroup>
                                     <optgroup label="Notification Only (US number)">
@@ -2271,7 +2273,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     } else {
                         // Euro countries: Show Monitor and Digest plans
                         // Both plans have ALL features - they only differ in prepaid message count
-                        let is_local_number_country = matches!(props.selected_country.as_str(), "FI" | "NL" | "UK" | "AU");
+                        let is_local_number_country = matches!(props.selected_country.as_str(), "FI" | "NL" | "GB" | "AU");
                         let is_notification_only = is_notification_only_country(&props.selected_country);
 
                         let base_features: Vec<Feature> = if is_local_number_country {
@@ -2429,7 +2431,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 </>
                             }
-                        } else if props.selected_country == "FI" || props.selected_country == "NL" || props.selected_country == "AU" || props.selected_country == "UK" {
+                        } else if props.selected_country == "FI" || props.selected_country == "NL" || props.selected_country == "AU" || props.selected_country == "GB" {
                             html! {
                                 <>
                                 <details>
@@ -2484,7 +2486,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     }
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
-                        <p>{"Available globally. US/CA has everything included. FI/UK/AU/NL include a local number. Other European countries receive messages from a US number. For other countries, you can use BYOT to bring your own number."}</p>
+                        <p>{"Available globally. US/CA has everything included. FI/GB/AU/NL include a local number. Other European countries receive messages from a US number. For other countries, you can use BYOT to bring your own number."}</p>
                     </details>
                     <details>
                         <summary>{"Why do plan offerings differ per country?"}</summary>

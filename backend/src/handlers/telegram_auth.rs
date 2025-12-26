@@ -38,6 +38,24 @@ fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     false
 }
 
+/// Extract connected account (username or phone) from bridge status message
+/// For Telegram, it might be username like @username or phone number
+fn extract_connected_account(message: &str) -> Option<String> {
+    // First try to find a phone number pattern
+    if let Some(re) = regex::Regex::new(r"\+\d{6,15}").ok() {
+        if let Some(m) = re.find(message) {
+            return Some(m.as_str().to_string());
+        }
+    }
+    // Then try to find @username pattern
+    if let Some(re) = regex::Regex::new(r"@[\w]+").ok() {
+        if let Some(m) = re.find(message) {
+            return Some(m.as_str().to_string());
+        }
+    }
+    None
+}
+
 // Helper function to get the store path
 fn get_store_path(username: &str) -> Result<String> {
     let persistent_store_path = std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
@@ -370,12 +388,14 @@ pub async fn get_telegram_status(
         Some(bridge) => Ok(AxumJson(json!({
             "connected": bridge.status == "connected",
             "status": bridge.status,
-            "created_at": bridge.created_at.unwrap_or(0), // Remove millisecond conversion
+            "created_at": bridge.created_at.unwrap_or(0),
+            "connected_account": bridge.data,
         }))),
         None => Ok(AxumJson(json!({
             "connected": false,
             "status": "not_connected",
             "created_at": 0,
+            "connected_account": null,
         }))),
     }
 }
@@ -431,6 +451,13 @@ async fn monitor_telegram_connection(
                             // Check for successful login or already logged in
                             if content.contains("Logged in") || content.contains("You are already logged in") {
                                 tracing::debug!("🎉 Telegram successfully connected for user {}", user_id);
+
+                                // Extract the connected account (username or phone)
+                                let connected_account = extract_connected_account(&content);
+                                if let Some(ref account) = connected_account {
+                                    tracing::info!("📱 Connected as: {}", account);
+                                }
+
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
@@ -440,7 +467,7 @@ async fn monitor_telegram_connection(
                                     bridge_type: "telegram".to_string(),
                                     status: "connected".to_string(),
                                     room_id: Some(room_id.to_string()),
-                                    data: None,
+                                    data: connected_account,
                                     created_at: Some(current_time),
                                 };
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
@@ -738,5 +765,173 @@ pub async fn disconnect_telegram(
 
     Ok(AxumJson(json!({
         "message": "Telegram disconnected successfully"
+    })))
+}
+
+/// Health check endpoint using login command
+/// Returns the actual Telegram connection status from the bridge
+pub async fn check_telegram_health(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    tracing::info!("🏥 Checking Telegram health for user {}", auth_user.user_id);
+
+    // Get the bridge information first
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+        .map_err(|e| {
+            tracing::error!("Failed to get Telegram bridge: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to get Telegram bridge info"})),
+            )
+        })?;
+
+    let Some(bridge) = bridge else {
+        return Ok(AxumJson(json!({
+            "healthy": false,
+            "message": "Telegram is not connected"
+        })));
+    };
+
+    // Get Matrix client
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get Matrix client: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
+            )
+        })?;
+
+    // Get the room
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid room ID format"})),
+        ))?;
+
+    let room = client.get_room(&room_id).ok_or_else(|| (
+        StatusCode::NOT_FOUND,
+        AxumJson(json!({"error": "Telegram bridge room not found"})),
+    ))?;
+
+    // Send login command to check status - if already logged in, bridge will respond with status
+    tracing::info!("📤 Sending login command for health check for user {}", auth_user.user_id);
+    room.send(RoomMessageEventContent::text_plain("login")).await
+        .map_err(|e| {
+            tracing::error!("Failed to send ping command: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to send ping command"})),
+            )
+        })?;
+
+    // Wait for response with timeout
+    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT")
+        .expect("TELEGRAM_BRIDGE_BOT not set");
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str())
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid bridge bot user ID"})),
+        ))?;
+
+    // Simple approach: check the MOST RECENT message from the bot
+    // Get recent messages from the room
+    let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+    options.limit = matrix_sdk::ruma::UInt::new(50).unwrap();
+
+    let messages = match room.messages(options).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("⚠️ Failed to get messages: {}", e);
+            return Ok(AxumJson(json!({
+                "healthy": false,
+                "message": format!("Failed to get room messages: {}", e)
+            })));
+        }
+    };
+
+    tracing::info!("📨 Got {} messages from room for health check", messages.chunk.len());
+
+    // Find the most recent message from the bridge bot
+    for msg in messages.chunk {
+        let raw_event = msg.raw();
+        if let Ok(event) = raw_event.deserialize() {
+            if event.sender() == bot_user_id {
+                if let AnySyncTimelineEvent::MessageLike(
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                ) = event {
+                    let event_content: RoomMessageEventContent = match sync_event {
+                        SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                        SyncRoomMessageEvent::Redacted(_) => continue,
+                    };
+
+                    let content = match event_content.msgtype {
+                        MessageType::Text(text_content) => text_content.body,
+                        MessageType::Notice(notice_content) => notice_content.body,
+                        _ => continue,
+                    };
+
+                    let content_lower = content.to_lowercase();
+                    tracing::info!("🔍 Most recent bot message: {}", content);
+
+                    // Skip non-status messages
+                    if content_lower.contains("queued sync") ||
+                       content_lower.contains("unknown command") ||
+                       content_lower.contains("login url") {
+                        continue;
+                    }
+
+                    // Unhealthy patterns
+                    if content_lower.contains("not logged in") ||
+                       content_lower.contains("not connected") ||
+                       content_lower.contains("disconnected") ||
+                       content_lower.contains("logged out") ||
+                       content_lower.contains("no session") {
+                        tracing::warn!("❌ Telegram health check failed for user {}: {}", auth_user.user_id, content);
+
+                        // Auto-delete the stale bridge record
+                        if let Err(e) = state.user_repository.delete_bridge(auth_user.user_id, "telegram") {
+                            tracing::error!("Failed to delete stale bridge: {}", e);
+                        } else {
+                            tracing::info!("🧹 Deleted stale Telegram bridge for user {}", auth_user.user_id);
+                        }
+
+                        return Ok(AxumJson(json!({
+                            "healthy": false,
+                            "message": content
+                        })));
+                    }
+
+                    // Healthy patterns
+                    if content_lower.contains("successfully logged in") ||
+                       content_lower.contains("logged in as") ||
+                       content_lower.contains("already logged in") {
+                        tracing::info!("✅ Telegram health check passed for user {}: {}", auth_user.user_id, content);
+
+                        // Extract and save the connected account
+                        if let Some(account) = extract_connected_account(&content) {
+                            tracing::info!("📱 Extracted connected account: {}", account);
+                            if let Err(e) = state.user_repository.update_bridge_data(auth_user.user_id, "telegram", &account) {
+                                tracing::warn!("Failed to save connected account: {}", e);
+                            }
+                        }
+
+                        return Ok(AxumJson(json!({
+                            "healthy": true,
+                            "message": content
+                        })));
+                    }
+                }
+            }
+        }
+    }
+
+    // If we didn't find a status message, assume healthy if bridge record exists
+    tracing::info!("ℹ️ No clear status message found, assuming healthy based on bridge record");
+    Ok(AxumJson(json!({
+        "healthy": true,
+        "message": "Connection appears healthy (no recent status changes)"
     })))
 }

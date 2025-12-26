@@ -11,15 +11,18 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewGoogleCalendar, 
-        NewImapConnection, Bridge, NewBridge, WaitingCheck, 
-        NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword, 
+    models::user_models::{User, NewUsageLog, NewGoogleCalendar,
+        NewImapConnection, Bridge, NewBridge, WaitingCheck,
+        NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword,
         NewKeyword, NewGoogleTasks,
         TaskNotification, NewTaskNotification, NewUber,
+        ContactProfile, NewContactProfile,
+        ContactProfileException, NewContactProfileException,
     },
     schema::{
-        users, usage_logs, 
-        waiting_checks, priority_senders, keywords, 
+        users, usage_logs,
+        waiting_checks, priority_senders, keywords, contact_profiles,
+        contact_profile_exceptions,
     },
     DbPool,
 };
@@ -608,6 +611,148 @@ impl UserRepository {
             .filter(priority_senders::user_id.eq(user_id))
             .filter(priority_senders::service_type.eq(service_type))
             .load::<PrioritySender>(&mut conn)
+    }
+
+    // Contact Profiles methods
+    pub fn create_contact_profile(&self, new_profile: &NewContactProfile) -> Result<ContactProfile, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(contact_profiles::table)
+            .values(new_profile)
+            .execute(&mut conn)?;
+
+        // Return the created profile
+        contact_profiles::table
+            .filter(contact_profiles::user_id.eq(new_profile.user_id))
+            .filter(contact_profiles::nickname.eq(&new_profile.nickname))
+            .order(contact_profiles::id.desc())
+            .first::<ContactProfile>(&mut conn)
+    }
+
+    pub fn get_contact_profiles(&self, user_id: i32) -> Result<Vec<ContactProfile>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        contact_profiles::table
+            .filter(contact_profiles::user_id.eq(user_id))
+            .order(contact_profiles::nickname.asc())
+            .load::<ContactProfile>(&mut conn)
+    }
+
+    pub fn get_contact_profile(&self, user_id: i32, profile_id: i32) -> Result<ContactProfile, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        contact_profiles::table
+            .filter(contact_profiles::user_id.eq(user_id))
+            .filter(contact_profiles::id.eq(profile_id))
+            .first::<ContactProfile>(&mut conn)
+    }
+
+    pub fn update_contact_profile(
+        &self,
+        user_id: i32,
+        profile_id: i32,
+        nickname: &str,
+        whatsapp_chat: Option<String>,
+        telegram_chat: Option<String>,
+        signal_chat: Option<String>,
+        email_addresses: Option<String>,
+        notification_mode: &str,
+        notification_type: &str,
+        notify_on_call: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(contact_profiles::table)
+            .filter(contact_profiles::user_id.eq(user_id))
+            .filter(contact_profiles::id.eq(profile_id))
+            .set((
+                contact_profiles::nickname.eq(nickname),
+                contact_profiles::whatsapp_chat.eq(whatsapp_chat),
+                contact_profiles::telegram_chat.eq(telegram_chat),
+                contact_profiles::signal_chat.eq(signal_chat),
+                contact_profiles::email_addresses.eq(email_addresses),
+                contact_profiles::notification_mode.eq(notification_mode),
+                contact_profiles::notification_type.eq(notification_type),
+                contact_profiles::notify_on_call.eq(notify_on_call),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_contact_profile(&self, user_id: i32, profile_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(contact_profiles::table)
+            .filter(contact_profiles::user_id.eq(user_id))
+            .filter(contact_profiles::id.eq(profile_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Contact Profile Exception methods
+    pub fn get_profile_exceptions(&self, profile_id: i32) -> Result<Vec<ContactProfileException>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        contact_profile_exceptions::table
+            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
+            .load::<ContactProfileException>(&mut conn)
+    }
+
+    pub fn get_profile_exception_for_platform(&self, profile_id: i32, platform: &str) -> Result<Option<ContactProfileException>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        contact_profile_exceptions::table
+            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
+            .filter(contact_profile_exceptions::platform.eq(platform))
+            .first::<ContactProfileException>(&mut conn)
+            .optional()
+    }
+
+    pub fn set_profile_exception(
+        &self,
+        profile_id: i32,
+        platform: &str,
+        notification_mode: &str,
+        notification_type: &str,
+        notify_on_call: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Try to update first, if no rows updated, insert
+        let updated = diesel::update(contact_profile_exceptions::table)
+            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
+            .filter(contact_profile_exceptions::platform.eq(platform))
+            .set((
+                contact_profile_exceptions::notification_mode.eq(notification_mode),
+                contact_profile_exceptions::notification_type.eq(notification_type),
+                contact_profile_exceptions::notify_on_call.eq(notify_on_call),
+            ))
+            .execute(&mut conn)?;
+
+        if updated == 0 {
+            // Insert new exception
+            let new_exception = NewContactProfileException {
+                profile_id,
+                platform: platform.to_string(),
+                notification_mode: notification_mode.to_string(),
+                notification_type: notification_type.to_string(),
+                notify_on_call,
+            };
+            diesel::insert_into(contact_profile_exceptions::table)
+                .values(&new_exception)
+                .execute(&mut conn)?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_profile_exception(&self, profile_id: i32, platform: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(contact_profile_exceptions::table)
+            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
+            .filter(contact_profile_exceptions::platform.eq(platform))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_all_profile_exceptions(&self, profile_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(contact_profile_exceptions::table)
+            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
+            .execute(&mut conn)?;
+        Ok(())
     }
 
     // Keywords methods
@@ -1497,6 +1642,18 @@ impl UserRepository {
         Ok(rows)
     }
 
+    /// Update bridge data field (e.g., connected account/phone number)
+    pub fn update_bridge_data(&self, user_id: i32, service_type: &str, data: &str) -> Result<usize, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let rows = diesel::update(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq(service_type))
+            .set(bridges::data.eq(Some(data)))
+            .execute(&mut conn)?;
+        Ok(rows)
+    }
+
 
     pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
         use crate::schema::bridges;
@@ -1532,7 +1689,6 @@ impl UserRepository {
             .first::<Bridge>(&mut conn)
             .optional()?;
 
-        println!("bridge: {:#?}", bridge);
         Ok(bridge)
     }
     pub fn get_bridge_by_room_id(&self, user_id: i32, room_id: String, service: &str) -> Result<Option<Bridge>, DieselError> {
@@ -1636,10 +1792,48 @@ impl UserRepository {
             .filter(users::matrix_username.eq(matrix_user_id))
             .first::<User>(&mut conn)
             .optional()?;
-            
+
         Ok(user)
     }
 
+    // Bridge disconnection event methods
+    pub fn record_bridge_disconnection(&self, user_id: i32, bridge_type: &str, detected_at: i32) -> Result<(), DieselError> {
+        use crate::schema::bridge_disconnection_events;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let new_event = crate::models::user_models::NewBridgeDisconnectionEvent {
+            user_id,
+            bridge_type: bridge_type.to_string(),
+            detected_at,
+        };
+
+        diesel::insert_into(bridge_disconnection_events::table)
+            .values(&new_event)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_pending_disconnection_events(&self, user_id: i32) -> Result<Vec<crate::models::user_models::BridgeDisconnectionEvent>, DieselError> {
+        use crate::schema::bridge_disconnection_events;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let events = bridge_disconnection_events::table
+            .filter(bridge_disconnection_events::user_id.eq(user_id))
+            .load::<crate::models::user_models::BridgeDisconnectionEvent>(&mut conn)?;
+
+        Ok(events)
+    }
+
+    pub fn delete_disconnection_events(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::bridge_disconnection_events;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(bridge_disconnection_events::table.filter(bridge_disconnection_events::user_id.eq(user_id)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
 
     // Mark an email as processed
     pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {

@@ -18,6 +18,27 @@ use crate::connections::instagram::InstagramConnect;
 use crate::connections::tesla::TeslaConnect;
 use crate::connections::youtube::YouTubeConnect;
 use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use gloo_timers::future::TimeoutFuture;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ProactiveResponse {
+    enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateProactiveRequest {
+    enabled: bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum ToggleSaveState {
+    Idle,
+    Saving,
+    Success,
+    Error(String),
+}
+
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
     pub user_id: i32,
@@ -53,6 +74,23 @@ pub fn connect(props: &ConnectProps) -> Html {
     let youtube_connected = use_state(|| false);
     let selected_app = use_state(|| None::<String>);
     let proactive_enabled = use_state(|| true);
+    let toggle_save_state = use_state(|| ToggleSaveState::Idle);
+
+    // Load proactive state on mount
+    {
+        let proactive_enabled = proactive_enabled.clone();
+        use_effect_with_deps(move |_| {
+            spawn_local(async move {
+                if let Ok(resp) = Api::get("/api/profile/proactive-agent").send().await {
+                    if let Ok(proactive) = resp.json::<ProactiveResponse>().await {
+                        proactive_enabled.set(proactive.enabled);
+                    }
+                }
+            });
+            || ()
+        }, ());
+    }
+
     {
         let calendar_connected = calendar_connected.clone();
         let memory_connected = memory_connected.clone();
@@ -305,6 +343,44 @@ pub fn connect(props: &ConnectProps) -> Html {
         html! {}
     };
     let active_monitoring_tab = use_state(|| MonitoringTab::ForEachMessage);
+
+    // Toggle proactive handler
+    let handle_toggle = {
+        let proactive_enabled = proactive_enabled.clone();
+        let toggle_save_state = toggle_save_state.clone();
+        Callback::from(move |_| {
+            let new_value = !*proactive_enabled;
+            let proactive_enabled = proactive_enabled.clone();
+            let toggle_save_state = toggle_save_state.clone();
+            proactive_enabled.set(new_value);
+            toggle_save_state.set(ToggleSaveState::Saving);
+            spawn_local(async move {
+                let request = UpdateProactiveRequest { enabled: new_value };
+                match Api::post("/api/profile/proactive-agent")
+                    .header("Content-Type", "application/json")
+                    .body(serde_json::to_string(&request).unwrap())
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        toggle_save_state.set(ToggleSaveState::Success);
+                        let state = toggle_save_state.clone();
+                        spawn_local(async move {
+                            TimeoutFuture::new(2000).await;
+                            state.set(ToggleSaveState::Idle);
+                        });
+                    },
+                    Ok(_) => {
+                        toggle_save_state.set(ToggleSaveState::Error("Failed to save".to_string()));
+                    },
+                    Err(_) => {
+                        toggle_save_state.set(ToggleSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
             html! {
                 <div class="connect-section">
                     // Apps
@@ -413,8 +489,8 @@ pub fn connect(props: &ConnectProps) -> Html {
                     </div>
                     // Proactive Services
                     <div class="service-group">
-                    <h3 class="service-group-title"
-                        onclick={let group_states = group_states.clone();
+                    <h3 class="service-group-title notifications-header">
+                        <div class="header-left" onclick={let group_states = group_states.clone();
                             Callback::from(move |_| {
                                 let mut new_states = (*group_states).clone();
                                 if let Some(state) = new_states.get_mut("proactive") {
@@ -422,17 +498,38 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 }
                                 group_states.set(new_states);
                             })
-                        }
-                    >
-                        <i class="fa-solid fa-robot"></i>
-                        {"Notifications"}
-                        <div class="group-summary">
+                        }>
+                            <i class="fa-solid fa-robot"></i>
+                            {"Notifications"}
+                            <span class="toggle-status-hint">{if *proactive_enabled { "Active" } else { "Paused" }}</span>
+                            {match &*toggle_save_state {
+                                ToggleSaveState::Idle => html! {},
+                                ToggleSaveState::Saving => html! {
+                                    <span class="save-indicator">
+                                        <span class="save-spinner"></span>
+                                    </span>
+                                },
+                                ToggleSaveState::Success => html! {
+                                    <span class="save-indicator save-success">{"✓"}</span>
+                                },
+                                ToggleSaveState::Error(msg) => html! {
+                                    <span class="save-indicator save-error" title={msg.clone()}>{"✗"}</span>
+                                },
+                            }}
                             <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
                                 "fas fa-chevron-up"
                             } else {
                                 "fas fa-chevron-down"
                             }}></i>
                         </div>
+                        <label class="toggle-switch header-toggle" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                            <input
+                                type="checkbox"
+                                checked={*proactive_enabled}
+                                onchange={handle_toggle}
+                            />
+                            <span class="toggle-slider"></span>
+                        </label>
                     </h3>
                         <div class={classes!(
                             "monitoring-content",
@@ -462,33 +559,18 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 {"Scheduled"}
                             </button>
                         </div>
-                        <div class="service-list">
+                        <div class={classes!("service-list", if !*proactive_enabled { "disabled" } else { "" })}>
                             {
                                 match *active_monitoring_tab {
                                     MonitoringTab::ForEachMessage => {
-                                        let proactive_enabled = proactive_enabled.clone();
                                         html! {
                                         <>
                                             <div class={classes!("service-item")}>
-                                                <crate::proactive::agent_on::ProactiveAgentSection
-                                                    on_change={Callback::from({
-                                                        let proactive_enabled = proactive_enabled.clone();
-                                                        move |enabled: bool| proactive_enabled.set(enabled)
-                                                    })}
+                                                <crate::proactive::critical::CriticalSection
+                                                    proactive_disabled={!*proactive_enabled}
                                                 />
                                             </div>
-                                            <h4 class="flow-title">{"Notification Flow"}</h4>
-                                                // CriticalSection now contains MonitoredContacts + WaitingChecks + Critical settings
-                                                <div class={classes!("service-item")}>
-                                                    <crate::proactive::critical::CriticalSection
-                                                        phone_number={props.phone_number.clone()}
-                                                        proactive_disabled={!*proactive_enabled}
-                                                    />
-                                                </div>
-                                                <p class="flow-description">{"If a match is found in any of the above steps, a notification message will be sent to you. Otherwise, no message will be sent."}</p>
-                                                <p class="flow-description">{"Only unread messages will go through this flow. Lightfriend waits variable amount of time before starting to process a incoming message. This is to prevent processing messages that you had already seen. When you are offline, the message will be processed within 30 seconds and when actively chatting on the original app, the wait will be 5 minutes."}</p>
-
-                                                <br/>
+                                            <p class="flow-description">{"Notifications are sent immediately for unread messages. If you've been recently online, there may be up to a 5 minute delay to avoid notifying while you're already chatting. Email is checked every 10 minutes."}</p>
                                         </>
                                     }},
                                     MonitoringTab::Scheduled => html! {
@@ -497,6 +579,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                 html! {
                                                     <crate::proactive::digest::DigestSection
                                                         phone_number={props.phone_number.clone()}
+                                                        disabled={!*proactive_enabled}
                                                         />
                                                 }
                                             }
@@ -837,18 +920,19 @@ pub fn connect(props: &ConnectProps) -> Html {
 }
 .service-list, .monitoring-content {
     transition: all 0.3s ease-in-out;
-    overflow: hidden;
 }
 .service-list.collapsed, .monitoring-content.collapsed {
     max-height: 0;
     opacity: 0;
     margin: 0;
     padding: 0;
+    overflow: hidden;
 }
 .service-list.expanded, .monitoring-content.expanded {
     max-height: 5000px;
     opacity: 1;
     margin-top: 1.5rem;
+    overflow: visible;
 }
 .service-group {
     margin-bottom: 2rem;
@@ -904,6 +988,10 @@ pub fn connect(props: &ConnectProps) -> Html {
     transform: translateY(-2px);
     border-color: rgba(30, 144, 255, 0.2);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+/* Prevent transform on service-item containing modals - transform breaks position:fixed */
+.service-item:has(.modal-overlay):hover {
+    transform: none;
 }
 .service-header {
     display: flex;
@@ -1610,6 +1698,98 @@ input:checked + .slider:before {
 }
 .tab-button:hover {
     color: #7EB2FF;
+}
+/* Notifications header with toggle */
+.notifications-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.notifications-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+    cursor: pointer;
+}
+.notifications-header .header-toggle {
+    flex-shrink: 0;
+}
+.toggle-status-hint {
+    font-size: 0.8rem;
+    color: #888;
+    font-weight: normal;
+}
+.toggle-switch {
+    position: relative;
+    width: 52px;
+    height: 28px;
+    cursor: pointer;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(100, 100, 100, 0.5);
+    transition: 0.3s;
+    border-radius: 28px;
+}
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+.toggle-switch input:checked + .toggle-slider {
+    background: linear-gradient(45deg, #F59E0B, #D97706);
+}
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+.save-indicator {
+    min-width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.5rem;
+}
+.save-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(245, 158, 11, 0.3);
+    border-top-color: #F59E0B;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.save-success {
+    color: #22C55E;
+    font-size: 16px;
+}
+.save-error {
+    color: #EF4444;
+    cursor: help;
+    font-size: 16px;
+}
+.service-list.disabled {
+    opacity: 0.5;
+    pointer-events: none;
 }
 "#}
                     </style>

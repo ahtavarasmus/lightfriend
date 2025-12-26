@@ -3,10 +3,12 @@ use crate::schema::users;
 use crate::schema::conversations;
 use crate::schema::waiting_checks;
 use crate::schema::priority_senders;
+use crate::schema::contact_profile_exceptions;
 use crate::schema::keywords;
 use crate::schema::usage_logs;
 use crate::schema::google_calendar;
 use crate::schema::bridges;
+use crate::schema::bridge_disconnection_events;
 use crate::schema::imap_connection;
 use crate::schema::processed_emails;
 use crate::schema::email_judgments;
@@ -25,6 +27,8 @@ use crate::schema::webauthn_credentials;
 use crate::schema::webauthn_challenges;
 use crate::schema::waitlist;
 use crate::schema::youtube;
+use crate::schema::contact_profiles;
+use serde::{Serialize, Deserialize};
 
 
 
@@ -204,12 +208,30 @@ pub struct Bridge {
 #[derive(Insertable)]
 #[diesel(table_name = bridges)]
 pub struct NewBridge {
-    pub user_id: i32, 
+    pub user_id: i32,
     pub bridge_type: String, // whatsapp, telegram
     pub status: String, // connected, disconnected
     pub room_id: Option<String>,
     pub data: Option<String>,
     pub created_at: Option<i32>,
+}
+
+#[derive(Queryable, Selectable, Insertable, Debug, Clone)]
+#[diesel(table_name = bridge_disconnection_events)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct BridgeDisconnectionEvent {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub bridge_type: String,
+    pub detected_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = bridge_disconnection_events)]
+pub struct NewBridgeDisconnectionEvent {
+    pub user_id: i32,
+    pub bridge_type: String,
+    pub detected_at: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -442,9 +464,64 @@ pub struct PrioritySender {
 pub struct NewPrioritySender {
     pub user_id: i32,
     pub sender: String,
-    pub service_type: String, 
-    pub noti_type: Option<String>, 
+    pub service_type: String,
+    pub noti_type: Option<String>,
     pub noti_mode: String,
+}
+
+// Contact Profiles - unified notification settings per person/group
+#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = contact_profiles)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ContactProfile {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub nickname: String,
+    pub whatsapp_chat: Option<String>,
+    pub telegram_chat: Option<String>,
+    pub signal_chat: Option<String>,
+    pub email_addresses: Option<String>,
+    pub notification_mode: String,      // "all", "critical", "digest"
+    pub notification_type: String,      // "sms", "call"
+    pub notify_on_call: i32,            // 1 = true, 0 = false
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = contact_profiles)]
+pub struct NewContactProfile {
+    pub user_id: i32,
+    pub nickname: String,
+    pub whatsapp_chat: Option<String>,
+    pub telegram_chat: Option<String>,
+    pub signal_chat: Option<String>,
+    pub email_addresses: Option<String>,
+    pub notification_mode: String,
+    pub notification_type: String,
+    pub notify_on_call: i32,
+    pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Debug, Clone)]
+#[diesel(table_name = contact_profile_exceptions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ContactProfileException {
+    pub id: Option<i32>,
+    pub profile_id: i32,
+    pub platform: String,           // "whatsapp", "telegram", "signal", "email"
+    pub notification_mode: String,  // "all", "critical", "digest"
+    pub notification_type: String,  // "sms", "call"
+    pub notify_on_call: i32,        // 1 = true, 0 = false
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = contact_profile_exceptions)]
+pub struct NewContactProfileException {
+    pub profile_id: i32,
+    pub platform: String,
+    pub notification_mode: String,
+    pub notification_type: String,
+    pub notify_on_call: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -501,6 +578,9 @@ pub struct UserSettings {
     pub outbound_message_pricing: Option<f32>, // cached Twilio outbound SMS price for user's country
     pub last_instant_digest_time: Option<i32>, // timestamp of last on-demand digest fetch
     pub phone_service_active: bool, // whether phone service (SMS and calls) is active - can be disabled for security (e.g., stolen phone)
+    pub default_notification_mode: Option<String>, // "critical", "digest", or "ignore" - default behavior for unknown senders
+    pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
+    pub default_notify_on_call: i32, // 1 = notify on incoming calls, 0 = don't notify
 }
 
 #[derive(Insertable)]

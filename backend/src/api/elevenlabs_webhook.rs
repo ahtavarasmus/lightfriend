@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 
+// ========================================
+// Structs for post_call_transcription webhook
+// ========================================
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WebhookPayload {
@@ -50,6 +53,25 @@ pub struct ConversationInitiationClientDataWebhook {
 pub struct DynamicVariablesWebhook {
     #[serde(deserialize_with = "deserialize_user_id")]
     pub user_id: Option<String>,  // Using Option since it might not always be present
+}
+
+// ========================================
+// Structs for call_initiation_failure webhook
+// ========================================
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CallInitiationFailurePayload {
+    #[serde(rename = "type")]
+    pub type_field: String,  // "call_initiation_failure"
+    pub event_timestamp: u64,
+    pub data: CallInitiationFailureData,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CallInitiationFailureData {
+    pub failure_reason: String,  // "busy", "no-answer", "unknown"
+    #[serde(default)]
+    pub conversation_initiation_client_data: Option<ConversationInitiationClientDataWebhook>,
 }
 
 // Add this function at the module level (outside of any struct)
@@ -179,12 +201,45 @@ pub async fn elevenlabs_webhook(
 ) -> Result<Json<Value>, (StatusCode, Json<serde_json::Value>)> {
     // Log the raw payload first
     tracing::info!("Received raw webhook payload: {}", request.0);
-    
-    // Try to parse the payload
-    let payload: WebhookPayload = match serde_json::from_value(request.0) {
+
+    // First, extract the webhook type to determine how to handle it
+    let webhook_type = request.0.get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown");
+
+    tracing::info!("Webhook type: {}", webhook_type);
+
+    match webhook_type {
+        "post_call_transcription" => {
+            // Call was answered - handle normally and charge for call
+            handle_post_call_transcription(state, request.0).await
+        },
+        "call_initiation_failure" => {
+            // Call was NOT answered (busy, no-answer, declined)
+            // Don't charge for call, just mark usage as failed
+            handle_call_initiation_failure(state, request.0).await
+        },
+        _ => {
+            tracing::warn!("Unknown webhook type: {}", webhook_type);
+            // Return OK to prevent ElevenLabs from retrying
+            Ok(Json(json!({
+                "status": "received",
+                "message": "Unknown webhook type, ignored"
+            })))
+        }
+    }
+}
+
+/// Handle post_call_transcription webhook - call was answered
+async fn handle_post_call_transcription(
+    state: Arc<AppState>,
+    payload_value: serde_json::Value,
+) -> Result<Json<Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Parse the payload
+    let payload: WebhookPayload = match serde_json::from_value(payload_value) {
         Ok(payload) => payload,
         Err(e) => {
-            tracing::error!("Failed to parse webhook payload: {}", e);
+            tracing::error!("Failed to parse post_call_transcription payload: {}", e);
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({
@@ -209,16 +264,15 @@ pub async fn elevenlabs_webhook(
     println!("Transcript Summary: {}", call_summary);
     let user_id: Option<String> = payload.data.conversation_initiation_client_data.dynamic_variables.user_id;
     println!("User ID: {:?}", user_id);
-    // Your webhook processing logic here
 
-    // Get user_id from query params
+    // Get user_id from dynamic variables
     let user_id_str = match user_id {
         Some(id) => id,
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Missing user_id query parameter"
+                    "error": "Missing user_id in dynamic variables"
                 }))
             ));
         }
@@ -258,9 +312,10 @@ pub async fn elevenlabs_webhook(
             ));
         }
     };
+
     match state.user_repository.get_ongoing_usage(user_id) {
         Ok(Some(usage)) => {
-            // Handle the ongoing usage log
+            // Handle the ongoing usage log - CHARGE for call (it was answered)
             if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "voice", Some(call_duration_secs)) {
                 eprintln!("Failed to deduct user credits: {}", e);
                 return Err((
@@ -296,14 +351,12 @@ pub async fn elevenlabs_webhook(
             }
 
             let now_dt = chrono::Utc::now();
-            let dur_secs = call_duration_secs as u64;   // or adjust to match your type
+            let dur_secs = call_duration_secs as u64;
             let start_dt = now_dt - std::time::Duration::from_secs(dur_secs);
 
-            // Serialize for message content and for created_at
-            let start_rfc3339 = start_dt.to_rfc3339();        // e.g. "2025-07-09T11:40:12Z"
-            let start_epoch   = start_dt.timestamp() as i32;  // i32 matches your schema
-
-            let end_epoch = now_dt.timestamp() as i32;        // keep “end” as ‘now’
+            let start_rfc3339 = start_dt.to_rfc3339();
+            let start_epoch = start_dt.timestamp() as i32;
+            let end_epoch = now_dt.timestamp() as i32;
 
             let call_start = crate::models::user_models::NewMessageHistory {
                 user_id,
@@ -373,6 +426,91 @@ pub async fn elevenlabs_webhook(
 
     Ok(Json(json!({
         "status": "received"
+    })))
+}
+
+/// Handle call_initiation_failure webhook - call was NOT answered (busy, no-answer, declined)
+/// For "Call + SMS" notifications, we don't charge for the call portion
+async fn handle_call_initiation_failure(
+    state: Arc<AppState>,
+    payload_value: serde_json::Value,
+) -> Result<Json<Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Parse the payload
+    let payload: CallInitiationFailurePayload = match serde_json::from_value(payload_value) {
+        Ok(payload) => payload,
+        Err(e) => {
+            tracing::error!("Failed to parse call_initiation_failure payload: {}", e);
+            // Return OK anyway to prevent retries - we'll log the error
+            return Ok(Json(json!({
+                "status": "received",
+                "warning": "Failed to parse failure payload"
+            })));
+        }
+    };
+
+    let failure_reason = &payload.data.failure_reason;
+    tracing::info!("Call initiation failed with reason: {}", failure_reason);
+
+    // Try to get user_id from dynamic variables
+    let user_id_opt = payload.data.conversation_initiation_client_data
+        .as_ref()
+        .and_then(|cicd| cicd.dynamic_variables.user_id.clone());
+
+    let user_id_str = match user_id_opt {
+        Some(id) => id,
+        None => {
+            tracing::warn!("No user_id in call_initiation_failure webhook, cannot update usage");
+            return Ok(Json(json!({
+                "status": "received",
+                "message": "Call initiation failure logged (no user_id)"
+            })));
+        }
+    };
+
+    let user_id: i32 = match user_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            tracing::warn!("Invalid user_id format in call_initiation_failure webhook");
+            return Ok(Json(json!({
+                "status": "received",
+                "message": "Call initiation failure logged (invalid user_id)"
+            })));
+        }
+    };
+
+    // Update usage log to mark call as not answered (no charge for call)
+    match state.user_repository.get_ongoing_usage(user_id) {
+        Ok(Some(usage)) => {
+            // DON'T deduct credits for the call - it wasn't answered
+            // Just mark the usage log as completed with failure
+            if let Err(e) = state.user_repository.update_usage_log_fields(
+                user_id,
+                &usage.sid.unwrap_or_default(),
+                "not_answered",  // Special status for unanswered calls
+                false,           // success = false
+                &format!("Call not answered: {}", failure_reason),
+                Some(0),         // 0 duration since call wasn't connected
+            ) {
+                error!("Failed to update usage log for unanswered call: {}", e);
+            }
+
+            tracing::info!(
+                "Call initiation failure for user {}: {} - NOT charging for call",
+                user_id,
+                failure_reason
+            );
+        },
+        Ok(None) => {
+            tracing::warn!("No ongoing usage found for user {} in call_initiation_failure", user_id);
+        },
+        Err(e) => {
+            error!("Failed to get ongoing usage for call_initiation_failure: {}", e);
+        }
+    };
+
+    Ok(Json(json!({
+        "status": "received",
+        "message": format!("Call initiation failure handled: {}", failure_reason)
     })))
 }
 

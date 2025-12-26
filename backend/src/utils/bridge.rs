@@ -864,7 +864,7 @@ pub async fn handle_bridge_message(
     client: MatrixClient,
     state: Arc<AppState>,
 ) {
-    tracing::debug!("Entering bridge message handler");
+    tracing::info!("🔔 Bridge message handler - room: {}, sender: {}", room.room_id(), event.sender);
     if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
         tracing::info!("Skipping message from a muted room");
         return;
@@ -909,12 +909,13 @@ pub async fn handle_bridge_message(
             bridges.push(bridge);
         }
     }
+    tracing::info!("🔍 Checking if room {} is a management room (found {} bridges)", room_id_str, bridges.len());
     if let Some(bridge) = bridges.iter().find(|b| b.room_id.as_ref().map_or(false, |rid| rid == &room_id_str)) {
         // This is a management room for a bridge
-        tracing::debug!("Processing message in {} bridge management room", bridge.bridge_type);
+        tracing::info!("📋 Processing message in {} bridge management room (status: {})", bridge.bridge_type, bridge.status);
         // Skip if bridge is in connecting state (handled by monitor task)
         if bridge.status == "connecting" {
-            tracing::debug!("Skipping disconnection check during initial connection for {}", bridge.bridge_type);
+            tracing::info!("⏳ Skipping disconnection check during initial connection for {}", bridge.bridge_type);
             return;
         }
       
@@ -942,9 +943,10 @@ pub async fn handle_bridge_message(
       
         // Check if sender is the bridge bot
         if event.sender != bot_user_id {
-            tracing::debug!("Message not from bridge bot, skipping");
+            tracing::info!("📤 Message not from bridge bot (sender: {}, expected: {}), skipping", event.sender, bot_user_id);
             return;
         }
+        tracing::info!("✅ Message IS from bridge bot");
       
         // Extract message content
         let content = match event.content.msgtype {
@@ -955,21 +957,17 @@ pub async fn handle_bridge_message(
                 return;
             }
         };
-        // Send debug email to admin for user 1's bridge bot messages
-        if user_id == 1 {
-            println!("bridge bot management room content: {}", content);
-            let state_clone = Arc::clone(&state);
-            let bridge_type = bridge.bridge_type.clone();
-            let content_clone = content.clone();
-            tokio::spawn(async move {
-                if let Err(e) = crate::utils::notification_utils::send_bridge_debug_email(
-                    &state_clone,
-                    &bridge_type,
-                    &content_clone,
-                ).await {
-                    tracing::error!("Failed to send bridge debug email: {}", e);
-                }
-            });
+        // Log bridge bot management room messages for debugging (no more email)
+        tracing::info!("🤖 Bridge bot ({}) management room message: {}", bridge.bridge_type, content);
+
+        // Skip health check related messages - these are handled by the health check endpoint
+        let lower_content_check = content.to_lowercase();
+        if lower_content_check.contains("already logged in") ||
+           lower_content_check.contains("successfully logged in") ||
+           lower_content_check.contains("queued sync") ||
+           lower_content_check.contains("unknown command") {
+            tracing::info!("⏭️ Skipping health check / status message in management room");
+            return;
         }
       
         // Define disconnection patterns (customize per bridge if needed)
@@ -979,15 +977,28 @@ pub async fn handle_bridge_message(
             "logged out",
             "authentication failed",
             "login failed",
-            "error",
-            "failed",
             "timeout",
             "invalid",
+            "bad_credentials",
+            "wa-logged-out",
+            "wa-not-logged-in",
+            "device_removed",
+            "relogin to continue",
         ];
+        tracing::info!("📝 Bot message content: {}", content);
         let lower_content = content.to_lowercase();
         if disconnection_patterns.iter().any(|p| lower_content.contains(p)) {
-            tracing::info!("Detected disconnection in {} bridge for user {}: {}", bridge.bridge_type, user_id, content);
-          
+            tracing::info!("🚨 Detected disconnection in {} bridge for user {}: {}", bridge.bridge_type, user_id, content);
+
+            // Record disconnection event for digest notification
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+            if let Err(e) = state.user_repository.record_bridge_disconnection(user_id, &bridge.bridge_type, current_time) {
+                tracing::error!("Failed to record disconnection event for user {}: {}", user_id, e);
+            }
+
             // Delete the bridge record
             if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
                 tracing::error!("Failed to delete {} bridge: {}", bridge.bridge_type, e);
@@ -1064,7 +1075,6 @@ pub async fn handle_bridge_message(
     const LONG_WAIT: u64 = 600;   // 10 minutes (increased from 5min)
     const ACTIVITY_THRESHOLD: i32 = 300;  // 5 minutes
 
-    println!("last_seen_online: {:#?}", bridge.last_seen_online);
     let wait_time = match bridge.last_seen_online {
         Some(last_seen) => {
             let age = now_secs - last_seen;
@@ -1181,6 +1191,41 @@ pub async fn handle_bridge_message(
     if user_id == 1 { // if admin for debugging
         println!("message: {}", content);
     }
+
+    // Extract chat_name early for contact profile matching
+    let chat_name = remove_bridge_suffix(room_name.as_str());
+    let sender_name = sender_localpart
+        .strip_prefix(&sender_prefix)
+        .unwrap_or(&sender_localpart)
+        .to_string();
+
+    // Load contact profiles for matching
+    let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+
+    // Find matching contact profile for this chat/sender
+    let matching_profile = contact_profiles.iter().find(|p| {
+        let chat_lower = chat_name.to_lowercase();
+        let sender_lower = sender_name.to_lowercase();
+        match service.as_str() {
+            "whatsapp" => p.whatsapp_chat.as_ref()
+                .map(|c| {
+                    let c_lower = remove_bridge_suffix(c).to_lowercase();
+                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                }).unwrap_or(false),
+            "telegram" => p.telegram_chat.as_ref()
+                .map(|c| {
+                    let c_lower = remove_bridge_suffix(c).to_lowercase();
+                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                }).unwrap_or(false),
+            "signal" => p.signal_chat.as_ref()
+                .map(|c| {
+                    let c_lower = remove_bridge_suffix(c).to_lowercase();
+                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                }).unwrap_or(false),
+            _ => false
+        }
+    });
+
     // Check if this is a group room (more than 3 members)
     let members = match room.members(RoomMemberships::JOIN).await {
         Ok(m) => m,
@@ -1193,15 +1238,25 @@ pub async fn handle_bridge_message(
     if user_id == 1 {
         println!("members: {}", member_count);
     }
+
+    // Group chat handling: check if profile has "all" mode to bypass @mention requirement
     if member_count > 3 {
-        let is_mentioned = event.content.mentions.as_ref()
-            .map(|m| m.user_ids.contains(&matrix_user_id))
+        let is_priority_group = matching_profile
+            .map(|p| p.notification_mode == "all")
             .unwrap_or(false);
-        if !is_mentioned {
-            tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned", member_count);
-            return;
+
+        if !is_priority_group {
+            let is_mentioned = event.content.mentions.as_ref()
+                .map(|m| m.user_ids.contains(&matrix_user_id))
+                .unwrap_or(false);
+            if !is_mentioned {
+                tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned and not in 'all' mode profile", member_count);
+                return;
+            }
+            tracing::info!("User {} is mentioned in message (event ID: {})", user_id, event.event_id);
+        } else {
+            tracing::info!("Group {} matches contact profile with 'all' mode, processing all messages", chat_name);
         }
-        tracing::info!("User {} is mentioned in message (event ID: {})", user_id, event.event_id);
     }
     // Skip error messages
     if content.contains("Failed to bridge media") ||
@@ -1269,14 +1324,8 @@ pub async fn handle_bridge_message(
             }
         }
     }
-    let chat_name = remove_bridge_suffix(room_name.as_str());
- 
-    let sender_name = sender_localpart
-        .strip_prefix(&sender_prefix)
-        .unwrap_or(&sender_localpart)
-        .to_string();
-    let waiting_checks = state.user_repository.get_waiting_checks(user_id, "messaging").unwrap_or(Vec::new());
-    let priority_senders = state.user_repository.get_priority_senders(user_id, &service).unwrap_or(Vec::new());
+    // chat_name and sender_name already defined earlier for contact profile matching
+
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
         let prefix = format!("{} from ", capitalize(&service));
         let separator = ": ";
@@ -1295,96 +1344,10 @@ pub async fn handle_bridge_message(
         }
         format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
     }
+
     let service_cap = capitalize(&service);
-    // FAST CHECKS SECOND - Check priority senders if active
-    for priority_sender in &priority_senders {
-        if priority_sender.noti_mode == "all" {
-            let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
-            if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
-               sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-            
-                // Determine suffix based on noti_type
-                let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
-                    Some("call") => "_call",
-                    _ => "_sms",
-                };
-                let notification_type = format!("{}_priority{}", service, suffix);
-            
-                // Check if user has enough credits for notification
-                match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
-                    Ok(()) => {
-                        // User has enough credits, proceed with notification
-                        let state_clone = state.clone();
-                        let content_clone = content.clone();
-                        let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
-                        let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                    
-                        // Spawn a new task for sending notification
-                        tokio::spawn(async move {
-                            // Send the notification
-                            crate::proactive::utils::send_notification(
-                                &state_clone,
-                                user_id,
-                                &message,
-                                notification_type,
-                                Some(first_message),
-                            ).await;
-                        
-                        });
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("User {} does not have enough credits for priority sender notification: {}, continuing though", user_id, e);
-                    }
-                }
-            }
-        }
-    }
-    if !waiting_checks.is_empty() {
-        // Check if any waiting checks match the message
-        if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
-            &state,
-            user_id,
-            &format!("{} from {}: {}", service_cap, chat_name, content),
-            &waiting_checks,
-        ).await {
-            if let Some(check_id) = check_id_option {
-                let message = message.unwrap_or(format!("Waiting check matched in {}, but failed to get content", service).to_string());
-                let first_message = first_message.unwrap_or(format!("Hey, I found a match for one of your waiting checks in {}.", service_cap));
-            
-                // Find the matched waiting check to determine noti_type
-                let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
-                let suffix = if let Some(wc) = matched_waiting_check {
-                    match wc.noti_type.as_ref().map(|s| s.as_str()) {
-                        Some("call") => "_call",
-                        _ => "_sms",
-                    }
-                } else {
-                    "_sms"
-                };
-                let notification_type = format!("{}_waiting_check{}", service, suffix);
-            
-                // Delete the matched waiting check
-                if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
-                    tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
-                }
-            
-                // Send notification
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
-                        user_id,
-                        &message,
-                        notification_type,
-                        Some(first_message),
-                    ).await;
-                });
-                return;
-            }
-        }
-    }
-    // Check message importance based on waiting checks and criticality
+
+    // Get user settings for default notification mode
     let user_settings = match state.user_core.get_user_settings(user_id) {
         Ok(settings) => settings,
         Err(e) => {
@@ -1392,65 +1355,158 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-    if user_settings.critical_enabled.is_none() {
-        tracing::debug!("Critical message checking disabled for user {}", user_id);
-        return;
-    }
+
+    // Determine notification mode and type based on contact profile or default
+    // Check for platform-specific exceptions if a profile matches
+    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) = match matching_profile {
+        Some(profile) => {
+            let profile_id = profile.id.unwrap_or(0);
+            // Check for platform-specific exception
+            let exception = state.user_repository.get_profile_exception_for_platform(profile_id, &service).ok().flatten();
+
+            match exception {
+                Some(exc) => {
+                    tracing::info!("Using {} exception for profile '{}': mode={}, type={}",
+                        service, profile.nickname, exc.notification_mode, exc.notification_type);
+                    (
+                        exc.notification_mode.clone(),
+                        exc.notification_type.clone(),
+                        exc.notify_on_call != 0,
+                        Some(profile.nickname.clone())
+                    )
+                },
+                None => (
+                    profile.notification_mode.clone(),
+                    profile.notification_type.clone(),
+                    profile.notify_on_call != 0,
+                    Some(profile.nickname.clone())
+                )
+            }
+        },
+        None => {
+            let default_mode = user_settings.default_notification_mode.clone()
+                .unwrap_or_else(|| "critical".to_string());
+            let default_notify_on_call = user_settings.default_notify_on_call != 0;
+            (default_mode, "sms".to_string(), default_notify_on_call, None)
+        }
+    };
+
     if user_id == 1 {
-        println!("service: {}", service);
-        println!("chat_name: {}", chat_name);
-        println!("content: {}", content);
-        println!("content contains call: {}", content.contains("Incoming call"));
+        println!("notification_mode: {}", notification_mode);
+        println!("notification_type: {}", notification_type_str);
+        println!("profile_nickname: {:?}", profile_nickname);
     }
-    if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
-        println!("is critical: {}", is_critical);
-        if is_critical {
-            let is_family = priority_senders.iter().filter(|ps| ps.noti_mode == "focus").any(|ps| {
-                let clean_priority_sender = remove_bridge_suffix(&ps.sender);
-                chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
-                sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase())
-            });
-            println!("is_family: {}", is_family);
-            let action = user_settings.action_on_critical_message.as_ref().map(|s| s.as_str());
-            println!("action: {:?}", action);
 
-            let should_notify = match action {
-                Some("notify_family") => is_family,
-                _ => true, // None (notify all) or any other value defaults to notify
+    // Handle based on notification mode
+    match notification_mode.as_str() {
+        "all" => {
+            // Send immediate notification for ALL messages from this contact/group
+            let suffix = match notification_type_str.as_str() {
+                "call" => "_call",
+                "call_sms" => "_call_sms",
+                _ => "_sms",
             };
+            let notification_type = format!("{}_profile{}", service, suffix);
 
-            if should_notify {
-                // Check if we recently sent a critical notification to avoid duplicates
-                let notification_type = format!("{}_critical", service);
-                const NOTIFICATION_COOLDOWN: i32 = 600; // 10 minutes
+            // Check if user has enough credits
+            match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+                Ok(()) => {
+                    let state_clone = state.clone();
+                    let content_clone = content.clone();
+                    let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
+                    let message = trim_for_sms(&service, sender_display, &content_clone);
+                    let first_message = format!("Hello, you have a {} message from {}.", service_cap, sender_display);
 
-                if let Ok(has_recent) = state.user_repository.has_recent_notification(
-                    user_id,
-                    &notification_type,
-                    NOTIFICATION_COOLDOWN
-                ) {
-                    if has_recent {
-                        tracing::info!("Skipping notification - already sent {} notification within last {} seconds",
-                            notification_type, NOTIFICATION_COOLDOWN);
-                        return;
-                    }
+                    tokio::spawn(async move {
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            &message,
+                            notification_type,
+                            Some(first_message),
+                        ).await;
+                    });
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("User {} does not have enough credits for profile notification: {}", user_id, e);
+                }
+            }
+        }
+        "critical" => {
+            // Only notify if AI deems the message critical
+            if user_settings.critical_enabled.is_none() {
+                tracing::debug!("Critical message checking disabled for user {}", user_id);
+                return;
+            }
+
+            if user_id == 1 {
+                println!("service: {}", service);
+                println!("chat_name: {}", chat_name);
+                println!("content: {}", content);
+            }
+
+            if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(
+                &state, user_id,
+                &format!("{} from {}: {}", service_cap, chat_name, content),
+                service_cap.as_str(), chat_name.as_str(), content.as_str()
+            ).await {
+                if user_id == 1 {
+                    println!("is_critical: {}", is_critical);
                 }
 
-                let message = message_opt.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
-                let first_message = first_message_opt.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
+                if is_critical {
+                    // Check if we recently sent a critical notification to avoid duplicates
+                    let suffix = match notification_type_str.as_str() {
+                        "call" => "_call",
+                        "call_sms" => "_call_sms",
+                        _ => "_sms",
+                    };
+                    let notification_type = format!("{}_critical{}", service, suffix);
+                    const NOTIFICATION_COOLDOWN: i32 = 600; // 10 minutes
 
-                // Spawn a new task for sending critical message notification
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
+                    if let Ok(has_recent) = state.user_repository.has_recent_notification(
                         user_id,
-                        &message,
-                        notification_type,
-                        Some(first_message),
-                    ).await;
-                });
+                        &notification_type,
+                        NOTIFICATION_COOLDOWN
+                    ) {
+                        if has_recent {
+                            tracing::info!("Skipping notification - already sent {} notification within last {} seconds",
+                                notification_type, NOTIFICATION_COOLDOWN);
+                            return;
+                        }
+                    }
+
+                    let message = message_opt.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
+                    let first_message = first_message_opt.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
+
+                    // Spawn a new task for sending critical message notification
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            &message,
+                            notification_type,
+                            Some(first_message),
+                        ).await;
+                    });
+                }
             }
+        }
+        "digest" | "ignore" => {
+            // For digest mode: message will be picked up by digest job, no immediate notification
+            // For ignore mode (only applicable to default, not profiles): skip entirely
+            if notification_mode == "ignore" {
+                tracing::debug!("Message from unknown sender ignored (default_notification_mode=ignore)");
+            } else {
+                tracing::debug!("Message will be included in digest (notification_mode=digest)");
+            }
+            return;
+        }
+        _ => {
+            // Unknown mode, treat as critical
+            tracing::warn!("Unknown notification mode: {}, treating as critical", notification_mode);
         }
     }
 }

@@ -1,6 +1,15 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    bridge_disconnection_events (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        bridge_type -> Text,
+        detected_at -> Integer,
+    }
+}
+
+diesel::table! {
     bridges (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -19,6 +28,33 @@ diesel::table! {
         user_id -> Integer,
         event_id -> Text,
         notification_time -> Integer,
+    }
+}
+
+diesel::table! {
+    contact_profile_exceptions (id) {
+        id -> Nullable<Integer>,
+        profile_id -> Integer,
+        platform -> Text,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Integer,
+    }
+}
+
+diesel::table! {
+    contact_profiles (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        nickname -> Text,
+        whatsapp_chat -> Nullable<Text>,
+        telegram_chat -> Nullable<Text>,
+        signal_chat -> Nullable<Text>,
+        email_addresses -> Nullable<Text>,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Integer,
+        created_at -> Integer,
     }
 }
 
@@ -315,6 +351,9 @@ diesel::table! {
         outbound_message_pricing -> Nullable<Float>,
         last_instant_digest_time -> Nullable<Integer>,
         phone_service_active -> Bool,
+        default_notification_mode -> Nullable<Text>,
+        default_notification_type -> Nullable<Text>,
+        default_notify_on_call -> Integer,
     }
 }
 
@@ -414,8 +453,11 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(bridge_disconnection_events -> users (user_id));
 diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(calendar_notifications -> users (user_id));
+diesel::joinable!(contact_profile_exceptions -> contact_profiles (profile_id));
+diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
@@ -433,8 +475,11 @@ diesel::joinable!(webauthn_challenges -> users (user_id));
 diesel::joinable!(webauthn_credentials -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    bridge_disconnection_events,
     bridges,
     calendar_notifications,
+    contact_profile_exceptions,
+    contact_profiles,
     conversations,
     country_availability,
     critical_categories,

@@ -43,6 +43,16 @@ fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     false
 }
 
+/// Extract connected account (phone number) from bridge status message
+/// Examples:
+/// - "Successfully logged in as +358442105886"
+/// - "Already logged in as +358442105886"
+fn extract_connected_account(message: &str) -> Option<String> {
+    // Look for phone number pattern (starts with + followed by digits)
+    let re = regex::Regex::new(r"\+\d{6,15}").ok()?;
+    re.find(message).map(|m| m.as_str().to_string())
+}
+
 // Helper function to get the store path
 fn get_store_path(username: &str) -> Result<String> {
     let persistent_store_path = std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
@@ -476,12 +486,14 @@ pub async fn get_whatsapp_status(
         Some(bridge) => Ok(AxumJson(json!({
             "connected": bridge.status == "connected",
             "status": bridge.status,
-            "created_at": bridge.created_at.unwrap_or(0), // Remove millisecond conversion
+            "created_at": bridge.created_at.unwrap_or(0),
+            "connected_account": bridge.data,
         }))),
         None => Ok(AxumJson(json!({
             "connected": false,
             "status": "not_connected",
             "created_at": 0,
+            "connected_account": null,
         }))),
     }
 }
@@ -494,25 +506,39 @@ async fn monitor_whatsapp_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    tracing::debug!("👀 Starting optimized WhatsApp connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::info!("👀 Starting WhatsApp connection monitoring for user {} in room {}", user_id, room_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
-    // Shorter sync timeout for faster response
+    // Shorter sync timeout for faster response (like the old working version)
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
 
-    // Reduced monitoring duration but more frequent checks
-    for attempt in 1..60 { // Try for about 5 minutes (60 * 5 seconds)
-        tracing::debug!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
+    // Monitor for about 5 minutes (60 * 5 seconds)
+    for attempt in 1..60 {
+        tracing::info!("🔄 Monitor attempt #{} for user {}", attempt, user_id);
 
-        let _ = client.sync_once(sync_settings.clone()).await?;
-        
+        // Sync with error handling
+        if let Err(e) = client.sync_once(sync_settings.clone()).await {
+            tracing::warn!("⚠️ Sync error on attempt #{}: {}", attempt, e);
+            sleep(Duration::from_secs(5)).await;
+            continue;
+        }
 
+        // Check ONLY the specific room where we sent the command (like the old working version)
         if let Some(room) = client.get_room(room_id) {
-            // Get only recent messages to reduce processing time
+            // Get only recent messages
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from default to 5
-            let messages = room.messages(options).await?;
-            
+            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
+            let messages = match room.messages(options).await {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!("⚠️ Failed to get messages: {}", e);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+
+            tracing::info!("📬 Found {} messages in room", messages.chunk.len());
+
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
@@ -520,7 +546,6 @@ async fn monitor_whatsapp_connection(
                         if let AnySyncTimelineEvent::MessageLike(
                             matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
                         ) = event {
-
                             let event_content: RoomMessageEventContent = match sync_event {
                                 SyncRoomMessageEvent::Original(original_event) => original_event.content,
                                 SyncRoomMessageEvent::Redacted(_) => continue,
@@ -532,12 +557,18 @@ async fn monitor_whatsapp_connection(
                                 _ => continue,
                             };
 
+                            tracing::info!("📨 Bot message: {}", content);
 
-
-                            // Check for successful login message first
+                            // Check for successful login first
                             if content.contains("Successfully logged in as") {
-                                tracing::debug!("🎉 WhatsApp successfully connected for user {} with phone number confirmation", user_id);
-                                
+                                tracing::info!("🎉 WhatsApp successfully connected for user {}", user_id);
+
+                                // Extract the connected account (phone number)
+                                let connected_account = extract_connected_account(&content);
+                                if let Some(ref account) = connected_account {
+                                    tracing::info!("📱 Connected as: {}", account);
+                                }
+
                                 // Update bridge status to connected
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
@@ -549,7 +580,7 @@ async fn monitor_whatsapp_connection(
                                     bridge_type: "whatsapp".to_string(),
                                     status: "connected".to_string(),
                                     room_id: Some(room_id.to_string()),
-                                    data: None,
+                                    data: connected_account,
                                     created_at: Some(current_time),
                                 };
 
@@ -560,24 +591,20 @@ async fn monitor_whatsapp_connection(
                                 let mut matrix_clients = state.matrix_clients.lock().await;
                                 let mut sync_tasks = state.matrix_sync_tasks.lock().await;
 
-                                // Add event handlers before storing/cloning the client
                                 use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
                                 use matrix_sdk::room::Room;
-                                
+
                                 let state_for_handler = Arc::clone(&state);
                                 client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
                                     let state = Arc::clone(&state_for_handler);
                                     async move {
-                                        tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
                                         crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
                                     }
                                 });
 
-                                // Store the client
                                 let client_arc = Arc::new(client.clone());
                                 matrix_clients.insert(user_id, client_arc.clone());
 
-                                // Create sync task
                                 let sync_settings = MatrixSyncSettings::default()
                                     .timeout(Duration::from_secs(30))
                                     .full_state(true);
@@ -585,10 +612,7 @@ async fn monitor_whatsapp_connection(
                                 let handle = tokio::spawn(async move {
                                     loop {
                                         match client_arc.sync(sync_settings.clone()).await {
-                                            Ok(_) => {
-                                                tracing::debug!("Sync completed normally for user {}", user_id);
-                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                            },
+                                            Ok(_) => tokio::time::sleep(tokio::time::Duration::from_secs(1)).await,
                                             Err(e) => {
                                                 tracing::error!("Matrix sync error for user {}: {}", user_id, e);
                                                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
@@ -599,39 +623,20 @@ async fn monitor_whatsapp_connection(
 
                                 sync_tasks.insert(user_id, handle);
 
-                                // Send sync commands with reduced delays
-                                if let Some(room) = client.get_room(&room_id) {
-                                    // Send both commands quickly without long waits
-                                    room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await?;
-                                    tracing::debug!("Sent contacts sync command for user {}", user_id);
-                                    
-                                    // Shorter wait time
-                                    sleep(Duration::from_millis(500)).await;
-                                    
-                                    room.send(RoomMessageEventContent::text_plain("!wa sync groups --create-portals")).await?;
-                                    tracing::debug!("Sent groups sync command for user {}", user_id);
-                                } else {
-                                    tracing::error!("WhatsApp room not found for sync commands");
-                                }
-
+                                // Send sync commands
+                                let _ = room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await;
+                                sleep(Duration::from_millis(500)).await;
+                                let _ = room.send(RoomMessageEventContent::text_plain("!wa sync groups --create-portals")).await;
 
                                 return Ok(());
                             }
 
-
-                            // Check for error messages with more specific patterns
+                            // Check for error messages
                             let error_patterns = [
-                                "error",
-                                "failed",
-                                "timeout",
-                                "disconnected",
-                                "invalid code",
-                                "connection lost",
-                                "authentication failed",
-                                "login failed"
+                                "error", "failed", "timeout", "disconnected",
+                                "connection lost", "authentication failed", "login failed"
                             ];
-
-                            if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
+                            if error_patterns.iter().any(|&p| content.to_lowercase().contains(p)) {
                                 tracing::error!("❌ WhatsApp connection failed for user {}: {}", user_id, content);
                                 state.user_repository.delete_bridge(user_id, "whatsapp")?;
                                 return Err(anyhow!("WhatsApp connection failed: {}", content));
@@ -640,15 +645,17 @@ async fn monitor_whatsapp_connection(
                     }
                 }
             }
+        } else {
+            tracing::warn!("⚠️ Room {} not found", room_id);
         }
 
-        // Shorter sleep between checks for faster response
-        sleep(Duration::from_secs(3)).await; // Reduced from 5 to 3 seconds
+        sleep(Duration::from_secs(5)).await;
     }
 
-    // If we reach here, connection timed out
+    // Timeout - connection didn't complete
+    tracing::warn!("⏰ WhatsApp connection timed out for user {}", user_id);
     state.user_repository.delete_bridge(user_id, "whatsapp")?;
-    Err(anyhow!("WhatsApp connection timed out after 3 minutes"))
+    Err(anyhow!("WhatsApp connection timed out after 5 minutes"))
 }
 
 
@@ -868,5 +875,177 @@ pub async fn disconnect_whatsapp(
 
     Ok(AxumJson(json!({
         "message": "WhatsApp disconnected successfully"
+    })))
+}
+
+/// Health check endpoint using !wa ping command
+/// Returns the actual WhatsApp connection status from the bridge
+pub async fn check_whatsapp_health(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    tracing::info!("🏥 Checking WhatsApp health for user {}", auth_user.user_id);
+
+    // Get the bridge information first
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+        .map_err(|e| {
+            tracing::error!("Failed to get WhatsApp bridge: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to get WhatsApp bridge info"})),
+            )
+        })?;
+
+    let Some(bridge) = bridge else {
+        return Ok(AxumJson(json!({
+            "healthy": false,
+            "message": "WhatsApp is not connected"
+        })));
+    };
+
+    // Get Matrix client
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get Matrix client: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
+            )
+        })?;
+
+    // Get the room
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid room ID format"})),
+        ))?;
+
+    let room = client.get_room(&room_id).ok_or_else(|| (
+        StatusCode::NOT_FOUND,
+        AxumJson(json!({"error": "WhatsApp bridge room not found"})),
+    ))?;
+
+    // Send login command to check status - if already logged in, bridge will respond with status
+    tracing::info!("📤 Sending login command for health check for user {}", auth_user.user_id);
+    room.send(RoomMessageEventContent::text_plain("login")).await
+        .map_err(|e| {
+            tracing::error!("Failed to send ping command: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to send ping command"})),
+            )
+        })?;
+
+    // Wait for response with timeout
+    let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT")
+        .expect("WHATSAPP_BRIDGE_BOT not set");
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str())
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid bridge bot user ID"})),
+        ))?;
+
+    // Simple approach: check the MOST RECENT message from the bot
+    // If it says logged in, we're healthy. If it says disconnected, we're not.
+    // Get recent messages from the room
+    let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+    options.limit = matrix_sdk::ruma::UInt::new(50).unwrap();
+
+    let messages = match room.messages(options).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("⚠️ Failed to get messages: {}", e);
+            return Ok(AxumJson(json!({
+                "healthy": false,
+                "message": format!("Failed to get room messages: {}", e)
+            })));
+        }
+    };
+
+    tracing::info!("📨 Got {} messages from room for health check", messages.chunk.len());
+
+    // Find the most recent message from the bridge bot
+    for msg in messages.chunk {
+        let raw_event = msg.raw();
+        if let Ok(event) = raw_event.deserialize() {
+            if event.sender() == bot_user_id {
+                if let AnySyncTimelineEvent::MessageLike(
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                ) = event {
+                    let event_content: RoomMessageEventContent = match sync_event {
+                        SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                        SyncRoomMessageEvent::Redacted(_) => continue,
+                    };
+
+                    let content = match event_content.msgtype {
+                        MessageType::Text(text_content) => text_content.body,
+                        MessageType::Notice(notice_content) => notice_content.body,
+                        _ => continue,
+                    };
+
+                    let content_lower = content.to_lowercase();
+                    tracing::info!("🔍 Most recent bot message: {}", content);
+
+                    // Skip non-status messages
+                    if content_lower.contains("scan") ||
+                       content_lower.contains("qr code") ||
+                       content_lower.contains("queued sync") ||
+                       content_lower.contains("unknown command") {
+                        continue;
+                    }
+
+                    // Unhealthy patterns
+                    if content_lower.contains("not logged in") ||
+                       content_lower.contains("not connected") ||
+                       content_lower.contains("disconnected") ||
+                       content_lower.contains("logged out") ||
+                       content_lower.contains("no session") ||
+                       content_lower.contains("no phone") {
+                        tracing::warn!("❌ WhatsApp health check failed for user {}: {}", auth_user.user_id, content);
+
+                        // Auto-delete the stale bridge record
+                        if let Err(e) = state.user_repository.delete_bridge(auth_user.user_id, "whatsapp") {
+                            tracing::error!("Failed to delete stale bridge: {}", e);
+                        } else {
+                            tracing::info!("🧹 Deleted stale WhatsApp bridge for user {}", auth_user.user_id);
+                        }
+
+                        return Ok(AxumJson(json!({
+                            "healthy": false,
+                            "message": content
+                        })));
+                    }
+
+                    // Healthy patterns
+                    if content_lower.contains("successfully logged in") ||
+                       content_lower.contains("logged in as") ||
+                       content_lower.contains("already logged in") {
+                        tracing::info!("✅ WhatsApp health check passed for user {}: {}", auth_user.user_id, content);
+
+                        // Extract and save the connected account (phone number)
+                        // Pattern: "Successfully logged in as +358..." or "logged in as +358..."
+                        if let Some(account) = extract_connected_account(&content) {
+                            tracing::info!("📱 Extracted connected account: {}", account);
+                            if let Err(e) = state.user_repository.update_bridge_data(auth_user.user_id, "whatsapp", &account) {
+                                tracing::warn!("Failed to save connected account: {}", e);
+                            }
+                        }
+
+                        return Ok(AxumJson(json!({
+                            "healthy": true,
+                            "message": content
+                        })));
+                    }
+                }
+            }
+        }
+    }
+
+    // If we didn't find a status message, assume healthy if bridge record exists
+    tracing::info!("ℹ️ No clear status message found, assuming healthy based on bridge record");
+    Ok(AxumJson(json!({
+        "healthy": true,
+        "message": "Connection appears healthy (no recent status changes)"
     })))
 }
