@@ -639,13 +639,12 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
             let selected_country = selected_country.clone();
             let plan_type = plan_type.clone();
 
-            if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
+            // BYOT plan warning - triggers for "Other" country or explicit BYOT plan selection
+            if selected_country == "Other" || plan_type.as_deref() == Some("byot") {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
-                        "Have you contacted us to make sure the service is available in your country?"
+                        "BYOT Plan Notice:\n\nBefore subscribing, please verify you can purchase a Twilio phone number for your country.\n\n- Some countries only allow business accounts\n- Number availability varies by region\n- Check Twilio's phone number search first\n\nContinue to checkout?"
                     ).unwrap_or(false) {
-                        let email_url = "mailto:rasmus@ahtava.com";
-                        let _ = window.location().set_href(email_url);
                         return;
                     }
                 }
@@ -787,6 +786,17 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
             if !*terms_accepted {
                 error.set(Some("Please accept the terms and conditions".to_string()));
                 return;
+            }
+
+            // BYOT plan warning - triggers for "Other" country or explicit BYOT plan selection
+            if selected_country == "Other" || plan_type.as_deref() == Some("byot") {
+                if let Some(window) = web_sys::window() {
+                    if !window.confirm_with_message(
+                        "BYOT Plan Notice:\n\nBefore subscribing, please verify you can purchase a Twilio phone number for your country.\n\n- Some countries only allow business accounts\n- Number availability varies by region\n- Check Twilio's phone number search first\n\nContinue to checkout?"
+                    ).unwrap_or(false) {
+                        return;
+                    }
+                }
             }
 
             let loading = loading.clone();
@@ -1462,6 +1472,8 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
                 <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
                 <li><i class="fas fa-car"></i>{"Tesla Vehicle Control (lock, unlock, climate, start, battery)"}</li>
+                <li><i class="fas fa-desktop"></i>{"Web Dashboard with Chat & Voice Calls"}</li>
+                <li><i class="fas fa-play-circle"></i>{"Video Player for Shared Links (coming soon)"}</li>
                 <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
                 <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
                 <li><i class="fas fa-clock"></i>{"Custom Waiting Checks Specific Content"}</li>
@@ -1697,6 +1709,10 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         },
         Feature {
             text: "All future updates, security, and priority support".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "7-day one-click refund, no questions asked".to_string(),
             sub_items: vec![],
         },
     ];
@@ -2244,6 +2260,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All features included".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <PricingCard
@@ -2280,12 +2297,20 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             vec![
                                 Feature { text: "Local phone number included".to_string(), sub_items: vec![] },
                                 Feature { text: "All features included".to_string(), sub_items: vec![] },
+                                Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
                             ]
                         } else {
-                            // Notification-only countries
+                            // Notification-only countries - reframe as proactive-first
                             vec![
-                                Feature { text: "Notifications from US number".to_string(), sub_items: vec!["Texting back may cost extra".to_string()] },
+                                Feature {
+                                    text: "Proactive notifications from US number".to_string(),
+                                    sub_items: vec![
+                                        "Service notifies you - rarely need to text back".to_string(),
+                                        "Texting back possible (may cost extra)".to_string()
+                                    ]
+                                },
                                 Feature { text: "All features included".to_string(), sub_items: vec![] },
+                                Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
                             ]
                         };
 
@@ -2301,6 +2326,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All features included".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
                         ];
 
                         let selected_country_clone = props.selected_country.clone();
@@ -2364,7 +2390,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 if is_notification_only {
                                     <PricingCard
                                         plan_name={"BYOT Plan"}
-                                        best_for={"Want a local number? Bring Your Own Twilio for two-way messaging."}
+                                        best_for={"Want a local number? Verify Twilio availability for your country first."}
                                         price={19.0}
                                         currency={"€"}
                                         period={"/month"}
@@ -2423,7 +2449,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
@@ -2436,7 +2462,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Monitor and Digest?"}</summary>
@@ -2453,7 +2479,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
+                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Monitor and Digest?"}</summary>
@@ -2467,6 +2493,14 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     <summary>{"Can I bring my own phone number?"}</summary>
                                     <p>{"Yes! If you want a local number for two-way messaging, you can use the BYOT (Bring Your Own Twilio) plan. This lets you set up your own Twilio account and pay messaging costs directly to them."}</p>
                                 </details>
+                                <details>
+                                    <summary>{"Do I need to text back?"}</summary>
+                                    <p>{"Rarely! Lightfriend is proactive-first - it monitors your emails, calendar, and messages, then notifies you about what matters. You can ask questions via web chat or voice calls from the dashboard anytime."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"What can I do from the dashboard?"}</summary>
+                                    <p>{"The web dashboard lets you chat with the AI, make voice calls, control your Tesla (climate, locks, charging), configure all proactive features, and soon watch videos from links friends share - all without texting."}</p>
+                                </details>
                                 </>
                             }
                         } else {
@@ -2474,7 +2508,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees. Not satisfied? Request a full refund within 7 days if you've used less than 30% of your credits."}</p>
+                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What is BYOT?"}</summary>

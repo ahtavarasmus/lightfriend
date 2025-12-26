@@ -1,4 +1,4 @@
-use crate::models::user_models::WaitingCheck;
+use crate::models::user_models::{WaitingCheck, ContactProfile};
 use crate::AppState;
 use crate::{AiProvider, ModelPurpose};
 use std::collections::{HashMap, HashSet};
@@ -341,6 +341,32 @@ fn build_contact_maps_and_filter_messages(
     DigestContactMaps { priority_map, ignore_map }
 }
 
+/// Resolves a sender name to a contact profile nickname if one exists.
+/// Returns the profile nickname if the chat_name matches a contact profile,
+/// otherwise returns the original chat_name.
+fn resolve_sender_name(
+    profiles: &[ContactProfile],
+    platform: &str,
+    chat_name: &str,
+) -> String {
+    let chat_lower = chat_name.to_lowercase();
+    profiles.iter().find_map(|p| {
+        let profile_chat = match platform {
+            "whatsapp" => p.whatsapp_chat.as_ref(),
+            "telegram" => p.telegram_chat.as_ref(),
+            "signal" => p.signal_chat.as_ref(),
+            "email" => p.email_addresses.as_ref(),
+            _ => None
+        }?;
+        let profile_lower = profile_chat.to_lowercase();
+        if chat_lower.contains(&profile_lower) || profile_lower.contains(&chat_lower) {
+            Some(p.nickname.clone())
+        } else {
+            None
+        }
+    }).unwrap_or_else(|| chat_name.to_string())
+}
+
 /// Formats disconnection events into a notice string for digest inclusion
 /// Returns formatted notice and deletes the events from the database
 fn format_disconnection_notice(
@@ -651,7 +677,10 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let now = Utc::now();
             let cutoff_time = now - Duration::hours(hours_since_prev as i64);
             let start_timestamp = cutoff_time.timestamp();
-            
+
+            // Fetch contact profiles for resolving sender nicknames
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
                 Ok(Some(_)) => {
@@ -706,7 +735,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             // Convert WhatsAppMessage to MessageInfo and add to messages
                             let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "whatsapp", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
@@ -765,7 +794,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             // Convert TelegramMessage to MessageInfo and add to messages
                             let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "telegram", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "telegram".to_string(),
@@ -824,7 +853,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             // Convert Signal Message to MessageInfo and add to messages
                             let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "signal", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
@@ -1037,7 +1066,10 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let now = Utc::now();
             let cutoff_time = now - Duration::hours(hours_since_prev as i64);
             let start_timestamp = cutoff_time.timestamp();
-            
+
+            // Fetch contact profiles for resolving sender nicknames
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
                 Ok(Some(_)) => {
@@ -1092,7 +1124,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             // Convert WhatsAppMessage to MessageInfo and add to messages
                             let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "whatsapp", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
@@ -1150,7 +1182,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                         // Convert TelegramMessage to MessageInfo and add to messages
                         let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                sender: msg.room_name,
+                                sender: resolve_sender_name(&contact_profiles, "telegram", &msg.room_name),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
@@ -1186,7 +1218,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             // Convert Signal Message to MessageInfo and add to messages
                             let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "signal", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
@@ -1420,7 +1452,10 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let now = Utc::now();
             let cutoff_time = now - Duration::hours(hours_since_prev as i64);
             let start_timestamp = cutoff_time.timestamp();
-            
+
+            // Fetch contact profiles for resolving sender nicknames
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
                 Ok(Some(_)) => {
@@ -1475,7 +1510,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             // Convert WhatsAppMessage to MessageInfo and add to messages
                             let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "whatsapp", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
@@ -1533,13 +1568,13 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         // Convert Telegram to MessageInfo and add to messages
                         let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                sender: msg.room_name,
+                                sender: resolve_sender_name(&contact_profiles, "telegram", &msg.room_name),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
                             })
                             .collect();
-                        
+
                         tracing::debug!(
                             "Fetched {} Telegram messages from the last {} hours for digest",
                             telegram_infos.len(),
@@ -1566,7 +1601,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             // Convert Signal Message to MessageInfo and add to messages
                             let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
                                 .map(|msg| MessageInfo {
-                                    sender: msg.room_name,
+                                    sender: resolve_sender_name(&contact_profiles, "signal", &msg.room_name),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),

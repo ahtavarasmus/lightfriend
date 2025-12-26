@@ -163,6 +163,14 @@ pub async fn create_contact_profile(
     auth_user: AuthUser,
     Json(request): Json<CreateContactProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate nickname doesn't contain @ (to distinguish from email addresses)
+    if request.nickname.contains('@') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }))
+        ));
+    }
+
     // Validate notification_mode
     if !["all", "critical", "digest"].contains(&request.notification_mode.as_str()) {
         return Err((
@@ -261,6 +269,14 @@ pub async fn update_contact_profile(
     Path(profile_id): Path<i32>,
     Json(request): Json<UpdateContactProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate nickname doesn't contain @ (to distinguish from email addresses)
+    if request.nickname.contains('@') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }))
+        ));
+    }
+
     // Validate notification_mode
     if !["all", "critical", "digest"].contains(&request.notification_mode.as_str()) {
         return Err((

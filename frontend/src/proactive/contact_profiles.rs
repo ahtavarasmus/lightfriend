@@ -530,6 +530,12 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                 });
             }
 
+            // Validate nickname doesn't contain @
+            if form_nickname.contains('@') {
+                error_message.set(Some("Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'.".to_string()));
+                return;
+            }
+
             let request = CreateProfileRequest {
                 nickname: (*form_nickname).clone(),
                 whatsapp_chat: if form_whatsapp.is_empty() { None } else { Some((*form_whatsapp).clone()) },
@@ -1299,6 +1305,9 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                         {"Each profile can be linked to WhatsApp, Telegram, Signal chats, or email addresses. You can set different notification rules for each."}
                     </div>
                     <div class="mode-item">
+                        <strong>{"Tip: "}</strong>{"You can use nicknames when talking to Lightfriend! For example, \"send my Boss a WhatsApp message\" or \"has Mom messaged me?\" will automatically find the right chat. If you don't specify a platform, Lightfriend will check all linked platforms."}
+                    </div>
+                    <div class="mode-item">
                         {"The \"Everyone else\" setting below applies to any contact or chat that doesn't have a profile."}
                     </div>
                 </div>
@@ -1528,7 +1537,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                     }
                                 })}
                             />
-                            <div class="field-help">{"A name to identify this profile. Could be a person, group, or category."}</div>
+                            <div class="field-help">{"Use this nickname when messaging Lightfriend, e.g. \"text my Boss\" or \"has Mom messaged me?\""}</div>
                         </div>
 
                         <div class="form-section">

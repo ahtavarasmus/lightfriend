@@ -40,7 +40,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         "query".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The search query to find a specific email".to_string()),
+            description: Some("The search query to find a specific email. Can be a topic, sender name, or contact profile nickname (e.g., 'Mom', 'Boss').".to_string()),
             ..Default::default()
         }),
     );
@@ -49,7 +49,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("fetch_specific_email"),
-            description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about a specific email or wants to find an email about a particular topic. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
+            description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about emails from a specific person (e.g., 'has Mom emailed me?', 'emails from Boss') or about a particular topic. Supports contact profile nicknames. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(specific_email_properties),
@@ -67,7 +67,7 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "to".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The recipient's email address".to_string()),
+            description: Some("The recipient's email address or contact profile nickname (e.g., 'mom@email.com' or 'Mom'). If a nickname is used, the first email address from their profile will be used.".to_string()),
             ..Default::default()
         }),
     );
@@ -150,10 +150,49 @@ pub async fn handle_send_email(
     user: &crate::models::user_models::User,
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: SendEmailArgs = serde_json::from_str(args)?;
+
+    // Check if 'to' is a contact profile nickname and resolve to email address
+    let recipient_email = if args.to.contains('@') {
+        // Already an email address
+        args.to.clone()
+    } else {
+        // Try to find a matching contact profile
+        let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+        let matching_profile = profiles.iter().find(|p| {
+            let nickname_lower = p.nickname.to_lowercase();
+            let to_lower = args.to.to_lowercase();
+            nickname_lower.contains(&to_lower) || to_lower.contains(&nickname_lower)
+        });
+
+        if let Some(profile) = matching_profile {
+            if let Some(ref emails) = profile.email_addresses {
+                // Use the first email address from the profile
+                emails.split(',').next().map(|e| e.trim().to_string()).unwrap_or(args.to.clone())
+            } else {
+                return Ok((
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(crate::api::twilio_sms::TwilioResponse {
+                        message: format!("Contact '{}' doesn't have an email address in their profile.", args.to),
+                    })
+                ));
+            }
+        } else {
+            // Not a valid email and no matching profile
+            return Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
+                })
+            ));
+        }
+    };
+
     // Format the queued message
     let queued_msg = format!(
         "Will send email to {} with subject '{}' and body '{}' in 60s. Reply 'C' to discard.",
-        args.to, args.subject, args.body
+        recipient_email, args.subject, args.body
     );
     // Send the queued message
     match crate::api::twilio_utils::send_conversation_message(
@@ -185,7 +224,7 @@ pub async fn handle_send_email(
     let cloned_state = state.clone();
     let cloned_user_id = user_id;
     let cloned_user = user.clone();
-    let cloned_to = args.to.clone();
+    let cloned_to = recipient_email.clone();
     let cloned_subject = args.subject.clone();
     let cloned_body = args.body.clone();
     tokio::spawn(async move {
@@ -451,8 +490,27 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
         }
     };
 
+    // Check if query matches a contact profile nickname and get their email addresses
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let matching_profile = profiles.iter().find(|p| {
+        let nickname_lower = p.nickname.to_lowercase();
+        let query_lower = query.to_lowercase();
+        nickname_lower.contains(&query_lower) || query_lower.contains(&nickname_lower)
+    });
+
+    // Enhance query with email addresses if we found a matching profile
+    let enhanced_query = if let Some(profile) = matching_profile {
+        if let Some(ref emails) = profile.email_addresses {
+            format!("{} (email addresses: {})", query, emails)
+        } else {
+            query.to_string()
+        }
+    } else {
+        query.to_string()
+    };
+
     let state_clone = state.clone();
-    let user_id_clone = user_id.clone();
+    let user_id_clone = user_id;
 
     // Fetch the latest 20 emails with full content
     match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false, false).await {
@@ -479,7 +537,7 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
             let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
             match crate::tool_call_utils::utils::select_most_relevant_email(&client,
                 model,
-                query, &formatted_emails).await {
+                &enhanced_query, &formatted_emails).await {
                 Ok((selected_email_id, _)) => selected_email_id,
                 Err(e) => {
                     eprintln!("Failed to select relevant email: {}", e);

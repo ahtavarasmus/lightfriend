@@ -50,7 +50,7 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to fetch messages from. Must be either 'telegram', 'whatsapp' or 'signal'.".to_string()),
+            description: Some("Optional: The platform to fetch messages from ('telegram', 'whatsapp' or 'signal'). If omitted and a contact profile nickname is used, will automatically search all platforms linked to that profile.".to_string()),
             enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string(), "signal".to_string()]),
             ..Default::default()
         }),
@@ -59,7 +59,7 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         "chat_name".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The exact name of a specific contact or group (e.g., 'John Doe' or 'Family Group'). Do not use generic terms like 'telegram'.".to_string()),
+            description: Some("The name of a specific contact or group (e.g., 'John Doe', 'Mom', 'Family Group'). Can be a contact profile nickname.".to_string()),
             ..Default::default()
         }),
     );
@@ -76,15 +76,15 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         function: types::Function {
             name: String::from("fetch_chat_messages"),
             description: Some(String::from(
-                "Fetches messages from a specific chat/room on Telegram, WhatsApp or Signal. \
-                Use this ONLY if the user specifies a particular contact or group (e.g., 'messages from John Doe'). \
-                Do not use if no specific chat is mentioned—use fetch_recent_messages instead. \
-                Returns the latest messages from that chat."
+                "Fetches messages from a specific contact or group. \
+                Use this when the user asks about messages from a specific person (e.g., 'has Mom messaged me?', 'messages from John'). \
+                Platform is optional—if omitted and the contact has a profile, will search all their linked platforms and return from the most recently active one. \
+                Do not use if no specific chat is mentioned—use fetch_recent_messages instead."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![String::from("platform"), String::from("chat_name")]),
+                required: Some(vec![String::from("chat_name")]),
             },
         },
     }
@@ -238,7 +238,27 @@ pub async fn handle_send_chat_message(
             ));
         }
     };
-    let best_match = crate::utils::bridge::search_best_match(&rooms, &args.chat_name);
+
+    // First, try to resolve chat_name via contact profile nickname
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profile_chat = profiles.iter().find_map(|p| {
+        let nickname_lower = p.nickname.to_lowercase();
+        let chat_name_lower = args.chat_name.to_lowercase();
+        if nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower) {
+            match args.platform.as_str() {
+                "whatsapp" => p.whatsapp_chat.clone(),
+                "telegram" => p.telegram_chat.clone(),
+                "signal" => p.signal_chat.clone(),
+                _ => None
+            }
+        } else {
+            None
+        }
+    });
+
+    // Use profile's chat name if found, otherwise fall back to user's input
+    let search_term = profile_chat.unwrap_or_else(|| args.chat_name.clone());
+    let best_match = crate::utils::bridge::search_best_match(&rooms, &search_term);
     let best_match = match best_match {
         Some(room) => room,
         None => {
@@ -373,11 +393,32 @@ pub async fn handle_search_chat_contacts(
             return "Failed to parse search request.".to_string();
         }
     };
+
+    // First, try to resolve search_term via contact profile nickname
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profile_chat = profiles.iter().find_map(|p| {
+        let nickname_lower = p.nickname.to_lowercase();
+        let search_lower = args.search_term.to_lowercase();
+        if nickname_lower.contains(&search_lower) || search_lower.contains(&nickname_lower) {
+            match args.platform.as_str() {
+                "whatsapp" => p.whatsapp_chat.clone(),
+                "telegram" => p.telegram_chat.clone(),
+                "signal" => p.signal_chat.clone(),
+                _ => None
+            }
+        } else {
+            None
+        }
+    });
+
+    // Use profile's chat name if found, otherwise fall back to user's input
+    let search_term = profile_chat.unwrap_or_else(|| args.search_term.clone());
+
     match crate::utils::bridge::search_bridge_rooms(
         &args.platform,
         state,
         user_id,
-        &args.search_term,
+        &search_term,
     ).await {
         Ok(rooms) => {
             if rooms.is_empty() {
@@ -417,7 +458,7 @@ pub async fn handle_search_chat_contacts(
 
 #[derive(Deserialize)]
 struct FetchChatMessagesArgs {
-    platform: String,
+    platform: Option<String>,
     chat_name: String,
     limit: Option<u64>,
 }
@@ -435,11 +476,73 @@ pub async fn handle_fetch_chat_messages(
         }
     };
 
+    // First, try to find a matching contact profile by nickname
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let matching_profile = profiles.iter().find(|p| {
+        let nickname_lower = p.nickname.to_lowercase();
+        let chat_name_lower = args.chat_name.to_lowercase();
+        nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
+    });
+
+    // Determine platform and chat_name to use
+    let (platform, chat_name) = if let Some(platform) = &args.platform {
+        // Platform was specified - use existing behavior
+        let chat = matching_profile.and_then(|p| {
+            match platform.as_str() {
+                "whatsapp" => p.whatsapp_chat.clone(),
+                "telegram" => p.telegram_chat.clone(),
+                "signal" => p.signal_chat.clone(),
+                _ => None
+            }
+        }).unwrap_or_else(|| args.chat_name.clone());
+        (platform.clone(), chat)
+    } else if let Some(profile) = matching_profile {
+        // No platform specified - find the most recently active platform from profile
+        let mut best_platform: Option<(String, String, i64)> = None; // (platform, chat_name, last_activity)
+
+        // Check each linked platform for activity
+        for (plat, chat_opt) in [
+            ("whatsapp", &profile.whatsapp_chat),
+            ("telegram", &profile.telegram_chat),
+            ("signal", &profile.signal_chat),
+        ] {
+            if let Some(chat) = chat_opt {
+                // Check if bridge is connected and get room activity
+                if let Ok(Some(_)) = state.user_repository.get_bridge(user_id, plat) {
+                    if let Ok(client) = crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+                        if let Ok(rooms) = crate::utils::bridge::get_service_rooms(&client, plat).await {
+                            // Find the room matching this chat
+                            let chat_lower = chat.to_lowercase();
+                            if let Some(room) = rooms.iter().find(|r| {
+                                let name_lower = r.display_name.to_lowercase();
+                                name_lower.contains(&chat_lower) || chat_lower.contains(&name_lower)
+                            }) {
+                                if best_platform.is_none() || room.last_activity > best_platform.as_ref().unwrap().2 {
+                                    best_platform = Some((plat.to_string(), chat.clone(), room.last_activity));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        match best_platform {
+            Some((plat, chat, _)) => (plat, chat),
+            None => {
+                return format!("No connected platforms found for '{}'. Make sure they have a linked WhatsApp, Telegram, or Signal chat in their contact profile.", args.chat_name);
+            }
+        }
+    } else {
+        // No platform and no matching profile - we need a platform
+        return format!("Please specify a platform (whatsapp, telegram, or signal) for '{}', or create a contact profile for them.", args.chat_name);
+    };
+
     match crate::utils::bridge::fetch_bridge_room_messages(
-        &args.platform,
+        &platform,
         &state,
         user_id,
-        &args.chat_name,
+        &chat_name,
         args.limit,
     ).await {
         Ok((messages, room_name)) => {

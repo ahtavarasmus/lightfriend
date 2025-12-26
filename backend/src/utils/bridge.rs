@@ -1476,10 +1476,12 @@ pub async fn handle_bridge_message(
                 println!("content: {}", content);
             }
 
+            // Use profile nickname for critical message detection if available
+            let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
             if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(
                 &state, user_id,
-                &format!("{} from {}: {}", service_cap, chat_name, content),
-                service_cap.as_str(), chat_name.as_str(), content.as_str()
+                &format!("{} from {}: {}", service_cap, sender_display, content),
+                service_cap.as_str(), sender_display.as_str(), content.as_str()
             ).await {
                 if user_id == 1 {
                     println!("is_critical: {}", is_critical);

@@ -304,15 +304,10 @@ pub fn tesla_controls() -> Html {
                                         if let Some(temp) = data["outside_temp"].as_f64() {
                                             outside_temp.set(Some(temp));
                                         }
-                                        if let Some(climate) = data["is_climate_on"].as_bool() {
-                                            is_climate_on.set(Some(climate));
-                                        }
-                                        if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
-                                            is_front_defroster_on.set(Some(front_defrost));
-                                        }
-                                        if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
-                                            is_rear_defroster_on.set(Some(rear_defrost));
-                                        }
+                                        // For climate/defrost: if field is present, use it; if null, default to false
+                                        is_climate_on.set(Some(data["is_climate_on"].as_bool().unwrap_or(false)));
+                                        is_front_defroster_on.set(Some(data["is_front_defroster_on"].as_bool().unwrap_or(false)));
+                                        is_rear_defroster_on.set(Some(data["is_rear_defroster_on"].as_bool().unwrap_or(false)));
                                         let now = web_sys::js_sys::Date::new_0();
                                         let time_str = format!(
                                             "{:02}:{:02}",
@@ -488,15 +483,10 @@ pub fn tesla_controls() -> Html {
                                             if let Some(temp) = data["outside_temp"].as_f64() {
                                                 outside_temp.set(Some(temp));
                                             }
-                                            if let Some(climate) = data["is_climate_on"].as_bool() {
-                                                is_climate_on.set(Some(climate));
-                                            }
-                                            if let Some(front_defrost) = data["is_front_defroster_on"].as_bool() {
-                                                is_front_defroster_on.set(Some(front_defrost));
-                                            }
-                                            if let Some(rear_defrost) = data["is_rear_defroster_on"].as_bool() {
-                                                is_rear_defroster_on.set(Some(rear_defrost));
-                                            }
+                                            // For climate/defrost: if field is present, use it; if null, default to false
+                                            is_climate_on.set(Some(data["is_climate_on"].as_bool().unwrap_or(false)));
+                                            is_front_defroster_on.set(Some(data["is_front_defroster_on"].as_bool().unwrap_or(false)));
+                                            is_rear_defroster_on.set(Some(data["is_rear_defroster_on"].as_bool().unwrap_or(false)));
                                             let now = web_sys::js_sys::Date::new_0();
                                             let time_str = format!(
                                                 "{:02}:{:02}",

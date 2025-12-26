@@ -321,24 +321,17 @@ pub async fn fetch_assistant(
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
-            // Fetch recent contacts for all platforms and combine into a single string
-            let platforms = vec!["whatsapp", "telegram", "signal"];
-            let mut all_contacts_str = String::new();
+            // Get contact profile nicknames for voice pronunciation
+            // This is faster than fetching from Matrix and contains user's important contacts
+            let contact_nicknames: String = state.user_repository
+                .get_contact_profiles(user.id)
+                .unwrap_or_default()
+                .iter()
+                .map(|p| p.nickname.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
 
-            for platform in platforms {
-                let contacts = crate::utils::bridge::fetch_recent_bridge_contacts(platform, &state, user.id).await.unwrap_or_else(|e| {
-                    tracing::error!("Failed to fetch {} contacts: {}", platform, e);
-                    Vec::new()
-                });
-                let contacts_str = contacts.join(", ");
-                
-                if !all_contacts_str.is_empty() {
-                    all_contacts_str.push_str("; ");
-                }
-                all_contacts_str.push_str(&format!("{}: {}", crate::utils::bridge::capitalize(platform), contacts_str));
-            }
-
-            dynamic_variables.insert("recent_contacts".to_string(), json!(all_contacts_str));
+            dynamic_variables.insert("recent_contacts".to_string(), json!(contact_nicknames));
         },
         Ok(None) => {
             tracing::debug!("No user found for number: {}", caller_number);
@@ -2548,6 +2541,15 @@ pub async fn get_web_signed_url(
         }
     });
 
+    // Get contact profile nicknames for voice pronunciation
+    let contact_nicknames: String = state.user_repository
+        .get_contact_profiles(user_id)
+        .unwrap_or_default()
+        .iter()
+        .map(|p| p.nickname.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+
     // Build dynamic variables (these get substituted into the prompt)
     let dynamic_variables = json!({
         "user_id": user_id.to_string(),
@@ -2560,7 +2562,8 @@ pub async fn get_web_signed_url(
         "now": format!("{}", chrono::Utc::now()),
         "email_id": "-1",
         "content_type": "",
-        "notification_message": ""
+        "notification_message": "",
+        "recent_contacts": contact_nicknames
     });
 
     // Get agent ID from environment
