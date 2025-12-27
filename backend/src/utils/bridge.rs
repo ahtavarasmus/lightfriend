@@ -900,7 +900,20 @@ pub async fn handle_bridge_message(
         _ => return,
     };
     let user_id = user.id;
-    // New: Check if this is a bridge management room
+
+    // Early exit: Skip ALL message processing if any bridge is in "connecting" state
+    // This prevents blocking the connection flow with long waits
+    let connecting_bridge_types = vec!["signal", "telegram", "whatsapp", "instagram", "messenger"];
+    for bridge_type in &connecting_bridge_types {
+        if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
+            if bridge.status == "connecting" {
+                tracing::debug!("⏳ Skipping message processing - {} bridge is connecting", bridge_type);
+                return;
+            }
+        }
+    }
+
+    // Check if this is a bridge management room
     let room_id_str = room.room_id().to_string();
     let bridge_types = vec!["signal", "telegram", "whatsapp"];
     let mut bridges = Vec::new();

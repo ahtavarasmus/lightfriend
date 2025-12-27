@@ -299,8 +299,8 @@ pub async fn start_signal_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<SignalConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🚀 Starting Signal connection process for user {}", auth_user.user_id);
-    tracing::debug!("📝 Getting Matrix client...");
+    tracing::info!("🚀 Signal connect request received for user {}", auth_user.user_id);
+    tracing::info!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
         .await

@@ -165,11 +165,13 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                             Ok(status) => {
                                 // When connected, always clear QR and update UI
                                 if status.connected {
+                                    // Check before setting to false
+                                    let was_in_connecting_state = *is_connecting || *was_connecting;
                                     is_connecting.set(false);
                                     was_connecting.set(false);
                                     auth_data.set(None);
                                     // Show success message only if we were actively connecting
-                                    if *is_connecting || *was_connecting {
+                                    if was_in_connecting_state {
                                         success_message.set(Some(format!("{} connected successfully!", bridge_name)));
                                         // Auto-hide success message after 3 seconds
                                         let success_message_clone = success_message.clone();
