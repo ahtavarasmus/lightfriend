@@ -620,7 +620,26 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 }
 
                 // For tool messages: format as context that won't be mimicked
+                // BUT skip tools that should always be called fresh
                 if msg.role == "tool" {
+                    const SKIP_FROM_HISTORY: &[&str] = &[
+                        "fetch_chat_messages",
+                        "fetch_recent_messages",
+                        "fetch_emails",
+                        "fetch_specific_email",
+                        "get_weather",
+                        "fetch_calendar_events",
+                        "fetch_tasks",
+                        "direct_response",
+                    ];
+
+                    // Skip these tool results - LLM should call them fresh each time
+                    if let Some(ref tool_name) = msg.tool_name {
+                        if SKIP_FROM_HISTORY.contains(&tool_name.as_str()) {
+                            continue;
+                        }
+                    }
+
                     let context_content = format!("[Previous result: {}]", msg.encrypted_content);
                     let chat_msg = ChatMessage {
                         role: "assistant".to_string(),
@@ -800,6 +819,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         crate::tool_call_utils::internet::get_directions_tool(),
         crate::tool_call_utils::tesla::get_tesla_control_tool(),
         crate::tool_call_utils::tesla::get_tesla_switch_vehicle_tool(),
+        crate::tool_call_utils::internet::get_direct_response_tool(),
     ];
 
     // Create client for the user's provider
@@ -845,7 +865,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         completion_messages.clone(),
     )
     .tools(tools)
-    .tool_choice(chat_completion::ToolChoiceType::Auto)
+    .tool_choice(chat_completion::ToolChoiceType::Required)
     .max_tokens(250)).await {
         Ok(result) => result,
         Err(e) => {
@@ -1413,6 +1433,16 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         user.id,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
+                } else if name == "direct_response" {
+                    tracing::debug!("Executing direct_response tool call");
+                    // Parse the response from the tool call arguments
+                    #[derive(Deserialize)]
+                    struct DirectResponse {
+                        response: String,
+                    }
+                    if let Ok(args) = serde_json::from_str::<DirectResponse>(arguments) {
+                        tool_answers.insert(tool_call_id, args.response);
+                    }
                 }
             }
 

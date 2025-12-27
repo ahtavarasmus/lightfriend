@@ -371,3 +371,34 @@ pub async fn handle_directions_tool(
         }
     }
 }
+
+pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    let mut properties = HashMap::new();
+    properties.insert(
+        "response".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The response to give to the user".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("direct_response"),
+            description: Some(String::from(
+                "Use this tool ONLY when the user's question can be answered from general knowledge \
+                or conversation context WITHOUT needing to fetch any current data. Examples: \
+                greetings, math calculations, explaining concepts, answering factual questions. \
+                Do NOT use this for questions about messages, emails, weather, calendar, or tasks - \
+                those require fetching fresh data."
+            )),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![String::from("response")]),
+            },
+        },
+    }
+}

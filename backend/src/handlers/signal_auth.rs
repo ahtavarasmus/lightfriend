@@ -26,6 +26,43 @@ use crate::{
 };
 use tokio::fs;
 use std::path::Path;
+
+/// Clean up all Signal bridge rooms for a user
+/// This includes the management room and all portal rooms created by the bridge
+async fn cleanup_all_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Result<u32> {
+    let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
+    let mut rooms_left = 0;
+
+    // Get all rooms the user is in
+    let rooms = client.joined_rooms();
+    tracing::info!("🔍 Checking {} rooms for Signal cleanup", rooms.len());
+
+    for room in rooms {
+        // Check if this room has the Signal bridge bot
+        let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("Failed to get members for room {}: {}", room.room_id(), e);
+                continue;
+            }
+        };
+
+        let has_signal_bot = members.iter().any(|m| m.user_id() == bot_user_id);
+
+        if has_signal_bot {
+            tracing::info!("🧹 Leaving Signal room: {}", room.room_id());
+            if let Err(e) = room.leave().await {
+                tracing::warn!("Failed to leave room {}: {}", room.room_id(), e);
+            } else {
+                rooms_left += 1;
+            }
+        }
+    }
+
+    tracing::info!("✅ Left {} Signal-related rooms", rooms_left);
+    Ok(rooms_left)
+}
+
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     if let Some(http_err) = error.downcast_ref::<matrix_sdk::HttpError>() {
@@ -162,17 +199,34 @@ async fn connect_signal(
     // Optimized QR code detection with event handler
     let mut qr_code_url = None;
     tracing::info!("⏳ Starting QR code monitoring");
-   
-    // Use shorter sync timeout for faster response
-    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
-    for attempt in 1..=60 { // Increased to 60 attempts for longer user input time
-        println!("📡 Sync attempt #{}/60", attempt);
-        client.sync_once(sync_settings.clone()).await?;
+
+    // Use longer sync timeout to ensure we catch the QR code message
+    // The bridge takes ~8-13 seconds to generate and upload the QR code
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(15));
+    for attempt in 1..=30 { // 30 attempts * ~15s = ~7.5 minutes max wait
+        println!("📡 Sync attempt #{}/30", attempt);
+
+        // Don't fail on sync errors - just log and retry
+        match client.sync_once(sync_settings.clone()).await {
+            Ok(_) => tracing::debug!("Sync completed successfully"),
+            Err(e) => {
+                tracing::warn!("Sync attempt {} failed: {}, retrying...", attempt, e);
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        }
+
         if let Some(room) = client.get_room(&room_id) {
             // Get only the most recent messages to reduce processing time
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from 10 to 5
-            let messages = room.messages(options).await?;
+            options.limit = matrix_sdk::ruma::UInt::new(10).unwrap(); // Check more messages
+            let messages = match room.messages(options).await {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!("Failed to get messages: {}, retrying...", e);
+                    continue;
+                }
+            };
            
             for msg in messages.chunk.iter() {
                 let raw_event = msg.raw();
@@ -699,6 +753,17 @@ pub async fn disconnect_signal(
                 } else {
                     tracing::info!("Background cleanup: Left Signal bridge management room");
                 }
+            }
+        }
+
+        // Clean up ALL Signal-related rooms (portal rooms created by the bridge)
+        let bridge_bot = std::env::var("SIGNAL_BRIDGE_BOT").unwrap_or_default();
+        if !bridge_bot.is_empty() {
+            // Wait for bridge cleanup commands to complete
+            sleep(Duration::from_secs(3)).await;
+            match cleanup_all_signal_rooms(&client, &bridge_bot).await {
+                Ok(count) => tracing::info!("Background cleanup: Left {} Signal portal rooms", count),
+                Err(e) => tracing::error!("Background cleanup: Failed to cleanup Signal rooms: {}", e),
             }
         }
 
