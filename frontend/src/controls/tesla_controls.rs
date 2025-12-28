@@ -2,10 +2,11 @@ use yew::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, EventSource, MessageEvent};
 use crate::utils::api::Api;
 use crate::utils::webauthn;
 use crate::components::feature_preview::FeaturePreview;
+use crate::config;
 use serde::Deserialize;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -57,6 +58,7 @@ pub fn tesla_controls() -> Html {
     let remote_start_loading = use_state(|| false);
     let cabin_overheat_loading = use_state(|| false);
     let command_result = use_state(|| None::<String>);
+    let status_message = use_state(|| None::<String>);  // SSE status updates
 
     // Passkey verification state
     let passkey_state = use_state(|| PasskeyVerifyState::Hidden);
@@ -650,10 +652,11 @@ pub fn tesla_controls() -> Html {
         })
     };
 
-    // Handle climate
+    // Handle climate with SSE streaming for status updates
     let handle_climate = {
         let climate_loading = climate_loading.clone();
         let command_result = command_result.clone();
+        let status_message = status_message.clone();
         let is_climate_on = is_climate_on.clone();
         let is_front_defroster_on = is_front_defroster_on.clone();
         let is_rear_defroster_on = is_rear_defroster_on.clone();
@@ -663,6 +666,7 @@ pub fn tesla_controls() -> Html {
         Callback::from(move |_: MouseEvent| {
             let climate_loading = climate_loading.clone();
             let command_result = command_result.clone();
+            let status_message = status_message.clone();
             let is_climate_on = is_climate_on.clone();
             let is_front_defroster_on = is_front_defroster_on.clone();
             let is_rear_defroster_on = is_rear_defroster_on.clone();
@@ -671,62 +675,158 @@ pub fn tesla_controls() -> Html {
 
             climate_loading.set(true);
             command_result.set(None);
+            status_message.set(None);
 
             // Remember if defrost was off before we turn climate on
             let defrost_currently_off = !is_front_defroster_on.unwrap_or(false) && !is_rear_defroster_on.unwrap_or(false);
 
-            spawn_local(async move {
-                let command = match *is_climate_on {
-                    Some(true) => "climate_off",
-                    Some(false) => "climate_on",
-                    None => "climate_on",
-                };
+            let command = match *is_climate_on {
+                Some(true) => "climate_off",
+                Some(false) => "climate_on",
+                None => "climate_on",
+            };
 
-                let body = serde_json::json!({ "command": command });
+            // Build the SSE URL (auth via cookies)
+            let url = format!("{}/api/tesla/command-stream?command={}",
+                config::get_backend_url(), command);
 
-                let request = match Api::post("/api/tesla/command").json(&body) {
-                    Ok(req) => req.send().await,
-                    Err(e) => {
-                        command_result.set(Some(format!("Failed: {}", e)));
-                        climate_loading.set(false);
-                        return;
-                    }
-                };
+            // Create EventSource for SSE
+            match EventSource::new(&url) {
+                Ok(event_source) => {
+                    let es = Rc::new(event_source);
 
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            match command {
-                                "climate_on" => {
-                                    is_climate_on.set(Some(true));
-                                    // Track that we just activated climate and defrost was off
-                                    climate_just_activated.set(true);
-                                    defrost_was_off_before_climate.set(defrost_currently_off);
+                    // Clone for closures
+                    let es_message = es.clone();
+                    let es_error = es.clone();
+                    let status_message_clone = status_message.clone();
+                    let command_result_clone = command_result.clone();
+                    let climate_loading_clone = climate_loading.clone();
+                    let is_climate_on_clone = is_climate_on.clone();
+                    let is_front_defroster_on_clone = is_front_defroster_on.clone();
+                    let is_rear_defroster_on_clone = is_rear_defroster_on.clone();
+                    let climate_just_activated_clone = climate_just_activated.clone();
+                    let defrost_was_off_before_climate_clone = defrost_was_off_before_climate.clone();
+                    let command_str = command.to_string();
+
+                    // Handle incoming messages
+                    let onmessage = Closure::wrap(Box::new(move |e: MessageEvent| {
+                        if let Some(data) = e.data().as_string() {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                                let step = json.get("step").and_then(|s| s.as_str()).unwrap_or("");
+                                let message = json.get("message").and_then(|m| m.as_str()).unwrap_or("");
+
+                                match step {
+                                    "done" => {
+                                        // Success - update UI state
+                                        status_message_clone.set(None);
+                                        command_result_clone.set(Some(message.to_string()));
+                                        climate_loading_clone.set(false);
+
+                                        match command_str.as_str() {
+                                            "climate_on" => {
+                                                is_climate_on_clone.set(Some(true));
+                                                climate_just_activated_clone.set(true);
+                                                defrost_was_off_before_climate_clone.set(defrost_currently_off);
+                                            }
+                                            "climate_off" => {
+                                                is_climate_on_clone.set(Some(false));
+                                                is_front_defroster_on_clone.set(Some(false));
+                                                is_rear_defroster_on_clone.set(Some(false));
+                                                climate_just_activated_clone.set(false);
+                                            }
+                                            _ => {}
+                                        }
+
+                                        // Close the EventSource
+                                        es_message.close();
+                                    }
+                                    "error" => {
+                                        // Error - show error message
+                                        status_message_clone.set(None);
+                                        command_result_clone.set(Some(message.to_string()));
+                                        climate_loading_clone.set(false);
+                                        es_message.close();
+                                    }
+                                    _ => {
+                                        // In-progress status update
+                                        status_message_clone.set(Some(message.to_string()));
+                                    }
                                 }
-                                "climate_off" => {
-                                    is_climate_on.set(Some(false));
-                                    // Turning off climate also turns off defrost
-                                    is_front_defroster_on.set(Some(false));
-                                    is_rear_defroster_on.set(Some(false));
-                                    climate_just_activated.set(false);
-                                }
-                                _ => {}
                             }
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
-                                    command_result.set(Some(msg.to_string()));
-                                }
-                            }
-                        } else {
-                            command_result.set(Some("Failed to execute command".to_string()));
                         }
-                    }
-                    Err(e) => {
-                        command_result.set(Some(format!("Network error: {}", e)));
-                    }
+                    }) as Box<dyn FnMut(_)>);
+
+                    // Handle errors
+                    let status_message_err = status_message.clone();
+                    let command_result_err = command_result.clone();
+                    let climate_loading_err = climate_loading.clone();
+
+                    let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                        status_message_err.set(None);
+                        command_result_err.set(Some("Connection error. Please try again.".to_string()));
+                        climate_loading_err.set(false);
+                        es_error.close();
+                    }) as Box<dyn FnMut(_)>);
+
+                    es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                    es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+
+                    // Prevent closures from being dropped
+                    onmessage.forget();
+                    onerror.forget();
                 }
-                climate_loading.set(false);
-            });
+                Err(_) => {
+                    // Fallback to regular POST if EventSource fails
+                    status_message.set(Some("Connecting...".to_string()));
+
+                    spawn_local(async move {
+                        let body = serde_json::json!({ "command": command });
+
+                        let request = match Api::post("/api/tesla/command").json(&body) {
+                            Ok(req) => req.send().await,
+                            Err(e) => {
+                                command_result.set(Some(format!("Failed: {}", e)));
+                                status_message.set(None);
+                                climate_loading.set(false);
+                                return;
+                            }
+                        };
+
+                        match request {
+                            Ok(response) => {
+                                if response.ok() {
+                                    match command {
+                                        "climate_on" => {
+                                            is_climate_on.set(Some(true));
+                                            climate_just_activated.set(true);
+                                            defrost_was_off_before_climate.set(defrost_currently_off);
+                                        }
+                                        "climate_off" => {
+                                            is_climate_on.set(Some(false));
+                                            is_front_defroster_on.set(Some(false));
+                                            is_rear_defroster_on.set(Some(false));
+                                            climate_just_activated.set(false);
+                                        }
+                                        _ => {}
+                                    }
+                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
+                                            command_result.set(Some(msg.to_string()));
+                                        }
+                                    }
+                                } else {
+                                    command_result.set(Some("Failed to execute command".to_string()));
+                                }
+                            }
+                            Err(e) => {
+                                command_result.set(Some(format!("Network error: {}", e)));
+                            }
+                        }
+                        status_message.set(None);
+                        climate_loading.set(false);
+                    });
+                }
+            }
         })
     };
 
@@ -1800,6 +1900,18 @@ pub fn tesla_controls() -> Html {
                 }
             }
 
+            // Status message (SSE streaming updates)
+            {
+                if let Some(status) = (*status_message).as_ref() {
+                    html! {
+                        <div class="status-message">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            {" "}{status}
+                        </div>
+                    }
+                } else { html! {} }
+            }
+
             // Command result
             {
                 if let Some(result) = (*command_result).as_ref() {
@@ -2048,6 +2160,16 @@ fn get_styles() -> &'static str {
             margin-top: 1rem;
             padding-top: 1rem;
             border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .status-message {
+            margin-top: 1rem;
+            padding: 10px;
+            background: rgba(30, 144, 255, 0.1);
+            color: #1e90ff;
+            border-radius: 8px;
+            font-size: 14px;
+            border: 1px solid rgba(30, 144, 255, 0.2);
+            text-align: center;
         }
         .command-result {
             margin-top: 1rem;

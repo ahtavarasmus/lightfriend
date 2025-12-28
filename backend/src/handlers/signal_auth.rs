@@ -27,6 +27,24 @@ use crate::{
 use tokio::fs;
 use std::path::Path;
 
+/// Count Signal bridge rooms for a user (to detect stale state)
+async fn count_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Result<u32> {
+    let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
+    let mut count = 0;
+
+    for room in client.joined_rooms() {
+        let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if members.iter().any(|m| m.user_id() == bot_user_id) {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
 /// Clean up all Signal bridge rooms for a user
 /// This includes the management room and all portal rooms created by the bridge
 async fn cleanup_all_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Result<u32> {
@@ -300,7 +318,41 @@ pub async fn start_signal_connection(
     auth_user: AuthUser,
 ) -> Result<AxumJson<SignalConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("🚀 Signal connect request received for user {}", auth_user.user_id);
-    tracing::info!("📝 Getting Matrix client...");
+
+    // Check if there's an existing bridge - block if cleanup is in progress
+    if let Ok(Some(existing_bridge)) = state.user_repository.get_bridge(auth_user.user_id, "signal") {
+        if existing_bridge.status == "cleaning_up" {
+            tracing::info!("⏳ Signal cleanup in progress for user {}, blocking connect", auth_user.user_id);
+            return Err((
+                StatusCode::CONFLICT,
+                AxumJson(json!({
+                    "error": "cleanup_in_progress",
+                    "message": "Please wait, cleaning up previous connection..."
+                })),
+            ));
+        }
+        // If there's an existing connected/connecting bridge, delete it first for fresh start
+        if existing_bridge.status == "connected" || existing_bridge.status == "connecting" {
+            tracing::info!("🧹 Removing existing Signal bridge for fresh start");
+            let _ = state.user_repository.delete_bridge(auth_user.user_id, "signal");
+        }
+    }
+
+    // Remove any cached Matrix client to ensure fresh state
+    {
+        let mut matrix_clients = state.matrix_clients.lock().await;
+        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+
+        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
+            task.abort();
+            tracing::debug!("Aborted existing sync task for fresh connect");
+        }
+        if matrix_clients.remove(&auth_user.user_id).is_some() {
+            tracing::debug!("Removed cached Matrix client for fresh connect");
+        }
+    }
+
+    tracing::info!("📝 Getting fresh Matrix client...");
     // Get or create Matrix client using the centralized function
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
         .await
@@ -312,9 +364,85 @@ pub async fn start_signal_connection(
             )
         })?;
     tracing::debug!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
+
     // Get bridge bot from environment
     let bridge_bot = std::env::var("SIGNAL_BRIDGE_BOT")
         .expect("SIGNAL_BRIDGE_BOT not set");
+
+    // Check for stale Signal rooms (rooms with Signal bot but no bridge record)
+    // This can happen if a previous connection failed or was partially cleaned up
+    let stale_room_count = count_signal_rooms(&client, &bridge_bot).await.unwrap_or(0);
+    if stale_room_count > 0 {
+        tracing::info!("🧹 Found {} stale Signal rooms for user {}, starting cleanup", stale_room_count, auth_user.user_id);
+
+        // Create a temporary "cleaning_up" bridge record to track state
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let new_bridge = NewBridge {
+            user_id: auth_user.user_id,
+            bridge_type: "signal".to_string(),
+            status: "cleaning_up".to_string(),
+            room_id: None,
+            data: None,
+            created_at: Some(current_time),
+        };
+        let _ = state.user_repository.create_bridge(new_bridge);
+
+        // Spawn cleanup task
+        let state_clone = state.clone();
+        let user_id = auth_user.user_id;
+        let bridge_bot_clone = bridge_bot.clone();
+        let client_clone = Arc::clone(&client);
+        tokio::spawn(async move {
+            tracing::info!("🧹 Starting stale room cleanup for user {}", user_id);
+
+            // Clean up all Signal rooms
+            match cleanup_all_signal_rooms(&client_clone, &bridge_bot_clone).await {
+                Ok(count) => tracing::info!("Cleaned up {} stale Signal rooms", count),
+                Err(e) => tracing::error!("Failed to cleanup stale Signal rooms: {}", e),
+            }
+
+            // Remove client from cache
+            {
+                let mut matrix_clients = state_clone.matrix_clients.lock().await;
+                let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
+                if let Some(task) = sync_tasks.remove(&user_id) {
+                    task.abort();
+                }
+                matrix_clients.remove(&user_id);
+            }
+
+            // Check if we should clear the store
+            let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id).unwrap_or(false);
+            if !has_active_bridges {
+                if let Some(user_id_matrix) = client_clone.user_id() {
+                    let username = user_id_matrix.localpart().to_string();
+                    if let Ok(store_path) = get_store_path(&username) {
+                        if Path::new(&store_path).exists() {
+                            let _ = fs::remove_dir_all(&store_path).await;
+                            tracing::info!("Cleared Matrix store for user {}", user_id);
+                        }
+                    }
+                }
+            }
+
+            // Delete the cleanup bridge record
+            let _ = state_clone.user_repository.delete_bridge(user_id, "signal");
+            tracing::info!("🧹 Stale room cleanup completed for user {}", user_id);
+        });
+
+        // Return cleanup_in_progress - frontend will retry
+        return Err((
+            StatusCode::CONFLICT,
+            AxumJson(json!({
+                "error": "cleanup_in_progress",
+                "message": "Cleaning up stale data from previous connection..."
+            })),
+        ));
+    }
+
     tracing::debug!("🔗 Connecting to Signal bridge...");
     // Connect to Signal bridge
     let mut client_clone = Arc::clone(&client);
@@ -691,21 +819,29 @@ pub async fn disconnect_signal(
         })));
     };
 
+    // If already cleaning up, just return success
+    if bridge.status == "cleaning_up" {
+        return Ok(AxumJson(json!({
+            "message": "Signal cleanup already in progress"
+        })));
+    }
+
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-    // Delete the bridge record IMMEDIATELY - user sees instant response
-    state.user_repository.delete_bridge(auth_user.user_id, "signal")
+    // Set bridge status to "cleaning_up" instead of deleting immediately
+    // This allows us to block reconnection until cleanup is complete
+    state.user_repository.update_bridge_status(auth_user.user_id, "signal", "cleaning_up")
         .map_err(|e| {
-            tracing::error!("Failed to delete Signal bridge: {}", e);
+            tracing::error!("Failed to update Signal bridge status: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to delete bridge record"})),
+                AxumJson(json!({"error": "Failed to update bridge status"})),
             )
         })?;
 
-    tracing::info!("✅ Signal bridge record deleted for user {}", auth_user.user_id);
+    tracing::info!("✅ Signal bridge status set to 'cleaning_up' for user {}", auth_user.user_id);
 
-    // Spawn background task for cleanup - don't block the response
+    // Spawn background task for cleanup - won't be cancelled on page refresh
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     tokio::spawn(async move {
@@ -716,6 +852,8 @@ pub async fn disconnect_signal(
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                // Still delete the bridge record so user can retry
+                let _ = state_clone.user_repository.delete_bridge(user_id, "signal");
                 return;
             }
         };
@@ -767,31 +905,9 @@ pub async fn disconnect_signal(
             }
         }
 
-        // Check for remaining active bridges and cleanup if none left
-        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
-            .unwrap_or(false);
-
-        if !has_active_bridges {
-            // Clear user store if no other bridges
-            if let Some(user_id_matrix) = client.user_id() {
-                let username = user_id_matrix.localpart().to_string();
-                let store_path = match get_store_path(&username) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::error!("Background cleanup: Failed to get store path: {}", e);
-                        return;
-                    }
-                };
-                if Path::new(&store_path).exists() {
-                    if let Err(e) = fs::remove_dir_all(&store_path).await {
-                        tracing::error!("Background cleanup: Failed to clear user store: {}", e);
-                    } else {
-                        tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
-                    }
-                }
-            }
-
-            // Remove client and sync task
+        // Remove client and sync task BEFORE checking other bridges
+        // This ensures fresh state for reconnection
+        {
             let mut matrix_clients = state_clone.matrix_clients.lock().await;
             let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
 
@@ -804,11 +920,43 @@ pub async fn disconnect_signal(
             }
         }
 
-        tracing::info!("🧹 Background cleanup completed for Signal user {}", user_id);
+        // Check for remaining active bridges and cleanup store if none left
+        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
+            .unwrap_or(false);
+
+        if !has_active_bridges {
+            // Clear user store if no other bridges
+            if let Some(user_id_matrix) = client.user_id() {
+                let username = user_id_matrix.localpart().to_string();
+                let store_path = match get_store_path(&username) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("Background cleanup: Failed to get store path: {}", e);
+                        // Still delete the bridge record
+                        let _ = state_clone.user_repository.delete_bridge(user_id, "signal");
+                        return;
+                    }
+                };
+                if Path::new(&store_path).exists() {
+                    if let Err(e) = fs::remove_dir_all(&store_path).await {
+                        tracing::error!("Background cleanup: Failed to clear user store: {}", e);
+                    } else {
+                        tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
+                    }
+                }
+            }
+        }
+
+        // Finally, delete the bridge record - cleanup is complete
+        if let Err(e) = state_clone.user_repository.delete_bridge(user_id, "signal") {
+            tracing::error!("Background cleanup: Failed to delete bridge record: {}", e);
+        } else {
+            tracing::info!("🧹 Background cleanup completed for Signal user {}", user_id);
+        }
     });
 
     Ok(AxumJson(json!({
-        "message": "Signal disconnected successfully"
+        "message": "Signal disconnecting"
     })))
 }
 

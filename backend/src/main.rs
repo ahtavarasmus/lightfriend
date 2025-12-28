@@ -186,6 +186,9 @@ pub struct AppState {
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
+    // Track vehicles currently being woken to prevent parallel wake attempts
+    // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
+    tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,
     password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
     phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
@@ -323,6 +326,7 @@ async fn main() {
         matrix_clients,
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
+        tesla_waking_vehicles: Arc::new(DashMap::new()),
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
         password_reset_otps: DashMap::new(),
@@ -501,6 +505,7 @@ async fn main() {
         .route("/api/auth/tesla/scopes/refresh", post(tesla_auth::tesla_refresh_scopes))
         .route("/api/auth/tesla/virtual-key", get(tesla_auth::get_virtual_key_link))
         .route("/api/tesla/command", post(tesla_auth::tesla_command))
+        .route("/api/tesla/command-stream", get(tesla_auth::tesla_command_stream))
         .route("/api/tesla/battery-status", get(tesla_auth::tesla_battery_status))
         .route("/api/tesla/vehicles", get(tesla_auth::tesla_list_vehicles))
         .route("/api/tesla/select-vehicle", post(tesla_auth::tesla_select_vehicle))

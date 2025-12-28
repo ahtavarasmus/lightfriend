@@ -137,6 +137,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let show_reset_modal = use_state(|| false);
     let is_resetting = use_state(|| false);
     let reset_success = use_state(|| false);
+    let is_cleaning_up = use_state(|| false);
+    let is_disconnecting = use_state(|| false);
 
     // Function to fetch status
     let fetch_status = {
@@ -163,13 +165,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     Ok(response) => {
                         match response.json::<BridgeStatus>().await {
                             Ok(status) => {
-                                // When connected, always clear QR and update UI
+                                // When connected, always clear QR, errors, and update UI
                                 if status.connected {
                                     // Check before setting to false
                                     let was_in_connecting_state = *is_connecting || *was_connecting;
                                     is_connecting.set(false);
                                     was_connecting.set(false);
                                     auth_data.set(None);
+                                    error.set(None); // Clear any previous timeout errors
                                     // Show success message only if we were actively connecting
                                     if was_in_connecting_state {
                                         success_message.set(Some(format!("{} connected successfully!", bridge_name)));
@@ -181,12 +184,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                         });
                                     }
                                 }
-                                // Only reset connecting state if truly disconnected (not just "connecting")
+                                // Only reset connecting state if truly disconnected AND we don't have auth data showing
                                 // The "connecting" status means we're waiting for QR scan, so keep the QR visible
                                 if !status.connected && status.status == "not_connected" {
-                                    is_connecting.set(false);
-                                    was_connecting.set(false);
-                                    auth_data.set(None);
+                                    // Only clear if we weren't actively showing a QR code
+                                    if (*auth_data).is_none() {
+                                        is_connecting.set(false);
+                                        was_connecting.set(false);
+                                    }
+                                    // Don't clear auth_data here - let the timeout handle it
                                 }
                                 connection_status.set(Some(status));
                                 error.set(None);
@@ -213,13 +219,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         }, ());
     }
 
-    // Function to start connection
+    // Function to start connection with cleanup retry support
     let start_connection = {
         let is_connecting = is_connecting.clone();
         let was_connecting = was_connecting.clone();
         let auth_data = auth_data.clone();
         let error = error.clone();
         let fetch_status = fetch_status.clone();
+        let is_cleaning_up = is_cleaning_up.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -228,83 +235,121 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let auth_data = auth_data.clone();
             let error = error.clone();
             let fetch_status = fetch_status.clone();
+            let is_cleaning_up = is_cleaning_up.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
             is_connecting.set(true);
             was_connecting.set(true);
             spawn_local(async move {
-                let url = format!("/api/auth/{}/connect", bridge_id);
-                match Api::get(&url).send().await {
-                    Ok(response) => {
-                        match response.json::<ConnectionResponse>().await {
-                            Ok(connection_response) => {
-                                auth_data.set(Some(connection_response.auth_data));
-                                error.set(None);
-                                // Start polling for status
-                                let start_time = js_sys::Date::now();
-                                // Create a recursive polling function
-                                fn create_poll_fn(
-                                    start_time: f64,
-                                    poll_duration: i32,
-                                    poll_interval: i32,
-                                    is_connecting: UseStateHandle<bool>,
-                                    auth_data: UseStateHandle<Option<String>>,
-                                    error: UseStateHandle<Option<String>>,
-                                    fetch_status: Callback<()>,
-                                ) -> Box<dyn Fn()> {
-                                    Box::new(move || {
-                                        if js_sys::Date::now() - start_time > poll_duration as f64 {
-                                            is_connecting.set(false);
-                                            auth_data.set(None);
-                                            error.set(Some("Connection attempt timed out".to_string()));
-                                            return;
+                // Retry loop for cleanup_in_progress
+                let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
+                for _retry in 0..max_cleanup_retries {
+                    let url = format!("/api/auth/{}/connect", bridge_id);
+                    match Api::get(&url).send().await {
+                        Ok(response) => {
+                            let status = response.status();
+                            // Check for cleanup_in_progress (409 Conflict)
+                            if status == 409 {
+                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                    if err_response.error == "cleanup_in_progress" {
+                                        is_cleaning_up.set(true);
+                                        // Wait and retry
+                                        TimeoutFuture::new(2_000).await;
+                                        continue;
+                                    }
+                                }
+                            }
+                            is_cleaning_up.set(false);
+
+                            if status == 200 {
+                                match response.json::<ConnectionResponse>().await {
+                                    Ok(connection_response) => {
+                                        auth_data.set(Some(connection_response.auth_data));
+                                        error.set(None);
+                                        // Start polling for status
+                                        let start_time = js_sys::Date::now();
+                                        // Create a recursive polling function
+                                        fn create_poll_fn(
+                                            start_time: f64,
+                                            poll_duration: i32,
+                                            poll_interval: i32,
+                                            is_connecting: UseStateHandle<bool>,
+                                            auth_data: UseStateHandle<Option<String>>,
+                                            error: UseStateHandle<Option<String>>,
+                                            fetch_status: Callback<()>,
+                                        ) -> Box<dyn Fn()> {
+                                            Box::new(move || {
+                                                if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                                    is_connecting.set(false);
+                                                    auth_data.set(None);
+                                                    error.set(Some("Connection attempt timed out".to_string()));
+                                                    return;
+                                                }
+                                                fetch_status.emit(());
+                                                // Clone all necessary values for the next iteration
+                                                let is_connecting = is_connecting.clone();
+                                                let auth_data = auth_data.clone();
+                                                let error = error.clone();
+                                                let fetch_status = fetch_status.clone();
+                                                // Schedule next poll
+                                                let poll_fn = create_poll_fn(
+                                                    start_time,
+                                                    poll_duration,
+                                                    poll_interval,
+                                                    is_connecting,
+                                                    auth_data,
+                                                    error,
+                                                    fetch_status,
+                                                );
+                                                let handle = gloo_timers::callback::Timeout::new(
+                                                    poll_interval as u32,
+                                                    move || poll_fn(),
+                                                );
+                                                handle.forget();
+                                            })
                                         }
-                                        fetch_status.emit(());
-                                        // Clone all necessary values for the next iteration
-                                        let is_connecting = is_connecting.clone();
-                                        let auth_data = auth_data.clone();
-                                        let error = error.clone();
-                                        let fetch_status = fetch_status.clone();
-                                        // Schedule next poll
+                                        // Start the polling
                                         let poll_fn = create_poll_fn(
                                             start_time,
-                                            poll_duration,
-                                            poll_interval,
-                                            is_connecting,
-                                            auth_data,
-                                            error,
-                                            fetch_status,
+                                            POLL_DURATION_MS,
+                                            POLL_INTERVAL_MS,
+                                            is_connecting.clone(),
+                                            auth_data.clone(),
+                                            error.clone(),
+                                            fetch_status.clone(),
                                         );
-                                        let handle = gloo_timers::callback::Timeout::new(
-                                            poll_interval as u32,
-                                            move || poll_fn(),
-                                        );
-                                        handle.forget();
-                                    })
+                                        poll_fn();
+                                        return; // Success - exit retry loop
+                                    }
+                                    Err(_) => {
+                                        is_connecting.set(false);
+                                        error.set(Some("Failed to parse connection response".to_string()));
+                                        return;
+                                    }
                                 }
-                                // Start the polling
-                                let poll_fn = create_poll_fn(
-                                    start_time,
-                                    POLL_DURATION_MS,
-                                    POLL_INTERVAL_MS,
-                                    is_connecting.clone(),
-                                    auth_data.clone(),
-                                    error.clone(),
-                                    fetch_status.clone(),
-                                );
-                                poll_fn();
-                            }
-                            Err(_) => {
+                            } else {
+                                // Other error
                                 is_connecting.set(false);
-                                error.set(Some("Failed to parse connection response".to_string()));
+                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                    error.set(Some(err_response.error));
+                                } else {
+                                    error.set(Some(format!("Failed to start {} connection", bridge_name)));
+                                }
+                                return;
                             }
                         }
-                    }
-                    Err(_) => {
-                        is_connecting.set(false);
-                        error.set(Some(format!("Failed to start {} connection", bridge_name)));
+                        Err(_) => {
+                            is_connecting.set(false);
+                            is_cleaning_up.set(false);
+                            error.set(Some(format!("Failed to start {} connection", bridge_name)));
+                            return;
+                        }
                     }
                 }
+                // Exhausted retries waiting for cleanup
+                is_connecting.set(false);
+                is_cleaning_up.set(false);
+                error.set(Some("Cleanup is taking too long. Please try again later.".to_string()));
             });
         })
     };
@@ -637,9 +682,13 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 <div class="loading-container">
                                     <p class="connect-instruction">
                                         {
-                                            match config.auth_type {
-                                                AuthType::QrCode => "Generating QR code...",
-                                                AuthType::LoginLink => "Generating login link...",
+                                            if *is_cleaning_up {
+                                                "Cleaning up previous connection..."
+                                            } else {
+                                                match config.auth_type {
+                                                    AuthType::QrCode => "Generating QR code...",
+                                                    AuthType::LoginLink => "Generating login link...",
+                                                }
                                             }
                                         }
                                     </p>

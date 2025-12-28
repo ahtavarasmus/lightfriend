@@ -1,11 +1,13 @@
 use reqwest;
 use std::sync::Arc;
+use std::convert::Infallible;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{Query, State},
-    response::{Json, Redirect},
+    response::{Json, Redirect, sse::{Event, KeepAlive, Sse}},
     http::StatusCode,
 };
+use futures::stream::Stream;
 use tower_sessions::{session_store::SessionStore, session::{Id, Record}};
 use oauth2::{
     PkceCodeVerifier,
@@ -971,25 +973,25 @@ pub async fn tesla_battery_status(
 
     let vehicle_vin = &vehicle.vin;
 
-    // Wake up vehicle if asleep
+    // Wake up vehicle if asleep (using deduplication to prevent parallel wake attempts)
     if vehicle.state != "online" {
         info!("Vehicle is asleep (state: {}), waking up...", vehicle.state);
-        match tesla_client.wake_up(&access_token, vehicle_vin).await {
+        match tesla_client.wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles).await {
             Ok(true) => {
                 info!("Vehicle successfully woken up");
             }
             Ok(false) => {
                 error!("Vehicle wake-up returned false");
                 return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to wake vehicle"})),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error": "Couldn't wake vehicle. This may be a Tesla server or connectivity issue."})),
                 ));
             }
             Err(e) => {
                 error!("Failed to wake up vehicle: {}", e);
                 return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to wake vehicle: {}", e)})),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error": format!("Couldn't reach vehicle. This may be a Tesla server or connectivity issue. {}", e)})),
                 ));
             }
         }
@@ -1462,4 +1464,188 @@ pub async fn cancel_charging_notify(
     } else {
         Ok(Json(json!({ "success": true, "message": "No monitoring was active" })))
     }
+}
+
+/// SSE endpoint for streaming Tesla command progress
+/// Streams status updates like "Waking up Tesla...", "Setting climate...", etc.
+#[derive(Debug, Deserialize)]
+pub struct TeslaCommandStreamRequest {
+    pub command: String,
+}
+
+pub async fn tesla_command_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(params): Query<TeslaCommandStreamRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let user_id = auth_user.user_id;
+    let command = params.command.clone();
+
+    info!("Tesla command stream started for user {}: {}", user_id, command);
+
+    // Create the async stream that yields SSE events
+    let stream = async_stream::stream! {
+        // Send initial status
+        yield Ok(Event::default().data(json!({
+            "step": "starting",
+            "message": "Connecting to Tesla..."
+        }).to_string()));
+
+        // Check if user has Tesla connected
+        let has_tesla = match state.user_repository.has_active_tesla(user_id) {
+            Ok(has) => has,
+            Err(e) => {
+                error!("Failed to check Tesla connection: {}", e);
+                yield Ok(Event::default().data(json!({
+                    "step": "error",
+                    "message": "Failed to check Tesla connection"
+                }).to_string()));
+                return;
+            }
+        };
+
+        if !has_tesla {
+            yield Ok(Event::default().data(json!({
+                "step": "error",
+                "message": "No Tesla account connected"
+            }).to_string()));
+            return;
+        }
+
+        // Get valid access token (handles refresh if needed)
+        let access_token = match get_valid_tesla_access_token(&state, user_id).await {
+            Ok(token) => token,
+            Err((_, msg)) => {
+                error!("Failed to get Tesla access token: {}", msg);
+                yield Ok(Event::default().data(json!({
+                    "step": "error",
+                    "message": format!("Failed to authenticate with Tesla: {}", msg)
+                }).to_string()));
+                return;
+            }
+        };
+
+        // Get user's Tesla region
+        let region = match state.user_repository.get_tesla_region(user_id) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to get Tesla region: {}", e);
+                yield Ok(Event::default().data(json!({
+                    "step": "error",
+                    "message": "Failed to get Tesla region settings"
+                }).to_string()));
+                return;
+            }
+        };
+
+        // Create Tesla client with user's region and proxy support
+        let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
+
+        // Get vehicles
+        yield Ok(Event::default().data(json!({
+            "step": "fetching",
+            "message": "Getting vehicle list..."
+        }).to_string()));
+
+        let vehicles = match tesla_client.get_vehicles(&access_token).await.map_err(|e| e.to_string()) {
+            Ok(v) => v,
+            Err(err_msg) => {
+                error!("Failed to get Tesla vehicles: {}", err_msg);
+                yield Ok(Event::default().data(json!({
+                    "step": "error",
+                    "message": format!("Couldn't reach Tesla servers. This may be a temporary issue. {}", err_msg)
+                }).to_string()));
+                return;
+            }
+        };
+
+        if vehicles.is_empty() {
+            yield Ok(Event::default().data(json!({
+                "step": "error",
+                "message": "No vehicles found in your Tesla account"
+            }).to_string()));
+            return;
+        }
+
+        let vehicle = &vehicles[0];
+        let vehicle_vin = &vehicle.vin;
+        let vehicle_name = vehicle.display_name.as_deref().unwrap_or("your Tesla");
+
+        // Check if vehicle needs waking
+        if vehicle.state != "online" {
+            yield Ok(Event::default().data(json!({
+                "step": "waking",
+                "message": format!("Waking up {}...", vehicle_name)
+            }).to_string()));
+
+            // Use deduplicated wake to prevent parallel wake attempts
+            match tesla_client.wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles).await.map_err(|e| e.to_string()) {
+                Ok(true) => {
+                    yield Ok(Event::default().data(json!({
+                        "step": "awake",
+                        "message": format!("{} is now awake", vehicle_name)
+                    }).to_string()));
+                }
+                Ok(false) | Err(_) => {
+                    yield Ok(Event::default().data(json!({
+                        "step": "error",
+                        "message": format!("Couldn't wake {}. This may be a Tesla server or connectivity issue.", vehicle_name)
+                    }).to_string()));
+                    return;
+                }
+            }
+        }
+
+        // Execute the command
+        let command_display = match command.as_str() {
+            "climate_on" => "Turning on climate control",
+            "climate_off" => "Turning off climate control",
+            "lock" => "Locking",
+            "unlock" => "Unlocking",
+            "defrost" => "Starting defrost mode",
+            "remote_start" => "Starting remote drive",
+            "cabin_overheat_on" => "Enabling Cabin Overheat Protection",
+            "cabin_overheat_off" => "Disabling Cabin Overheat Protection",
+            "cabin_overheat_fan_only" => "Setting Cabin Overheat Protection to Fan Only",
+            _ => "Sending command"
+        };
+
+        yield Ok(Event::default().data(json!({
+            "step": "executing",
+            "message": format!("{}...", command_display)
+        }).to_string()));
+
+        // Execute via the tool handler (reuse existing logic)
+        let args_json = json!({"command": command}).to_string();
+        let result = crate::tool_call_utils::tesla::handle_tesla_command(
+            &state,
+            user_id,
+            &args_json,
+            true, // skip notification for dashboard calls
+        ).await;
+
+        // Determine if it was successful based on the result message
+        let is_success = result.to_lowercase().contains("success")
+            || result.to_lowercase().contains("started")
+            || result.to_lowercase().contains("activated")
+            || result.to_lowercase().contains("enabled")
+            || result.to_lowercase().contains("disabled")
+            || result.to_lowercase().contains("stopped")
+            || result.to_lowercase().contains("locked")
+            || result.to_lowercase().contains("unlocked");
+
+        if is_success {
+            yield Ok(Event::default().data(json!({
+                "step": "done",
+                "message": result
+            }).to_string()));
+        } else {
+            yield Ok(Event::default().data(json!({
+                "step": "error",
+                "message": result
+            }).to_string()));
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }

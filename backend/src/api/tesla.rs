@@ -398,6 +398,60 @@ impl TeslaClient {
         Ok(command_response.response.result)
     }
 
+    /// Wake up vehicle with deduplication - prevents parallel wake attempts for the same vehicle.
+    /// If another request is already waking this vehicle, this will wait for that result.
+    pub async fn wake_up_deduplicated(
+        &self,
+        access_token: &str,
+        vehicle_id: &str,
+        waking_vehicles: &dashmap::DashMap<String, tokio::sync::broadcast::Sender<bool>>,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let vin = vehicle_id.to_string();
+
+        // Check if vehicle is already being woken
+        if let Some(sender) = waking_vehicles.get(&vin) {
+            tracing::info!("Vehicle {} is already being woken by another request, waiting...", vin);
+            let mut receiver = sender.subscribe();
+            drop(sender); // Release the read lock
+
+            // Wait for the wake result from the other request
+            match receiver.recv().await {
+                Ok(result) => {
+                    tracing::info!("Received wake result from other request: {}", result);
+                    return if result {
+                        Ok(true)
+                    } else {
+                        Err("Vehicle wake-up failed (from parallel request)".into())
+                    };
+                }
+                Err(_) => {
+                    // Channel closed, the other request may have failed/panicked
+                    tracing::warn!("Wake broadcast channel closed, will retry wake");
+                    // Fall through to try waking ourselves
+                }
+            }
+        }
+
+        // Create a broadcast channel to notify any parallel requests
+        let (tx, _) = tokio::sync::broadcast::channel::<bool>(1);
+        waking_vehicles.insert(vin.clone(), tx.clone());
+
+        // Perform the actual wake-up
+        let result = self.wake_up(access_token, vehicle_id).await;
+
+        // Broadcast the result to any waiting requests
+        let success = result.is_ok() && result.as_ref().map(|&r| r).unwrap_or(false);
+        let _ = tx.send(success); // Ignore error if no receivers
+
+        // Remove from the map
+        waking_vehicles.remove(&vin);
+
+        // Convert the error type
+        result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            e.to_string().into()
+        })
+    }
+
     // Wake up vehicle (if needed before sending commands)
     pub async fn wake_up(&self, access_token: &str, vehicle_id: &str) -> Result<bool, Box<dyn Error>> {
         const POLL_INTERVAL_SECS: u64 = 2;
@@ -461,7 +515,7 @@ impl TeslaClient {
         }
 
         tracing::error!("Vehicle failed to wake up after {} seconds", MAX_ATTEMPTS as u64 * POLL_INTERVAL_SECS);
-        Err("Vehicle wake-up timed out after 46 seconds".into())
+        Err("Vehicle didn't respond after 46 seconds. This may be due to poor cellular reception at the vehicle or Tesla server issues.".into())
     }
 
     // Monitor climate until ready to drive

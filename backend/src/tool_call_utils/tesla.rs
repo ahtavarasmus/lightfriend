@@ -333,10 +333,11 @@ pub async fn handle_tesla_command(
 
     // Handle asleep vehicles: wake up first, then execute command
     // We wait for the full operation to complete so user gets a single response
+    // Using deduplicated wake to prevent parallel wake attempts
     if command != "charge_status" && vehicle.state != "online" {
         info!("Vehicle is {}, waking up before executing command", vehicle.state);
 
-        let wake_result = tesla_client.wake_up(&access_token, vehicle_vin).await
+        let wake_result = tesla_client.wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles).await
             .map_err(|e| e.to_string());
 
         match wake_result {
@@ -346,11 +347,11 @@ pub async fn handle_tesla_command(
             }
             Ok(false) => {
                 error!("Vehicle wake-up returned false (unexpected)");
-                return format!("Couldn't wake up your {}. Please try again or use the Tesla app.", vehicle_name);
+                return format!("Couldn't wake up your {}. This may be a Tesla server or connectivity issue - the vehicle might have poor cellular reception.", vehicle_name);
             }
             Err(error_msg) => {
                 error!("Failed to wake up vehicle: {}", error_msg);
-                return format!("Couldn't wake up your {}. Please try again or use the Tesla app.", vehicle_name);
+                return format!("Couldn't reach your {}. This may be a Tesla server or connectivity issue. {}", vehicle_name, error_msg);
             }
         }
     }
@@ -378,42 +379,42 @@ async fn execute_tesla_command(
         "lock" => {
             match tesla_client.lock_vehicle(&access_token, vehicle_vin).await {
                 Ok(true) => format!("Successfully locked your {}", vehicle_name),
-                Ok(false) => format!("Failed to lock your {}", vehicle_name),
-                Err(e) => format!("Error locking vehicle: {}", e),
+                Ok(false) => format!("Failed to lock your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error locking vehicle. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "unlock" => {
             match tesla_client.unlock_vehicle(&access_token, vehicle_vin).await {
                 Ok(true) => format!("Successfully unlocked your {}", vehicle_name),
-                Ok(false) => format!("Failed to unlock your {}", vehicle_name),
-                Err(e) => format!("Error unlocking vehicle: {}", e),
+                Ok(false) => format!("Failed to unlock your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error unlocking vehicle. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "climate_on" => {
             match tesla_client.start_climate(&access_token, vehicle_vin).await {
                 Ok(true) => format!("Climate control started in your {}. The car will start warming up or cooling down to your preset temperature.", vehicle_name),
-                Ok(false) => format!("Failed to start climate in your {}", vehicle_name),
-                Err(e) => format!("Error starting climate: {}", e),
+                Ok(false) => format!("Failed to start climate in your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error starting climate. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "climate_off" => {
             match tesla_client.stop_climate(&access_token, vehicle_vin).await {
                 Ok(true) => format!("Climate control stopped in your {}", vehicle_name),
-                Ok(false) => format!("Failed to stop climate in your {}", vehicle_name),
-                Err(e) => format!("Error stopping climate: {}", e),
+                Ok(false) => format!("Failed to stop climate in your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error stopping climate. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "defrost" => {
             match tesla_client.defrost_vehicle(&access_token, vehicle_vin).await {
                 Ok(msg) => format!("Your {} is now in max defrost mode. {}. The windshield and windows should clear quickly!", vehicle_name, msg),
-                Err(e) => format!("Error activating defrost: {}", e),
+                Err(e) => format!("Error activating defrost. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "remote_start" => {
             match tesla_client.remote_start(&access_token, vehicle_vin).await {
                 Ok(true) => format!("Remote start activated for your {}. You can now drive without the key for 2 minutes. Make sure you're near the vehicle.", vehicle_name),
-                Ok(false) => format!("Failed to activate remote start for your {}", vehicle_name),
-                Err(e) => format!("Error activating remote start: {}", e),
+                Ok(false) => format!("Failed to activate remote start for your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error activating remote start. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "charge_status" => {
@@ -438,28 +439,28 @@ async fn execute_tesla_command(
                         format!("Unable to get charge information for your {}", vehicle_name)
                     }
                 }
-                Err(e) => format!("Error getting charge status: {}", e),
+                Err(e) => format!("Error getting charge status. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "cabin_overheat_on" => {
             match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, true, false).await {
                 Ok(true) => format!("Cabin Overheat Protection enabled for your {}. The car will use A/C to keep the cabin cool when parked in hot conditions.", vehicle_name),
-                Ok(false) => format!("Failed to enable Cabin Overheat Protection for your {}", vehicle_name),
-                Err(e) => format!("Error enabling Cabin Overheat Protection: {}", e),
+                Ok(false) => format!("Failed to enable Cabin Overheat Protection for your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error enabling Cabin Overheat Protection. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "cabin_overheat_off" => {
             match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, false, false).await {
                 Ok(true) => format!("Cabin Overheat Protection disabled for your {}", vehicle_name),
-                Ok(false) => format!("Failed to disable Cabin Overheat Protection for your {}", vehicle_name),
-                Err(e) => format!("Error disabling Cabin Overheat Protection: {}", e),
+                Ok(false) => format!("Failed to disable Cabin Overheat Protection for your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error disabling Cabin Overheat Protection. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         "cabin_overheat_fan_only" => {
             match tesla_client.set_cabin_overheat_protection(&access_token, vehicle_vin, true, true).await {
                 Ok(true) => format!("Cabin Overheat Protection set to Fan Only for your {}. The car will use only the fan (no A/C) to keep the cabin cool when parked.", vehicle_name),
-                Ok(false) => format!("Failed to set Cabin Overheat Protection to Fan Only for your {}", vehicle_name),
-                Err(e) => format!("Error setting Cabin Overheat Protection to Fan Only: {}", e),
+                Ok(false) => format!("Failed to set Cabin Overheat Protection to Fan Only for your {}. This may be a temporary Tesla server issue.", vehicle_name),
+                Err(e) => format!("Error setting Cabin Overheat Protection to Fan Only. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
         _ => {

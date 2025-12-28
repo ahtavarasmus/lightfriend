@@ -1688,6 +1688,18 @@ impl UserRepository {
         Ok(rows)
     }
 
+    /// Update bridge status (e.g., "connected", "connecting", "cleaning_up")
+    pub fn update_bridge_status(&self, user_id: i32, service_type: &str, status: &str) -> Result<usize, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let rows = diesel::update(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq(service_type))
+            .set(bridges::status.eq(status))
+            .execute(&mut conn)?;
+        Ok(rows)
+    }
+
 
     pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
         use crate::schema::bridges;
