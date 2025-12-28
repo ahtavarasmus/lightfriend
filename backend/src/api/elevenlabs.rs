@@ -2295,53 +2295,7 @@ pub async fn make_notification_call(
             }))
         ));
     }
-    // Get user information before spawning the thread
-    let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            error!("User not found for ID: {}", user_id);
-            return Ok(Json(json!({
-                "status": "success",
-                "message": "Notification call initiated successfully, but user not found for status updates",
-                "to_number": to_phone_number,
-                "from_number_id": phone_number_id,
-            })));
-        }
-        Err(e) => {
-            error!("Error fetching user: {}", e);
-            return Ok(Json(json!({
-                "status": "success",
-                "message": "Notification call initiated successfully, but failed to fetch user for status updates",
-                "to_number": to_phone_number,
-                "from_number_id": phone_number_id,
-            })));
-        }
-    };
-    // Send an immediate SMS notification
-    // Truncate and clean notification message to ensure SMS compatibility
-    let cleaned_message = notification_message
-        .chars()
-        .filter(|c| c.is_ascii())
-        .collect::<String>();
-    let truncated_message = if cleaned_message.len() > 50 {
-        format!("{}...", &cleaned_message[..47])
-    } else {
-        cleaned_message
-    };
-    let notification_sms = format!(
-        "Notification: {}",
-        truncated_message
-    );
-    // Send the SMS notification
-    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-        &state,
-        &notification_sms,
-        None,
-        &user,
-    ).await {
-        error!("Failed to send notification SMS: {}", e);
-        // Continue with the call even if SMS fails
-    }
+
     Ok(Json(json!({
         "status": "success",
         "message": "Notification call initiated successfully",

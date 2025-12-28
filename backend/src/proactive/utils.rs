@@ -510,7 +510,11 @@ pub async fn check_message_importance(
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["is_critical".to_string()]),
+                required: Some(vec![
+                    "is_critical".to_string(),
+                    "what_to_inform".to_string(),
+                    "first_message".to_string(),
+                ]),
             },
         },
     }];
