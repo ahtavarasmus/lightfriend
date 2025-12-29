@@ -12,10 +12,14 @@ build:
 build-core:
     cd docker && docker compose build core
 
-# Build backend locally (on Mac) then create Docker image - USE THIS IF RUNNING OUT OF MEMORY
+# Build backend for Linux using Docker, then create image - USE THIS IF RUNNING OUT OF MEMORY
 build-prebuilt:
-    @echo "Building backend locally (may take 10-15 minutes)..."
-    cd backend && cargo build --release
+    @echo "Building backend for Linux in Docker (may take 10-15 minutes)..."
+    docker run --rm \
+        -v "{{justfile_directory()}}/backend:/app" \
+        -w /app \
+        rust:1.85-bookworm \
+        sh -c "apt-get update && apt-get install -y libsqlite3-dev pkg-config libssl-dev lld && cargo build --release"
     @echo "Creating Docker image with pre-built binary..."
     cd docker && docker build -f core/Dockerfile.prebuilt -t lightfriend-core ..
 
