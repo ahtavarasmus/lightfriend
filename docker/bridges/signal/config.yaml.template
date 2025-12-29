@@ -1,0 +1,42 @@
+# Signal bridge configuration for Docker
+# Full config reference: https://github.com/mautrix/signal/blob/master/example-config.yaml
+
+homeserver:
+    address: http://synapse:8008
+    domain: matrix.local
+
+appservice:
+    address: http://mautrix-signal:29328
+    hostname: 0.0.0.0
+    port: 29328
+    id: signal
+    bot:
+        username: signalbot
+        displayname: Signal Bridge
+    ephemeral_events: true
+
+database:
+    type: postgres
+    uri: postgres://signal_user:signal_password@postgres:5432/signal_db?sslmode=disable
+
+signal:
+    socket_path: /signald/signald.sock
+
+bridge:
+    username_template: signal_{{.}}
+    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}} (Signal)"
+    permissions:
+        "*": user
+        "matrix.local": user
+
+double_puppet:
+    servers:
+        matrix.local: "${DOUBLE_PUPPET_SECRET}"
+    secrets:
+        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
+
+logging:
+    min_level: info
+    writers:
+    - type: stdout
+      format: pretty-colored

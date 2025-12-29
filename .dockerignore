@@ -1,15 +1,61 @@
-# Rust build artifacts (prevents xattr issues)
-**/target/
-.cargo/
-
-# Frontend builds
-**/dist/
-
-# General ignores
-.git
+# Git
+.git/
 .gitignore
-README.md
-docker-compose.yaml  # Or .yml
-notes-for-matrix-bridges.md
-LICENSE
-data/
+.github/
+
+# Build artifacts
+backend/target/*
+!backend/target/release
+backend/target/release/*
+!backend/target/release/backend
+frontend/target/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+database.db
+
+# Uploads and runtime data
+backend/uploads/
+backend/matrix_store/
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Docker itself
+docker/
+Dockerfile
+.dockerignore
+
+# Keys and certificates
+*.pem
+*.key
+*.crt
+
+# Tesla integration sensitive files
+backend/tesla_private_key.pem
+backend/tesla_public_key.pem
+backend/tesla-proxy-tls/
+
+# Logs
+*.log
+
+# Temporary files
+second_terminal

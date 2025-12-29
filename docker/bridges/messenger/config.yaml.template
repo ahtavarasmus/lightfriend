@@ -1,0 +1,42 @@
+# Messenger bridge configuration for Docker (mautrix-meta)
+# Full config reference: https://github.com/mautrix/meta/blob/master/example-config.yaml
+
+meta:
+    mode: messenger
+
+homeserver:
+    address: http://synapse:8008
+    domain: matrix.local
+
+appservice:
+    address: http://mautrix-messenger:29320
+    hostname: 0.0.0.0
+    port: 29320
+    id: messenger
+    bot:
+        username: messengerbot
+        displayname: Messenger Bridge
+    ephemeral_events: true
+
+database:
+    type: postgres
+    uri: postgres://messenger_user:messenger_password@postgres:5432/messenger_db?sslmode=disable
+
+bridge:
+    username_template: messenger_{{.}}
+    displayname_template: "{{.DisplayName}} (Messenger)"
+    permissions:
+        "*": user
+        "matrix.local": user
+
+double_puppet:
+    servers:
+        matrix.local: "${DOUBLE_PUPPET_SECRET}"
+    secrets:
+        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
+
+logging:
+    min_level: info
+    writers:
+    - type: stdout
+      format: pretty-colored

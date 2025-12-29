@@ -1,0 +1,11 @@
+# Double puppet registration for all bridges
+id: doublepuppet
+url: null
+as_token: ${DOUBLE_PUPPET_SECRET}
+hs_token: ${DOUBLE_PUPPET_SECRET}
+sender_localpart: doublepuppetbot
+rate_limited: false
+namespaces:
+  users:
+  - regex: '@.*:matrix\.local'
+    exclusive: false

@@ -1,0 +1,26 @@
+[build]
+# Single-threaded compilation (redundant with ENV but ensures it)
+jobs = 1
+
+[profile.release]
+# Optimize for size instead of speed (uses less memory during compilation)
+opt-level = "s"
+# Disable LTO completely (it's memory intensive during linking)
+lto = false
+# Reduce code generation units (less parallelism, less memory)
+codegen-units = 1
+# Strip debug symbols
+strip = true
+# No debug info
+debug = false
+# Disable incremental compilation (can use extra memory)
+incremental = false
+
+[target.x86_64-unknown-linux-gnu]
+# Use mold or lld linker if available (faster, less memory)
+# Falls back to default if not available
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[net]
+# Use git CLI for fetching (reduces memory)
+git-fetch-with-cli = true

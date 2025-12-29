@@ -1,0 +1,96 @@
+# Synapse homeserver configuration for Docker deployment
+server_name: "matrix.local"
+pid_file: /data/homeserver.pid
+web_client_location: https://app.element.io/
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    bind_addresses: ['0.0.0.0']
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: synapse_user
+    password: ${SYNAPSE_DB_PASSWORD}
+    database: synapse_db
+    host: postgres
+    port: 5432
+    cp_min: 5
+    cp_max: 10
+
+log_config: "/config/matrix.local.log.config"
+
+media_store_path: /data/media_store
+uploads_path: /data/uploads
+
+max_upload_size: 50M
+
+enable_registration: true
+enable_registration_without_verification: true
+
+# Registration shared secret from .env
+registration_shared_secret: "${MATRIX_HOMESERVER_SHARED_SECRET}"
+
+# For bridge appservices
+app_service_config_files:
+  - /bridges/whatsapp/whatsapp-registration.yaml
+  - /bridges/signal/signal-registration.yaml
+  - /bridges/messenger/messenger-registration.yaml
+  - /bridges/instagram/instagram-registration.yaml
+  - /bridges/doublepuppet.yaml
+
+# Shared secret for double puppeting (instead of module)
+# This allows bridges to log in as any user for double puppeting
+# The bridges use this secret with the doublepuppet appservice
+login_shared_secret: "${MATRIX_HOMESERVER_SHARED_SECRET}"
+
+# Prevent rate limiting for appservices
+rc_message:
+  per_second: 100
+  burst_count: 100
+
+rc_registration:
+  per_second: 10
+  burst_count: 30
+
+rc_login:
+  address:
+    per_second: 10
+    burst_count: 30
+  account:
+    per_second: 10
+    burst_count: 30
+  failed_attempts:
+    per_second: 10
+    burst_count: 30
+
+# Federation settings
+federation_domain_whitelist: []
+allow_public_rooms_without_auth: false
+allow_public_rooms_over_federation: false
+
+# Retention settings
+user_directory:
+  enabled: true
+  search_all_users: true
+
+# URL previews
+url_preview_enabled: false
+
+# Metrics
+enable_metrics: true
+report_stats: false
+
+# Signing key will be auto-generated on first run
+signing_key_path: "/data/matrix.local.signing.key"
+
+trusted_key_servers:
+  - server_name: "matrix.org"
+
+suppress_key_server_warning: true

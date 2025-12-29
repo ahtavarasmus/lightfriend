@@ -1,0 +1,39 @@
+# WhatsApp bridge configuration for Docker
+# Full config reference: https://github.com/mautrix/whatsapp/blob/master/example-config.yaml
+
+homeserver:
+    address: http://synapse:8008
+    domain: matrix.local
+
+appservice:
+    address: http://mautrix-whatsapp:29318
+    hostname: 0.0.0.0
+    port: 29318
+    id: whatsapp
+    bot:
+        username: whatsappbot
+        displayname: WhatsApp Bridge
+    ephemeral_events: true
+
+database:
+    type: postgres
+    uri: postgres://whatsapp_user:whatsapp_password@postgres:5432/whatsapp_db?sslmode=disable
+
+bridge:
+    username_template: whatsapp_{{.}}
+    displayname_template: "{{if .BusinessName}}{{.BusinessName}}{{else if .PushName}}{{.PushName}}{{else}}{{.JID}}{{end}} (WA)"
+    permissions:
+        "*": user
+        "matrix.local": user
+
+double_puppet:
+    servers:
+        matrix.local: "${DOUBLE_PUPPET_SECRET}"
+    secrets:
+        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
+
+logging:
+    min_level: info
+    writers:
+    - type: stdout
+      format: pretty-colored
