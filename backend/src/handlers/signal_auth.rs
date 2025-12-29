@@ -216,13 +216,14 @@ async fn connect_signal(
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
     // Optimized QR code detection with event handler
     let mut qr_code_url = None;
+    let mut saw_scan_text = false;
     tracing::info!("⏳ Starting QR code monitoring");
 
-    // Use longer sync timeout to ensure we catch the QR code message
-    // The bridge takes ~8-13 seconds to generate and upload the QR code
-    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(15));
-    for attempt in 1..=30 { // 30 attempts * ~15s = ~7.5 minutes max wait
-        println!("📡 Sync attempt #{}/30", attempt);
+    // Use shorter sync timeout for more frequent checks (matching WhatsApp's proven approach)
+    // More frequent syncs catch the image message more reliably
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
+    for attempt in 1..=60 { // 60 attempts * ~2s = ~2 minutes max wait
+        println!("📡 Sync attempt #{}/60", attempt);
 
         // Don't fail on sync errors - just log and retry
         match client.sync_once(sync_settings.clone()).await {
@@ -281,7 +282,12 @@ async fn connect_signal(
                                     }
                                 },
                                 MessageType::Text(text_content) => {
-                                    tracing::info!("Received Text message: {}", text_content.body);
+                                    tracing::info!("📝 Received Text from bot: {}", text_content.body);
+                                    // Track when we see the QR code prompt - image should follow
+                                    if text_content.body.contains("Scan the QR code") {
+                                        saw_scan_text = true;
+                                        tracing::info!("✅ Detected QR prompt, image should follow...");
+                                    }
                                     // Check for errors or other texts
                                     if text_content.body.contains("error") {
                                         return Err(anyhow!("Error from bot: {}", text_content.body));
@@ -303,7 +309,15 @@ async fn connect_signal(
         // Balanced delay
         sleep(Duration::from_millis(500)).await;
     }
-    let qr_code_url = qr_code_url.ok_or(anyhow!("Signal QR code not received within timeout. Please try again."))?;
+
+    // Provide more specific error message if we saw the text prompt but never got the image
+    let qr_code_url = if let Some(url) = qr_code_url {
+        url
+    } else if saw_scan_text {
+        return Err(anyhow!("Signal bridge sent QR prompt but image was not received. Please try again."));
+    } else {
+        return Err(anyhow!("Signal QR code not received within timeout. Please try again."));
+    };
     Ok((room_id.into(), qr_code_url))
 }
 

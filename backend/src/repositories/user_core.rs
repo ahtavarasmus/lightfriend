@@ -674,6 +674,27 @@ impl UserCore {
         Ok(result)
     }
 
+    pub fn update_llm_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::llm_provider.eq(provider))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_llm_provider(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        self.ensure_user_settings_exist(user_id)?;
+        let result = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::llm_provider)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(result)
+    }
+
     pub fn update_notification_type(&self, user_id: i32, notification_type: Option<&str>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

@@ -581,6 +581,7 @@ pub struct UserSettings {
     pub default_notification_mode: Option<String>, // "critical", "digest", or "ignore" - default behavior for unknown senders
     pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
     pub default_notify_on_call: i32, // 1 = notify on incoming calls, 0 = don't notify
+    pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - which LLM provider to use for SMS/chat
 }
 
 #[derive(Insertable)]

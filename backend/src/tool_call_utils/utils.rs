@@ -17,7 +17,7 @@ pub struct ChatMessage {
 }
 
 /// Creates an OpenAI-compatible client for a specific user.
-/// Routes to the appropriate provider based on user_id (admin gets Tinfoil for testing).
+/// Routes to the appropriate provider based on user's llm_provider preference setting.
 /// For self-hosted (tier 3) deployments, uses the user's own API key.
 pub fn create_openai_client_for_user(
     state: &Arc<AppState>,
@@ -48,8 +48,9 @@ pub fn create_openai_client_for_user(
             .build()?;
         Ok((client, crate::AiProvider::OpenRouter))
     } else {
-        // Cloud deployment uses user-based provider routing
-        let provider = state.ai_config.provider_for_user(user_id);
+        // Cloud deployment uses user's LLM provider preference from settings
+        let llm_provider_preference = state.user_core.get_llm_provider(user_id).unwrap_or(None);
+        let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
         let client = state.ai_config.create_client(provider)?;
         Ok((client, provider))
     }

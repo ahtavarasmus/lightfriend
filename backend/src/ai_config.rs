@@ -1,7 +1,8 @@
 /// Centralized AI provider configuration
 ///
-/// User-based routing: user_id == 1 (admin) uses Tinfoil for testing,
-/// all other users use OpenRouter. Easy to switch all users later.
+/// Users can choose their preferred provider in settings:
+/// - "openai" (default): Uses OpenRouter with GPT-4o (faster, smarter)
+/// - "tinfoil": Uses Tinfoil for privacy-focused LLM (slower but private)
 
 use openai_api_rs::v1::api::OpenAIClient;
 
@@ -46,15 +47,15 @@ impl AiConfig {
         }
     }
 
-    /// Determine which provider a user should use
-    /// Currently: user_id == 1 gets Tinfoil (admin testing)
-    /// To switch all users: change this to return Tinfoil for everyone
-    pub fn provider_for_user(&self, user_id: i32) -> AiProvider {
-        // Admin testing: only user 1 gets Tinfoil
-        if user_id == 1 && self.tinfoil_api_key.is_some() {
-            AiProvider::Tinfoil
-        } else {
-            AiProvider::OpenRouter
+    /// Determine which provider to use based on user's preference setting
+    ///
+    /// preference: The user's llm_provider setting from the database
+    /// - Some("tinfoil") -> use Tinfoil
+    /// - Some("openai") or None -> use OpenRouter (default)
+    pub fn provider_for_user_with_preference(&self, preference: Option<&str>) -> AiProvider {
+        match preference {
+            Some("tinfoil") if self.tinfoil_api_key.is_some() => AiProvider::Tinfoil,
+            _ => AiProvider::OpenRouter,
         }
     }
 

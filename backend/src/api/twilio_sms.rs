@@ -680,8 +680,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         println!("history: {:#?}", chat_messages);
     }
 
-    // Get the provider for this user (admin gets Tinfoil for testing)
-    let provider = state.ai_config.provider_for_user(user.id);
+    // Get the user's LLM provider preference from settings
+    let llm_provider_preference = state.user_core.get_llm_provider(user.id).unwrap_or(None);
+    let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
     let needs_two_step = state.ai_config.needs_two_step_vision(provider);
 
     // Handle image if present

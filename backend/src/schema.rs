@@ -354,6 +354,7 @@ diesel::table! {
         default_notification_mode -> Nullable<Text>,
         default_notification_type -> Nullable<Text>,
         default_notify_on_call -> Integer,
+        llm_provider -> Nullable<Text>,
     }
 }
 

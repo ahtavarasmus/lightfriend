@@ -57,6 +57,7 @@ pub fn tesla_controls() -> Html {
     let defrost_loading = use_state(|| false);
     let remote_start_loading = use_state(|| false);
     let cabin_overheat_loading = use_state(|| false);
+    let precondition_loading = use_state(|| false);
     let command_result = use_state(|| None::<String>);
     let status_message = use_state(|| None::<String>);  // SSE status updates
 
@@ -995,6 +996,50 @@ pub fn tesla_controls() -> Html {
         })
     };
 
+    // Handle precondition battery for fast charging
+    let handle_precondition_battery = {
+        let precondition_loading = precondition_loading.clone();
+        let command_result = command_result.clone();
+
+        Callback::from(move |_: MouseEvent| {
+            let precondition_loading = precondition_loading.clone();
+            let command_result = command_result.clone();
+
+            precondition_loading.set(true);
+            command_result.set(None);
+
+            spawn_local(async move {
+                let body = serde_json::json!({ "command": "precondition_battery" });
+                let request = match Api::post("/api/tesla/command").json(&body) {
+                    Ok(req) => req.send().await,
+                    Err(e) => {
+                        command_result.set(Some(format!("Failed to create request: {}", e)));
+                        precondition_loading.set(false);
+                        return;
+                    }
+                };
+
+                match request {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
+                                    command_result.set(Some(msg.to_string()));
+                                }
+                            }
+                        } else {
+                            command_result.set(Some("Failed to start battery preconditioning".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        command_result.set(Some(format!("Network error: {}", e)));
+                    }
+                }
+                precondition_loading.set(false);
+            });
+        })
+    };
+
     // Handle refresh
     let handle_refresh = {
         let battery_loading = battery_loading.clone();
@@ -1852,6 +1897,29 @@ pub fn tesla_controls() -> Html {
                 </div>
             </div>
 
+            // Battery Preconditioning section - for fast charging preparation
+            <div class="battery-precondition-section">
+                <h4 class="section-title">{"Fast Charge Prep"}</h4>
+                <div class="control-btn-wrapper" title={if !*has_vehicle_cmds { "Requires Vehicle Commands permission" } else { "Warms battery for faster charging by setting nav to distant Supercharger" }}>
+                    <button
+                        onclick={handle_precondition_battery}
+                        disabled={*precondition_loading || !*has_vehicle_cmds}
+                        class={format!("control-btn control-btn-full {}", if !*has_vehicle_cmds { "control-btn-disabled" } else { "" })}
+                    >
+                        {
+                            if *precondition_loading {
+                                html! { <><i class="fas fa-spinner fa-spin"></i>{" Preconditioning..."}</> }
+                            } else {
+                                html! { <><i class="fas fa-bolt"></i>{" Precondition Battery"}</> }
+                            }
+                        }
+                    </button>
+                </div>
+                <div class="precondition-hint">
+                    {"Warms battery for fast charging (use ~30 min before charging)"}
+                </div>
+            </div>
+
             // Charging notification - only show when charging
             {
                 if charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
@@ -2340,6 +2408,25 @@ fn get_styles() -> &'static str {
         .cabin-overheat-buttons .control-btn {
             flex: 1;
             min-width: 90px;
+        }
+        .battery-precondition-section {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .battery-precondition-section .section-title {
+            color: #7EB2FF;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .precondition-hint {
+            width: 100%;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 8px;
+            font-style: italic;
         }
 
     "#

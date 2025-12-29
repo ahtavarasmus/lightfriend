@@ -80,6 +80,35 @@ pub struct CommandResult {
     pub reason: Option<String>,
 }
 
+// Nearby charging sites response structures
+#[derive(Debug, Deserialize)]
+pub struct NearbySitesResponse {
+    pub response: NearbySitesData,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NearbySitesData {
+    pub superchargers: Vec<ChargingSite>,
+    pub destination_charging: Vec<ChargingSite>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChargingSite {
+    pub location: ChargingLocation,
+    pub name: String,
+    pub distance_miles: f64,
+    #[serde(default)]
+    pub available_stalls: Option<i32>,
+    #[serde(default)]
+    pub total_stalls: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChargingLocation {
+    pub lat: f64,
+    pub long: f64,
+}
+
 pub struct TeslaClient {
     client: reqwest::Client,
     base_url: String,
@@ -328,6 +357,35 @@ impl TeslaClient {
             "fan_only": fan_only
         });
         self.send_command_with_body(access_token, vehicle_id, "set_cabin_overheat_protection", &body).await
+    }
+
+    // Get nearby Tesla charging sites (Superchargers and Destination chargers)
+    pub async fn get_nearby_charging_sites(&self, access_token: &str, vehicle_id: &str) -> Result<NearbySitesData, Box<dyn Error>> {
+        let url = format!("{}/api/1/vehicles/{}/nearby_charging_sites", self.base_url, vehicle_id);
+
+        let response = self.client
+            .get(&url)
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(format!("Tesla API error getting nearby charging sites: {}", error_text).into());
+        }
+
+        let sites_response: NearbySitesResponse = response.json().await?;
+        Ok(sites_response.response)
+    }
+
+    // Navigate to GPS coordinates (triggers battery preconditioning if destination is a Supercharger)
+    pub async fn navigate_to_gps(&self, access_token: &str, vehicle_id: &str, lat: f64, lon: f64) -> Result<bool, Box<dyn Error>> {
+        let body = serde_json::json!({
+            "lat": lat,
+            "lon": lon,
+            "order": 1
+        });
+        self.send_command_with_body(access_token, vehicle_id, "navigation_gps_request", &body).await
     }
 
     // Generic command sender

@@ -91,6 +91,7 @@ pub struct ProfileResponse {
     server_ip: Option<String>,
     plan_type: Option<String>, // "monitor" or "digest"
     phone_service_active: bool, // whether phone service is active - can be disabled for security
+    llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -255,6 +256,7 @@ pub async fn get_profile(
                 server_ip: user_settings.server_ip,
                 plan_type: user.plan_type,
                 phone_service_active: user_settings.phone_service_active,
+                llm_provider: user_settings.llm_provider,
             }))
         }
         None => Err((
@@ -468,6 +470,23 @@ pub async fn patch_profile_field(
                 Json(json!({"error": "phone_service_active must be a boolean"}))
             ))?;
             state.user_core.update_phone_service_active(user_id, value).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
+        }
+        "llm_provider" => {
+            let value = request.value.as_str().ok_or_else(|| (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "llm_provider must be a string"}))
+            ))?;
+            // Validate the value is either "openai" or "tinfoil"
+            if value != "openai" && value != "tinfoil" {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "llm_provider must be 'openai' or 'tinfoil'"}))
+                ));
+            }
+            state.user_core.update_llm_provider(user_id, value).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;

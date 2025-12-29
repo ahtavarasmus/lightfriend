@@ -166,7 +166,7 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "command".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Command to execute: 'lock', 'unlock', 'climate_on', 'climate_off', 'defrost', 'remote_start', 'charge_status', 'cabin_overheat_on', 'cabin_overheat_off', or 'cabin_overheat_fan_only'".to_string()),
+            description: Some("Command to execute: 'lock', 'unlock', 'climate_on', 'climate_off', 'defrost', 'remote_start', 'charge_status', 'cabin_overheat_on', 'cabin_overheat_off', 'cabin_overheat_fan_only', or 'precondition_battery'".to_string()),
             enum_values: Some(vec![
                 "lock".to_string(),
                 "unlock".to_string(),
@@ -178,6 +178,7 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 "cabin_overheat_on".to_string(),
                 "cabin_overheat_off".to_string(),
                 "cabin_overheat_fan_only".to_string(),
+                "precondition_battery".to_string(),
             ]),
             ..Default::default()
         }),
@@ -197,7 +198,7 @@ pub fn get_tesla_control_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("control_tesla"),
             description: Some(String::from(
-                "Control Tesla vehicle functions: lock/unlock doors, start/stop climate control, defrost vehicle (max heat + heated seats/steering wheel for deep ice), remote start driving, check charge status, or control cabin overheat protection (on/off/fan-only). For climate_on/defrost, can optionally notify user when car is ready.",
+                "Control Tesla vehicle functions: lock/unlock doors, start/stop climate control, defrost vehicle (max heat + heated seats/steering wheel for deep ice), remote start driving, check charge status, control cabin overheat protection (on/off/fan-only), or precondition battery for fast charging (warms battery by setting nav to distant Supercharger - use when user is leaving within 30 min to charge). For climate_on/defrost, can optionally notify user when car is ready.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -463,8 +464,51 @@ async fn execute_tesla_command(
                 Err(e) => format!("Error setting Cabin Overheat Protection to Fan Only. This may be a Tesla server or connectivity issue. {}", e),
             }
         }
+        "precondition_battery" => {
+            // Get nearby charging sites to find a distant Supercharger
+            let sites = match tesla_client.get_nearby_charging_sites(access_token, vehicle_vin).await {
+                Ok(s) => s,
+                Err(e) => {
+                    return format!("Error getting nearby Superchargers: {}. Please try again.", e);
+                }
+            };
+
+            if sites.superchargers.is_empty() {
+                return format!("No Superchargers found near your {}. Cannot start battery preconditioning.", vehicle_name);
+            }
+
+            // Find a Supercharger ideally 20+ miles away, or use the furthest one available
+            let target = sites.superchargers
+                .iter()
+                .filter(|s| s.distance_miles >= 20.0)
+                .min_by(|a, b| a.distance_miles.partial_cmp(&b.distance_miles).unwrap_or(std::cmp::Ordering::Equal))
+                .or_else(|| sites.superchargers.iter().max_by(|a, b|
+                    a.distance_miles.partial_cmp(&b.distance_miles).unwrap_or(std::cmp::Ordering::Equal)));
+
+            let Some(supercharger) = target else {
+                return format!("No suitable Supercharger found for preconditioning your {}.", vehicle_name);
+            };
+
+            let sc_name = supercharger.name.clone();
+            let sc_distance = supercharger.distance_miles;
+            let sc_lat = supercharger.location.lat;
+            let sc_lon = supercharger.location.long;
+
+            // Start climate control (also warms battery as side effect)
+            let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
+
+            // Set navigation to the distant Supercharger to trigger battery preconditioning
+            match tesla_client.navigate_to_gps(access_token, vehicle_vin, sc_lat, sc_lon).await {
+                Ok(true) => format!(
+                    "Battery preconditioning started for your {}! Navigation set to {} ({:.0} miles away). Climate is also running. Your battery will warm up for fast charging. When ready, just drive to your nearby charger.",
+                    vehicle_name, sc_name, sc_distance
+                ),
+                Ok(false) => format!("Failed to set navigation for battery preconditioning. Please try again."),
+                Err(e) => format!("Error setting navigation for preconditioning: {}", e),
+            }
+        }
         _ => {
-            format!("Unknown Tesla command: '{}'. Available commands are: lock, unlock, climate_on, climate_off, defrost, remote_start, charge_status, cabin_overheat_on, cabin_overheat_off, cabin_overheat_fan_only", command)
+            format!("Unknown Tesla command: '{}'. Available commands are: lock, unlock, climate_on, climate_off, defrost, remote_start, charge_status, cabin_overheat_on, cabin_overheat_off, cabin_overheat_fan_only, precondition_battery", command)
         }
     }
 }

@@ -54,6 +54,7 @@ pub struct UserProfile {
     pub server_ip: Option<String>,
     pub plan_type: Option<String>,
     pub phone_service_active: Option<bool>, // whether phone service is active - can be disabled for security
+    pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
