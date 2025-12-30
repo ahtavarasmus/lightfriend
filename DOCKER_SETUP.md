@@ -39,12 +39,12 @@ openssl
 
 ### System Requirements
 
-- **Disk Space**: ~5GB for images + data volumes
-- **Memory**: 6-8GB RAM for Docker (recommended: set Docker Desktop to 6GB)
-- **CPU**: 2+ cores recommended
-- **Rust toolchain**: Required for default build method (install via [rustup.rs](https://rustup.rs))
+- **Memory**: 8GB+ RAM for Docker (12GB recommended)
+- **CPU**: 4+ cores recommended (faster builds)
+- **Disk**: 5-10GB free space
+- **Time**: 3-7 minutes first build (optimized), 30-60s for code changes
 
-**Note**: The default build method compiles Rust on your local machine (using full system RAM + swap) and packages the binary in Docker. This avoids OOM errors on memory-constrained systems like Mac M1 with 8GB RAM.
+**Limited local resources?** Use [GitHub Codespaces](https://github.com/codespaces) (free tier: 4 cores, 8GB RAM) - build completes in ~5 minutes.
 
 ---
 
@@ -60,6 +60,10 @@ cp .env.example .env
 
 # Generate secrets and append to .env
 just generate-secrets >> .env
+
+# Optional: Load .env variables into your current terminal session
+# (only needed if you want to use env vars in terminal commands)
+set -a && source .env && set +a
 ```
 
 Edit `.env` and verify the generated values:
@@ -77,26 +81,25 @@ That's it! The configuration files (Synapse, bridges, registration) will be auto
 ### 2. Build and Start Services
 
 ```bash
-# Build backend locally, then create Docker images (recommended)
-just build-prebuilt
+# Build all Docker images (3-7 minutes first build with optimized Dockerfile)
+just build
 
-# Start all services in background
+# Start all services
 just up
-
-# OR start with logs visible
-just up-logs
 ```
 
-First startup will take 10-15 minutes as it:
-- Compiles Rust backend on your local machine (single-threaded, memory-optimized)
-- Creates Docker image with pre-built binary
-- Downloads other base images (~2GB)
-- Initializes databases
-- Generates Synapse signing keys
+**Build time**: 3-7 minutes (first build), 30-60 seconds (code changes only)
 
-**Why prebuilt?** Building Rust inside Docker can cause OOM errors on systems with 8GB RAM. The prebuilt approach compiles locally (using full system memory + swap) and Docker only packages the binary.
+**What makes it fast:**
+- **cargo-chef**: Caches dependencies separately from source code
+- **BuildKit cache mounts**: Cargo registry cached between builds
+- **mold linker**: 2-3x faster linking than default
+- **Parallel compilation**: Uses all CPU cores (not single-threaded)
 
-**Alternative (for 16GB+ RAM systems):** If you have plenty of RAM, you can build entirely in Docker with `just build` instead. This may take longer but keeps everything containerized.
+**Requirements**:
+- Run `just` commands from project root
+- Docker memory: 8GB+ (Docker Desktop → Settings → Resources)
+- BuildKit enabled (default in modern Docker)
 
 ### 3. Create Matrix Admin User
 
@@ -371,75 +374,35 @@ just up
 
 ---
 
-## Common Commands (with Just)
+## Common Commands
 
 ```bash
-# Build (recommended: prebuilt method)
-just build-prebuilt # Build backend locally + create Docker image (default method)
-just build          # Alternative: Build all images in Docker (requires 16GB+ RAM)
-just build-core     # Alternative: Build only core in Docker (requires 16GB+ RAM)
+# Build
+just build          # Build all images (20-40 min first time)
 
 # Lifecycle
 just up             # Start all services
 just down           # Stop all services
 just restart        # Restart all services
-just restart-core   # Restart only core
 
 # Logs
 just logs           # View all logs
 just logs-core      # View core logs
 just logs-synapse   # View synapse logs
-just logs-bridge whatsapp  # View specific bridge logs
+just logs-bridge whatsapp  # View bridge logs
 
 # Status
 just status         # Check service status
 
 # Admin
 just create-admin <username> <password>  # Create Matrix admin
-just shell-core     # Enter core container
-just shell-synapse  # Enter synapse container
-just shell-postgres # Enter postgres container
 
 # Maintenance
 just clean          # Clean up Docker resources
-just rebuild        # Full rebuild (stop, clean, build, start)
+just rebuild        # Full rebuild
 ```
 
-### Without Just
-
-If you don't have `just` installed:
-
-```bash
-# Recommended: Prebuilt method
-cd backend && cargo build --release && cd ..
-cd docker && docker build -f core/Dockerfile.prebuilt -t lightfriend-core .. && cd ..
-
-# Alternative: Build in Docker (requires 16GB+ RAM)
-cd docker
-docker compose build
-
-# Lifecycle
-docker compose up -d
-docker compose down
-docker compose restart
-docker compose restart core
-
-# Logs
-docker compose logs -f
-docker compose logs -f core
-docker compose logs -f mautrix-whatsapp
-
-# Status
-docker compose ps
-
-# Admin
-docker compose exec synapse register_new_matrix_user -c /data/homeserver.yaml -u admin -p password --admin
-
-# Shell
-docker compose exec core /bin/bash
-docker compose exec synapse /bin/bash
-docker compose exec postgres psql -U postgres
-```
+**Don't have `just` installed?** Install it: `brew install just` or `cargo install just`
 
 ---
 
@@ -491,110 +454,61 @@ All services should show "Up" or "Up (healthy)".
 ### View Logs
 
 ```bash
-# All services
-just logs
-
-# Specific service
-just logs-core
-just logs-synapse
-just logs-bridge whatsapp
+just logs           # All services
+just logs-core      # Core service
+just logs-synapse   # Synapse
+just logs-bridge whatsapp  # Specific bridge
 ```
 
 ### Common Issues
 
+**Build takes longer than expected**
+- Expected: 3-7 min first build, 30-60s for code changes
+- Using GitHub Codespaces or sufficient local resources?
+- Check BuildKit is enabled: `docker buildx version`
+
+**Build fails with "Killed" (exit code 137)**
+- Docker out of memory
+- Fix: Docker Desktop → Settings → Resources → Memory → Set to 8GB+
+- Or use GitHub Codespaces instead
+
+**"cd: docker: No such file or directory"**
+- Run `just` commands from project root, not from inside `docker/` directory
+
 **"Connection refused" to backend**
-- Check core is running: `just status`
-- Check logs: `just logs-core`
-- Ensure .env has all required variables
+- Run `just status` to check if core is running
+- Run `just logs-core` to see errors
 
 **Bridge not connecting**
-- Check bridge logs: `just logs-bridge <name>`
-- Verify bridge config has correct tokens
-- Ensure Synapse can reach bridge (check network)
-
-**Signal bridge failing**
-- Check signald is running: `just status`
-- Check signald logs: `cd docker && docker compose logs signald`
-- Ensure signal bridge can access signald socket
-
-**Database connection errors**
-- Check postgres is running: `just status`
-- Check postgres logs: `cd docker && docker compose logs postgres`
-- Verify database credentials in configs match postgres-init script
+- Run `just logs-bridge <name>` to see bridge errors
+- Ensure you created Matrix admin: `just create-admin <user> <pass>`
 
 **Out of disk space**
-- Check usage: `just disk-usage`
-- Clean up: `just clean`
-- Remove old volumes: `cd docker && docker volume prune`
+- Run `just clean` to clean up Docker resources
 
 ### Reset Everything
 
-If something is seriously broken:
-
 ```bash
-# Stop everything
-just down
-
-# Remove all volumes (WARNING: deletes all data!)
-just down-volumes
-
-# Clean Docker cache
-just clean
-
-# Rebuild and start
-just rebuild
+just rebuild        # Stop, clean, rebuild, start
+just down-volumes   # WARNING: Deletes all data!
 ```
 
 ---
 
 ## Development
 
-### Running Locally (without Docker)
-
-You can still run backend and frontend locally for development:
-
 ```bash
-# Terminal 1: Backend
-just dev-backend
+# After changing Rust code
+just build-core && just restart-core
 
-# Terminal 2: Frontend  
-just dev-frontend
-```
+# Run locally without Docker
+just dev-backend    # Terminal 1
+just dev-frontend   # Terminal 2
 
-This requires local setup as documented in `MATRIX_SETUP_GUIDE.md`.
-
-### Running Tests
-
-```bash
+# Tests
 just test-backend
 just test-frontend
 ```
-
-### Modifying Docker Images
-
-After changing Rust code:
-
-```bash
-# Rebuild backend and recreate Docker image
-just build-prebuilt
-
-# Restart the service
-just restart-core
-```
-
-After changing configs:
-
-```bash
-# Just restart the service
-cd docker && docker compose restart <service-name>
-```
-
-### Build Methods Comparison
-
-| Method | RAM Required | Build Time | Use Case |
-|--------|--------------|------------|----------|
-| **`just build-prebuilt`** (default) | 6GB Docker + system swap | 10-15 min | Mac M1 8GB, memory-constrained systems |
-| `just build` (alternative) | 16GB+ Docker memory | 15-20 min | High-memory systems, full containerization |
 
 ---
 

@@ -133,11 +133,10 @@ services:
 
   # Lightfriend Core (Rust backend + frontend)
   core:
-    image: lightfriend-core  # Using pre-built image (built with: just build-prebuilt)
-    pull_policy: never  # Always use local image, never pull from registry
-    # build:
-    #   context: ..
-    #   dockerfile: docker/core/Dockerfile
+    build:
+      context: ..
+      dockerfile: docker/core/Dockerfile
+    image: lightfriend-core
     container_name: lightfriend-core
     environment:
       DATABASE_URL: /app/data/database.db

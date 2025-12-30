@@ -49,7 +49,7 @@ The project includes Docker containerization for running the entire stack:
 
 ```bash
 # Quick start
-just build-prebuilt # Build backend locally + Docker images (memory-optimized)
+just build          # Build all Docker images
 just up             # Start all services
 just create-admin adminuser password  # Create Matrix admin
 
@@ -72,7 +72,7 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
 - **mautrix-instagram**: Instagram bridge via mautrix-meta (official image)
 
 **Key Files:**
-- `docker/core/Dockerfile.prebuilt` - Prebuilt binary packaging (default method)
+- `docker/core/Dockerfile` - Core service container definition
 - `docker/docker-compose.yml` - Service orchestration
 - `docker/setup-configs.sh` - Auto-generates configs and registration files
 - `docker/synapse/homeserver.yaml.template` - Matrix homeserver config template
