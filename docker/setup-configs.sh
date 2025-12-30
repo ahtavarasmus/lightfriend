@@ -163,6 +163,8 @@ for bridge in whatsapp signal messenger instagram; do
             "$bridge_executable" -g -c /data/config.yaml -r /data/${bridge}-registration.yaml
 
         if [ $? -eq 0 ]; then
+            # Fix permissions so synapse can read the registration file
+            sudo chmod 644 "bridges/${bridge}/${bridge}-registration.yaml"
             echo "✓ Generated bridges/${bridge}/${bridge}-registration.yaml"
         else
             echo "✗ Failed to generate ${bridge}-registration.yaml"

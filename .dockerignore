@@ -39,8 +39,12 @@ backend/matrix_store/
 *.md
 !README.md
 
-# Docker itself
-docker/
+# Docker itself (exclude config files but keep core/ directory for Dockerfile)
+docker/bridges/
+docker/synapse/
+docker/postgres-init/
+docker/docker-compose.yml
+docker/setup-configs.sh
 Dockerfile
 .dockerignore
 

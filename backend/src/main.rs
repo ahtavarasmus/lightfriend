@@ -203,22 +203,65 @@ pub struct AppState {
     webauthn_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
 pub fn validate_env() {
-    let required_vars = [
-        "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
-        "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "AUS_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
-        "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
-        "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
-        "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
-        "SHAZAM_PHONE_NUMBER", "SHAZAM_API_KEY", "SERVER_URL",
-        "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID",
-        "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
-        "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
-        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH",
+    // Core variables (always required regardless of environment)
+    let core_vars = [
+        "JWT_SECRET_KEY",
+        "JWT_REFRESH_KEY",
+        "DATABASE_URL",
+        "ENCRYPTION_KEY",
+        "MATRIX_HOMESERVER_SHARED_SECRET",
     ];
-    for var in required_vars.iter() {
+
+    for var in core_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
     }
+
+    // Production-only validation for live application features
+    let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
+
+    if environment == "production" {
+        let production_vars = [
+            // Billing (Stripe)
+            "STRIPE_SECRET_KEY",
+            "STRIPE_PUBLISHABLE_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_CREDITS_PRODUCT_ID",
+            "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
+
+            // SMS/Voice (Twilio)
+            "TWILIO_ACCOUNT_SID",
+            "TWILIO_AUTH_TOKEN",
+
+            // Voice AI (ElevenLabs)
+            "ELEVENLABS_SERVER_URL_SECRET",
+
+            // Regional phone numbers
+            "FIN_PHONE",
+            "USA_PHONE",
+            "AUS_PHONE",
+
+            // Music recognition (Shazam)
+            "SHAZAM_PHONE_NUMBER",
+            "SHAZAM_API_KEY",
+
+            // Production server config
+            "SERVER_URL",
+            "ASSISTANT_ID",
+
+            // External integrations
+            "COMPOSIO_API_KEY",
+        ];
+
+        for var in production_vars.iter() {
+            std::env::var(var).expect(&format!("{} must be set in production environment", var));
+        }
+    }
+
+    // Note: The following are truly optional even in production:
+    // - PERPLEXITY_API_KEY, OPENROUTER_API_KEY (AI features gracefully degrade)
+    // - GOOGLE_CALENDAR_CLIENT_ID/SECRET (OAuth, user-specific)
+    // - SENTRY_DSN (error tracking, optional)
+    // - Bridge bot IDs (may have defaults)
 }
 #[tokio::main]
 async fn main() {

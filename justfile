@@ -4,13 +4,53 @@
 default:
     @just --list
 
-# Build all Docker images
+# Build all Docker images (multi-platform: amd64 + arm64)
 build:
+    @echo "Building for multiple platforms (amd64 + arm64)..."
+    @echo "This enables cross-compatibility but takes longer."
+    cd docker && docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t lightfriend-core:latest \
+        -f core/Dockerfile \
+        --load \
+        .. || echo "Note: --load doesn't support multi-platform. Use 'just build-push' to push to registry."
+    cd docker && docker compose build --no-cache postgres synapse mautrix-whatsapp mautrix-signal mautrix-messenger mautrix-instagram signald
+
+# Build for current platform only (faster, single architecture)
+build-native:
+    @echo "Building for current platform only (faster)..."
     cd docker && docker compose build
 
-# Build only the core image
+# Build and push multi-platform images to registry
+build-push REGISTRY="docker.io/yourusername":
+    @echo "Building and pushing multi-platform images to {{REGISTRY}}..."
+    cd docker && docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t {{REGISTRY}}/lightfriend-core:latest \
+        -f core/Dockerfile \
+        --push \
+        ..
+
+# Build only the core image (current platform)
 build-core:
     cd docker && docker compose build core
+
+# Build core for multiple platforms
+build-core-multi:
+    @echo "Building core for multiple platforms..."
+    cd docker && docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -t lightfriend-core:latest \
+        -f core/Dockerfile \
+        --load \
+        .. || echo "Note: Use 'just build-core-push' to push multi-platform image."
+
+# Fast build (uses release-fast profile with fewer optimizations)
+build-fast:
+    @echo "Building with faster compile settings (less optimized binary)..."
+    cd docker && CARGO_PROFILE=release-fast docker compose build core
 
 # Start all services (generates configs first)
 up:

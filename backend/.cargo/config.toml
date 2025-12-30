@@ -1,26 +1,34 @@
-[build]
-# Single-threaded compilation (redundant with ENV but ensures it)
-jobs = 1
+# Cargo build configuration for faster compilation
 
-[profile.release]
-# Optimize for size instead of speed (uses less memory during compilation)
-opt-level = "s"
-# Disable LTO completely (it's memory intensive during linking)
-lto = false
-# Reduce code generation units (less parallelism, less memory)
-codegen-units = 1
-# Strip debug symbols
-strip = true
-# No debug info
-debug = false
-# Disable incremental compilation (can use extra memory)
-incremental = false
+[build]
+# Use all available CPU cores for parallel compilation
+jobs = 0  # 0 = use all cores
 
 [target.x86_64-unknown-linux-gnu]
-# Use mold or lld linker if available (faster, less memory)
-# Falls back to default if not available
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+# Use mold linker for 2-3x faster linking on Linux x86_64
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-gnu]
+# Use mold linker for ARM64 as well
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[profile.release]
+# Optimize for speed while keeping reasonable build times
+opt-level = 3           # Full optimizations
+lto = "thin"           # Thin LTO for faster linking than "fat" LTO
+codegen-units = 16     # Parallel codegen (more = faster compile, slightly slower runtime)
+strip = true           # Strip symbols for smaller binary
+panic = "abort"        # Smaller binary, no unwinding overhead
+
+[profile.release-fast]
+# Alternative profile for FASTER builds (use with: cargo build --profile release-fast)
+inherits = "release"
+opt-level = 2          # Slightly less optimization
+lto = false            # No LTO for faster linking
+codegen-units = 256    # Maximum parallelism
 
 [net]
-# Use git CLI for fetching (reduces memory)
-git-fetch-with-cli = true
+# Use sparse registry protocol for faster dependency fetching
+git-fetch-with-cli = false

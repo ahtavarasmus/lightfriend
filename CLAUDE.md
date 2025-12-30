@@ -48,10 +48,14 @@ Start backend first (port 3000), then frontend (port 8080). Frontend expects bac
 The project includes Docker containerization for running the entire stack:
 
 ```bash
-# Quick start
-just build          # Build all Docker images
+# Quick start (use build-native for local development - fastest)
+just build-native   # Build for current platform only (15-20 min first build)
 just up             # Start all services
 just create-admin adminuser password  # Create Matrix admin
+
+# Alternative build commands
+just build          # Build multi-platform (amd64 + arm64) for distribution
+just build-fast     # Fast build with fewer optimizations (10-15 min)
 
 # Common operations
 just logs           # View all logs
@@ -59,6 +63,8 @@ just logs-core      # View core service logs
 just restart        # Restart all services
 just down           # Stop all services
 ```
+
+**Build optimizations:** The Docker build now includes sccache (Rust compilation cache), mold linker (2-3x faster), and optimized Cargo profiles for significantly faster builds.
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
 

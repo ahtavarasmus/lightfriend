@@ -40,11 +40,20 @@ openssl
 ### System Requirements
 
 - **Memory**: 8GB+ RAM for Docker (12GB recommended)
-- **CPU**: 4+ cores recommended (faster builds)
-- **Disk**: 5-10GB free space
-- **Time**: 3-7 minutes first build (optimized), 30-60s for code changes
+- **CPU**: 4+ cores recommended (more cores = faster parallel compilation)
+- **Disk**: 5-10GB free space (including build caches)
+- **Time**: 15-20 minutes first build (native), 30-40 min (multi-platform)
 
-**Limited local resources?** Use [GitHub Codespaces](https://github.com/codespaces) (free tier: 4 cores, 8GB RAM) - build completes in ~5 minutes.
+**Limited local resources?** Use [GitHub Codespaces](https://github.com/codespaces) (free tier: 4 cores, 8GB RAM).
+
+**Cross-Platform Compatibility:**
+- `just build-native`: Builds for your current architecture only (faster)
+  - Linux/Intel Mac/Windows → linux/amd64 image
+  - Apple Silicon Mac → linux/arm64 image
+  - **Images are NOT interchangeable** between architectures
+- `just build`: Builds for BOTH amd64 and arm64 (slower but works everywhere)
+  - Use this if you need to run the same image on different CPU architectures
+  - Requires `docker buildx` (included in Docker Desktop)
 
 ---
 
@@ -81,25 +90,40 @@ That's it! The configuration files (Synapse, bridges, registration) will be auto
 ### 2. Build and Start Services
 
 ```bash
-# Build all Docker images (3-7 minutes first build with optimized Dockerfile)
+# Build for current platform only (RECOMMENDED for local dev - fastest)
+just build-native
+
+# OR: Build for multiple platforms (amd64 + arm64 - slower but cross-compatible)
 just build
 
 # Start all services
 just up
 ```
 
-**Build time**: 3-7 minutes (first build), 30-60 seconds (code changes only)
+**Build Options:**
 
-**What makes it fast:**
-- **cargo-chef**: Caches dependencies separately from source code
-- **BuildKit cache mounts**: Cargo registry cached between builds
-- **mold linker**: 2-3x faster linking than default
-- **Parallel compilation**: Uses all CPU cores (not single-threaded)
+| Command | Platforms | Build Time | Use Case |
+|---------|-----------|------------|----------|
+| `just build-native` | Current only | 15-20 min (first), 30-60s (changes) | ✅ **Local development** |
+| `just build` | amd64 + arm64 | 30-40 min (first), 60-90s (changes) | Cross-platform distribution |
+| `just build-fast` | Current only | 10-15 min (first), 20-40s (changes) | Quick testing (less optimized) |
+
+**Build time improvements** (vs original 30min build):
+- ✅ **sccache**: Caches compiled Rust code across builds (~30% faster rebuilds)
+- ✅ **cargo-chef**: Caches dependencies separately from source code
+- ✅ **BuildKit cache mounts**: Cargo registry cached between builds
+- ✅ **mold linker**: 2-3x faster linking than default linker
+- ✅ **Optimized Cargo profile**: Thin LTO + parallel codegen
+- ✅ **Parallel compilation**: Uses all CPU cores automatically
+
+**First build**: Expect 15-20 minutes for `build-native`, 30-40 minutes for multi-platform `build`
+**Subsequent builds** (code changes only): 30-60 seconds with sccache cache hits
 
 **Requirements**:
 - Run `just` commands from project root
 - Docker memory: 8GB+ (Docker Desktop → Settings → Resources)
 - BuildKit enabled (default in modern Docker)
+- For multi-platform builds: `docker buildx` installed (included in Docker Desktop)
 
 ### 3. Create Matrix Admin User
 
@@ -377,8 +401,12 @@ just up
 ## Common Commands
 
 ```bash
-# Build
-just build          # Build all images (20-40 min first time)
+# Build Commands
+just build-native   # Build for current platform (RECOMMENDED - fastest)
+just build          # Build multi-platform (amd64 + arm64)
+just build-fast     # Fast build with fewer optimizations
+just build-core     # Build only core service
+just build-push     # Build & push multi-platform to registry
 
 # Lifecycle
 just up             # Start all services
@@ -463,9 +491,12 @@ just logs-bridge whatsapp  # Specific bridge
 ### Common Issues
 
 **Build takes longer than expected**
-- Expected: 3-7 min first build, 30-60s for code changes
-- Using GitHub Codespaces or sufficient local resources?
+- Expected: 15-20 min first build (native), 30-40 min (multi-platform)
+- Subsequent builds: 30-60s with sccache cache hits
+- Using sufficient resources? (4+ CPU cores, 8GB+ RAM recommended)
 - Check BuildKit is enabled: `docker buildx version`
+- Use `just build-native` for faster local development builds
+- Use `just build-fast` for even faster builds (less optimized binary)
 
 **Build fails with "Killed" (exit code 137)**
 - Docker out of memory
