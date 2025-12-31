@@ -1,8 +1,7 @@
 # Cargo build configuration for faster compilation
 
 [build]
-# Use all available CPU cores for parallel compilation
-jobs = 0  # 0 = use all cores
+# Use all available CPU cores for parallel compilation (default behavior)
 
 [target.x86_64-unknown-linux-gnu]
 # Use mold linker for 2-3x faster linking on Linux x86_64
