@@ -328,6 +328,7 @@ echo "Backup complete! Files saved to: $BACKUP_DIR"
 echo "Total size: $(du -sh $BACKUP_DIR | cut -f1)"
 ```
 
+
 Make it executable: `chmod +x docker/backup.sh`
 
 #### Restore Commands
