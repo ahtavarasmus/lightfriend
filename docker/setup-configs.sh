@@ -47,6 +47,22 @@ fi
 
 echo "✓ All required environment variables are set"
 echo ""
+
+# Clean up old generated files that may have been created by Docker containers
+# (Docker containers run as different users, making files unwritable by host user)
+echo "Cleaning up old generated config files..."
+rm -f synapse/homeserver.yaml 2>/dev/null || true
+rm -f bridges/whatsapp/config.yaml 2>/dev/null || true
+rm -f bridges/signal/config.yaml 2>/dev/null || true
+rm -f bridges/messenger/config.yaml 2>/dev/null || true
+rm -f bridges/instagram/config.yaml 2>/dev/null || true
+rm -f bridges/doublepuppet.yaml 2>/dev/null || true
+rm -f bridges/whatsapp/whatsapp-registration.yaml 2>/dev/null || true
+rm -f bridges/signal/signal-registration.yaml 2>/dev/null || true
+rm -f bridges/messenger/messenger-registration.yaml 2>/dev/null || true
+rm -f bridges/instagram/instagram-registration.yaml 2>/dev/null || true
+rm -f postgres-init/init-databases.sh 2>/dev/null || true
+
 echo "Generating configuration files from templates..."
 
 # Function to substitute environment variables in a file
@@ -163,8 +179,9 @@ for bridge in whatsapp signal messenger instagram; do
             "$bridge_executable" -g -c /data/config.yaml -r /data/${bridge}-registration.yaml
 
         if [ $? -eq 0 ]; then
-            # Fix permissions so synapse can read the registration file
+            # Fix permissions so synapse and validation can read the files
             sudo chmod 644 "bridges/${bridge}/${bridge}-registration.yaml"
+            sudo chmod 644 "bridges/${bridge}/config.yaml"
             echo "✓ Generated bridges/${bridge}/${bridge}-registration.yaml"
         else
             echo "✗ Failed to generate ${bridge}-registration.yaml"

@@ -117,8 +117,32 @@ generate-secrets:
     @echo "# Bridge configuration"
     @echo "DOUBLE_PUPPET_SECRET=$(openssl rand -base64 32)"
 
+# Ensure .env file exists (creates from .env.example with generated secrets if missing)
+ensure-env:
+    #!/usr/bin/env bash
+    if [ ! -f .env ]; then
+        echo "No .env file found. Creating from .env.example with generated secrets..."
+        if [ ! -f .env.example ]; then
+            echo "ERROR: .env.example not found!"
+            exit 1
+        fi
+        cp .env.example .env
+        # Generate and append secrets
+        sed -i "s|^JWT_SECRET_KEY=.*|JWT_SECRET_KEY=$(openssl rand -base64 32)|" .env
+        sed -i "s|^JWT_REFRESH_KEY=.*|JWT_REFRESH_KEY=$(openssl rand -base64 32)|" .env
+        sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -base64 32)|" .env
+        sed -i "s|^MATRIX_HOMESERVER_SHARED_SECRET=.*|MATRIX_HOMESERVER_SHARED_SECRET=$(openssl rand -hex 32)|" .env
+        sed -i "s|^SYNAPSE_DB_PASSWORD=.*|SYNAPSE_DB_PASSWORD=$(openssl rand -base64 16)|" .env
+        sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -base64 16)|" .env
+        sed -i "s|^DOUBLE_PUPPET_SECRET=.*|DOUBLE_PUPPET_SECRET=$(openssl rand -base64 32)|" .env
+        echo "✓ Created .env with generated secrets"
+        echo "  You can edit .env to add optional API keys (Twilio, Stripe, etc.)"
+    else
+        echo "✓ .env file exists"
+    fi
+
 # Generate config files from templates using .env variables
-setup-configs:
+setup-configs: ensure-env
     @echo "Generating configuration files from .env..."
     cd docker && ./setup-configs.sh
 
@@ -141,7 +165,7 @@ migrate:
 # Create a new Synapse admin user
 create-admin user password:
     cd docker && docker compose exec synapse register_new_matrix_user \
-        -c /data/homeserver.yaml \
+        -c /config/homeserver.yaml \
         -u {{user}} \
         -p {{password}} \
         --admin

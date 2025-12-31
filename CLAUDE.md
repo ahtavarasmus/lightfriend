@@ -50,7 +50,7 @@ The project includes Docker containerization for running the entire stack:
 ```bash
 # Quick start (use build-native for local development - fastest)
 just build-native   # Build for current platform only (15-20 min first build)
-just up             # Start all services
+just up             # Start all services (auto-creates .env with secrets if missing)
 just create-admin adminuser password  # Create Matrix admin
 
 # Alternative build commands
@@ -85,7 +85,7 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
 - `docker/bridges/*/config.yaml.template` - Bridge config templates (minimal, ~40 lines each)
 - `docker/postgres-init/init-databases.sh.template` - Database init template
 - `justfile` - Common Docker commands
-- `.env.example` - Environment variable template (only 4 required vars)
+- `.env.example` - Environment variable template (auto-copied to .env with generated secrets)
 
 **Bridge Configuration (Auto-Generated):**
 - Registration files (`*-registration.yaml`) are AUTO-GENERATED using mautrix bridges' `-g` flag

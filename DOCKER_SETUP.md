@@ -37,6 +37,21 @@ cargo install just  # via Rust
 openssl
 ```
 
+### Frontend Development (Optional)
+
+If you want to run the frontend locally (recommended for development):
+
+```bash
+# Rust toolchain (if not already installed)
+# Install from: https://rustup.rs/
+
+# Trunk (Yew/WASM build tool)
+cargo install trunk
+
+# WebAssembly target
+rustup target add wasm32-unknown-unknown
+```
+
 ### System Requirements
 
 - **Memory**: 8GB+ RAM for Docker (12GB recommended)
@@ -59,48 +74,32 @@ openssl
 
 ## Quick Start
 
-### 1. Setup Environment Variables
+### 1. Build and Start Services
 
 ```bash
 cd lightfriend-cloud
 
-# Copy example environment file
-cp .env.example .env
-
-# Generate secrets and append to .env
-just generate-secrets >> .env
-
-# Optional: Load .env variables into your current terminal session
-# (only needed if you want to use env vars in terminal commands)
-set -a && source .env && set +a
-```
-
-Edit `.env` and verify the generated values:
-- **Required secrets** (4 total): Already added by `generate-secrets` ✓
-  - `MATRIX_HOMESERVER_SHARED_SECRET`
-  - `SYNAPSE_DB_PASSWORD`
-  - `POSTGRES_PASSWORD`
-  - `DOUBLE_PUPPET_SECRET`
-- **Optional API keys**: Add your Twilio, Stripe, Google, OpenRouter keys (or leave blank for now)
-
-**Note**: Bridge tokens (as_token, hs_token) are now **auto-generated**! You no longer need to manually create 8 bridge tokens. The setup script uses each bridge's `-g` flag to generate random tokens automatically.
-
-That's it! The configuration files (Synapse, bridges, registration) will be automatically generated from your `.env` when you start the services.
-
-### 2. Build and Start Services
-
-```bash
 # Build for current platform only (RECOMMENDED for local dev - fastest)
 just build-native
 
-# OR: Build for multiple platforms (amd64 + arm64 - slower but cross-compatible)
-just build
-
-# Start all services
+# Start all services (auto-creates .env with secrets if missing)
 just up
 ```
 
-**Build Options:**
+**That's it!** The `just up` command will:
+1. **Auto-create `.env`** with generated secrets if it doesn't exist
+2. Generate all configuration files (Synapse, bridges, registration)
+3. Start all Docker services
+
+**Optional**: Edit `.env` to add API keys for optional features:
+- Twilio (SMS/Voice)
+- Stripe (Payments)
+- Google OAuth (Calendar/Tasks)
+- OpenRouter/Perplexity (AI)
+
+**Note**: Bridge tokens (as_token, hs_token) are **auto-generated** - no manual token management needed!
+
+### 2. Build Options
 
 | Command | Platforms | Build Time | Use Case |
 |---------|-----------|------------|----------|
@@ -137,13 +136,21 @@ This user can log into bridges and manage the Matrix homeserver.
 
 ### 4. Run Frontend (Separate Terminal)
 
-For Phase 1, the frontend runs separately from Docker:
+For Phase 1, the frontend runs separately from Docker.
 
+**First time setup** (if not already done):
+```bash
+cargo install trunk
+rustup target add wasm32-unknown-unknown
+```
+
+**Start the frontend:**
 ```bash
 cd frontend && trunk serve
 ```
 
 This will start the frontend dev server on http://localhost:8080.
+First build takes ~3 minutes; subsequent builds are fast with hot-reload.
 
 ### 5. Access the Application
 
