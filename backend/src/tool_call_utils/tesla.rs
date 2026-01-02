@@ -504,9 +504,9 @@ async fn execute_tesla_command(
             // Start climate control (also warms battery as side effect)
             let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
 
-            // Use share command with "Tesla Supercharger" prefix so Tesla recognizes it
-            // as a Supercharger destination and triggers battery preconditioning
-            let destination = format!("Tesla Supercharger {}", sc_name);
+            // Use share command with exact Supercharger coordinates from Tesla's API
+            // This ensures we navigate to the actual Supercharger, not just the town
+            let destination = format!("{},{}", supercharger.location.lat, supercharger.location.long);
             match tesla_client.share_destination(access_token, vehicle_vin, &destination).await {
                 Ok(true) => format!(
                     "Battery preconditioning started for your {}! Scheduled departure set for 10 min, navigation to {} ({:.0} miles away), and climate running. Your battery will warm up for fast charging.",
