@@ -123,11 +123,14 @@ async fn execute_tool_call(
 /// 1. Calls AI with the action_spec and available tools
 /// 2. Executes up to 2 tool calls
 /// 3. Returns the result
+///
+/// `trigger_context` - Optional context about what triggered the task (e.g., the incoming message)
 pub async fn execute_action_spec(
     state: &Arc<AppState>,
     user_id: i32,
     action_spec: &str,
     notification_type: &str,
+    trigger_context: Option<&str>,
 ) -> ActionResult {
     tracing::debug!("Executing action_spec for user {}: {}", user_id, action_spec);
 
@@ -153,6 +156,16 @@ pub async fn execute_action_spec(
         notification_type
     );
 
+    // Build the user message with task and optional trigger context
+    let user_message = if let Some(context) = trigger_context {
+        format!(
+            "Execute this task:\n\n{}\n\n---\nTrigger context (the event that triggered this task):\n{}",
+            action_spec, context
+        )
+    } else {
+        format!("Execute this task:\n\n{}", action_spec)
+    };
+
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -163,7 +176,7 @@ pub async fn execute_action_spec(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!("Execute this task:\n\n{}", action_spec)),
+            content: chat_completion::Content::Text(user_message),
             name: None,
             tool_calls: None,
             tool_call_id: None,

@@ -24,6 +24,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
     // Predefined providers
     let providers = vec![
         ("gmail", "Gmail", "imap.gmail.com", "993"),
+        ("icloud", "iCloud", "imap.mail.me.com", "993"),
         ("privateemail", "PrivateEmail", "mail.privateemail.com", "993"),
         ("outlook", "Outlook", "imap-mail.outlook.com", "993"),
         ("custom", "Custom", "", ""), // Custom option with empty defaults
@@ -272,8 +273,9 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 <div class="info-subsection">
                     <h5>{"Provider Support"}</h5>
                     <ul>
-                        <li>{"Gmail: Full support with App Password (2FA enabled requirement)"}</li>
-                        <li>{"Outlook: Native IMAP support"}</li>
+                        <li>{"Gmail: Requires App Password (2FA must be enabled) - "}<a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"Create App Password"}</a></li>
+                        <li>{"iCloud: Requires App-Specific Password (2FA must be enabled) - "}<a class="nice-link" href="https://appleid.apple.com/account/manage" target="_blank">{"Create App-Specific Password"}</a>{" (Sign-In and Security > App-Specific Passwords)"}</li>
+                        <li>{"Outlook: Native IMAP support with your regular password"}</li>
                         <li>{"PrivateEmail: Direct IMAP integration"}</li>
                         <li>{"Custom: Support for any IMAP-enabled email provider"}</li>
                     </ul>
@@ -291,10 +293,34 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 </div>
             </div>
             <p class="service-description">
-                {"Connect your email account using IMAP access your emails through SMS or voice calls. For Gmail, create an app password "}
-                <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
-                {" (requires 2FA)."}
+                {"Connect your email account using IMAP to access your emails through SMS or voice calls."}
             </p>
+            {
+                if *imap_provider == "gmail" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Gmail requires an App Password (2FA must be enabled). "}
+                            <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"Create App Password"}</a>
+                        </p>
+                    }
+                } else if *imap_provider == "icloud" {
+                    html! {
+                        <p class="provider-hint">
+                            {"iCloud requires an App-Specific Password. Go to "}
+                            <a class="nice-link" href="https://appleid.apple.com/account/manage" target="_blank">{"Apple ID Settings"}</a>
+                            {" > Sign-In and Security > App-Specific Passwords to create one."}
+                        </p>
+                    }
+                } else if *imap_provider == "outlook" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Use your regular Outlook password. If you have 2FA enabled, you may need an app password."}
+                        </p>
+                    }
+                } else {
+                    html! {}
+                }
+            }
             if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                 if *imap_connected {
                     <div class="imap-controls">
@@ -655,6 +681,18 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     .service-status {
                         color: #4CAF50;
                         font-weight: 500;
+                    }
+                    .provider-hint {
+                        background: rgba(0, 136, 204, 0.1);
+                        border: 1px solid rgba(0, 136, 204, 0.2);
+                        border-radius: 8px;
+                        padding: 0.8rem 1rem;
+                        margin: 0.5rem 0 1rem 0;
+                        color: #CCC;
+                        font-size: 0.9rem;
+                    }
+                    .provider-hint a {
+                        color: #0088cc;
                     }
                     .info-button {
                         background: none;

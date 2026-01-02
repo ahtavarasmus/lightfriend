@@ -500,17 +500,41 @@ async fn execute_tesla_command(
 
             let sc_name = supercharger.name.clone();
             let sc_distance = supercharger.distance_miles;
+            let sc_id = supercharger.id;
+
+            // Log the supercharger details including ID
+            tracing::info!(
+                "Selected Supercharger: {} (ID: {:?}, {:.1} miles away)",
+                sc_name, sc_id, sc_distance
+            );
 
             // Start climate control (also warms battery as side effect)
             let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
 
-            // Use Google Maps search URL to find the Supercharger by name
-            // This should trigger Tesla's POI recognition and identify it as a Supercharger
-            let encoded_name = sc_name.replace(' ', "+").replace(',', "%2C");
-            let destination = format!(
-                "https://www.google.com/maps/search/?api=1&query=Tesla+Supercharger+{}",
-                encoded_name
-            );
+            // Try navigation_sc_request if we have the Supercharger ID
+            if let Some(id) = sc_id {
+                match tesla_client.navigate_to_supercharger(access_token, vehicle_vin, id).await {
+                    Ok(true) => {
+                        return format!(
+                            "Battery preconditioning started for your {}! Navigating to Supercharger {} ({:.0} miles away). Climate is running. Your battery will warm up for fast charging.",
+                            vehicle_name, sc_name, sc_distance
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("navigation_sc_request failed: {}, falling back to coordinates", e);
+                    }
+                    _ => {
+                        tracing::info!("navigation_sc_request returned false, falling back to coordinates");
+                    }
+                }
+            } else {
+                tracing::warn!("No Supercharger ID available (detail=true may not have returned id field)");
+            }
+
+            // Fallback: share coordinates directly
+            let sc_lat = supercharger.location.lat;
+            let sc_lon = supercharger.location.long;
+            let destination = format!("{},{}", sc_lat, sc_lon);
             match tesla_client.share_destination(access_token, vehicle_vin, &destination).await {
                 Ok(true) => format!(
                     "Battery preconditioning started for your {}! Scheduled departure set, navigation to {} ({:.0} miles away), and climate running. Your battery will warm up for fast charging.",

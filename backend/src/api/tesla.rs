@@ -101,6 +101,8 @@ pub struct ChargingSite {
     pub available_stalls: Option<i32>,
     #[serde(default)]
     pub total_stalls: Option<i32>,
+    #[serde(default)]
+    pub id: Option<i64>,  // Supercharger ID for navigation_sc_request
 }
 
 #[derive(Debug, Deserialize)]
@@ -360,8 +362,9 @@ impl TeslaClient {
     }
 
     // Get nearby Tesla charging sites (Superchargers and Destination chargers)
+    // Uses detail=true to get site IDs needed for navigation_sc_request
     pub async fn get_nearby_charging_sites(&self, access_token: &str, vehicle_id: &str) -> Result<NearbySitesData, Box<dyn Error>> {
-        let url = format!("{}/api/1/vehicles/{}/nearby_charging_sites", self.base_url, vehicle_id);
+        let url = format!("{}/api/1/vehicles/{}/nearby_charging_sites?detail=true", self.base_url, vehicle_id);
 
         let response = self.client
             .get(&url)
@@ -409,6 +412,17 @@ impl TeslaClient {
         });
         // Use direct API for share command
         self.send_command_direct_api(access_token, vehicle_id, "share", &body).await
+    }
+
+    /// Navigate to a Supercharger using navigation_sc_request endpoint
+    /// This should trigger battery preconditioning since Tesla knows it's a Supercharger
+    /// Requires the Supercharger ID from nearby_charging_sites (with detail=true)
+    pub async fn navigate_to_supercharger(&self, access_token: &str, vehicle_id: &str, supercharger_id: i64) -> Result<bool, Box<dyn Error>> {
+        let body = serde_json::json!({
+            "id": supercharger_id,
+            "order": 1
+        });
+        self.send_command_direct_api(access_token, vehicle_id, "navigation_sc_request", &body).await
     }
 
     /// Set a scheduled departure time to trigger preconditioning

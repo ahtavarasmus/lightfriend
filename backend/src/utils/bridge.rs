@@ -1237,8 +1237,9 @@ pub async fn handle_bridge_message(
                         tracing::error!("Failed to complete task {}: {}", task_id, e);
                     }
 
-                    // Execute the action_spec through AI + tools
+                    // Execute the action_spec through AI + tools, passing the message context
                     let state_clone = state.clone();
+                    let trigger_context = message_context.clone();
                     tokio::spawn(async move {
                         tracing::debug!("Executing messaging task {} for user {}: {}", task_id, user_id, action_spec);
                         match crate::utils::action_executor::execute_action_spec(
@@ -1246,6 +1247,7 @@ pub async fn handle_bridge_message(
                             user_id,
                             &action_spec,
                             &notification_type,
+                            Some(&trigger_context),
                         ).await {
                             crate::utils::action_executor::ActionResult::Success { message } => {
                                 tracing::debug!("Messaging task {} completed successfully: {}", task_id, message);

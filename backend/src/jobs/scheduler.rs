@@ -317,9 +317,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             tracing::error!("Failed to complete task {}: {}", task_id, e);
                                                         }
 
-                                                        // Execute the action_spec through AI + tools
+                                                        // Execute the action_spec through AI + tools, passing the email context
                                                         let state_clone = state.clone();
                                                         let user_id = user.id;
+                                                        let trigger_context = email_content.clone();
                                                         tokio::spawn(async move {
                                                             tracing::debug!("Executing email task {} for user {}: {}", task_id, user_id, action_spec);
                                                             match crate::utils::action_executor::execute_action_spec(
@@ -327,6 +328,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                 user_id,
                                                                 &action_spec,
                                                                 &notification_type,
+                                                                Some(&trigger_context),
                                                             ).await {
                                                                 crate::utils::action_executor::ActionResult::Success { message } => {
                                                                     tracing::debug!("Email task {} completed successfully: {}", task_id, message);
@@ -610,12 +612,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         tokio::spawn(async move {
                             debug!("Executing scheduled task {} for user {}: {}", task_id, user_id, action);
 
-                            // Execute the action_spec through AI + tools
+                            // Execute the action_spec through AI + tools (no trigger context for time-based tasks)
                             match crate::utils::action_executor::execute_action_spec(
                                 &state,
                                 user_id,
                                 &action,
                                 &notification_type,
+                                None, // No trigger context for scheduled tasks
                             ).await {
                                 crate::utils::action_executor::ActionResult::Success { message } => {
                                     debug!("Task {} completed successfully: {}", task_id, message);
