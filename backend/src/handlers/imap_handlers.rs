@@ -605,10 +605,10 @@ pub async fn fetch_emails_imap(
             }
         }
     }
-    // Logout
-    imap_session
-        .logout()
-        .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
+    // Logout - don't fail if logout fails, we already have the emails
+    if let Err(e) = imap_session.logout() {
+        tracing::warn!("Failed to logout from IMAP session: {} - ignoring since emails were fetched successfully", e);
+    }
     // Reverse the order so newest emails appear first
     //email_previews.reverse();
     Ok(email_previews)
@@ -758,10 +758,10 @@ pub async fn fetch_single_email_imap(
         },
         None => (String::new(), String::new(), Vec::new())
     };
-    // Logout
-    imap_session
-        .logout()
-        .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
+    // Logout - don't fail if logout fails, we already have the email
+    if let Err(e) = imap_session.logout() {
+        tracing::warn!("Failed to logout from IMAP session: {} - ignoring since email was fetched successfully", e);
+    }
     let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_core.get_user_info(user_id)
         .ok()
         .and_then(|info| info.timezone)));

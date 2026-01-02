@@ -21,13 +21,25 @@ pub fn email_connect(props: &EmailProps) -> Html {
     let imap_server = use_state(|| String::new()); // For custom provider
     let imap_port = use_state(|| String::new()); // For custom provider
     let connected_email = use_state(|| None::<String>);
-    // Predefined providers
+    // Predefined providers - sorted alphabetically for easy lookup, with Custom at the end
     let providers = vec![
+        ("aol", "AOL", "imap.aol.com", "993"),
+        ("fastmail", "Fastmail", "imap.fastmail.com", "993"),
         ("gmail", "Gmail", "imap.gmail.com", "993"),
+        ("gmx", "GMX", "imap.gmx.com", "993"),
         ("icloud", "iCloud", "imap.mail.me.com", "993"),
-        ("privateemail", "PrivateEmail", "mail.privateemail.com", "993"),
-        ("outlook", "Outlook", "imap-mail.outlook.com", "993"),
-        ("custom", "Custom", "", ""), // Custom option with empty defaults
+        ("outlook", "Outlook / Hotmail", "outlook.office365.com", "993"),
+        ("privateemail", "PrivateEmail (Namecheap)", "mail.privateemail.com", "993"),
+        ("yahoo", "Yahoo Mail", "imap.mail.yahoo.com", "993"),
+        ("yandex", "Yandex", "imap.yandex.com", "993"),
+        ("zoho", "Zoho Mail", "imap.zoho.com", "993"),
+        // Hosting providers for users with custom domain emails
+        ("bluehost", "Bluehost", "imap.oxcs.bluehost.com", "993"),
+        ("dreamhost", "DreamHost", "imap.dreamhost.com", "993"),
+        ("godaddy", "GoDaddy", "imap.secureserver.net", "993"),
+        ("hostinger", "Hostinger", "imap.hostinger.com", "993"),
+        ("ionos", "IONOS (1&1)", "imap.ionos.com", "993"),
+        ("custom", "Other / Custom", "", ""), // Custom option with empty defaults
     ];
     // Check connection status on component mount
     {
@@ -272,12 +284,15 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 </div>
                 <div class="info-subsection">
                     <h5>{"Provider Support"}</h5>
+                    <p class="provider-note">{"We support 15+ email providers. Most require an App Password for security:"}</p>
                     <ul>
-                        <li>{"Gmail: Requires App Password (2FA must be enabled) - "}<a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"Create App Password"}</a></li>
-                        <li>{"iCloud: Requires App-Specific Password (2FA must be enabled) - "}<a class="nice-link" href="https://appleid.apple.com/account/manage" target="_blank">{"Create App-Specific Password"}</a>{" (Sign-In and Security > App-Specific Passwords)"}</li>
-                        <li>{"Outlook: Native IMAP support with your regular password"}</li>
-                        <li>{"PrivateEmail: Direct IMAP integration"}</li>
-                        <li>{"Custom: Support for any IMAP-enabled email provider"}</li>
+                        <li>{"Gmail: "}<a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"Create App Password"}</a>{" (requires 2FA)"}</li>
+                        <li>{"iCloud: "}<a class="nice-link" href="https://appleid.apple.com/account/manage" target="_blank">{"Create App-Specific Password"}</a>{" (Sign-In and Security > App-Specific Passwords)"}</li>
+                        <li>{"Yahoo: "}<a class="nice-link" href="https://login.yahoo.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>{" (requires 2FA)"}</li>
+                        <li>{"AOL: "}<a class="nice-link" href="https://login.aol.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>{" (requires 2FA)"}</li>
+                        <li>{"Outlook/Hotmail: Use regular password, or "}<a class="nice-link" href="https://account.microsoft.com/security" target="_blank">{"app password"}</a>{" if 2FA enabled"}</li>
+                        <li>{"Zoho, Fastmail, GMX, Yandex: Use regular password or app password if available"}</li>
+                        <li>{"Hosting providers (GoDaddy, Bluehost, etc.): Use your email password"}</li>
                     </ul>
                 </div>
                 <div class="info-subsection security-notice">
@@ -289,7 +304,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         <li>{"Limited Access: We only access emails when you specifically request them"}</li>
                         <li>{"No Email Storage: We don't store your emails - we fetch them on demand when you need them"}</li>
                     </ul>
-                    <p class="security-recommendation">{"Note: For Gmail users, we recommend using App Passwords instead of your main account password. This provides an extra layer of security and control over access."}</p>
+                    <p class="security-recommendation">{"Note: We recommend using App Passwords when available (Gmail, iCloud, Yahoo, AOL, etc.) instead of your main account password. This provides an extra layer of security and control over access."}</p>
                 </div>
             </div>
             <p class="service-description">
@@ -311,14 +326,55 @@ pub fn email_connect(props: &EmailProps) -> Html {
                             {" > Sign-In and Security > App-Specific Passwords to create one."}
                         </p>
                     }
+                } else if *imap_provider == "yahoo" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Yahoo requires an App Password (2FA must be enabled). "}
+                            <a class="nice-link" href="https://login.yahoo.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>
+                        </p>
+                    }
+                } else if *imap_provider == "aol" {
+                    html! {
+                        <p class="provider-hint">
+                            {"AOL requires an App Password (2FA must be enabled). "}
+                            <a class="nice-link" href="https://login.aol.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>
+                        </p>
+                    }
                 } else if *imap_provider == "outlook" {
                     html! {
                         <p class="provider-hint">
-                            {"Use your regular Outlook password. If you have 2FA enabled, you may need an app password."}
+                            {"Use your regular Outlook/Hotmail password. If you have 2FA enabled, "}
+                            <a class="nice-link" href="https://account.microsoft.com/security" target="_blank">{"create an app password"}</a>
+                            {"."}
+                        </p>
+                    }
+                } else if *imap_provider == "zoho" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Make sure IMAP is enabled in your Zoho settings. Use your regular password or "}
+                            <a class="nice-link" href="https://accounts.zoho.com/home#security/security_pwd" target="_blank">{"create an app password"}</a>
+                            {" if 2FA is enabled."}
+                        </p>
+                    }
+                } else if *imap_provider == "fastmail" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Fastmail recommends using an App Password. "}
+                            <a class="nice-link" href="https://www.fastmail.com/settings/security/devicekeys" target="_blank">{"Create App Password"}</a>
+                        </p>
+                    }
+                } else if *imap_provider == "custom" {
+                    html! {
+                        <p class="provider-hint">
+                            {"Enter your email provider's IMAP server and port. Most providers use port 993 with SSL/TLS."}
                         </p>
                     }
                 } else {
-                    html! {}
+                    html! {
+                        <p class="provider-hint">
+                            {"Use your email password. If you have 2FA enabled, you may need to create an app-specific password in your account settings."}
+                        </p>
+                    }
                 }
             }
             if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
