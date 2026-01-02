@@ -491,20 +491,19 @@ async fn execute_tesla_command(
 
             let sc_name = supercharger.name.clone();
             let sc_distance = supercharger.distance_miles;
-            let sc_lat = supercharger.location.lat;
-            let sc_lon = supercharger.location.long;
 
             // Start climate control (also warms battery as side effect)
             let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
 
-            // Set navigation to the distant Supercharger to trigger battery preconditioning
-            match tesla_client.navigate_to_gps(access_token, vehicle_vin, sc_lat, sc_lon).await {
+            // Use share command to actually start navigation (not just suggest destination)
+            // This triggers battery preconditioning when navigating to a Supercharger
+            match tesla_client.share_destination(access_token, vehicle_vin, &sc_name).await {
                 Ok(true) => format!(
-                    "Battery preconditioning started for your {}! Navigation set to {} ({:.0} miles away). Climate is also running. Your battery will warm up for fast charging. When ready, just drive to your nearby charger.",
+                    "Battery preconditioning started for your {}! Navigation started to {} ({:.0} miles away). Climate is also running. Your battery will warm up for fast charging. When ready, just drive to your nearby charger.",
                     vehicle_name, sc_name, sc_distance
                 ),
-                Ok(false) => format!("Failed to set navigation for battery preconditioning. Please try again."),
-                Err(e) => format!("Error setting navigation for preconditioning: {}", e),
+                Ok(false) => format!("Failed to start navigation for battery preconditioning. Please try again."),
+                Err(e) => format!("Error starting navigation for preconditioning: {}", e),
             }
         }
         _ => {

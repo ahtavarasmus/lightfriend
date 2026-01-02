@@ -390,6 +390,27 @@ impl TeslaClient {
         self.send_command_direct_api(access_token, vehicle_id, "navigation_gps_request", &body).await
     }
 
+    // Share a destination to start navigation immediately (uses the share endpoint)
+    // This actually starts turn-by-turn navigation, unlike navigation_gps_request which only suggests
+    pub async fn share_destination(&self, access_token: &str, vehicle_id: &str, destination: &str) -> Result<bool, Box<dyn Error>> {
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .to_string();
+
+        let body = serde_json::json!({
+            "type": "share_ext_content_raw",
+            "locale": "en-US",
+            "timestamp_ms": timestamp_ms,
+            "value": {
+                "android.intent.extra.TEXT": destination
+            }
+        });
+        // Use direct API for share command
+        self.send_command_direct_api(access_token, vehicle_id, "share", &body).await
+    }
+
     // Generic command sender
     async fn send_command(&self, access_token: &str, vehicle_id: &str, command: &str) -> Result<bool, Box<dyn Error>> {
         // Use proxy for signed commands if available, otherwise fall back to direct API
