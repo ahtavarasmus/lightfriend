@@ -466,10 +466,10 @@ async fn execute_tesla_command(
             }
         }
         "precondition_battery" => {
-            // Set scheduled departure for ~10 minutes from now to trigger preconditioning
-            // This tells Tesla "I'm leaving soon" so it starts warming the battery
+            // Set scheduled departure for 1 minute from now to trigger immediate preconditioning
+            // This tells Tesla "I'm leaving NOW" so it starts warming the battery immediately
             let now = chrono::Local::now();
-            let departure_minutes = ((now.hour() * 60 + now.minute() + 10) % 1440) as i32;
+            let departure_minutes = ((now.hour() * 60 + now.minute() + 1) % 1440) as i32;
             let _ = tesla_client.set_scheduled_departure(
                 access_token,
                 vehicle_vin,
@@ -504,12 +504,16 @@ async fn execute_tesla_command(
             // Start climate control (also warms battery as side effect)
             let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
 
-            // Use share command with exact Supercharger coordinates from Tesla's API
-            // This ensures we navigate to the actual Supercharger, not just the town
-            let destination = format!("{},{}", supercharger.location.lat, supercharger.location.long);
+            // Use Google Maps search URL to find the Supercharger by name
+            // This should trigger Tesla's POI recognition and identify it as a Supercharger
+            let encoded_name = sc_name.replace(' ', "+").replace(',', "%2C");
+            let destination = format!(
+                "https://www.google.com/maps/search/?api=1&query=Tesla+Supercharger+{}",
+                encoded_name
+            );
             match tesla_client.share_destination(access_token, vehicle_vin, &destination).await {
                 Ok(true) => format!(
-                    "Battery preconditioning started for your {}! Scheduled departure set for 10 min, navigation to {} ({:.0} miles away), and climate running. Your battery will warm up for fast charging.",
+                    "Battery preconditioning started for your {}! Scheduled departure set, navigation to {} ({:.0} miles away), and climate running. Your battery will warm up for fast charging.",
                     vehicle_name, sc_name, sc_distance
                 ),
                 Ok(false) => format!("Failed to start navigation for battery preconditioning. Please try again."),
