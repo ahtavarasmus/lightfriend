@@ -1,6 +1,6 @@
-use crate::models::user_models::{WaitingCheck, ContactProfile};
+use crate::models::user_models::{Task, ContactProfile};
 use crate::AppState;
-use crate::{AiProvider, ModelPurpose};
+use crate::ModelPurpose;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use openai_api_rs::v1::{
@@ -100,10 +100,9 @@ If `is_critical` is false, leave the other two fields empty strings.
 
 
 #[derive(Debug, Serialize, Deserialize)]
-// or #[serde_with::skip_serializing_none]  <-- whole-struct shortcut
-pub struct WaitingCheckMatchResponse {
+pub struct TaskMatchResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub waiting_check_id: Option<i32>,
+    pub task_id: Option<i32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sms_message: Option<String>,
@@ -115,19 +114,25 @@ pub struct WaitingCheckMatchResponse {
     pub match_explanation: Option<String>,
 }
 
-/// Determine whether `message` satisfies **one** of the supplied `waiting_checks`.
-/// Returns `(waiting_check_id, sms_message, first_message)`.
-pub async fn check_waiting_check_match(
+/// Determine whether `message` satisfies **one** of the supplied recurring tasks.
+/// Returns `(task_id, sms_message, first_message)`.
+pub async fn check_task_condition_match(
     state: &Arc<AppState>,
     user_id: i32,
     message: &str,
-    waiting_checks: &Vec<WaitingCheck>,
+    tasks: &Vec<Task>,
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     let (client, provider) = create_openai_client_for_user(&state, user_id)?;
 
-    let waiting_checks_str = waiting_checks
+    // Format tasks with their conditions for matching
+    let tasks_str = tasks
         .iter()
-        .map(|check| format!("ID: {}, Content: {}", check.id.unwrap_or(-1), check.content))
+        .filter_map(|task| {
+            // Only include tasks with conditions
+            task.condition.as_ref().map(|cond| {
+                format!("ID: {}, Condition: {}", task.id.unwrap_or(-1), cond)
+            })
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -143,7 +148,7 @@ pub async fn check_waiting_check_match(
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
                 "Incoming message:\n\n{}\n\nWaiting checks:\n\n{}\n\nReturn the best match or null.",
-                message, waiting_checks_str
+                message, tasks_str
             )),
             name: None,
             tool_calls: None,
@@ -154,10 +159,10 @@ pub async fn check_waiting_check_match(
     // JSON schema -----------------------------------------------------------
     let mut properties = std::collections::HashMap::new();
     properties.insert(
-        "waiting_check_id".to_string(),
+        "task_id".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("ID of the matched waiting check, or null".to_string()),
+            description: Some("ID of the matched task, or null".to_string()),
             ..Default::default()
         }),
     );
@@ -181,12 +186,12 @@ pub async fn check_waiting_check_match(
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: "analyze_waiting_check_match".to_string(),
-            description: Some("Determines whether the message matches a waiting check and drafts notifications".to_string()),
+            name: "analyze_task_match".to_string(),
+            description: Some("Determines whether the message matches a task condition and drafts notifications".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["waiting_check_id".to_string()]),
+                required: Some(vec!["task_id".to_string()]),
             },
         },
     }];
@@ -206,21 +211,21 @@ pub async fn check_waiting_check_match(
         .tool_calls
         .as_ref()
         .and_then(|tc| tc.first())
-        .ok_or("No tool call in waiting‑check response")?;
+        .ok_or("No tool call in task condition response")?;
 
     let args = tool_call
         .function
         .arguments
         .as_ref()
-        .ok_or("No arguments in waiting‑check tool call")?;
+        .ok_or("No arguments in task condition tool call")?;
 
-    let response: WaitingCheckMatchResponse = serde_json::from_str(args)?;
+    let response: TaskMatchResponse = serde_json::from_str(args)?;
 
     if let Some(explanation) = &response.match_explanation {
-        tracing::debug!("Waiting‑check match explanation: {}", explanation);
+        tracing::debug!("Task condition match explanation: {}", explanation);
     }
 
-    Ok((response.waiting_check_id, response.sms_message, response.first_message))
+    Ok((response.task_id, response.sms_message, response.first_message))
 }
 
 #[derive(Debug, Serialize)]
@@ -1198,10 +1203,6 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             telegram_infos.len(),
                             hours_since_prev
                         );
-                        if user_id == 1 {
-                            println!("telegram_infos: {:#?}", telegram_infos);
-                        }
-
                         // Extend messages with Telegram messages
                         messages.extend(telegram_infos);
 
@@ -2010,7 +2011,6 @@ pub async fn send_notification(
                 }
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
-                    println!("Failed to send call notification for user {}", user_id);
 
                     // Log failed call notification
                     if let Err(e) = state.user_repository.log_usage(
@@ -2148,9 +2148,6 @@ pub async fn send_notification(
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
             }
-            if user.id == 1 {
-                println!("sending noti: {}", notification);
-            }
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &notification,
@@ -2159,8 +2156,7 @@ pub async fn send_notification(
             ).await {
                 Ok(response_sid) => {
                     tracing::info!("Successfully sent notification to user {}", user_id);
-                    println!("SMS notification sent successfully for user {}", user_id);
-                    
+
                     // Store notification in message history
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
                         user_id: user.id,
@@ -2200,8 +2196,7 @@ pub async fn send_notification(
                 }
                 Err(e) => {
                     tracing::error!("Failed to send notification: {}", e);
-                    println!("Failed to send SMS notification for user {}", user_id);
-                    
+
                     // Log failed SMS notification
                     if let Err(log_err) = state.user_repository.log_usage(
                         user_id,

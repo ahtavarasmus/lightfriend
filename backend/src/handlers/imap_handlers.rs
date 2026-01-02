@@ -123,10 +123,8 @@ pub async fn fetch_full_imap_emails(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
     let mut limit = params.limit;
-    let mut testing = false;
     if let None = limit {
         limit = Some(5);
-        testing = true;
     }
     match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
         Ok(previews) => {
@@ -136,10 +134,6 @@ pub async fn fetch_full_imap_emails(
             let formatted_emails: Vec<_> = previews
                 .into_iter()
                 .map(|p| {
-                    if testing {
-                        println!("from_email: {:#?}", p.from_email.clone());
-                        println!("from: {:#?}", p.from.clone());
-                    }
                     json!({
                         "id": p.id,
                         "subject": p.subject.unwrap_or_else(|| "No subject".to_string()),
@@ -390,11 +384,6 @@ pub async fn fetch_single_imap_email(
     match fetch_single_email_imap(&state, auth_user.user_id, &email_id).await {
         Ok(email) => {
             tracing::debug!("Successfully fetched email {}", email_id);
-            // if admin testing their own account
-            if auth_user.user_id == 1 {
-                println!("email addr: {:#?}", email.from.clone());
-                println!("from_email addr: {:#?}", email.from_email.clone());
-            }
             Ok(AxumJson(json!({
                 "success": true,
                 "email": {

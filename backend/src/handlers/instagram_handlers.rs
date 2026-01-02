@@ -79,48 +79,6 @@ pub async fn test_fetch_instagram_messages(
     match crate::utils::bridge::fetch_bridge_messages("instagram", &state, auth_user.user_id, start_time, false).await {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
-         
-            // Print message details in a readable format for testing
-            println!("\n📱 Instagram Messages Summary:");
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-         
-            for msg in messages.iter() {
-                let message_type_icon = match msg.message_type.as_str() {
-                    "text" => "💬",
-                    "notice" => "📢",
-                    "image" => "🖼️",
-                    "video" => "🎥",
-                    "file" => "📎",
-                    "audio" => "🔊",
-                    "location" => "📍",
-                    "emote" => "🎭",
-                    _ => "📝",
-                };
-             
-                println!("\n{} Room: {}", message_type_icon, msg.room_name);
-                println!("👤 {}", msg.sender_display_name);
-                println!("🕒 {}", msg.formatted_timestamp);
-                println!("📄 {}", msg.content);
-                println!("─────────────────────────────────────");
-            }
-         
-            println!("\nTotal messages: {}\n", messages.len());
-         
-            // Also keep the debug logging for the first 5 messages
-            for (i, msg) in messages.iter().enumerate().take(5) {
-                tracing::info!(
-                    "Message {}: room={}, sender={}, content={}",
-                    i,
-                    msg.room_name,
-                    msg.sender,
-                    if msg.content.len() > 30 {
-                        format!("{}...", &msg.content[..30])
-                    } else {
-                        msg.content.clone()
-                    }
-                );
-            }
-         
             Ok(Json(InstagramMessagesResponse { messages }))
         }
         Err(e) => {
@@ -161,17 +119,6 @@ pub async fn search_instagram_rooms_handler(
         &request.search_term,
     ).await {
         Ok(rooms) => {
-            println!("Found {} matching Instagram rooms", rooms.len());
-         
-            // Print detailed information about each matching room
-            for (i, room) in rooms.iter().enumerate() {
-                println!(
-                    "Room {}: ID='{}', Name='{}'",
-                    i + 1,
-                    room.room_id,
-                    room.display_name
-                );
-            }
             if rooms.is_empty() {
                 tracing::error!("No rooms found matching search term: '{}'", request.search_term);
             }

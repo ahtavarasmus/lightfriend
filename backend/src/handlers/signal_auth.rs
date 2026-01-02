@@ -625,7 +625,6 @@ async fn monitor_signal_connection(
                                 MessageType::Notice(notice_content) => notice_content.body,
                                 _ => continue,
                             };
-                            println!("CONTENT: {}", content);
                             // Check for successful login message first
                             if content.contains("Successfully logged in") {
                                 tracing::info!("🎉 Signal successfully connected for user {}", user_id);

@@ -122,20 +122,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    google_tasks (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        encrypted_access_token -> Text,
-        encrypted_refresh_token -> Text,
-        status -> Text,
-        last_update -> Integer,
-        created_on -> Integer,
-        description -> Text,
-        expires_in -> Integer,
-    }
-}
-
-diesel::table! {
     imap_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -224,11 +210,16 @@ diesel::table! {
 }
 
 diesel::table! {
-    task_notifications (id) {
+    tasks (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
-        task_id -> Text,
-        notified_at -> Integer,
+        trigger -> Text,
+        condition -> Nullable<Text>,
+        action -> Text,
+        notification_type -> Nullable<Text>,
+        status -> Nullable<Text>,
+        created_at -> Integer,
+        completed_at -> Nullable<Integer>,
     }
 }
 
@@ -395,16 +386,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    waiting_checks (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        content -> Text,
-        service_type -> Text,
-        noti_type -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
     waitlist (id) {
         id -> Nullable<Integer>,
         email -> Text,
@@ -466,12 +447,12 @@ diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(refund_info -> users (user_id));
+diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
-diesel::joinable!(waiting_checks -> users (user_id));
 diesel::joinable!(webauthn_challenges -> users (user_id));
 diesel::joinable!(webauthn_credentials -> users (user_id));
 
@@ -486,7 +467,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     critical_categories,
     email_judgments,
     google_calendar,
-    google_tasks,
     imap_connection,
     keywords,
     message_history,
@@ -494,7 +474,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     processed_emails,
     refund_info,
     subaccounts,
-    task_notifications,
+    tasks,
     tesla,
     totp_backup_codes,
     totp_secrets,
@@ -503,7 +483,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     user_info,
     user_settings,
     users,
-    waiting_checks,
     waitlist,
     webauthn_challenges,
     webauthn_credentials,

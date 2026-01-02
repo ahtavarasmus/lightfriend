@@ -629,7 +629,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         "fetch_specific_email",
                         "get_weather",
                         "fetch_calendar_events",
-                        "fetch_tasks",
                         "direct_response",
                     ];
 
@@ -676,10 +675,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             chat_messages.extend(context_messages);
         }
     }
-    if user.id == 1 {
-        println!("history: {:#?}", chat_messages);
-    }
-
     // Get the user's LLM provider preference from settings
     let llm_provider_preference = state.user_core.get_llm_provider(user.id).unwrap_or(None);
     let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
@@ -809,9 +804,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         crate::tool_call_utils::email::get_respond_to_email_tool(),
         crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
         crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
-        crate::tool_call_utils::tasks::get_fetch_tasks_tool(),
-        crate::tool_call_utils::tasks::get_create_tasks_tool(),
-        crate::tool_call_utils::management::get_create_waiting_check_tool(),
+        crate::tool_call_utils::management::get_create_task_tool(),
         crate::tool_call_utils::management::get_update_monitoring_status_tool(),
         crate::tool_call_utils::internet::get_scan_qr_code_tool(),
         crate::tool_call_utils::internet::get_ask_perplexity_tool(),
@@ -880,11 +873,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             );
         }
     };
-
-    if user.id == 1 {
-        println!("result: {:#?}", result);
-    }
-
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
@@ -1221,15 +1209,15 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             );
                         }
                     }
-                } else if name == "create_waiting_check" {
-                    tracing::debug!("Executing create_waiting_check tool call");
-                    match crate::tool_call_utils::management::handle_create_waiting_check(&state, user.id, arguments).await {
+                } else if name == "create_task" {
+                    tracing::debug!("Executing create_task tool call");
+                    match crate::tool_call_utils::management::handle_create_task(&state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
-                            tracing::error!("Failed to create waiting check: {}", e);
-                            tool_answers.insert(tool_call_id, "Sorry, I couldn't create a waiting check. (Contact rasmus@ahtava.com pls:D)".to_string());
+                            tracing::error!("Failed to create task: {}", e);
+                            tool_answers.insert(tool_call_id, format!("Sorry, I couldn't create the task: {}", e));
                         }
                     }
                 } else if name == "update_monitoring_status" {
@@ -1309,14 +1297,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             );
                         }
                     }
-                } else if name == "create_task" {
-                    tracing::debug!("Executing create_task tool call");
-                    let response = crate::tool_call_utils::tasks::handle_create_task(&state, user.id, arguments).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_tasks" {
-                    tracing::debug!("Executing fetch_tasks tool call");
-                    let response = crate::tool_call_utils::tasks::handle_fetch_tasks(&state, user.id, arguments).await;
-                    tool_answers.insert(tool_call_id, response);
                 } else if name == "search_chat_contacts" {
                     tracing::debug!("Executing search_chat_contacts tool call");
                     let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
@@ -1466,10 +1446,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         Some(ans) => ans.clone(),
                         None => "".to_string(),
                     };
-                    // TODO remove
-                    if user.id == 1 {
-                        println!("response: {}", tool_answer);
-                    }
                     follow_up_messages.push(chat_completion::ChatCompletionMessage {
                         role: chat_completion::MessageRole::tool,
                         content: chat_completion::Content::Text(tool_answer),

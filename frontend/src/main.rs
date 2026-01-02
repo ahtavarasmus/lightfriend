@@ -64,7 +64,6 @@ mod connections {
     pub mod whatsapp;
     pub mod telegram;
     pub mod signal;
-    pub mod tasks;
     pub mod uber;
     pub mod messenger;
     pub mod instagram;

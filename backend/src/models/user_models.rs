@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use crate::schema::users;
 use crate::schema::conversations;
-use crate::schema::waiting_checks;
+use crate::schema::tasks;
 use crate::schema::priority_senders;
 use crate::schema::contact_profile_exceptions;
 use crate::schema::keywords;
@@ -12,8 +12,6 @@ use crate::schema::bridge_disconnection_events;
 use crate::schema::imap_connection;
 use crate::schema::processed_emails;
 use crate::schema::email_judgments;
-use crate::schema::google_tasks;
-use crate::schema::task_notifications;
 use crate::schema::calendar_notifications;
 use crate::schema::user_settings;
 use crate::schema::message_history;
@@ -95,24 +93,6 @@ pub struct NewUserInfo {
     pub timezone: Option<String>,
     pub nearby_places: Option<String>,
     pub recent_contacts: Option<String>,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = task_notifications)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct TaskNotification {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub task_id: String, // google task id
-    pub notified_at: i32, // due timestamp
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = task_notifications)]
-pub struct NewTaskNotification {
-    pub user_id: i32,
-    pub task_id: String,
-    pub notified_at: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -323,36 +303,6 @@ pub struct NewUber {
     pub expires_in: i32,
 }
 
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = google_tasks)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct GoogleTasks {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String, 
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32, // for access token
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = google_tasks)]
-pub struct NewGoogleTasks{
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32,
-}
-
-
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = google_calendar)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -427,24 +377,35 @@ pub struct NewCalendarNotification {
 }
 
 
-#[derive(Queryable, Selectable, Insertable, Debug, Clone)]
-#[diesel(table_name = waiting_checks)]
+/// Unified task model for scheduled and recurring tasks
+/// trigger: "once_<timestamp>" or "recurring_email" or "recurring_messaging"
+/// condition: optional natural language condition checked at runtime
+/// action: natural language description of what to do
+#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = tasks)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct WaitingCheck {
+pub struct Task {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub content: String,
-    pub service_type: String,// like email, whatsapp, .. 
-    pub noti_type: Option<String>, // "sms", "call"
+    pub trigger: String,              // "once_<timestamp>", "recurring_email", "recurring_messaging"
+    pub condition: Option<String>,    // natural language condition (optional)
+    pub action: String,               // natural language action (required)
+    pub notification_type: Option<String>, // "sms" or "call"
+    pub status: Option<String>,       // "active", "completed", "cancelled"
+    pub created_at: i32,
+    pub completed_at: Option<i32>,
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = waiting_checks)]
-pub struct NewWaitingCheck {
+#[diesel(table_name = tasks)]
+pub struct NewTask {
     pub user_id: i32,
-    pub content: String,
-    pub service_type: String,// like email, whatsapp, .. 
-    pub noti_type: Option<String>,
+    pub trigger: String,
+    pub condition: Option<String>,
+    pub action: String,
+    pub notification_type: Option<String>,
+    pub status: String,
+    pub created_at: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]

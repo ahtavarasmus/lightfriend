@@ -93,19 +93,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"8. Google Tasks Integration and OAuth"}</h2>
-                <p>{"Lightfriend integrates with Google Tasks to allow you to manage your tasks via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
-                <ul>
-                    <li>{"Data We Access: We request access to your Google Tasks data only when you authorize it through OAuth."}</li>
-                    <li>{"Tokens We Store: Upon your authorization, we store an access token and a refresh token in our secure database. These tokens enable Lightfriend to access your Google Tasks on your behalf when you use our SMS or voice call features. We encrypt these tokens to protect your data."}</li>
-                    <li>{"What We Don't Store: We do not store any additional Google account data, such as your calendar events, email, or personal details—only the encrypted tokens necessary for tasks access are retained."}</li>
-                    <li>{"Usage: The stored tokens are used exclusively to authenticate and access your Google Tasks when you request actions (e.g., checking or sending your tasks messages). Lightfriend does not retain user data obtained through Workspace APIs to develop, improve, or train generalized AI and/or ML models."}</li>
-                    <li>{"Sharing: We do not share these tokens or your Google user data with third parties, except as required by law or to facilitate the Google API services you've authorized."}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"9. YouTube Integration and OAuth"}</h2>
+                <h2>{"8. YouTube Integration and OAuth"}</h2>
                 <p>{"Lightfriend provides an intentional YouTube viewing experience through our web dashboard, designed for users who want to access YouTube content without algorithmic recommendations, infinite scroll, or autoplay. This feature uses YouTube API Services."}</p>
                 <ul>
                     <li><strong>{"YouTube API Services: "}</strong>{"This application uses YouTube API Services. By using the YouTube features, you are also agreeing to be bound by the "}<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{"YouTube Terms of Service"}</a>{"."}</li>
@@ -122,7 +110,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"10. Vehicle Integration (Tesla)"}</h2>
+                <h2>{"9. Vehicle Integration (Tesla)"}</h2>
                 <p>{"Lightfriend offers integration with Tesla vehicles to allow remote vehicle control via SMS or voice commands. BY USING THIS FEATURE, YOU ACKNOWLEDGE AND ACCEPT THE FOLLOWING:"}</p>
                 <ul>
                     <li>{"We store encrypted OAuth tokens to access your Tesla account on your behalf."}</li>
@@ -136,7 +124,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"11. Email Integration (IMAP)"}</h2>
+                <h2>{"10. Email Integration (IMAP)"}</h2>
                 <p>{"Lightfriend can connect to your email account to monitor and notify you of important messages."}</p>
                 <ul>
                     <li>{"We store encrypted credentials (server, port, password) to access your email."}</li>
@@ -147,7 +135,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"12. Other Third-Party Services"}</h2>
+                <h2>{"11. Other Third-Party Services"}</h2>
                 <p>{"Lightfriend may integrate with additional third-party services not explicitly listed above. For all such integrations:"}</p>
                 <ul>
                     <li>{"We store only the credentials necessary for access, encrypted at rest."}</li>
@@ -159,7 +147,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"13. Data Retention"}</h2>
+                <h2>{"12. Data Retention"}</h2>
                 <p>{"We retain your data until:"}</p>
                 <ul>
                     <li>{"You request account deletion"}</li>
@@ -169,7 +157,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"14. Contact Information"}</h2>
+                <h2>{"13. Contact Information"}</h2>
                 <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
                 <p>{"Email: rasmus@ahtava.com"}</p>
                 <p>{"Location: Tampere, Finland"}</p>

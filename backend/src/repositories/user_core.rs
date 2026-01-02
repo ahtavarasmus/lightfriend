@@ -275,11 +275,11 @@ impl UserCore {
     pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::{
             bridges, calendar_notifications, conversations, critical_categories,
-            email_judgments, google_calendar, google_tasks, imap_connection,
+            email_judgments, google_calendar, imap_connection,
             keywords, message_history, priority_senders, processed_emails,
-            refund_info, task_notifications, tesla, totp_backup_codes,
+            refund_info, tasks, tesla, totp_backup_codes,
             totp_secrets, uber, usage_logs, user_info, user_settings,
-            waiting_checks, webauthn_challenges, webauthn_credentials, youtube,
+            webauthn_challenges, webauthn_credentials, youtube,
         };
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -291,14 +291,12 @@ impl UserCore {
         diesel::delete(critical_categories::table.filter(critical_categories::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(email_judgments::table.filter(email_judgments::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id))).execute(&mut conn)?;
-        diesel::delete(google_tasks::table.filter(google_tasks::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(keywords::table.filter(keywords::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(message_history::table.filter(message_history::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(priority_senders::table.filter(priority_senders::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(processed_emails::table.filter(processed_emails::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(refund_info::table.filter(refund_info::user_id.eq(user_id))).execute(&mut conn)?;
-        diesel::delete(task_notifications::table.filter(task_notifications::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(tesla::table.filter(tesla::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(totp_backup_codes::table.filter(totp_backup_codes::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(totp_secrets::table.filter(totp_secrets::user_id.eq(user_id))).execute(&mut conn)?;
@@ -306,7 +304,7 @@ impl UserCore {
         diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(user_info::table.filter(user_info::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(user_settings::table.filter(user_settings::user_id.eq(user_id))).execute(&mut conn)?;
-        diesel::delete(waiting_checks::table.filter(waiting_checks::user_id.eq(user_id))).execute(&mut conn)?;
+        diesel::delete(tasks::table.filter(tasks::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(webauthn_challenges::table.filter(webauthn_challenges::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(webauthn_credentials::table.filter(webauthn_credentials::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(youtube::table.filter(youtube::user_id.eq(user_id))).execute(&mut conn)?;

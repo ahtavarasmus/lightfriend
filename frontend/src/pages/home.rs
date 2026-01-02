@@ -653,8 +653,6 @@ pub fn Home() -> Html {
                         Some("Uber account connected successfully!")
                     } else if params.get("google_calendar").as_deref() == Some("success") {
                         Some("Google Calendar connected successfully!")
-                    } else if params.get("google_tasks").as_deref() == Some("success") {
-                        Some("Google Tasks connected successfully!")
                     } else if params.get("youtube").as_deref() == Some("success") {
                         Some("YouTube connected successfully!")
                     } else {
@@ -1164,6 +1162,12 @@ pub fn Home() -> Html {
                                                                 chat_bot_reply.set(Some(reply));
                                                                 // Refresh usage after chat
                                                                 refetch_usage.emit(());
+                                                                // Dispatch event to refresh tasks
+                                                                if let Some(window) = web_sys::window() {
+                                                                    if let Ok(event) = web_sys::CustomEvent::new("lightfriend-chat-sent") {
+                                                                        let _ = window.dispatch_event(&event);
+                                                                    }
+                                                                }
                                                             }
                                                             Err(_) => {
                                                                 chat_error.set(Some("Failed to parse response".to_string()));

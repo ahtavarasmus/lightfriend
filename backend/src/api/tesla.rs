@@ -379,13 +379,15 @@ impl TeslaClient {
     }
 
     // Navigate to GPS coordinates (triggers battery preconditioning if destination is a Supercharger)
+    // Note: Navigation commands must bypass the proxy as it doesn't support them
     pub async fn navigate_to_gps(&self, access_token: &str, vehicle_id: &str, lat: f64, lon: f64) -> Result<bool, Box<dyn Error>> {
         let body = serde_json::json!({
             "lat": lat,
             "lon": lon,
             "order": 1
         });
-        self.send_command_with_body(access_token, vehicle_id, "navigation_gps_request", &body).await
+        // Use direct API - proxy returns "invalid_command" for navigation
+        self.send_command_direct_api(access_token, vehicle_id, "navigation_gps_request", &body).await
     }
 
     // Generic command sender
@@ -435,6 +437,35 @@ impl TeslaClient {
         let url = format!("{}/api/1/vehicles/{}/command/{}", base_url, vehicle_id, command);
 
         let response = client
+            .post(&url)
+            .bearer_auth(access_token)
+            .json(body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(format!("Tesla API error for command {}: {}", command, error_text).into());
+        }
+
+        let command_response: CommandResponse = response.json().await?;
+
+        if !command_response.response.result {
+            let reason = command_response.response.reason.unwrap_or_else(|| "Unknown error".to_string());
+            return Err(format!("Command {} failed: {}", command, reason).into());
+        }
+
+        Ok(command_response.response.result)
+    }
+
+    // Direct API command sender - bypasses proxy for commands that don't require signing
+    // Navigation commands must use direct API as the proxy doesn't support them
+    async fn send_command_direct_api(&self, access_token: &str, vehicle_id: &str, command: &str, body: &serde_json::Value) -> Result<bool, Box<dyn Error>> {
+        let url = format!("{}/api/1/vehicles/{}/command/{}", self.base_url, vehicle_id, command);
+
+        tracing::info!("Sending direct API command '{}' to vehicle {} (bypassing proxy)", command, vehicle_id);
+
+        let response = self.client
             .post(&url)
             .bearer_auth(access_token)
             .json(body)

@@ -548,6 +548,133 @@ pub fn tesla_controls() -> Html {
         );
     }
 
+    // Listen for chat-sent event to trigger immediate refresh
+    {
+        let battery_level = battery_level.clone();
+        let battery_range = battery_range.clone();
+        let charging_state = charging_state.clone();
+        let is_locked = is_locked.clone();
+        let inside_temp = inside_temp.clone();
+        let outside_temp = outside_temp.clone();
+        let is_climate_on = is_climate_on.clone();
+        let is_front_defroster_on = is_front_defroster_on.clone();
+        let is_rear_defroster_on = is_rear_defroster_on.clone();
+        let last_refresh_time = last_refresh_time.clone();
+        let last_refresh_epoch = last_refresh_epoch.clone();
+        let climate_notify_active = climate_notify_active.clone();
+        let charging_notify_active = charging_notify_active.clone();
+        let tesla_connected = tesla_connected.clone();
+
+        use_effect_with_deps(
+            move |_| {
+                let battery_level = battery_level.clone();
+                let battery_range = battery_range.clone();
+                let charging_state = charging_state.clone();
+                let is_locked = is_locked.clone();
+                let inside_temp = inside_temp.clone();
+                let outside_temp = outside_temp.clone();
+                let is_climate_on = is_climate_on.clone();
+                let is_front_defroster_on = is_front_defroster_on.clone();
+                let is_rear_defroster_on = is_rear_defroster_on.clone();
+                let last_refresh_time = last_refresh_time.clone();
+                let last_refresh_epoch = last_refresh_epoch.clone();
+                let climate_notify_active = climate_notify_active.clone();
+                let charging_notify_active = charging_notify_active.clone();
+                let tesla_connected = tesla_connected.clone();
+
+                let closure = Closure::<dyn Fn()>::new(move || {
+                    if !*tesla_connected {
+                        return;
+                    }
+                    let battery_level = battery_level.clone();
+                    let battery_range = battery_range.clone();
+                    let charging_state = charging_state.clone();
+                    let is_locked = is_locked.clone();
+                    let inside_temp = inside_temp.clone();
+                    let outside_temp = outside_temp.clone();
+                    let is_climate_on = is_climate_on.clone();
+                    let is_front_defroster_on = is_front_defroster_on.clone();
+                    let is_rear_defroster_on = is_rear_defroster_on.clone();
+                    let last_refresh_time = last_refresh_time.clone();
+                    let last_refresh_epoch = last_refresh_epoch.clone();
+                    let climate_notify_active = climate_notify_active.clone();
+                    let charging_notify_active = charging_notify_active.clone();
+
+                    spawn_local(async move {
+                        // Same refresh logic as auto-refresh
+                        if let Ok(response) = Api::get("/api/tesla/battery-status").send().await {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                    if let Some(level) = data["battery_level"].as_i64() {
+                                        battery_level.set(Some(level as i32));
+                                    }
+                                    if let Some(range) = data["battery_range"].as_f64() {
+                                        battery_range.set(Some(range));
+                                    }
+                                    if let Some(state) = data["charging_state"].as_str() {
+                                        charging_state.set(Some(state.to_string()));
+                                    }
+                                    if let Some(locked) = data["locked"].as_bool() {
+                                        is_locked.set(Some(locked));
+                                    }
+                                    if let Some(temp) = data["inside_temp"].as_f64() {
+                                        inside_temp.set(Some(temp));
+                                    }
+                                    if let Some(temp) = data["outside_temp"].as_f64() {
+                                        outside_temp.set(Some(temp));
+                                    }
+                                    is_climate_on.set(Some(data["is_climate_on"].as_bool().unwrap_or(false)));
+                                    is_front_defroster_on.set(Some(data["is_front_defroster_on"].as_bool().unwrap_or(false)));
+                                    is_rear_defroster_on.set(Some(data["is_rear_defroster_on"].as_bool().unwrap_or(false)));
+                                    let now = web_sys::js_sys::Date::new_0();
+                                    let time_str = format!(
+                                        "{:02}:{:02}",
+                                        now.get_hours() as u32,
+                                        now.get_minutes() as u32,
+                                    );
+                                    last_refresh_time.set(Some(time_str));
+                                    *last_refresh_epoch.borrow_mut() = now.get_time();
+                                }
+                            }
+                        }
+
+                        // Also refresh notify statuses
+                        if let Ok(response) = Api::get("/api/tesla/climate-notify/status").send().await {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                    if let Some(active) = data["active"].as_bool() {
+                                        climate_notify_active.set(active);
+                                    }
+                                }
+                            }
+                        }
+                        if let Ok(response) = Api::get("/api/tesla/charging-notify/status").send().await {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                    if let Some(active) = data["active"].as_bool() {
+                                        charging_notify_active.set(active);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+
+                let window = web_sys::window().unwrap();
+                let func = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+                let _ = window.add_event_listener_with_callback("lightfriend-chat-sent", &func);
+
+                move || {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.remove_event_listener_with_callback("lightfriend-chat-sent", &func);
+                    }
+                    drop(closure);
+                }
+            },
+            (),
+        );
+    }
+
     // Fetch granted scopes when connected for feature gating
     {
         let tesla_connected = tesla_connected.clone();

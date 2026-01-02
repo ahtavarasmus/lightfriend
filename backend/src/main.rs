@@ -54,8 +54,6 @@ mod handlers {
     pub mod bluesky;
     pub mod imap_auth;
     pub mod imap_handlers;
-    pub mod google_tasks_auth;
-    pub mod google_tasks;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
     pub mod bridge_auth_common;
@@ -92,6 +90,7 @@ mod utils {
     pub mod country;
     pub mod webauthn_config;
     pub mod email;
+    pub mod action_executor;
 }
 mod proactive {
     pub mod utils;
@@ -99,7 +98,6 @@ mod proactive {
 mod tool_call_utils {
     pub mod email;
     pub mod calendar;
-    pub mod tasks;
     pub mod utils;
     pub mod internet;
     pub mod management;
@@ -140,7 +138,7 @@ use repositories::webauthn_repository::WebauthnRepository;
 use handlers::{
     auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
     admin_handlers, stripe_handlers, refund_handlers, google_calendar_auth, google_calendar,
-    google_tasks_auth, google_tasks, imap_auth, imap_handlers,
+    imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
     signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
     messenger_auth, messenger_handlers, instagram_auth, instagram_handlers,
@@ -174,7 +172,6 @@ pub struct AppState {
     user_repository: Arc<UserRepository>,
     ai_config: AiConfig,
     google_calendar_oauth_client: GoogleOAuthClient,
-    google_tasks_oauth_client: GoogleOAuthClient,
     youtube_oauth_client: GoogleOAuthClient,
     uber_oauth_client: GoogleOAuthClient,
     tesla_oauth_client: TeslaOAuthClient,
@@ -280,11 +277,6 @@ async fn main() {
     let session_layer = SessionManagerLayer::new(session_store.clone())
         .with_secure(is_prod)
         .with_same_site(tower_sessions::cookie::SameSite::Lax);
-    let google_tasks_oauth_client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
-        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
-        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
-        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/tasks/callback", server_url_oauth)).expect("Invalid redirect URL"));
 
     // Tesla OAuth client
     let tesla_client_id = std::env::var("TESLA_CLIENT_ID").unwrap_or_else(|_| "default-tesla-client-id-for-testing".to_string());
@@ -313,7 +305,6 @@ async fn main() {
         user_repository: user_repository.clone(),
         ai_config: AiConfig::from_env(),
         google_calendar_oauth_client,
-        google_tasks_oauth_client,
         uber_oauth_client,
         tesla_oauth_client,
         youtube_oauth_client,
@@ -361,11 +352,9 @@ async fn main() {
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/email/respond", post(elevenlabs::handle_respond_to_email))
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
-        .route("/api/call/waiting_check", post(elevenlabs::handle_create_waiting_check_tool_call))
+        .route("/api/call/task", post(elevenlabs::handle_create_task_tool_call))
         .route("/api/call/monitoring-status", post(elevenlabs::handle_update_monitoring_status_tool_call))
         .route("/api/call/cancel-message", get(elevenlabs::handle_cancel_pending_message_tool_call))
-        .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
-        .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
         .route("/api/call/fetch-recent-messages", get(elevenlabs::handle_fetch_recent_messages_tool_call))
         .route("/api/call/fetch-chat-messages", get(elevenlabs::handle_fetch_specific_chat_messages_tool_call))
         .route("/api/call/search-chat-contacts", post(elevenlabs::handle_search_chat_contacts_tool_call))
@@ -380,7 +369,6 @@ async fn main() {
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
-        .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback))
         .route("/api/auth/uber/callback", get(uber_auth::uber_callback))
         .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback))
         .route("/api/auth/youtube/callback", get(youtube_auth::youtube_callback));
@@ -488,12 +476,6 @@ async fn main() {
         .route("/api/auth/google/calendar/email", get(google_calendar::get_calendar_email))
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
         .route("/api/calendar/create", post(google_calendar::create_calendar_event))
-        .route("/api/auth/google/tasks/login", get(google_tasks_auth::google_tasks_login))
-        .route("/api/auth/google/tasks/connection", delete(google_tasks_auth::delete_google_tasks_connection))
-        .route("/api/auth/google/tasks/refresh", post(google_tasks_auth::refresh_google_tasks_token))
-        .route("/api/auth/google/tasks/status", get(google_tasks::google_tasks_status))
-        .route("/api/tasks", get(google_tasks::handle_tasks_fetching_route))
-        .route("/api/tasks/create", post(google_tasks::handle_tasks_creation_route))
         .route("/api/auth/uber/login", get(uber_auth::uber_login))
         .route("/api/auth/uber/connection", delete(uber_auth::uber_disconnect))
         .route("/api/auth/uber/status", get(uber_auth::uber_status))
@@ -591,10 +573,9 @@ async fn main() {
         .route("/api/whatsapp/search-rooms", get(whatsapp_handlers::search_rooms_handler))
         // Matrix connection reset route (clears all Matrix credentials when auth fails)
         .route("/api/auth/matrix/reset", delete(bridge_auth_common::reset_matrix_connection))
-        // Filter routes
-        .route("/api/filters/waiting-checks", get(filter_handlers::get_waiting_checks))
-        .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
-        .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
+        // Task routes (reminders and message monitoring)
+        .route("/api/filters/tasks", get(filter_handlers::get_tasks))
+        .route("/api/filters/task/{task_id}", delete(filter_handlers::cancel_task))
         .route("/api/filters/monitored-contacts", get(filter_handlers::get_priority_senders))
         .route("/api/filters/monitored-contact/{service_type}", post(filter_handlers::create_priority_sender))
         .route("/api/filters/monitored-contact/{service_type}/{content}", delete(filter_handlers::delete_priority_sender))

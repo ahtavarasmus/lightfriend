@@ -130,10 +130,8 @@ pub async fn fetch_assistant(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AssistantPayload>,
 ) -> Result<Json<ConversationInitiationClientData>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received assistant request:");
     let call_sid = payload.call_sid;
     let caller_number = payload.caller_id;
-    println!("caller_number: {}", caller_number);
     let us_voice_id = std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set");
     let fi_voice_id = std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set");
     let de_voice_id = std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set");
@@ -355,19 +353,22 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
+/// Payload for creating a task via ElevenLabs voice call
 #[derive(Deserialize)]
-pub struct WaitingCheckPayload {
-    pub content: String,
-    pub service_type: String,
-    pub noti_type: Option<String>,
+pub struct CreateTaskPayload {
+    pub trigger_type: String,        // "once", "recurring_email", "recurring_messaging"
+    pub trigger_time: Option<String>, // ISO datetime for "once" triggers
+    pub condition: Option<String>,
+    pub action_spec: String,         // Detailed step-by-step instructions for runtime AI
+    pub notification_type: Option<String>,
 }
 
-pub async fn handle_create_waiting_check_tool_call(
+pub async fn handle_create_task_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<WaitingCheckPayload>,
+    Json(payload): Json<CreateTaskPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received waiting check creation request");
+    tracing::debug!("Received task creation request");
 
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
         Some(id) => id,
@@ -380,58 +381,128 @@ pub async fn handle_create_waiting_check_tool_call(
             ));
         }
     };
-    // Verify user exists
-    match state.user_core.find_by_id(user_id) {
-        Ok(Some(_user)) => {
-            let new_check = crate::models::user_models::NewWaitingCheck {
-                user_id: user_id,
-                content: payload.content,
-                service_type: payload.service_type,
-                noti_type: payload.noti_type,
+
+    // Build trigger field
+    let trigger = match payload.trigger_type.as_str() {
+        "once" => {
+            let time_str = match &payload.trigger_time {
+                Some(t) => t,
+                None => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "trigger_time is required for 'once' trigger type"
+                        }))
+                    ));
+                }
             };
 
-            match state.user_repository.create_waiting_check(&new_check) {
-                Ok(_) => {
-                    tracing::debug!("Successfully created waiting check for user: {}", 
-                        user_id);
-                    Ok(Json(json!({
-                        "response": "I'll keep an eye out for that and notify you when I find it.",
-                        "status": "success",
-                        "user_id": user_id,
-                    })))
-                },
-                Err(e) => {
-                    error!("Failed to create waiting check: {}", e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to create waiting check",
-                            "details": e.to_string()
-                        }))
-                    ))
-                }
-            }
-        },
-        Ok(None) => {
-            tracing::error!("User not found: {}", user_id);
-            Err((
-                StatusCode::NOT_FOUND,
+            // Get user's timezone
+            let user_info = state.user_core.get_user_info(user_id)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to get user info: {:?}", e)}))))?;
+            let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
+            let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+
+            // Parse datetime and convert to timestamp
+            let timestamp = parse_datetime_to_timestamp_elevenlabs(time_str, &tz)
+                .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({"error": format!("Invalid trigger_time: {}", e)}))))?;
+            format!("once_{}", timestamp)
+        }
+        "recurring_email" => "recurring_email".to_string(),
+        "recurring_messaging" => "recurring_messaging".to_string(),
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "User not found"
+                    "error": format!("Invalid trigger_type: {}", payload.trigger_type)
                 }))
-            ))
+            ));
+        }
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_task = crate::models::user_models::NewTask {
+        user_id,
+        trigger: trigger.clone(),
+        condition: payload.condition.clone(),
+        action: payload.action_spec.clone(),
+        notification_type: payload.notification_type.or(Some("sms".to_string())),
+        status: "active".to_string(),
+        created_at: now,
+    };
+
+    // Build confirmation message (use a short summary, not full action_spec)
+    let action_summary = if payload.action_spec.len() > 50 {
+        format!("{}...", &payload.action_spec[..50])
+    } else {
+        payload.action_spec.clone()
+    };
+
+    match state.user_repository.create_task(&new_task) {
+        Ok(_) => {
+            tracing::debug!("Successfully created task for user: {}", user_id);
+
+            let confirmation = match payload.trigger_type.as_str() {
+                "once" => format!("Got it! I'll handle '{}' at the scheduled time.", action_summary),
+                "recurring_email" => {
+                    if let Some(cond) = &payload.condition {
+                        format!("Got it! I'll watch for emails matching '{}' and execute the task.", cond)
+                    } else {
+                        format!("Got it! I'll monitor your emails and execute: {}", action_summary)
+                    }
+                }
+                "recurring_messaging" => {
+                    if let Some(cond) = &payload.condition {
+                        format!("Got it! I'll watch for messages matching '{}' and execute the task.", cond)
+                    } else {
+                        format!("Got it! I'll monitor your messages and execute: {}", action_summary)
+                    }
+                }
+                _ => format!("Task created: {}", action_summary),
+            };
+
+            Ok(Json(json!({
+                "response": confirmation,
+                "status": "success",
+                "user_id": user_id,
+            })))
         },
         Err(e) => {
-            error!("Error fetching user: {}", e);
+            error!("Failed to create task: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to fetch user",
+                    "error": "Failed to create task",
                     "details": e.to_string()
                 }))
             ))
         }
     }
+}
+
+/// Parse ISO datetime string (in user's timezone) to UTC unix timestamp
+fn parse_datetime_to_timestamp_elevenlabs(time_str: &str, tz: &chrono_tz::Tz) -> Result<i32, String> {
+    use chrono::{NaiveDateTime, TimeZone};
+
+    // Try parsing as ISO datetime (YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS)
+    let naive = if time_str.len() == 16 {
+        NaiveDateTime::parse_from_str(&format!("{}:00", time_str), "%Y-%m-%dT%H:%M:%S")
+            .map_err(|e| format!("Failed to parse datetime: {}", e))?
+    } else {
+        NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
+            .map_err(|e| format!("Failed to parse datetime: {}", e))?
+    };
+
+    // Interpret naive datetime in user's timezone, then get UTC timestamp
+    let local_dt = tz.from_local_datetime(&naive)
+        .single()
+        .ok_or("Ambiguous or invalid local time")?;
+
+    Ok(local_dt.timestamp() as i32)
 }
 
 #[derive(Deserialize)]
@@ -843,112 +914,6 @@ pub async fn handle_calendar_tool_call(
     match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, start, end).await {
         Ok(response) => response,
         Err((_, json_response)) => json_response,
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TaskCreatePayload {
-    pub title: String,
-    pub description: Option<String>,
-    pub due_time: Option<String>,
-}
-
-pub async fn handle_tasks_creation_tool_call(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(task_payload): axum::extract::Json<TaskCreatePayload>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    
-    // Get user_id from query params
-    let user_id_str = match params.get("user_id") {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing user_id query parameter"
-                }))
-            ));
-        }
-    };
-
-    // Convert String to i32
-    let user_id: i32 = match user_id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid user_id format, must be an integer"
-                }))
-            ));
-        }
-    };
-
-    // Convert due_time string to DateTime<Utc> if provided
-    let due_time = match task_payload.due_time {
-        Some(time_str) => {
-            match chrono::DateTime::parse_from_rfc3339(&time_str) {
-                Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
-                Err(_) => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "Invalid due_time format. Please use RFC3339 format."
-                        }))
-                    ));
-                }
-            }
-        },
-        None => None,
-    };
-
-    let task_request = crate::handlers::google_tasks::CreateTaskRequest {
-        title: task_payload.title,
-        description: task_payload.description,
-        due_time,
-    };
-
-    match crate::handlers::google_tasks::create_task(&state, user_id, &task_request).await {
-        Ok(response) => {
-            tracing::debug!("Successfully created task for user: {}", user_id);
-            Ok(response)
-        },
-        Err(e) => {
-            error!("Failed to create task: {:?}", e);
-            Err(e)
-        }
-    }
-}
-
-pub async fn handle_tasks_fetching_tool_call(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and parse user_id from query params
-    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid or missing user_id parameter"
-                }))
-            ));
-        }
-    };
-
-    tracing::debug!("Received tasks fetch request for user: {}", user_id);
-
-    match crate::handlers::google_tasks::get_tasks(&state, user_id).await {
-        Ok(response) => {
-            tracing::debug!("Successfully fetched tasks for user: {}", user_id);
-            Ok(response)
-        },
-        Err(e) => {
-            error!("Failed to fetch tasks: {:?}", e);
-            Err(e)
-        }
     }
 }
 

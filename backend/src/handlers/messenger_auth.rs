@@ -323,7 +323,6 @@ async fn monitor_messenger_connection(
                                 MessageType::Notice(notice_content) => notice_content.body,
                                 _ => continue,
                             };
-                            println!("CONTENT: {}", content);
                             // Check for successful login message first
                             if content.to_lowercase().contains("successful login") {
                                 tracing::info!("🎉 Messenger successfully connected for user {}", user_id);

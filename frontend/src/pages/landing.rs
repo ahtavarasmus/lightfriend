@@ -354,15 +354,6 @@ pub fn landing() -> Html {
                         </li>
                         <li>
                             <details>
-                                <summary><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</summary>
-                                <div class="feature-desc">
-                                    <p>{"Manage a personal task list or idea notebook. Create entries (e.g. call lightfriend and ask, 'Hey save this brilliant billion dollar idea i got'), fetch them ('List my saved ideas'), and organize via voice or SMS. Stored in google tasks and accessible anytime. Will not affect your existing google tasks."}</p>
-                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
-                                </div>
-                            </details>
-                        </li>
-                        <li>
-                            <details>
                                 <summary><i class="fas fa-car"></i>{"Tesla Vehicle Control"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Connect your Tesla and control it via voice call, SMS, or the Lightfriend web dashboard. Lock and unlock doors, turn on climate control, start defrost mode, and check battery status. Perfect for cold mornings - just text 'warm up my Tesla' before heading out. On the dashboard, sensitive actions like unlocking or starting the car require entering your passkey each time for security."}</p>

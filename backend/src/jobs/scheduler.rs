@@ -289,56 +289,55 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             email.body.as_deref().unwrap_or("No content")
                                         );
 
-                                                                                // Check waiting checks first if they exist
-                                        let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "email") {
-                                            Ok(checks) => checks,
+                                        // Check recurring_email tasks if they exist
+                                        let email_tasks = match state.user_repository.get_recurring_tasks_for_user(user.id, "recurring_email") {
+                                            Ok(tasks) => tasks,
                                             Err(e) => {
-                                                tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
+                                                tracing::error!("Failed to get recurring email tasks for user {}: {}", user.id, e);
                                                 Vec::new()
                                             }
                                         };
-                                        if !waiting_checks.is_empty() {
-                                            // Check if any waiting checks match the message
-                                            if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
+                                        if !email_tasks.is_empty() {
+                                            // Check if any tasks match the message
+                                            if let Ok((task_id_option, _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
                                                 &state,
                                                 user.id,
                                                 &email_content,
-                                                &waiting_checks,
+                                                &email_tasks,
                                             ).await {
-                                                if let Some(check_id) = check_id_option {
-                                                    let message = message.unwrap_or("Waiting check matched in Email, but failed to get content".to_string());
-                                                    let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in Email.".to_string());
-                                                   
-                                                    // Find the matched waiting check to determine noti_type
-                                                    let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
-                                                    let suffix = if let Some(wc) = matched_waiting_check {
-                                                        match wc.noti_type.as_ref().map(|s| s.as_str()) {
-                                                            Some("call") => "_call",
-                                                            _ => "_sms",
+                                                if let Some(task_id) = task_id_option {
+                                                    // Find the matched task to get its action and notification_type
+                                                    let matched_task = email_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
+                                                    if let Some(task) = matched_task {
+                                                        let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
+                                                        let action_spec = task.action.clone();
+
+                                                        // Mark the task as completed
+                                                        if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
+                                                            tracing::error!("Failed to complete task {}: {}", task_id, e);
                                                         }
-                                                    } else {
-                                                        "_sms"
-                                                    };
-                                                    let notification_type = format!("email_waiting_check{}", suffix);
-                                                   
-                                                    // Delete the matched waiting check
-                                                    if let Err(e) = state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
-                                                        tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
+
+                                                        // Execute the action_spec through AI + tools
+                                                        let state_clone = state.clone();
+                                                        let user_id = user.id;
+                                                        tokio::spawn(async move {
+                                                            tracing::debug!("Executing email task {} for user {}: {}", task_id, user_id, action_spec);
+                                                            match crate::utils::action_executor::execute_action_spec(
+                                                                &state_clone,
+                                                                user_id,
+                                                                &action_spec,
+                                                                &notification_type,
+                                                            ).await {
+                                                                crate::utils::action_executor::ActionResult::Success { message } => {
+                                                                    tracing::debug!("Email task {} completed successfully: {}", task_id, message);
+                                                                }
+                                                                crate::utils::action_executor::ActionResult::Failed { error } => {
+                                                                    tracing::error!("Email task {} failed: {}", task_id, error);
+                                                                }
+                                                            }
+                                                        });
+                                                        continue;
                                                     }
-                                                   
-                                                    // Send notification
-                                                    let state_clone = state.clone();
-                                                    let user_id = user.id;
-                                                    tokio::spawn(async move {
-                                                        crate::proactive::utils::send_notification(
-                                                            &state_clone,
-                                                            user_id,
-                                                            &message,
-                                                            notification_type,
-                                                            Some(first_message),
-                                                        ).await;
-                                                    });
-                                                    continue;
                                                 }
                                             }
                                         }
@@ -411,26 +410,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create message monitor job");
 
     sched.add(message_monitor_job).await.expect("Failed to add message monitor job to scheduler");
-
-    // Create a job that runs daily to clean up old task notifications
-    let state_clone = Arc::clone(&state);
-    let task_cleanup_job = Job::new_async("0 0 0 * * *", move |_, _| {  // Runs at midnight every day
-        let state = state_clone.clone();
-        Box::pin(async move {
-            debug!("Running task notification cleanup...");
-            
-            // Calculate timestamp for 30 days ago
-            let thirty_days_ago = (chrono::Utc::now() - chrono::Duration::days(30)).timestamp() as i32;
-            
-            // Delete notifications for tasks that were due more than 30 days ago
-            match state.user_repository.delete_old_task_notifications(thirty_days_ago) {
-                Ok(count) => debug!("Cleaned up {} old task notifications", count),
-                Err(e) => error!("Failed to clean up old task notifications: {}", e),
-            }
-        })
-    }).expect("Failed to create task cleanup job");
-
-    sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
 
     // Create a job that runs every hour to check morning digests
     let state_clone = Arc::clone(&state);
@@ -606,6 +585,88 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create bridge health check job");
 
     sched.add(bridge_health_job).await.expect("Failed to add bridge health check job to scheduler");
+
+    // Time-triggered tasks - runs every 10 minutes to execute due "once_*" tasks
+    let state_clone = Arc::clone(&state);
+    let once_tasks_job = Job::new_async("0 */10 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Checking for due scheduled tasks...");
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            match state.user_repository.get_due_once_tasks(now) {
+                Ok(tasks) => {
+                    debug!("Found {} due scheduled tasks", tasks.len());
+                    for task in tasks {
+                        let state = state.clone();
+                        let task_id = task.id.unwrap_or(0);
+                        let user_id = task.user_id;
+                        let action = task.action.clone();
+                        let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
+
+                        tokio::spawn(async move {
+                            debug!("Executing scheduled task {} for user {}: {}", task_id, user_id, action);
+
+                            // Execute the action_spec through AI + tools
+                            match crate::utils::action_executor::execute_action_spec(
+                                &state,
+                                user_id,
+                                &action,
+                                &notification_type,
+                            ).await {
+                                crate::utils::action_executor::ActionResult::Success { message } => {
+                                    debug!("Task {} completed successfully: {}", task_id, message);
+                                }
+                                crate::utils::action_executor::ActionResult::Failed { error } => {
+                                    error!("Task {} failed: {}", task_id, error);
+                                    // Optionally notify user of failure
+                                    let noti_type = format!("task_failed_{}", notification_type);
+                                    crate::proactive::utils::send_notification(
+                                        &state,
+                                        user_id,
+                                        &format!("Your scheduled task failed: {}", error),
+                                        noti_type,
+                                        Some("Sorry, your scheduled task encountered an error.".to_string()),
+                                    ).await;
+                                }
+                            }
+
+                            // Mark task as completed
+                            if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
+                                error!("Failed to mark task {} as completed: {}", task_id, e);
+                            }
+                        });
+                    }
+                }
+                Err(e) => error!("Failed to get due scheduled tasks: {}", e),
+            }
+        })
+    }).expect("Failed to create once tasks job");
+
+    sched.add(once_tasks_job).await.expect("Failed to add once tasks job to scheduler");
+
+    // Task cleanup - runs daily at 3am UTC to remove old completed/cancelled tasks
+    let state_clone = Arc::clone(&state);
+    let task_cleanup_job = Job::new_async("0 0 3 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running daily task cleanup...");
+            let cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32 - (7 * 24 * 60 * 60); // 7 days ago
+
+            match state.user_repository.delete_old_tasks(cutoff) {
+                Ok(count) => debug!("Cleaned up {} old tasks", count),
+                Err(e) => error!("Failed to cleanup old tasks: {}", e),
+            }
+        })
+    }).expect("Failed to create task cleanup job");
+
+    sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

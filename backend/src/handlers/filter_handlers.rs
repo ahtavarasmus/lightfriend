@@ -11,19 +11,11 @@ use serde_json::json;
 use crate::{
     AppState,
     models::user_models::{
-        NewWaitingCheck, NewPrioritySender,
+        NewPrioritySender,
         NewKeyword
     },
     handlers::auth_middleware::AuthUser,
 };
-
-// Request DTOs
-#[derive(Deserialize, Serialize)]
-pub struct WaitingCheckRequest {
-    content: String,
-    service_type: String, // imap, whatsapp, etc.
-    noti_type: Option<String>, // "sms" or "call"
-}
 
 #[derive(Deserialize)]
 pub struct PrioritySenderRequest {
@@ -41,11 +33,15 @@ pub struct KeywordRequest {
 
 // Response DTOs
 #[derive(Serialize)]
-pub struct WaitingCheckResponse {
+pub struct TaskResponse {
+    id: Option<i32>,
     user_id: i32,
-    content: String,
-    service_type: String,
-    noti_type: Option<String>, // "sms" or "call"
+    trigger: String,
+    condition: Option<String>,
+    action: String,
+    notification_type: Option<String>,
+    status: Option<String>,
+    created_at: i32,
 }
 
 #[derive(Serialize)]
@@ -57,58 +53,24 @@ pub struct PrioritySenderResponse {
     noti_mode: String,
 }
 
-// Waiting Checks handlers
-pub async fn create_waiting_check(
+pub async fn cancel_task(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Json(request): Json<WaitingCheckRequest>,
+    Path(task_id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Attempting to create waiting check for user {} with type: {}", auth_user.user_id, request.service_type);
+    tracing::debug!("Attempting to cancel task {} for user {}", task_id, auth_user.user_id);
 
-    let new_check = NewWaitingCheck {
-        user_id: auth_user.user_id,
-        content: request.content,
-        service_type: request.service_type,
-        noti_type: request.noti_type,
-    };
-
-    match state.user_repository.create_waiting_check(&new_check) {
-        Ok(_) => {
-            println!("Successfully created waiting check for user {}", auth_user.user_id);
-            Ok(Json(json!({"message": "Waiting check created successfully"})))
+    match state.user_repository.cancel_task(auth_user.user_id, task_id) {
+        Ok(true) => {
+            tracing::debug!("Successfully cancelled task {} for user {}", task_id, auth_user.user_id);
+            Ok(Json(json!({"message": "Task cancelled successfully"})))
         },
-        Err(DieselError::RollbackTransaction) => Err((
-            StatusCode::CONFLICT,
-            Json(json!({"error": "Waiting check already exists"}))
-        )),
-        Err(e) => {
-            tracing::error!("Failed to create waiting check for user {}: {}", auth_user.user_id, e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))
-        },
-    }
-}
-
-pub async fn delete_waiting_check(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path((service_type, content)): Path<(String, String)>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Attempting to delete waiting check {} for user {}", service_type, auth_user.user_id);
-
-    match state.user_repository.delete_waiting_check(auth_user.user_id, &service_type, &content) {
-        Ok(_) => {
-            println!("Successfully deleted waiting check {} for user {}", service_type, auth_user.user_id);
-            Ok(Json(json!({"message": "Waiting check deleted successfully"})))
-        },
-        Err(DieselError::NotFound) => Err((
+        Ok(false) => Err((
             StatusCode::NOT_FOUND,
-            Json(json!({"error": "Waiting check not found"}))
+            Json(json!({"error": "Task not found or already completed"}))
         )),
         Err(e) => {
-            tracing::error!("Failed to delete waiting check {}: {}", service_type, e);
+            tracing::error!("Failed to cancel task {}: {}", task_id, e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
@@ -117,26 +79,30 @@ pub async fn delete_waiting_check(
     }
 }
 
-pub async fn get_waiting_checks(
+pub async fn get_tasks(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser
-) -> Result<Json<Vec<WaitingCheckResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Fetching waiting checks for user {}", auth_user.user_id);
+) -> Result<Json<Vec<TaskResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Fetching tasks for user {}", auth_user.user_id);
 
-    let checks = state.user_repository.get_waiting_checks_all(auth_user.user_id)
+    let tasks = state.user_repository.get_user_tasks(auth_user.user_id)
         .map_err(|e| {
-            tracing::error!("Failed to fetch waiting checks for user {}: {}", auth_user.user_id, e);
+            tracing::error!("Failed to fetch tasks for user {}: {}", auth_user.user_id, e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             )
         })?;
 
-    let response: Vec<WaitingCheckResponse> = checks.into_iter().map(|check| WaitingCheckResponse {
-        user_id: check.user_id,
-        content: check.content,
-        service_type: check.service_type,
-        noti_type: check.noti_type,
+    let response: Vec<TaskResponse> = tasks.into_iter().map(|task| TaskResponse {
+        id: task.id,
+        user_id: task.user_id,
+        trigger: task.trigger,
+        condition: task.condition,
+        action: task.action,
+        notification_type: task.notification_type,
+        status: task.status,
+        created_at: task.created_at,
     }).collect();
 
     Ok(Json(response))

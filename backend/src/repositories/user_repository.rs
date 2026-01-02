@@ -12,16 +12,15 @@ pub struct UsageDataPoint {
 
 use crate::{
     models::user_models::{User, NewUsageLog, NewGoogleCalendar,
-        NewImapConnection, Bridge, NewBridge, WaitingCheck,
-        NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword,
-        NewKeyword, NewGoogleTasks,
-        TaskNotification, NewTaskNotification, NewUber,
+        NewImapConnection, Bridge, NewBridge, Task,
+        NewTask, PrioritySender, NewPrioritySender, Keyword,
+        NewKeyword, NewUber,
         ContactProfile, NewContactProfile,
         ContactProfileException, NewContactProfileException,
     },
     schema::{
         users, usage_logs,
-        waiting_checks, priority_senders, keywords, contact_profiles,
+        tasks, priority_senders, keywords, contact_profiles,
         contact_profile_exceptions,
     },
     DbPool,
@@ -127,46 +126,6 @@ impl UserRepository {
             .execute(&mut conn)?;
 
         Ok(())
-    }
-
-    pub fn get_task_notification(&self, user_id: i32, task_id: &str) -> Result<Option<TaskNotification>, diesel::result::Error> {
-        use crate::schema::task_notifications;
-        
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let result = task_notifications::table
-            .filter(task_notifications::user_id.eq(user_id))
-            .filter(task_notifications::task_id.eq(task_id))
-            .first::<TaskNotification>(&mut conn)
-            .optional()?;
-            
-        Ok(result)
-    }
-    
-    pub fn create_task_notification(&self, user_id: i32, task_id: &str, notified_at: i32) -> Result<(), diesel::result::Error> {
-        use crate::schema::task_notifications;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-
-        let new_notification = NewTaskNotification {
-            user_id,
-            task_id: task_id.to_string(),
-            notified_at,
-        };
-        
-        diesel::insert_into(task_notifications::table)
-            .values(&new_notification)
-            .execute(&mut conn)?;
-            
-        Ok(())
-    }
-
-    pub fn delete_old_task_notifications(&self, older_than_timestamp: i32) -> Result<usize, diesel::result::Error> {
-        use crate::schema::task_notifications;
-        
-        diesel::delete(task_notifications::table)
-            .filter(task_notifications::notified_at.lt(older_than_timestamp))
-            .execute(&mut self.pool.get().unwrap())
     }
 
     pub fn delete_old_message_history(&self, user_id: i32, save_context_limit: i64) -> Result<usize, diesel::result::Error> {
@@ -485,86 +444,126 @@ impl UserRepository {
         Ok(())
     }
 
-    // Waiting Checks methods
-    pub fn create_waiting_check(&self, new_check: &NewWaitingCheck) -> Result<(), DieselError> {
+    // Task methods
+    const MAX_ACTIVE_TASKS_PER_USER: i64 = 50;
+
+    pub fn count_active_tasks(&self, user_id: i32) -> Result<i64, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::insert_into(waiting_checks::table)
-            .values(new_check)
+        tasks::table
+            .filter(tasks::user_id.eq(user_id))
+            .filter(tasks::status.eq("active"))
+            .count()
+            .get_result(&mut conn)
+    }
+
+    pub fn create_task(&self, new_task: &NewTask) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Check task limit before creating
+        let count: i64 = tasks::table
+            .filter(tasks::user_id.eq(new_task.user_id))
+            .filter(tasks::status.eq("active"))
+            .count()
+            .get_result(&mut conn)?;
+
+        if count >= Self::MAX_ACTIVE_TASKS_PER_USER {
+            return Err(DieselError::DatabaseError(
+                diesel::result::DatabaseErrorKind::CheckViolation,
+                Box::new(format!("Task limit reached: maximum {} active tasks per user", Self::MAX_ACTIVE_TASKS_PER_USER)),
+            ));
+        }
+
+        diesel::insert_into(tasks::table)
+            .values(new_task)
             .execute(&mut conn)?;
         Ok(())
     }
 
-    pub fn delete_waiting_check(&self, user_id: i32, service_type: &str, content: &str) -> Result<(), DieselError> {
+    pub fn get_user_tasks(&self, user_id: i32) -> Result<Vec<Task>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        if service_type == "email" {
-            diesel::delete(waiting_checks::table)
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq("imap").or(waiting_checks::service_type.eq("email")))
-                .filter(waiting_checks::content.eq(content))
-                .execute(&mut conn)?;
-        } else if service_type == "messaging" {
-            diesel::delete(waiting_checks::table)
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq("messaging").or(waiting_checks::service_type.eq("whatsapp")))
-                .filter(waiting_checks::content.eq(content))
-                .execute(&mut conn)?;
-        } else {
-            diesel::delete(waiting_checks::table)
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq(service_type))
-                .filter(waiting_checks::content.eq(content))
-                .execute(&mut conn)?;
-        }
-        Ok(())
+        tasks::table
+            .filter(tasks::user_id.eq(user_id))
+            .filter(tasks::status.eq("active"))
+            .order(tasks::created_at.desc())
+            .load::<Task>(&mut conn)
     }
 
-    pub fn delete_waiting_check_by_id(&self, user_id: i32, id: i32) -> Result<(), DieselError> {
+    pub fn get_due_once_tasks(&self, now: i32) -> Result<Vec<Task>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(waiting_checks::table)
-            .filter(waiting_checks::user_id.eq(user_id))
-            .filter(waiting_checks::id.eq(id))
+        // Get all active once_* tasks where timestamp <= now
+        let prefix = format!("once_{}", now);
+        tasks::table
+            .filter(tasks::status.eq("active"))
+            .filter(tasks::trigger.like("once_%"))
+            .load::<Task>(&mut conn)
+            .map(|task_list| {
+                task_list.into_iter().filter(|task| {
+                    if let Some(ts_str) = task.trigger.strip_prefix("once_") {
+                        if let Ok(ts) = ts_str.parse::<i32>() {
+                            return ts <= now;
+                        }
+                    }
+                    false
+                }).collect()
+            })
+    }
+
+    pub fn get_recurring_tasks(&self, trigger_type: &str) -> Result<Vec<Task>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        tasks::table
+            .filter(tasks::status.eq("active"))
+            .filter(tasks::trigger.eq(trigger_type))
+            .load::<Task>(&mut conn)
+    }
+
+    pub fn get_recurring_tasks_for_user(&self, user_id: i32, trigger_type: &str) -> Result<Vec<Task>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        tasks::table
+            .filter(tasks::user_id.eq(user_id))
+            .filter(tasks::status.eq("active"))
+            .filter(tasks::trigger.eq(trigger_type))
+            .load::<Task>(&mut conn)
+    }
+
+    pub fn update_task_status(&self, task_id: i32, status: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let completed_at = if status == "completed" {
+            Some(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32)
+        } else {
+            None
+        };
+        diesel::update(tasks::table.filter(tasks::id.eq(task_id)))
+            .set((
+                tasks::status.eq(status),
+                tasks::completed_at.eq(completed_at),
+            ))
             .execute(&mut conn)?;
         Ok(())
     }
 
-    pub fn get_waiting_checks_all(&self, user_id: i32) -> Result<Vec<WaitingCheck>, DieselError> {
+    pub fn cancel_task(&self, user_id: i32, task_id: i32) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let mut checks = waiting_checks::table
-            .filter(waiting_checks::user_id.eq(user_id))
-            .load::<WaitingCheck>(&mut conn)?;
-
-        // Update service types
-        for check in &mut checks {
-            if check.service_type == "whatsapp" {
-                check.service_type = "messaging".to_string();
-            } else if check.service_type == "imap" {
-                check.service_type = "email".to_string();
-            }
-        }
-
-        Ok(checks)
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id))
+                .filter(tasks::status.eq("active"))
+        )
+            .set(tasks::status.eq("cancelled"))
+            .execute(&mut conn)?;
+        Ok(count > 0)
     }
 
-    pub fn get_waiting_checks(&self, user_id: i32, service_type: &str) -> Result<Vec<WaitingCheck>, DieselError> {
+    pub fn delete_old_tasks(&self, before_timestamp: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        if service_type == "email" {
-            waiting_checks::table
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq("imap").or(waiting_checks::service_type.eq("email")))
-                .load::<WaitingCheck>(&mut conn)
-        } else if service_type == "messaging" {
-            waiting_checks::table
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq("messaging").or(waiting_checks::service_type.eq("whatsapp")))
-                .load::<WaitingCheck>(&mut conn)
-        } else {
-            waiting_checks::table
-                .filter(waiting_checks::user_id.eq(user_id))
-                .filter(waiting_checks::service_type.eq(service_type))
-                .load::<WaitingCheck>(&mut conn)
-        }
+        diesel::delete(
+            tasks::table
+                .filter(tasks::status.ne("active"))
+                .filter(tasks::completed_at.lt(before_timestamp))
+        ).execute(&mut conn)
     }
 
     // Priority Senders methods
@@ -1060,19 +1059,6 @@ impl UserRepository {
         Ok(user_ids)
     }
 
-    pub fn has_active_google_tasks(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::google_tasks;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let connection = google_tasks::table
-            .filter(google_tasks::user_id.eq(user_id))
-            .filter(google_tasks::status.eq("active"))
-            .first::<crate::models::user_models::GoogleTasks>(&mut conn)
-            .optional()?;
-
-        Ok(connection.is_some())
-    }
-
     pub fn has_active_uber(&self, user_id: i32) -> Result<bool, DieselError> {
         use crate::schema::uber;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1481,127 +1467,6 @@ impl UserRepository {
             .filter(tesla::user_id.eq(user_id))
             .filter(tesla::status.eq("active"))
             .set(tesla::granted_scopes.eq(Some(scopes)))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn get_google_tasks_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
-        use crate::schema::google_tasks;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let connection = google_tasks::table
-            .filter(google_tasks::user_id.eq(user_id))
-            .filter(google_tasks::status.eq("active"))
-            .first::<crate::models::user_models::GoogleTasks>(&mut conn)
-            .optional()?;
-
-        if let Some(connection) = connection {
-            let access_token = match decrypt(&connection.encrypted_access_token) {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to decrypt access token: {:?}", e);
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            Ok(Some((access_token, refresh_token)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn update_google_tasks_access_token(
-        &self,
-        user_id: i32,
-        new_access_token: &str,
-        expires_in: i32,
-    ) -> Result<(), DieselError> {
-        use crate::schema::google_tasks;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_access_token = encrypt(new_access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        diesel::update(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
-            .filter(google_tasks::status.eq("active"))
-            .set((
-                google_tasks::encrypted_access_token.eq(encrypted_access_token),
-                google_tasks::expires_in.eq(expires_in),
-                google_tasks::last_update.eq(current_time),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn delete_google_tasks_connection(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::google_tasks;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn create_google_tasks_connection(
-        &self,
-        user_id: i32,
-        access_token: &str,
-        refresh_token: Option<&str>,
-        expires_in: i32,
-    ) -> Result<(), DieselError> {
-        use crate::schema::google_tasks;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_access_token = encrypt(access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-        let encrypted_refresh_token = refresh_token
-            .map(|token| encrypt(token))
-            .transpose()
-            .map_err(|_| DieselError::RollbackTransaction)?
-            .unwrap_or_default();
-
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let new_connection = NewGoogleTasks {
-            user_id,
-            encrypted_access_token,
-            encrypted_refresh_token,
-            expires_in,
-            status: "active".to_string(),
-            last_update: current_time,
-            created_on: current_time,
-            description: "Google Tasks Connection".to_string(),
-        };
-
-        // First, delete any existing connections for this user
-        diesel::delete(google_tasks::table)
-            .filter(google_tasks::user_id.eq(user_id))
-            .execute(&mut conn)?;
-
-        // Then insert the new connection
-        diesel::insert_into(google_tasks::table)
-            .values(&new_connection)
             .execute(&mut conn)?;
 
         Ok(())

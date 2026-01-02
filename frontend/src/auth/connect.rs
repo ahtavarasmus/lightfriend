@@ -9,7 +9,6 @@ use crate::Route;
 use crate::connections::whatsapp::WhatsappConnect;
 use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
-use crate::connections::tasks::TasksConnect;
 use crate::connections::telegram::TelegramConnect;
 use crate::connections::uber::UberConnect;
 use crate::connections::signal::SignalConnect;
@@ -55,14 +54,14 @@ struct ServiceGroupState {
 }
 #[derive(Clone, PartialEq)]
 enum MonitoringTab {
-    ForEachMessage,
+    Tasks,
+    People,
     Scheduled,
 }
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
     let calendar_connected = use_state(|| false);
-    let memory_connected = use_state(|| false);
     let email_connected = use_state(|| false);
     let whatsapp_connected = use_state(|| false);
     let telegram_connected = use_state(|| false);
@@ -93,7 +92,6 @@ pub fn connect(props: &ConnectProps) -> Html {
 
     {
         let calendar_connected = calendar_connected.clone();
-        let memory_connected = memory_connected.clone();
         let email_connected = email_connected.clone();
         let whatsapp_connected = whatsapp_connected.clone();
         let telegram_connected= telegram_connected.clone();
@@ -117,22 +115,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 calendar_connected.set(connected);
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                // Memory (Tasks) status check
-                spawn_local({
-                    let memory_connected = memory_connected.clone();
-                    async move {
-                        if let Ok(response) = Api::get("/api/auth/google/tasks/status")
-                            .send()
-                            .await
-                        {
-                                        if let Ok(data) = response.json::<Value>().await {
-                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                                memory_connected.set(connected);
                                             }
                                         }
                                     }
@@ -327,7 +309,6 @@ pub fn connect(props: &ConnectProps) -> Html {
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
             "calendar" => html! { <CalendarConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "tasks" => html! { <TasksConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
@@ -342,7 +323,17 @@ pub fn connect(props: &ConnectProps) -> Html {
     } else {
         html! {}
     };
-    let active_monitoring_tab = use_state(|| MonitoringTab::ForEachMessage);
+    let active_monitoring_tab = use_state(|| {
+        web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .and_then(|s| s.get_item("monitoring_tab").ok().flatten())
+            .map(|s| match s.as_str() {
+                "people" => MonitoringTab::People,
+                "scheduled" => MonitoringTab::Scheduled,
+                _ => MonitoringTab::Tasks,
+            })
+            .unwrap_or(MonitoringTab::Tasks)
+    });
 
     // Toggle proactive handler
     let handle_toggle = {
@@ -392,14 +383,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                             })}
                         >
                             <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *memory_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tasks") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("tasks".to_string()) { None } else { Some("tasks".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks" width="24" height="24"/>
                         </button>
                         <button
                             class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
@@ -541,19 +524,49 @@ pub fn connect(props: &ConnectProps) -> Html {
                         )}>
                         <div class="monitoring-tabs">
                             <button
-                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::ForEachMessage).then(|| "active"))}
+                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::Tasks).then(|| "active"))}
                                 onclick={{
                                     let active_monitoring_tab = active_monitoring_tab.clone();
-                                    Callback::from(move |_| active_monitoring_tab.set(MonitoringTab::ForEachMessage))
+                                    Callback::from(move |_| {
+                                        active_monitoring_tab.set(MonitoringTab::Tasks);
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("monitoring_tab", "tasks");
+                                            }
+                                        }
+                                    })
                                 }}
                             >
-                                {"For each message"}
+                                {"Tasks"}
+                            </button>
+                            <button
+                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::People).then(|| "active"))}
+                                onclick={{
+                                    let active_monitoring_tab = active_monitoring_tab.clone();
+                                    Callback::from(move |_| {
+                                        active_monitoring_tab.set(MonitoringTab::People);
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("monitoring_tab", "people");
+                                            }
+                                        }
+                                    })
+                                }}
+                            >
+                                {"People"}
                             </button>
                             <button
                                 class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::Scheduled).then(|| "active"))}
                                 onclick={{
                                     let active_monitoring_tab = active_monitoring_tab.clone();
-                                    Callback::from(move |_| active_monitoring_tab.set(MonitoringTab::Scheduled))
+                                    Callback::from(move |_| {
+                                        active_monitoring_tab.set(MonitoringTab::Scheduled);
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("monitoring_tab", "scheduled");
+                                            }
+                                        }
+                                    })
                                 }}
                             >
                                 {"Scheduled"}
@@ -562,7 +575,19 @@ pub fn connect(props: &ConnectProps) -> Html {
                         <div class={classes!("service-list", if !*proactive_enabled { "disabled" } else { "" })}>
                             {
                                 match *active_monitoring_tab {
-                                    MonitoringTab::ForEachMessage => {
+                                    MonitoringTab::Tasks => {
+                                        html! {
+                                            <div class={classes!("service-item")}>
+                                                <crate::proactive::waiting_checks::TasksSection
+                                                    tasks={vec![]}
+                                                    on_change={Callback::from(|_| {})}
+                                                    phone_number={props.phone_number.clone()}
+                                                    critical_disabled={!*proactive_enabled}
+                                                />
+                                            </div>
+                                        }
+                                    },
+                                    MonitoringTab::People => {
                                         html! {
                                         <>
                                             <div class={classes!("service-item")}>

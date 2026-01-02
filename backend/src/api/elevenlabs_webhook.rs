@@ -250,20 +250,11 @@ async fn handle_post_call_transcription(
         }
     };
 
-    tracing::info!("Successfully parsed webhook payload: {:?}", payload);
-    println!("Type: {}", payload.type_field);
     let conversation_id = payload.data.conversation_id;
-    println!("Conversation ID: {}", conversation_id);
-    let call_status = payload.data.status;
-    println!("Status: {}", call_status);
     let call_duration_secs = payload.data.metadata.call_duration_secs;
-    println!("Call Duration (secs): {}", call_duration_secs);
     let call_successful = payload.data.analysis.call_successful;
-    println!("Call Successful: {}", call_successful);
     let call_summary = payload.data.analysis.transcript_summary;
-    println!("Transcript Summary: {}", call_summary);
     let user_id: Option<String> = payload.data.conversation_initiation_client_data.dynamic_variables.user_id;
-    println!("User ID: {:?}", user_id);
 
     // Get user_id from dynamic variables
     let user_id_str = match user_id {
@@ -379,10 +370,6 @@ async fn handle_post_call_transcription(
                 tool_calls_json: None,
                 created_at: end_epoch,
             };
-
-            if user_id == 1 {
-                println!("adding call summary to message history: {:#?}", call_end);
-            }
 
             if let Err(e) = state.user_repository.create_message_history(&call_start) {
                 error!("Failed to create message history: {}", e);

@@ -1205,6 +1205,62 @@ pub async fn handle_bridge_message(
         println!("message: {}", content);
     }
 
+    // Check recurring_messaging tasks for this user
+    let message_context = format!(
+        "From: {}\nService: {}\nRoom: {}\nContent: {}",
+        sender_localpart, service, room_name.as_str(), content
+    );
+    let messaging_tasks = match state.user_repository.get_recurring_tasks_for_user(user_id, "recurring_messaging") {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            tracing::error!("Failed to get recurring messaging tasks for user {}: {}", user_id, e);
+            Vec::new()
+        }
+    };
+    if !messaging_tasks.is_empty() {
+        // Check if any tasks match the message
+        if let Ok((task_id_option, _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
+            &state,
+            user_id,
+            &message_context,
+            &messaging_tasks,
+        ).await {
+            if let Some(task_id) = task_id_option {
+                // Find the matched task to get its action and notification_type
+                let matched_task = messaging_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
+                if let Some(task) = matched_task {
+                    let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
+                    let action_spec = task.action.clone();
+
+                    // Mark the task as completed
+                    if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
+                        tracing::error!("Failed to complete task {}: {}", task_id, e);
+                    }
+
+                    // Execute the action_spec through AI + tools
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        tracing::debug!("Executing messaging task {} for user {}: {}", task_id, user_id, action_spec);
+                        match crate::utils::action_executor::execute_action_spec(
+                            &state_clone,
+                            user_id,
+                            &action_spec,
+                            &notification_type,
+                        ).await {
+                            crate::utils::action_executor::ActionResult::Success { message } => {
+                                tracing::debug!("Messaging task {} completed successfully: {}", task_id, message);
+                            }
+                            crate::utils::action_executor::ActionResult::Failed { error } => {
+                                tracing::error!("Messaging task {} failed: {}", task_id, error);
+                            }
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
     // Extract chat_name early for contact profile matching
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let sender_name = sender_localpart
