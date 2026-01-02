@@ -411,6 +411,24 @@ impl TeslaClient {
         self.send_command_direct_api(access_token, vehicle_id, "share", &body).await
     }
 
+    /// Set a scheduled departure time to trigger preconditioning
+    /// departure_time is minutes after midnight in vehicle local time (e.g., 480 = 8:00 AM)
+    pub async fn set_scheduled_departure(
+        &self,
+        access_token: &str,
+        vehicle_id: &str,
+        departure_time: i32,
+        preconditioning_enabled: bool,
+    ) -> Result<bool, Box<dyn Error>> {
+        let body = serde_json::json!({
+            "enable": true,
+            "departure_time": departure_time,
+            "preconditioning_enabled": preconditioning_enabled,
+            "preconditioning_weekdays_only": false
+        });
+        self.send_command_with_body(access_token, vehicle_id, "set_scheduled_departure", &body).await
+    }
+
     // Generic command sender
     async fn send_command(&self, access_token: &str, vehicle_id: &str, command: &str) -> Result<bool, Box<dyn Error>> {
         // Use proxy for signed commands if available, otherwise fall back to direct API

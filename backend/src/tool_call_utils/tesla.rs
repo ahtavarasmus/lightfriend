@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use chrono::Timelike;
 use serde_json::Value;
 use tracing::{info, error};
 
@@ -465,7 +466,18 @@ async fn execute_tesla_command(
             }
         }
         "precondition_battery" => {
-            // Get nearby charging sites to find a distant Supercharger
+            // Set scheduled departure for ~10 minutes from now to trigger preconditioning
+            // This tells Tesla "I'm leaving soon" so it starts warming the battery
+            let now = chrono::Local::now();
+            let departure_minutes = ((now.hour() * 60 + now.minute() + 10) % 1440) as i32;
+            let _ = tesla_client.set_scheduled_departure(
+                access_token,
+                vehicle_vin,
+                departure_minutes,
+                true,  // preconditioning_enabled
+            ).await;
+
+            // Get nearby charging sites to find a Supercharger
             let sites = match tesla_client.get_nearby_charging_sites(access_token, vehicle_vin).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -477,13 +489,10 @@ async fn execute_tesla_command(
                 return format!("No Superchargers found near your {}. Cannot start battery preconditioning.", vehicle_name);
             }
 
-            // Find a Supercharger ideally 20+ miles away, or use the furthest one available
+            // Use the closest Supercharger - Tesla will precondition regardless of distance
             let target = sites.superchargers
                 .iter()
-                .filter(|s| s.distance_miles >= 20.0)
-                .min_by(|a, b| a.distance_miles.partial_cmp(&b.distance_miles).unwrap_or(std::cmp::Ordering::Equal))
-                .or_else(|| sites.superchargers.iter().max_by(|a, b|
-                    a.distance_miles.partial_cmp(&b.distance_miles).unwrap_or(std::cmp::Ordering::Equal)));
+                .min_by(|a, b| a.distance_miles.partial_cmp(&b.distance_miles).unwrap_or(std::cmp::Ordering::Equal));
 
             let Some(supercharger) = target else {
                 return format!("No suitable Supercharger found for preconditioning your {}.", vehicle_name);
@@ -495,11 +504,12 @@ async fn execute_tesla_command(
             // Start climate control (also warms battery as side effect)
             let _ = tesla_client.start_climate(access_token, vehicle_vin).await;
 
-            // Use share command to actually start navigation (not just suggest destination)
-            // This triggers battery preconditioning when navigating to a Supercharger
-            match tesla_client.share_destination(access_token, vehicle_vin, &sc_name).await {
+            // Use share command with "Tesla Supercharger" prefix so Tesla recognizes it
+            // as a Supercharger destination and triggers battery preconditioning
+            let destination = format!("Tesla Supercharger {}", sc_name);
+            match tesla_client.share_destination(access_token, vehicle_vin, &destination).await {
                 Ok(true) => format!(
-                    "Battery preconditioning started for your {}! Navigation started to {} ({:.0} miles away). Climate is also running. Your battery will warm up for fast charging. When ready, just drive to your nearby charger.",
+                    "Battery preconditioning started for your {}! Scheduled departure set for 10 min, navigation to {} ({:.0} miles away), and climate running. Your battery will warm up for fast charging.",
                     vehicle_name, sc_name, sc_distance
                 ),
                 Ok(false) => format!("Failed to start navigation for battery preconditioning. Please try again."),
