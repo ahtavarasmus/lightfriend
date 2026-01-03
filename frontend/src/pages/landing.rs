@@ -188,6 +188,13 @@ pub fn landing() -> Html {
                 </div>
             </header>
 
+            <section class="trust-signal">
+                <span class="trust-label">{"As seen on"}</span>
+                <a href="https://www.thelightphone.com/blog/lightos-tips" target="_blank" rel="noopener noreferrer" class="trust-link">
+                    <img src="/assets/lightphone-logo.svg" alt="The Light Phone" class="trust-logo" />
+                </a>
+            </section>
+
             <section class="story-section">
                 <img src="/assets/rasmus-story.png" alt="Rasmus story" loading="lazy" />
             </section>
@@ -735,10 +742,17 @@ pub fn landing() -> Html {
     }
     .faq-item {
         margin-bottom: 1.5rem;
-        background: transparent;
-        border: none;
+        background: rgba(126, 178, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(126, 178, 255, 0.1);
         border-radius: 12px;
         padding: 1.5rem;
+        box-shadow: 0 0 15px rgba(126, 178, 255, 0.05);
+        transition: all 0.3s ease;
+    }
+    .faq-item:hover {
+        border-color: rgba(126, 178, 255, 0.25);
+        box-shadow: 0 0 25px rgba(126, 178, 255, 0.1);
     }
     .faq-item h3 {
         font-size: 1.4rem;
@@ -870,7 +884,13 @@ pub fn landing() -> Html {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 25px rgba(126, 178, 255, 0.12);
+        border: 1px solid rgba(126, 178, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+    .difference-image img:hover {
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 35px rgba(126, 178, 255, 0.2);
+        border-color: rgba(126, 178, 255, 0.25);
     }
     @media (max-width: 768px) {
         .difference-section {
@@ -1318,7 +1338,7 @@ pub fn landing() -> Html {
     }
     .hero-cta:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(126, 178, 255, 0.4);
+        box-shadow: 0 4px 20px rgba(126, 178, 255, 0.4), 0 0 40px rgba(126, 178, 255, 0.3);
         background: linear-gradient(
             45deg,
             #90c2ff,
@@ -1544,6 +1564,43 @@ pub fn landing() -> Html {
         transform: scaleX(1);
         transform-origin: bottom left;
     }
+    .trust-signal {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 1.5rem;
+        position: relative;
+        z-index: 2;
+    }
+    .trust-label {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+    }
+    .trust-link {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        background: rgba(126, 178, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(126, 178, 255, 0.2);
+        box-shadow: 0 0 20px rgba(126, 178, 255, 0.15), inset 0 0 20px rgba(126, 178, 255, 0.05);
+        transition: all 0.3s ease;
+    }
+    .trust-link:hover {
+        background: rgba(126, 178, 255, 0.15);
+        box-shadow: 0 0 30px rgba(126, 178, 255, 0.25), inset 0 0 20px rgba(126, 178, 255, 0.1);
+        border-color: rgba(126, 178, 255, 0.4);
+    }
+    .trust-logo {
+        height: 22px;
+        width: auto;
+        filter: brightness(0) invert(1);
+        opacity: 0.9;
+    }
     .story-section {
         padding: 4rem 2rem;
         max-width: 1200px;
@@ -1637,10 +1694,18 @@ pub fn landing() -> Html {
         text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
     }
     .testimonial {
-        background: rgba(0, 0, 0, 0.2);
+        background: rgba(126, 178, 255, 0.05);
+        backdrop-filter: blur(10px);
         border-radius: 12px;
         padding: 2rem;
         margin: 1rem 0;
+        border: 1px solid rgba(126, 178, 255, 0.15);
+        box-shadow: 0 0 20px rgba(126, 178, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+    .testimonial:hover {
+        border-color: rgba(126, 178, 255, 0.3);
+        box-shadow: 0 0 30px rgba(126, 178, 255, 0.15);
     }
     .testimonial blockquote {
         font-size: 1.2rem;

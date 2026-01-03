@@ -151,7 +151,9 @@ pub async fn execute_action_spec(
         - You MUST use tools to complete the task\n\
         - Maximum 2 tool calls allowed\n\
         - Use send_reminder to notify the user about results or reminders\n\
-        - Be concise and action-oriented\n\n\
+        - Be concise and action-oriented\n\
+        - When sending notifications, ALWAYS include WHY the action was triggered (the trigger context) along with what action was taken. \
+        For example: 'Ville messaged about leaving soon, so I turned on your Tesla climate.' NOT just 'Turned on Tesla climate.'\n\n\
         Notification preference: {}",
         notification_type
     );
