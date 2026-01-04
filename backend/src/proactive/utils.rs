@@ -1932,7 +1932,10 @@ pub async fn send_notification(
 
     // Check user's notification preference from settings
     // Note: Order matters - check "_call_sms" before "_call" to avoid false match
-    let notification_type = if content_type.contains("_call_sms") {
+    // Digests are always SMS-only (not affected by user's default notification type)
+    let notification_type = if content_type.contains("digest") {
+        "sms"
+    } else if content_type.contains("_call_sms") {
         "call_sms"
     } else if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")

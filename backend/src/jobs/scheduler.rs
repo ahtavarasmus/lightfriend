@@ -251,6 +251,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             // Determine suffix based on noti_type
                                             let suffix = match matched_sender.noti_type.as_ref().map(|s| s.as_str()) {
                                                 Some("call") => "_call",
+                                                Some("call_sms") => "_call_sms",
                                                 _ => "_sms",
                                             };
                                             let notification_type = format!("email_priority{}", suffix);
