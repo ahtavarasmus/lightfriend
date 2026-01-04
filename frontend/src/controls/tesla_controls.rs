@@ -73,6 +73,8 @@ pub fn tesla_controls() -> Html {
     let charge_rate = use_state(|| None::<f64>);
     let charger_power = use_state(|| None::<i32>);
     let time_to_full_charge = use_state(|| None::<f64>);
+    let charge_energy_added = use_state(|| None::<f64>);
+    let uses_miles = use_state(|| true);  // Default to miles, updated from API
     let charge_limit_loading = use_state(|| false);
     let charge_limit_editing = use_state(|| false);
     let charge_limit_input = use_state(|| 80i32);
@@ -259,6 +261,8 @@ pub fn tesla_controls() -> Html {
         let charge_rate = charge_rate.clone();
         let charger_power = charger_power.clone();
         let time_to_full_charge = time_to_full_charge.clone();
+        let charge_energy_added = charge_energy_added.clone();
+        let uses_miles = uses_miles.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -285,6 +289,8 @@ pub fn tesla_controls() -> Html {
                     let charge_rate = charge_rate.clone();
                     let charger_power = charger_power.clone();
                     let time_to_full_charge = time_to_full_charge.clone();
+                    let charge_energy_added = charge_energy_added.clone();
+                    let uses_miles = uses_miles.clone();
                     let is_locked = is_locked.clone();
                     let inside_temp = inside_temp.clone();
                     let outside_temp = outside_temp.clone();
@@ -319,6 +325,8 @@ pub fn tesla_controls() -> Html {
                                         charge_rate.set(data["charge_rate"].as_f64());
                                         charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
                                         time_to_full_charge.set(data["time_to_full_charge"].as_f64());
+                                        charge_energy_added.set(data["charge_energy_added"].as_f64());
+                                        uses_miles.set(data["uses_miles"].as_bool().unwrap_or(true));
                                         if let Some(locked) = data["locked"].as_bool() {
                                             is_locked.set(Some(locked));
                                         }
@@ -415,6 +423,8 @@ pub fn tesla_controls() -> Html {
         let charge_rate = charge_rate.clone();
         let charger_power = charger_power.clone();
         let time_to_full_charge = time_to_full_charge.clone();
+        let charge_energy_added = charge_energy_added.clone();
+        let uses_miles = uses_miles.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -441,6 +451,8 @@ pub fn tesla_controls() -> Html {
                         let charge_rate = charge_rate.clone();
                         let charger_power = charger_power.clone();
                         let time_to_full_charge = time_to_full_charge.clone();
+                        let charge_energy_added = charge_energy_added.clone();
+                        let uses_miles = uses_miles.clone();
                         let is_locked = is_locked.clone();
                         let inside_temp = inside_temp.clone();
                         let outside_temp = outside_temp.clone();
@@ -485,6 +497,8 @@ pub fn tesla_controls() -> Html {
                             let charge_rate = charge_rate.clone();
                             let charger_power = charger_power.clone();
                             let time_to_full_charge = time_to_full_charge.clone();
+                            let charge_energy_added = charge_energy_added.clone();
+                            let uses_miles = uses_miles.clone();
                             let is_locked = is_locked.clone();
                             let inside_temp = inside_temp.clone();
                             let outside_temp = outside_temp.clone();
@@ -516,6 +530,8 @@ pub fn tesla_controls() -> Html {
                                             charge_rate.set(data["charge_rate"].as_f64());
                                             charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
                                             time_to_full_charge.set(data["time_to_full_charge"].as_f64());
+                                            charge_energy_added.set(data["charge_energy_added"].as_f64());
+                                            uses_miles.set(data["uses_miles"].as_bool().unwrap_or(true));
                                             if let Some(locked) = data["locked"].as_bool() {
                                                 is_locked.set(Some(locked));
                                             }
@@ -1568,6 +1584,8 @@ pub fn tesla_controls() -> Html {
         let charge_rate = charge_rate.clone();
         let charger_power = charger_power.clone();
         let time_to_full_charge = time_to_full_charge.clone();
+        let charge_energy_added = charge_energy_added.clone();
+        let uses_miles = uses_miles.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -1590,6 +1608,8 @@ pub fn tesla_controls() -> Html {
             let charge_rate = charge_rate.clone();
             let charger_power = charger_power.clone();
             let time_to_full_charge = time_to_full_charge.clone();
+            let charge_energy_added = charge_energy_added.clone();
+            let uses_miles = uses_miles.clone();
             let is_locked = is_locked.clone();
             let inside_temp = inside_temp.clone();
             let outside_temp = outside_temp.clone();
@@ -1620,6 +1640,8 @@ pub fn tesla_controls() -> Html {
                             charge_rate.set(data["charge_rate"].as_f64());
                             charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
                             time_to_full_charge.set(data["time_to_full_charge"].as_f64());
+                            charge_energy_added.set(data["charge_energy_added"].as_f64());
+                            uses_miles.set(data["uses_miles"].as_bool().unwrap_or(true));
                             if let Some(locked) = data["locked"].as_bool() {
                                 is_locked.set(Some(locked));
                             }
@@ -1830,7 +1852,8 @@ pub fn tesla_controls() -> Html {
                                     <span class="status-main">{format!("{}%", level)}</span>
                                     {
                                         if let Some(range) = *battery_range {
-                                            html! { <span class="status-sub">{format!("{:.0} mi", range)}</span> }
+                                            let unit = if *uses_miles { "mi" } else { "km" };
+                                            html! { <span class="status-sub">{format!("{:.0} {}", range, unit)}</span> }
                                         } else { html! {} }
                                     }
                                 </div>
@@ -1860,6 +1883,7 @@ pub fn tesla_controls() -> Html {
                 {
                     if (*charging_state).as_ref().map(|s| s == "Charging").unwrap_or(false) {
                         let power_str = (*charger_power).map(|p| format!("{} kW", p)).unwrap_or_else(|| "-- kW".to_string());
+                        let energy_str = (*charge_energy_added).map(|e| format!("{:.1} kWh", e));
                         let time_str = (*time_to_full_charge).map(|h| {
                             let hours = h.floor() as i32;
                             let mins = ((h - hours as f64) * 60.0).round() as i32;
@@ -1869,12 +1893,17 @@ pub fn tesla_controls() -> Html {
                                 format!("{}m", mins)
                             }
                         }).unwrap_or_else(|| "--".to_string());
+                        let charging_info = if let Some(energy) = energy_str {
+                            format!(" {} • {} • {} left", power_str, energy, time_str)
+                        } else {
+                            format!(" {} • {} left", power_str, time_str)
+                        };
 
                         html! {
                             <div class="charging-details-row">
                                 <span class="charging-info">
                                     <i class="fas fa-bolt"></i>
-                                    {format!(" {} • {} left", power_str, time_str)}
+                                    {charging_info}
                                 </span>
                                 <button
                                     onclick={handle_charging_notify.clone()}

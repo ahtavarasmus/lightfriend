@@ -1012,7 +1012,7 @@ pub async fn tesla_battery_status(
     };
 
     // Extract charge state
-    let (battery_level, battery_range, charging_state, charge_limit_soc, charge_rate, charger_power, time_to_full_charge) =
+    let (battery_level, battery_range, charging_state, charge_limit_soc, charge_rate, charger_power, time_to_full_charge, charge_energy_added) =
         if let Some(charge_state) = &vehicle_data.charge_state {
             (
                 Some(charge_state.battery_level),
@@ -1022,10 +1022,14 @@ pub async fn tesla_battery_status(
                 charge_state.charge_rate,
                 charge_state.charger_power,
                 charge_state.time_to_full_charge,
+                charge_state.charge_energy_added,
             )
         } else {
-            (None, None, None, None, None, None, None)
+            (None, None, None, None, None, None, None, None)
         };
+
+    // Determine if region uses miles (NA) or kilometers (EU/CN)
+    let uses_miles = region.contains(".na.");
 
     // Extract climate data
     let (inside_temp, outside_temp, is_climate_on, is_front_defroster_on, is_rear_defroster_on) = if let Some(climate) = &vehicle_data.climate_state {
@@ -1052,6 +1056,8 @@ pub async fn tesla_battery_status(
         "charge_rate": charge_rate,
         "charger_power": charger_power,
         "time_to_full_charge": time_to_full_charge,
+        "charge_energy_added": charge_energy_added,
+        "uses_miles": uses_miles,
         "inside_temp": inside_temp,
         "outside_temp": outside_temp,
         "is_climate_on": is_climate_on,
