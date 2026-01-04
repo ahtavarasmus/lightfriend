@@ -1012,15 +1012,20 @@ pub async fn tesla_battery_status(
     };
 
     // Extract charge state
-    let (battery_level, battery_range, charging_state) = if let Some(charge_state) = &vehicle_data.charge_state {
-        (
-            Some(charge_state.battery_level),
-            Some(charge_state.battery_range),
-            Some(charge_state.charging_state.clone()),
-        )
-    } else {
-        (None, None, None)
-    };
+    let (battery_level, battery_range, charging_state, charge_limit_soc, charge_rate, charger_power, time_to_full_charge) =
+        if let Some(charge_state) = &vehicle_data.charge_state {
+            (
+                Some(charge_state.battery_level),
+                Some(charge_state.battery_range),
+                Some(charge_state.charging_state.clone()),
+                Some(charge_state.charge_limit_soc),
+                charge_state.charge_rate,
+                charge_state.charger_power,
+                charge_state.time_to_full_charge,
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
 
     // Extract climate data
     let (inside_temp, outside_temp, is_climate_on, is_front_defroster_on, is_rear_defroster_on) = if let Some(climate) = &vehicle_data.climate_state {
@@ -1043,6 +1048,10 @@ pub async fn tesla_battery_status(
         "battery_level": battery_level,
         "battery_range": battery_range,
         "charging_state": charging_state,
+        "charge_limit_soc": charge_limit_soc,
+        "charge_rate": charge_rate,
+        "charger_power": charger_power,
+        "time_to_full_charge": time_to_full_charge,
         "inside_temp": inside_temp,
         "outside_temp": outside_temp,
         "is_climate_on": is_climate_on,
@@ -1050,6 +1059,93 @@ pub async fn tesla_battery_status(
         "is_rear_defroster_on": is_rear_defroster_on,
         "locked": locked
     })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetChargeLimitRequest {
+    pub percent: i32,
+}
+
+pub async fn set_charge_limit(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(payload): Json<SetChargeLimitRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    info!("Set charge limit request from user {}: {}%", auth_user.user_id, payload.percent);
+
+    // Validate percent is within Tesla's limits (50-100)
+    if payload.percent < 50 || payload.percent > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Charge limit must be between 50 and 100 percent"})),
+        ));
+    }
+
+    // Check if user has Tesla connected
+    let has_tesla = state.user_repository
+        .has_active_tesla(auth_user.user_id)
+        .unwrap_or(false);
+
+    if !has_tesla {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Tesla not connected"})),
+        ));
+    }
+
+    // Get valid access token (with auto-refresh)
+    let access_token = match get_valid_tesla_access_token(&state, auth_user.user_id).await {
+        Ok(token) => token,
+        Err((status, msg)) => {
+            return Err((status, Json(json!({"error": msg}))));
+        }
+    };
+
+    // Get region from database
+    let region = state.user_repository
+        .get_tesla_region(auth_user.user_id)
+        .unwrap_or_else(|_| "na".to_string());
+
+    // Get selected vehicle
+    let vehicle_info = state.user_repository
+        .get_selected_vehicle_info(auth_user.user_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+
+    let (vehicle_vin, _, _) = vehicle_info;
+
+    // Create Tesla client
+    let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
+
+    // Wake up vehicle if needed
+    match tesla_client.wake_up_deduplicated(&access_token, &vehicle_vin, &state.tesla_waking_vehicles).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to wake up vehicle for charge limit: {}", e);
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": format!("Couldn't reach vehicle: {}", e)})),
+            ));
+        }
+    }
+
+    // Set charge limit
+    match tesla_client.set_charge_limit(&access_token, &vehicle_vin, payload.percent).await {
+        Ok(_) => {
+            info!("Successfully set charge limit to {}% for user {}", payload.percent, auth_user.user_id);
+            Ok(Json(json!({
+                "success": true,
+                "message": format!("Charge limit set to {}%", payload.percent)
+            })))
+        }
+        Err(e) => {
+            error!("Failed to set charge limit: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to set charge limit: {}", e)})),
+            ))
+        }
+    }
 }
 
 pub async fn tesla_list_vehicles(

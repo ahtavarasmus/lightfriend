@@ -489,6 +489,7 @@ async fn main() {
         .route("/api/tesla/command", post(tesla_auth::tesla_command))
         .route("/api/tesla/command-stream", get(tesla_auth::tesla_command_stream))
         .route("/api/tesla/battery-status", get(tesla_auth::tesla_battery_status))
+        .route("/api/tesla/charge-limit", post(tesla_auth::set_charge_limit))
         .route("/api/tesla/vehicles", get(tesla_auth::tesla_list_vehicles))
         .route("/api/tesla/select-vehicle", post(tesla_auth::tesla_select_vehicle))
         .route("/api/tesla/mark-paired", post(tesla_auth::tesla_mark_paired))

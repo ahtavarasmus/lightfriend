@@ -34,6 +34,9 @@ pub struct ChargeState {
     pub charge_limit_soc: i32,
     pub charging_state: String,
     pub minutes_to_full_charge: Option<i32>,
+    pub charge_rate: Option<f64>,         // Miles/hr or km/hr charging rate
+    pub charger_power: Option<i32>,       // kW being delivered
+    pub time_to_full_charge: Option<f64>, // Hours (float, more precise than minutes)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -359,6 +362,12 @@ impl TeslaClient {
             "fan_only": fan_only
         });
         self.send_command_with_body(access_token, vehicle_id, "set_cabin_overheat_protection", &body).await
+    }
+
+    // Set charging limit (percent must be 50-100)
+    pub async fn set_charge_limit(&self, access_token: &str, vehicle_id: &str, percent: i32) -> Result<bool, Box<dyn Error>> {
+        let body = serde_json::json!({"percent": percent});
+        self.send_command_with_body(access_token, vehicle_id, "set_charge_limit", &body).await
     }
 
     // Get nearby Tesla charging sites (Superchargers and Destination chargers)

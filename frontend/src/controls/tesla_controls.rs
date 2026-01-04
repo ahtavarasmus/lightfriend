@@ -69,6 +69,13 @@ pub fn tesla_controls() -> Html {
     let battery_level = use_state(|| None::<i32>);
     let battery_range = use_state(|| None::<f64>);
     let charging_state = use_state(|| None::<String>);
+    let charge_limit_soc = use_state(|| None::<i32>);
+    let charge_rate = use_state(|| None::<f64>);
+    let charger_power = use_state(|| None::<i32>);
+    let time_to_full_charge = use_state(|| None::<f64>);
+    let charge_limit_loading = use_state(|| false);
+    let charge_limit_editing = use_state(|| false);
+    let charge_limit_input = use_state(|| 80i32);
     let battery_loading = use_state(|| false);
     let is_locked = use_state(|| None::<bool>);
     let inside_temp = use_state(|| None::<f64>);
@@ -248,6 +255,10 @@ pub fn tesla_controls() -> Html {
         let battery_level = battery_level.clone();
         let battery_range = battery_range.clone();
         let charging_state = charging_state.clone();
+        let charge_limit_soc = charge_limit_soc.clone();
+        let charge_rate = charge_rate.clone();
+        let charger_power = charger_power.clone();
+        let time_to_full_charge = time_to_full_charge.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -270,6 +281,10 @@ pub fn tesla_controls() -> Html {
                     let climate_notify_active = climate_notify_active.clone();
                     let charging_notify_active = charging_notify_active.clone();
                     let charging_state = charging_state.clone();
+                    let charge_limit_soc = charge_limit_soc.clone();
+                    let charge_rate = charge_rate.clone();
+                    let charger_power = charger_power.clone();
+                    let time_to_full_charge = time_to_full_charge.clone();
                     let is_locked = is_locked.clone();
                     let inside_temp = inside_temp.clone();
                     let outside_temp = outside_temp.clone();
@@ -298,6 +313,12 @@ pub fn tesla_controls() -> Html {
                                         if let Some(state) = data["charging_state"].as_str() {
                                             charging_state.set(Some(state.to_string()));
                                         }
+                                        if let Some(limit) = data["charge_limit_soc"].as_i64() {
+                                            charge_limit_soc.set(Some(limit as i32));
+                                        }
+                                        charge_rate.set(data["charge_rate"].as_f64());
+                                        charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
+                                        time_to_full_charge.set(data["time_to_full_charge"].as_f64());
                                         if let Some(locked) = data["locked"].as_bool() {
                                             is_locked.set(Some(locked));
                                         }
@@ -390,6 +411,10 @@ pub fn tesla_controls() -> Html {
         let battery_level = battery_level.clone();
         let battery_range = battery_range.clone();
         let charging_state = charging_state.clone();
+        let charge_limit_soc = charge_limit_soc.clone();
+        let charge_rate = charge_rate.clone();
+        let charger_power = charger_power.clone();
+        let time_to_full_charge = time_to_full_charge.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -412,6 +437,10 @@ pub fn tesla_controls() -> Html {
                         let battery_level = battery_level.clone();
                         let battery_range = battery_range.clone();
                         let charging_state = charging_state.clone();
+                        let charge_limit_soc = charge_limit_soc.clone();
+                        let charge_rate = charge_rate.clone();
+                        let charger_power = charger_power.clone();
+                        let time_to_full_charge = time_to_full_charge.clone();
                         let is_locked = is_locked.clone();
                         let inside_temp = inside_temp.clone();
                         let outside_temp = outside_temp.clone();
@@ -452,6 +481,10 @@ pub fn tesla_controls() -> Html {
                             let battery_level = battery_level.clone();
                             let battery_range = battery_range.clone();
                             let charging_state = charging_state.clone();
+                            let charge_limit_soc = charge_limit_soc.clone();
+                            let charge_rate = charge_rate.clone();
+                            let charger_power = charger_power.clone();
+                            let time_to_full_charge = time_to_full_charge.clone();
                             let is_locked = is_locked.clone();
                             let inside_temp = inside_temp.clone();
                             let outside_temp = outside_temp.clone();
@@ -477,6 +510,12 @@ pub fn tesla_controls() -> Html {
                                             if let Some(state) = data["charging_state"].as_str() {
                                                 charging_state.set(Some(state.to_string()));
                                             }
+                                            if let Some(limit) = data["charge_limit_soc"].as_i64() {
+                                                charge_limit_soc.set(Some(limit as i32));
+                                            }
+                                            charge_rate.set(data["charge_rate"].as_f64());
+                                            charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
+                                            time_to_full_charge.set(data["time_to_full_charge"].as_f64());
                                             if let Some(locked) = data["locked"].as_bool() {
                                                 is_locked.set(Some(locked));
                                             }
@@ -1525,6 +1564,10 @@ pub fn tesla_controls() -> Html {
         let battery_level = battery_level.clone();
         let battery_range = battery_range.clone();
         let charging_state = charging_state.clone();
+        let charge_limit_soc = charge_limit_soc.clone();
+        let charge_rate = charge_rate.clone();
+        let charger_power = charger_power.clone();
+        let time_to_full_charge = time_to_full_charge.clone();
         let is_locked = is_locked.clone();
         let inside_temp = inside_temp.clone();
         let outside_temp = outside_temp.clone();
@@ -1543,6 +1586,10 @@ pub fn tesla_controls() -> Html {
             let battery_level = battery_level.clone();
             let battery_range = battery_range.clone();
             let charging_state = charging_state.clone();
+            let charge_limit_soc = charge_limit_soc.clone();
+            let charge_rate = charge_rate.clone();
+            let charger_power = charger_power.clone();
+            let time_to_full_charge = time_to_full_charge.clone();
             let is_locked = is_locked.clone();
             let inside_temp = inside_temp.clone();
             let outside_temp = outside_temp.clone();
@@ -1567,6 +1614,12 @@ pub fn tesla_controls() -> Html {
                             if let Some(state) = data["charging_state"].as_str() {
                                 charging_state.set(Some(state.to_string()));
                             }
+                            if let Some(limit) = data["charge_limit_soc"].as_i64() {
+                                charge_limit_soc.set(Some(limit as i32));
+                            }
+                            charge_rate.set(data["charge_rate"].as_f64());
+                            charger_power.set(data["charger_power"].as_i64().map(|p| p as i32));
+                            time_to_full_charge.set(data["time_to_full_charge"].as_f64());
                             if let Some(locked) = data["locked"].as_bool() {
                                 is_locked.set(Some(locked));
                             }
@@ -1769,6 +1822,7 @@ pub fn tesla_controls() -> Html {
                             else if level <= 60 { "fa-battery-half" }
                             else if level <= 90 { "fa-battery-three-quarters" }
                             else { "fa-battery-full" };
+                        let is_charging = (*charging_state).as_ref().map(|s| s == "Charging").unwrap_or(false);
                         html! {
                             <div class="status-row">
                                 <i class={format!("fa-solid {}", icon_class)} style="font-size: 24px; color: #7EB2FF;"></i>
@@ -1781,8 +1835,9 @@ pub fn tesla_controls() -> Html {
                                     }
                                 </div>
                                 {
-                                    if let Some(state) = (*charging_state).as_ref() {
-                                        html! { <span class="charging-state">{state}</span> }
+                                    // Only show "Charging" status, hide other states
+                                    if is_charging {
+                                        html! { <span class="charging-state">{"Charging"}</span> }
                                     } else { html! {} }
                                 }
                             </div>
@@ -1798,6 +1853,64 @@ pub fn tesla_controls() -> Html {
                         html! {
                             <div class="status-empty">{"Click refresh to load status"}</div>
                         }
+                    }
+                }
+
+                // Charging details row (only when charging)
+                {
+                    if (*charging_state).as_ref().map(|s| s == "Charging").unwrap_or(false) {
+                        let power_str = (*charger_power).map(|p| format!("{} kW", p)).unwrap_or_else(|| "-- kW".to_string());
+                        let time_str = (*time_to_full_charge).map(|h| {
+                            let hours = h.floor() as i32;
+                            let mins = ((h - hours as f64) * 60.0).round() as i32;
+                            if hours > 0 {
+                                format!("{}h {}m", hours, mins)
+                            } else {
+                                format!("{}m", mins)
+                            }
+                        }).unwrap_or_else(|| "--".to_string());
+
+                        html! {
+                            <div class="charging-details-row">
+                                <span class="charging-info">
+                                    <i class="fas fa-bolt"></i>
+                                    {format!(" {} • {} left", power_str, time_str)}
+                                </span>
+                                <button
+                                    onclick={handle_charging_notify.clone()}
+                                    disabled={*charging_notify_loading || !*has_vehicle_charging_cmds}
+                                    class={format!("notify-btn-inline {}",
+                                        if *charging_notify_active { "notify-btn-active" } else { "" }
+                                    )}
+                                    title={if !*has_vehicle_charging_cmds { "Requires Charging Commands permission" } else { "" }}
+                                >
+                                    {
+                                        if *charging_notify_loading {
+                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                        } else if *charging_notify_active {
+                                            html! { <><i class="fas fa-bell-slash"></i>{" Cancel"}</> }
+                                        } else {
+                                            html! { <><i class="fas fa-bell"></i>{" Notify"}</> }
+                                        }
+                                    }
+                                </button>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+
+                // Charging notify hint (only when notify is active)
+                {
+                    if *charging_notify_active {
+                        html! {
+                            <div class="charging-notify-hint">
+                                {"Uses your default notification setting"}
+                            </div>
+                        }
+                    } else {
+                        html! {}
                     }
                 }
 
@@ -1819,6 +1932,126 @@ pub fn tesla_controls() -> Html {
                             </div>
                         }
                     } else { html! {} }
+                }
+
+                // Charge limit row
+                {
+                    if let Some(limit) = *charge_limit_soc {
+                        html! {
+                            <div class="charge-limit-row">
+                                <span class="charge-limit-label">
+                                    {format!("Limit: {}%", limit)}
+                                </span>
+                                {
+                                    if *charge_limit_editing {
+                                        html! {
+                                            <div class="charge-limit-edit">
+                                                <input
+                                                    type="range"
+                                                    min="50"
+                                                    max="100"
+                                                    value={(*charge_limit_input).to_string()}
+                                                    class="charge-limit-slider"
+                                                    oninput={{
+                                                        let charge_limit_input = charge_limit_input.clone();
+                                                        Callback::from(move |e: InputEvent| {
+                                                            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                            if let Ok(val) = input.value().parse::<i32>() {
+                                                                charge_limit_input.set(val);
+                                                            }
+                                                        })
+                                                    }}
+                                                />
+                                                <span class="charge-limit-value">{format!("{}%", *charge_limit_input)}</span>
+                                                <button
+                                                    class="charge-limit-save-btn"
+                                                    disabled={*charge_limit_loading}
+                                                    onclick={{
+                                                        let charge_limit_input = charge_limit_input.clone();
+                                                        let charge_limit_soc = charge_limit_soc.clone();
+                                                        let charge_limit_editing = charge_limit_editing.clone();
+                                                        let charge_limit_loading = charge_limit_loading.clone();
+                                                        let command_result = command_result.clone();
+                                                        Callback::from(move |_: MouseEvent| {
+                                                            let new_limit = *charge_limit_input;
+                                                            let charge_limit_soc = charge_limit_soc.clone();
+                                                            let charge_limit_editing = charge_limit_editing.clone();
+                                                            let charge_limit_loading = charge_limit_loading.clone();
+                                                            let command_result = command_result.clone();
+                                                            spawn_local(async move {
+                                                                charge_limit_loading.set(true);
+                                                                let body = serde_json::json!({"percent": new_limit});
+                                                                match Api::post("/api/tesla/charge-limit")
+                                                                    .json(&body)
+                                                                    .unwrap()
+                                                                    .send()
+                                                                    .await
+                                                                {
+                                                                    Ok(response) => {
+                                                                        if response.ok() {
+                                                                            charge_limit_soc.set(Some(new_limit));
+                                                                            charge_limit_editing.set(false);
+                                                                            command_result.set(Some(format!("Charge limit set to {}%", new_limit)));
+                                                                        } else {
+                                                                            command_result.set(Some("Failed to set charge limit".to_string()));
+                                                                        }
+                                                                    }
+                                                                    Err(_) => {
+                                                                        command_result.set(Some("Failed to set charge limit".to_string()));
+                                                                    }
+                                                                }
+                                                                charge_limit_loading.set(false);
+                                                            });
+                                                        })
+                                                    }}
+                                                >
+                                                    {
+                                                        if *charge_limit_loading {
+                                                            html! { <i class="fas fa-spinner fa-spin"></i> }
+                                                        } else {
+                                                            html! { <i class="fas fa-check"></i> }
+                                                        }
+                                                    }
+                                                </button>
+                                                <button
+                                                    class="charge-limit-cancel-btn"
+                                                    onclick={{
+                                                        let charge_limit_editing = charge_limit_editing.clone();
+                                                        Callback::from(move |_: MouseEvent| {
+                                                            charge_limit_editing.set(false);
+                                                        })
+                                                    }}
+                                                >
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <button
+                                                class="charge-limit-edit-btn"
+                                                disabled={!*has_vehicle_charging_cmds}
+                                                title={if !*has_vehicle_charging_cmds { "Requires Charging Commands permission" } else { "" }}
+                                                onclick={{
+                                                    let charge_limit_editing = charge_limit_editing.clone();
+                                                    let charge_limit_input = charge_limit_input.clone();
+                                                    let limit = limit;
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        charge_limit_input.set(limit);
+                                                        charge_limit_editing.set(true);
+                                                    })
+                                                }}
+                                            >
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                        }
+                                    }
+                                }
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
                 }
             </div>
 
@@ -2046,41 +2279,6 @@ pub fn tesla_controls() -> Html {
                     {"Warms battery for fast charging (use ~30 min before charging)"}
                 </div>
             </div>
-
-            // Charging notification - only show when charging
-            {
-                if charging_state.as_ref().map(|s| s == "Charging").unwrap_or(false) {
-                    html! {
-                        <div class="charging-notify-section">
-                            <div class="control-btn-wrapper" title={if !*has_vehicle_charging_cmds { "Requires Charging Commands permission. Reconnect Tesla to grant." } else { "" }}>
-                                <button
-                                    onclick={handle_charging_notify}
-                                    disabled={*charging_notify_loading || !*has_vehicle_charging_cmds}
-                                    class={format!("control-btn control-btn-full {} {}",
-                                        if *charging_notify_active { "control-btn-active" } else { "" },
-                                        if !*has_vehicle_charging_cmds { "control-btn-disabled" } else { "" }
-                                    )}
-                                >
-                                    {
-                                        if *charging_notify_loading {
-                                            html! { <i class="fas fa-spinner fa-spin"></i> }
-                                        } else if *charging_notify_active {
-                                            html! { <><i class="fas fa-bell-slash"></i>{" Cancel Charging Notification"}</> }
-                                        } else {
-                                            html! { <><i class="fas fa-bell"></i>{" Notify When Charged"}</> }
-                                        }
-                                    }
-                                </button>
-                            </div>
-                            <div class="notify-hint">
-                                {"Won't notify if you're in the vehicle"}
-                            </div>
-                        </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
 
             // Hint for climate notify when visible
             {
@@ -2351,10 +2549,134 @@ fn get_styles() -> &'static str {
             font-size: 12px;
             opacity: 0.7;
         }
-        .charging-notify-section {
-            margin-top: 1rem;
-            padding-top: 1rem;
+        .charging-details-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 8px;
+            padding-top: 8px;
             border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .charging-info {
+            color: #7EB2FF;
+            font-size: 14px;
+        }
+        .notify-btn-inline {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: rgba(30, 144, 255, 0.15);
+            color: #7EB2FF;
+            border: 1px solid rgba(30, 144, 255, 0.3);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .notify-btn-inline:hover:not(:disabled) {
+            background: rgba(30, 144, 255, 0.25);
+        }
+        .notify-btn-inline:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .notify-btn-inline.notify-btn-active {
+            background: rgba(30, 144, 255, 0.3);
+            border-color: rgba(30, 144, 255, 0.5);
+        }
+        .charging-notify-hint {
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+            margin-top: 4px;
+            padding: 4px 0;
+        }
+        .charge-limit-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
+        }
+        .charge-limit-label {
+            color: #999;
+            font-size: 14px;
+        }
+        .charge-limit-edit {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .charge-limit-slider {
+            width: 80px;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            background: rgba(30, 144, 255, 0.3);
+            border-radius: 3px;
+            outline: none;
+        }
+        .charge-limit-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #7EB2FF;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .charge-limit-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #7EB2FF;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+        .charge-limit-value {
+            color: #7EB2FF;
+            font-size: 14px;
+            min-width: 35px;
+        }
+        .charge-limit-save-btn,
+        .charge-limit-cancel-btn {
+            padding: 4px 8px;
+            font-size: 12px;
+            background: rgba(30, 144, 255, 0.15);
+            color: #7EB2FF;
+            border: 1px solid rgba(30, 144, 255, 0.3);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .charge-limit-save-btn:hover:not(:disabled) {
+            background: rgba(105, 240, 174, 0.2);
+            border-color: rgba(105, 240, 174, 0.4);
+            color: #69f0ae;
+        }
+        .charge-limit-cancel-btn:hover {
+            background: rgba(255, 100, 100, 0.2);
+            border-color: rgba(255, 100, 100, 0.4);
+            color: #ff6464;
+        }
+        .charge-limit-save-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .charge-limit-edit-btn {
+            padding: 4px 8px;
+            font-size: 12px;
+            background: transparent;
+            color: #666;
+            border: none;
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+        .charge-limit-edit-btn:hover:not(:disabled) {
+            color: #7EB2FF;
+        }
+        .charge-limit-edit-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
         }
         .status-message {
             margin-top: 1rem;
