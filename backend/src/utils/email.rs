@@ -110,21 +110,34 @@ pub async fn send_password_reset_email(
     let smtp_port: u16 = 587;
 
     let email_body = format!(
-        r#"Password Reset Request
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #333;">Password Reset Request</h2>
 
-You requested a password reset for your Lightfriend account.
+    <p>You requested a password reset for your Lightfriend account.</p>
 
-Click the link below to set a new password:
+    <p>Click the button below to set a new password:</p>
 
-{}
+    <p style="margin: 30px 0;">
+        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Reset Password</a>
+    </p>
 
-This link is valid for 24 hours and can only be used once.
+    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
 
-If you didn't request a password reset, you can safely ignore this email.
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">This link is valid for 24 hours and can only be used once.</p>
 
-Best,
-The Lightfriend Team"#,
-        reset_link
+    <p style="font-size: 14px; color: #666;">If you didn't request a password reset, you can safely ignore this email.</p>
+
+    <p style="margin-top: 30px;">Best,<br>The Lightfriend Team</p>
+</body>
+</html>"#,
+        reset_link, reset_link, reset_link
     );
 
     let email = Message::builder()
@@ -133,7 +146,7 @@ The Lightfriend Team"#,
         .subject("Lightfriend Password Reset")
         .singlepart(
             SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
+                .header(ContentType::TEXT_HTML)
                 .body(email_body)
         )?;
 

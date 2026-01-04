@@ -8,10 +8,14 @@ use axum::{
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use rand::Rng;
+use diesel::prelude::*;
 
 use std::path::Path;
 use tokio::fs;
 use uuid::Uuid;
+
+use crate::schema::waitlist;
+use crate::models::user_models::WaitlistEntry;
 
 #[derive(Deserialize)]
 pub struct TestSmsRequest {
@@ -120,6 +124,7 @@ pub async fn unsubscribe(
 ) -> Result<Html<String>, (StatusCode, String)> {
     tracing::info!("Unsubscribe request received for raw email param: {}", params.email);
 
+    // First try to find a registered user
     match state.user_core.find_by_email(&params.email) {
         Ok(Some(user)) => {
             tracing::info!("Found user {} for email: {}", user.id, params.email);
@@ -138,11 +143,34 @@ pub async fn unsubscribe(
             }
         }
         Ok(None) => {
-            tracing::warn!("No user found for email: {}", params.email);
-            Err((
-                StatusCode::BAD_REQUEST,
-                "Invalid email.".to_string(),
-            ))
+            // No registered user found, check waitlist
+            tracing::info!("No registered user found for email: {}, checking waitlist", params.email);
+
+            let mut conn = state.db_pool.get().map_err(|e| {
+                tracing::error!("Failed to get DB connection: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+            })?;
+
+            // Try to delete from waitlist
+            let deleted = diesel::delete(
+                waitlist::table.filter(waitlist::email.eq(&params.email.to_lowercase()))
+            )
+            .execute(&mut conn)
+            .map_err(|e| {
+                tracing::error!("Failed to delete from waitlist: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process request.".to_string())
+            })?;
+
+            if deleted > 0 {
+                tracing::info!("Removed {} from waitlist", params.email);
+                Ok(Html("<h1>You have been unsubscribed!</h1>".to_string()))
+            } else {
+                tracing::warn!("No user or waitlist entry found for email: {}", params.email);
+                Err((
+                    StatusCode::BAD_REQUEST,
+                    "Invalid email.".to_string(),
+                ))
+            }
         }
         Err(e) => {
             tracing::error!("Failed to find user by email {}: {}", params.email, e);
@@ -220,6 +248,27 @@ pub async fn broadcast_email(
         )
     })?;
 
+    // Fetch waitlist entries (updates-only subscribers who haven't signed up yet)
+    let waitlist_entries: Vec<WaitlistEntry> = {
+        let mut conn = state.db_pool.get().map_err(|e| {
+            tracing::error!("Failed to get DB connection for waitlist: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            )
+        })?;
+        waitlist::table
+            .select(WaitlistEntry::as_select())
+            .load(&mut conn)
+            .map_err(|e| {
+                tracing::error!("Failed to fetch waitlist entries: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Database error: {}", e)}))
+                )
+            })?
+    };
+
     // Clone what we need for the task
     let state_clone = state.clone();
     let request_clone = request.clone();
@@ -232,6 +281,10 @@ pub async fn broadcast_email(
         let mut failed_count = 0;
         let mut error_details = Vec::new();
 
+        // Collect registered user emails to avoid sending duplicates to waitlist entries
+        let mut sent_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Send to registered users with notify enabled
         for user in users {
             let user_settings = match state_clone.user_core.get_user_settings(user.id) {
                 Ok(settings) => settings,
@@ -245,6 +298,8 @@ pub async fn broadcast_email(
 
             if !user_settings.notify {
                 tracing::info!("skipping user since they don't have notify on");
+                // Still track email to avoid duplicate from waitlist
+                sent_emails.insert(user.email.to_lowercase());
                 continue;
             }
 
@@ -253,6 +308,9 @@ pub async fn broadcast_email(
                 tracing::warn!("Skipping invalid email address: {}", user.email);
                 continue;
             }
+
+            // Track this email as sent
+            sent_emails.insert(user.email.to_lowercase());
 
             // Prepare the unsubscribe link
             let encoded_email = urlencoding::encode(&user.email);
@@ -294,6 +352,59 @@ pub async fn broadcast_email(
             }
 
             // Add a small delay to avoid hitting rate limits
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        // Send to waitlist entries (updates-only subscribers)
+        for entry in waitlist_entries {
+            // Skip if already sent to this email (user is both registered and on waitlist)
+            if sent_emails.contains(&entry.email.to_lowercase()) {
+                tracing::info!("Skipping waitlist entry {} - already sent as registered user", entry.email);
+                continue;
+            }
+
+            // Skip invalid email addresses
+            if entry.email.is_empty() || !entry.email.contains('@') || !entry.email.contains('.') {
+                tracing::warn!("Skipping invalid waitlist email address: {}", entry.email);
+                continue;
+            }
+
+            // Prepare the unsubscribe link
+            let encoded_email = urlencoding::encode(&entry.email);
+            let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
+            let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+
+            // Prepare plain text body with unsubscribe
+            let plain_body = format!(
+                "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
+                request_clone.message, unsubscribe_link
+            );
+            let wrapped_body = wrap_text(&plain_body, 72);
+            let crlf_body = wrapped_body.replace("\n", "\r\n");
+
+            let email_request = crate::handlers::imap_handlers::SendEmailRequest {
+                to: entry.email.clone(),
+                subject: request_clone.subject.clone(),
+                body: crlf_body,
+            };
+
+            match crate::handlers::imap_handlers::send_email(
+                State(state_clone.clone()),
+                auth_user.clone(),
+                Json(email_request)
+            ).await {
+                Ok(_) => {
+                    success_count += 1;
+                    tracing::info!("Successfully sent email to waitlist entry {}", entry.email);
+                }
+                Err((_status, err)) => {
+                    failed_count += 1;
+                    let error_msg = format!("Failed to send to waitlist {}: {:?}", entry.email, err);
+                    tracing::error!("{}", error_msg);
+                    error_details.push(error_msg);
+                }
+            }
+
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 

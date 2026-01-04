@@ -143,10 +143,11 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "How to notify/contact the user. Default is 'sms'. \
-                Use 'call' if the user specifically asks to be called.".to_string()
+                "How to notify the user. If not specified, uses user's default preference from settings. \
+                Only set this if user explicitly asks for a specific method (e.g., 'call me', 'text me'). \
+                Options: 'sms', 'call', or 'call_sms' (loud phone ring + SMS backup, only charged for call if answered).".to_string()
             ),
-            enum_values: Some(vec!["sms".to_string(), "call".to_string()]),
+            enum_values: Some(vec!["sms".to_string(), "call".to_string(), "call_sms".to_string()]),
             ..Default::default()
         }),
     );
@@ -227,12 +228,18 @@ pub async fn handle_create_task(
         .unwrap()
         .as_secs() as i32;
 
+    // Get user's default notification type from settings
+    let user_settings = state.user_core.get_user_settings(user_id)
+        .map_err(|e| format!("Failed to get user settings: {:?}", e))?;
+    let default_noti_type = user_settings.notification_type
+        .unwrap_or_else(|| "sms".to_string());
+
     let new_task = crate::models::user_models::NewTask {
         user_id,
         trigger: trigger.clone(),
         condition: args.condition.clone(),
         action: args.action_spec.clone(),
-        notification_type: args.notification_type.or(Some("sms".to_string())),
+        notification_type: args.notification_type.or(Some(default_noti_type)),
         status: "active".to_string(),
         created_at: now,
     };

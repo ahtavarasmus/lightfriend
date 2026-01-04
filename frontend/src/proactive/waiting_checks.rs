@@ -243,6 +243,10 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
                         color: #FF6347;
                         border: 1px solid rgba(255, 99, 71, 0.2);
                     }
+                    .noti-type-badge.call_sms {
+                        color: #9B59B6;
+                        border: 1px solid rgba(155, 89, 182, 0.2);
+                    }
                     .filter-list li:hover {
                         border-color: rgba(245, 158, 11, 0.2);
                         transform: translateY(-1px);
@@ -445,7 +449,11 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
                                 "scheduled"
                             };
                             let noti_type = task.notification_type.as_ref().map(|s| s.as_str()).unwrap_or("sms");
-                            let noti_class = if noti_type == "call" { "call" } else { "sms" };
+                            let noti_class = match noti_type {
+                                "call" => "call",
+                                "call_sms" => "call_sms",
+                                _ => "sms",
+                            };
 
                             html! {
                                 <li>
@@ -454,7 +462,7 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
                                             {format_trigger(&task.trigger)}
                                         </span>
                                         <span class={classes!("noti-type-badge", noti_class)}>
-                                            {noti_type.to_uppercase()}
+                                            {if noti_type == "call_sms" { "CALL+SMS".to_string() } else { noti_type.to_uppercase() }}
                                         </span>
                                         <button class="delete-btn"
                                             onclick={Callback::from({

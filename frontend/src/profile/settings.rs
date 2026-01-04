@@ -2044,7 +2044,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"Choose how you want to receive notifications (SMS or call)."}
+                            {"Choose how you want to receive notifications. Call+SMS rings your phone as a loud alert, plus sends SMS with details. Only charged for call if answered."}
                         </span>
                     </div>
                 </div>
@@ -2059,6 +2059,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         </option>
                         <option value="call" selected={(*notification_type).as_deref() == Some("call")}>
                             {"Call me"}
+                        </option>
+                        <option value="call_sms" selected={(*notification_type).as_deref() == Some("call_sms")}>
+                            {"Call + SMS (loud alert)"}
                         </option>
                     </select>
                     {render_save_indicator(&*notification_type_save_state)}

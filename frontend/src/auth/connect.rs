@@ -569,7 +569,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     })
                                 }}
                             >
-                                {"Scheduled"}
+                                {"Digests"}
                             </button>
                         </div>
                         <div class={classes!("service-list", if !*proactive_enabled { "disabled" } else { "" })}>
