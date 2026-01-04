@@ -36,7 +36,7 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                     if let Ok(response) = request {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                // Check if YouTube is available for this user (only user_id 1 for now)
+                                // Check if YouTube is available for this user
                                 let available = data.get("available").and_then(|v| v.as_bool()).unwrap_or(true);
                                 youtube_available.set(available);
 

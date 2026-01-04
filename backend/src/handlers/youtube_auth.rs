@@ -32,11 +32,6 @@ pub async fn youtube_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // YouTube integration is currently only available for user id 1 and 129
-    if auth_user.user_id != 1 && auth_user.user_id != 129 {
-        return Ok(Json(json!({ "connected": false, "scope": null, "available": false })));
-    }
-
     let connected = match state.user_repository.has_active_youtube(auth_user.user_id) {
         Ok(c) => c,
         Err(e) => {
@@ -78,14 +73,6 @@ pub async fn youtube_login(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // YouTube integration is currently only available for user id 1 and 129
-    if auth_user.user_id != 1 && auth_user.user_id != 129 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "YouTube integration is not yet available for your account"}))
-        ));
-    }
-
     tracing::info!("Received request to /api/auth/youtube/login");
 
     let session_key = Uuid::new_v4().to_string();
@@ -137,14 +124,6 @@ pub async fn youtube_upgrade_scope(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // YouTube integration is currently only available for user id 1 and 129
-    if auth_user.user_id != 1 && auth_user.user_id != 129 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "YouTube integration is not yet available for your account"}))
-        ));
-    }
-
     tracing::info!("Received request to upgrade YouTube scope for user {}", auth_user.user_id);
 
     let session_key = Uuid::new_v4().to_string();
@@ -195,14 +174,6 @@ pub async fn youtube_downgrade_scope(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // YouTube integration is currently only available for user id 1 and 129
-    if auth_user.user_id != 1 && auth_user.user_id != 129 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "YouTube integration is not yet available for your account"}))
-        ));
-    }
-
     tracing::info!("Received request to downgrade YouTube scope for user {}", auth_user.user_id);
 
     let session_key = Uuid::new_v4().to_string();
@@ -409,14 +380,6 @@ pub async fn delete_youtube_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // YouTube integration is currently only available for user id 1 and 129
-    if auth_user.user_id != 1 && auth_user.user_id != 129 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "YouTube integration is not yet available for your account"}))
-        ));
-    }
-
     tracing::info!("Received request to delete YouTube connection");
 
     // Get the tokens before deleting them

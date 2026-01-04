@@ -424,48 +424,14 @@ pub fn connect(props: &ConnectProps) -> Html {
                         >
                             <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
                         </button>
-                        {
-                            if props.user_id == 1 || props.user_id == 129 {
-                                html! {
-                                    <>
-                                        <button
-                                            class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
-                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                                selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
-                                            })}
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
-                                        </button>
-                                        /*<button
-                                            class={classes!("app-icon", if *instagram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "instagram") { "selected" } else { "" })}
-                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                                selected_app.set(if *selected_app == Some("instagram".to_string()) { None } else { Some("instagram".to_string()) });
-                                            })}
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/e/e7/Instagram_logo_2016.svg" alt="Instagram Logo" width="24" height="24"/>
-                                        </button>
-                                        <button
-                                            class={classes!("app-icon", if *messenger_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "messenger") { "selected" } else { "" })}
-                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                                selected_app.set(if *selected_app == Some("messenger".to_string()) { None } else { Some("messenger".to_string()) });
-                                            })}
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/63/Facebook_Messenger_logo_2025.svg" alt="Messenger Logo" width="24" height="24" />
-                                        </button>
-                                        <button
-                                            class={classes!("app-icon", if *uber_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "uber") { "selected" } else { "" })}
-                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                                selected_app.set(if *selected_app == Some("uber".to_string()) { None } else { Some("uber".to_string()) });
-                                            })}
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.svg" alt="Uber" width="24" height="24"/>
-                                        </button>*/
-                                    </>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
+                        <button
+                            class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
+                        </button>
                     </div>
                     <div class="app-details">
                         { details }

@@ -1739,24 +1739,7 @@ pub fn Home() -> Html {
                                                 },
                                                 DashboardTab::Media => html! {
                                                     <div class="media-tab">
-                                                        {
-                                                            if let Some(profile) = (*profile_data).as_ref() {
-                                                                if profile.id == 1 || profile.id == 129 {
-                                                                    html! {
-                                                                        <YouTubeHub youtube_connected={*youtube_connected} can_subscribe={*youtube_can_subscribe} />
-                                                                    }
-                                                                } else {
-                                                                    html! {
-                                                                        <div style="text-align: center; padding: 2rem; color: rgba(255, 255, 255, 0.7);">
-                                                                            <h3>{"Coming Soon"}</h3>
-                                                                            <p>{"Media features are currently in development."}</p>
-                                                                        </div>
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        }
+                                                        <YouTubeHub youtube_connected={*youtube_connected} can_subscribe={*youtube_can_subscribe} />
                                                     </div>
                                                 },
                                                 DashboardTab::Billing => html! {
