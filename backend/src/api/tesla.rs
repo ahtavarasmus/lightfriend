@@ -37,6 +37,7 @@ pub struct ChargeState {
     pub charge_rate: Option<f64>,         // Miles/hr or km/hr charging rate
     pub charger_power: Option<i32>,       // kW being delivered
     pub time_to_full_charge: Option<f64>, // Hours (float, more precise than minutes)
+    pub charge_energy_added: Option<f64>, // kWh added in current charging session
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
