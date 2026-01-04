@@ -831,8 +831,10 @@ pub async fn send_email(
         ))?)
         .header(ContentTransferEncoding::SevenBit)
         .body(request.body.clone());
+    // Format sender with display name "Lightfriend"
+    let from_address = format!("Lightfriend <{}>", email);
     let email_message = match Message::builder()
-        .from(email.parse().map_err(|e| (
+        .from(from_address.parse().map_err(|e| (
             StatusCode::BAD_REQUEST,
             AxumJson(json!({ "error": format!("Invalid sender email format: {}", e) })),
         ))?)
