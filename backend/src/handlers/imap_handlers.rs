@@ -824,12 +824,23 @@ pub async fn send_email(
         .build();
     // Build the email message
     use lettre::message::{header::{ContentType, ContentTransferEncoding}, SinglePart};
+
+    // Auto-detect HTML content
+    let is_html = request.body.trim_start().starts_with("<!DOCTYPE")
+        || request.body.trim_start().starts_with("<html");
+
+    let content_type = if is_html {
+        "text/html; charset=utf-8"
+    } else {
+        "text/plain; charset=us-ascii"
+    };
+
     let part = SinglePart::builder()
-        .header(ContentType::parse("text/plain; charset=us-ascii").map_err(|e| (
+        .header(ContentType::parse(content_type).map_err(|e| (
             StatusCode::BAD_REQUEST,
             AxumJson(json!({ "error": format!("Invalid content type: {}", e) })),
         ))?)
-        .header(ContentTransferEncoding::SevenBit)
+        .header(if is_html { ContentTransferEncoding::QuotedPrintable } else { ContentTransferEncoding::SevenBit })
         .body(request.body.clone());
     let email_message = match Message::builder()
         .from(email.parse().map_err(|e| (

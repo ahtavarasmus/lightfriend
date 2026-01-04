@@ -436,7 +436,7 @@ pub fn youtube_video_player(props: &YouTubeVideoPlayerProps) -> Html {
                     src={video_details.embed_url.clone()}
                     title={video_details.video.title.clone()}
                     frameborder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                     allowfullscreen=true
                     class="video-embed"
                 />
@@ -1950,7 +1950,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={tiktok_data.embed_url.clone()}
                             title={tiktok_data.title.clone()}
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed"
                         />
@@ -1981,7 +1981,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={embed_url}
                             title="Instagram Reel"
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed"
                         />
@@ -2010,7 +2010,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={embed_url}
                             title={format!("Tweet by {}", author_display)}
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed twitter-embed"
                         />
@@ -2035,7 +2035,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={embed_url}
                             title={format!("Reddit r/{}", subreddit_display)}
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed reddit-embed"
                         />
@@ -2084,7 +2084,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={embed_url}
                             title="Rumble Video"
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed"
                         />
@@ -2108,7 +2108,7 @@ fn render_media_player(media: &SelectedMedia, close_callback: Callback<MouseEven
                             src={embed_url}
                             title="Streamable Video"
                             frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                             allowfullscreen=true
                             class="video-embed"
                         />

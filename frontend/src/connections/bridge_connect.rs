@@ -724,21 +724,24 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     {"Matrix connection has been reset. You can now try reconnecting."}
                 </div>
             }
-            if let Some(error_msg) = (*error).clone() {
-                <div class="error-message">
-                    <div class="error-content">
-                        <span>{error_msg}</span>
+            // Only show error if not connected (prevents showing error alongside sync indicator)
+            if !(*connection_status).as_ref().map(|s| s.connected).unwrap_or(false) {
+                if let Some(error_msg) = (*error).clone() {
+                    <div class="error-message">
+                        <div class="error-content">
+                            <span>{error_msg}</span>
+                        </div>
+                        <div class="error-actions">
+                            <p class="reset-hint">{"If you're having persistent connection issues, try resetting the Matrix connection."}</p>
+                            <button onclick={
+                                let show_reset_modal = show_reset_modal.clone();
+                                Callback::from(move |_| show_reset_modal.set(true))
+                            } class="reset-button">
+                                {"Reset Matrix Connection"}
+                            </button>
+                        </div>
                     </div>
-                    <div class="error-actions">
-                        <p class="reset-hint">{"If you're having persistent connection issues, try resetting the Matrix connection."}</p>
-                        <button onclick={
-                            let show_reset_modal = show_reset_modal.clone();
-                            Callback::from(move |_| show_reset_modal.set(true))
-                        } class="reset-button">
-                            {"Reset Matrix Connection"}
-                        </button>
-                    </div>
-                </div>
+                }
             }
             if *show_reset_modal {
                 <div class="modal-overlay">

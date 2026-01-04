@@ -36,19 +36,32 @@ pub async fn send_magic_link_email(
     let smtp_port: u16 = 587;
 
     let email_body = format!(
-        r#"Welcome to Lightfriend!
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #333;">Welcome to Lightfriend!</h2>
 
-You've successfully subscribed. Click the link below to set your password and access your account:
+    <p>You've successfully subscribed. Click the button below to set your password and access your account:</p>
 
-{}
+    <p style="margin: 30px 0;">
+        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Set Your Password</a>
+    </p>
 
-This link doesn't expire, but can only be used once to set your password.
+    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
 
-If you didn't sign up for Lightfriend, you can ignore this email.
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">This link doesn't expire, but can only be used once to set your password.</p>
 
-Best,
-The Lightfriend Team"#,
-        magic_link
+    <p style="font-size: 14px; color: #666;">If you didn't sign up for Lightfriend, you can ignore this email.</p>
+
+    <p style="margin-top: 30px;">-Rasmus</p>
+</body>
+</html>"#,
+        magic_link, magic_link, magic_link
     );
 
     let email = Message::builder()
@@ -57,7 +70,7 @@ The Lightfriend Team"#,
         .subject("Set your Lightfriend password")
         .singlepart(
             SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
+                .header(ContentType::TEXT_HTML)
                 .body(email_body)
         )?;
 
@@ -134,7 +147,7 @@ pub async fn send_password_reset_email(
 
     <p style="font-size: 14px; color: #666;">If you didn't request a password reset, you can safely ignore this email.</p>
 
-    <p style="margin-top: 30px;">Best,<br>The Lightfriend Team</p>
+    <p style="margin-top: 30px;">-Rasmus</p>
 </body>
 </html>"#,
         reset_link, reset_link, reset_link
@@ -187,19 +200,35 @@ pub async fn send_subscription_activated_email(
     let smtp_port: u16 = 587;
 
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
+    let login_url = format!("{}/login", frontend_url);
 
     let email_body = format!(
-        r#"Your Lightfriend subscription is now active!
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #333;">Your Lightfriend subscription is now active!</h2>
 
-We noticed you already have an account with this email. Your subscription has been linked to your existing account.
+    <p>We noticed you already have an account with this email. Your subscription has been linked to your existing account.</p>
 
-Log in to get started:
-{}/login
+    <p>Log in to get started:</p>
 
-If you have any questions, just reply to this email.
+    <p style="margin: 30px 0;">
+        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Log In</a>
+    </p>
 
-- Rasmus"#,
-        frontend_url
+    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
+
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">If you have any questions, just reply to this email.</p>
+
+    <p style="margin-top: 30px;">-Rasmus</p>
+</body>
+</html>"#,
+        login_url, login_url, login_url
     );
 
     let email = Message::builder()
@@ -208,7 +237,7 @@ If you have any questions, just reply to this email.
         .subject("Your Lightfriend subscription is active")
         .singlepart(
             SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
+                .header(ContentType::TEXT_HTML)
                 .body(email_body)
         )?;
 

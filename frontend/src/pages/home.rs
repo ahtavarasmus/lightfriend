@@ -54,51 +54,6 @@ struct ByotUsageResponse {
     days_until_billing: Option<i32>,
 }
 
-fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
-    html! {
-        <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(30, 30, 30, 0.7); border: 1px solid rgba(30, 144, 255, 0.1); border-radius: 12px; margin-bottom: 2rem;">
-            {
-                if let Some(profile) = profile {
-                    html! {
-                        <>
-                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
-                                <span style="color: white;">{"Notifications"}</span>
-                                    <label class="switch">
-                                        <input
-                                            type="checkbox"
-                                            checked={profile.notify}
-                                            onchange={{
-                                                let user_id = profile.id;
-                                                Callback::from(move |e: Event| {
-                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                    let notify = input.checked();
-
-                                                    spawn_local(async move {
-                                                        let _ = Api::post(&format!("/api/profile/update-notify/{}", user_id))
-                                                            .json(&json!({"notify": notify}))
-                                                            .expect("Failed to serialize notify request")
-                                                            .send()
-                                                            .await;
-                                                    });
-                                                })
-                                            }}
-                                        />
-                                        <span class="slider round"></span>
-                                    </label>
-                            </div>
-                            <p style="color: #999; font-size: 0.9rem; margin-top: 0.5rem;">
-                                {"Receive notifications about new feature updates."}
-                            </p>
-                        </>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-        </div>
-    }
-}
-
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
@@ -1719,13 +1674,6 @@ pub fn Home() -> Html {
                                                                 } else {
                                                                     html! {}
                                                                 }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        }
-                                                        {
-                                                            if let Some(profile) = (*profile_data).as_ref() {
-                                                                render_notification_settings(Some(profile))
                                                             } else {
                                                                 html! {}
                                                             }

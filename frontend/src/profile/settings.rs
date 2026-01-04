@@ -240,6 +240,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let notification_type = use_state(|| (*user_profile).notification_type.clone().or(Some("sms".to_string())));
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let llm_provider = use_state(|| (*user_profile).llm_provider.clone().unwrap_or_else(|| "openai".to_string()));
+    let feature_updates = use_state(|| (*user_profile).notify);
     let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let location_original = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
@@ -257,6 +258,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let save_context_save_state = use_state(|| FieldSaveState::Idle);
     let llm_provider_save_state = use_state(|| FieldSaveState::Idle);
+    let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
     let show_email_confirm = use_state(|| false);
@@ -1020,6 +1022,49 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
                         profile.llm_provider = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    // Feature updates toggle handler
+    let on_feature_updates_toggle = {
+        let feature_updates = feature_updates.clone();
+        let save_state = feature_updates_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let new_val = input.checked();
+            feature_updates.set(new_val);
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                match Api::post(&format!("/api/profile/update-notify/{}", (*user_profile).id))
+                    .json(&serde_json::json!({"notify": new_val}))
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.notify = new_val;
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -2097,6 +2142,31 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         <option value="0" selected={*save_context == 0}>{"No history"}</option>
                     </select>
                     {render_save_indicator(&*save_context_save_state)}
+                </div>
+            </div>
+
+            // Feature Updates field
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Feature Updates"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Receive email notifications about new Lightfriend features and updates."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <label class="custom-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={*feature_updates}
+                            onchange={on_feature_updates_toggle.clone()}
+                        />
+                        <span class="checkmark"></span>
+                        {if *feature_updates { "Subscribed" } else { "Not subscribed" }}
+                    </label>
+                    {render_save_indicator(&*feature_updates_save_state)}
                 </div>
             </div>
 

@@ -317,20 +317,39 @@ pub async fn broadcast_email(
             let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
             let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
 
-            // Prepare plain text body with unsubscribe (link inline now)
-            let plain_body = format!(
-                "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
-                request_clone.message, unsubscribe_link
+            // Convert message newlines to HTML paragraphs
+            let html_message = request_clone.message
+                .split("\n\n")
+                .map(|p| format!("<p>{}</p>", p.replace('\n', "<br>")))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Prepare HTML body
+            let html_body = format!(
+                r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    {}
+
+    <p style="margin-top: 30px;">-Rasmus</p>
+
+    <p style="margin-top: 40px; font-size: 12px; color: #999;">
+        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+    </p>
+</body>
+</html>"#,
+                html_message, unsubscribe_link
             );
-            let wrapped_body = wrap_text(&plain_body, 72);
-            // Convert to CRLF line endings for email compliance
-            let crlf_body = wrapped_body.replace("\n", "\r\n");
 
             // Prepare the email request for the send_email handler
             let email_request = crate::handlers::imap_handlers::SendEmailRequest {
                 to: user.email.clone(),
                 subject: request_clone.subject.clone(),
-                body: crlf_body,
+                body: html_body,
             };
 
             // Call the existing send_email handler
@@ -374,18 +393,38 @@ pub async fn broadcast_email(
             let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
             let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
 
-            // Prepare plain text body with unsubscribe
-            let plain_body = format!(
-                "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
-                request_clone.message, unsubscribe_link
+            // Convert message newlines to HTML paragraphs
+            let html_message = request_clone.message
+                .split("\n\n")
+                .map(|p| format!("<p>{}</p>", p.replace('\n', "<br>")))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Prepare HTML body
+            let html_body = format!(
+                r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    {}
+
+    <p style="margin-top: 30px;">-Rasmus</p>
+
+    <p style="margin-top: 40px; font-size: 12px; color: #999;">
+        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+    </p>
+</body>
+</html>"#,
+                html_message, unsubscribe_link
             );
-            let wrapped_body = wrap_text(&plain_body, 72);
-            let crlf_body = wrapped_body.replace("\n", "\r\n");
 
             let email_request = crate::handlers::imap_handlers::SendEmailRequest {
                 to: entry.email.clone(),
                 subject: request_clone.subject.clone(),
-                body: crlf_body,
+                body: html_body,
             };
 
             match crate::handlers::imap_handlers::send_email(
