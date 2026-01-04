@@ -1651,24 +1651,15 @@ pub fn Home() -> Html {
                                             >
                                                 {"Controls"}
                                             </button>
-                                            {
-                                                // Only show Media tab for user IDs 1 or 129
-                                                if profile.id == 1 || profile.id == 129 {
-                                                    html! {
-                                                        <button
-                                                            class={classes!("tab-button", (*active_tab == DashboardTab::Media).then(|| "active"))}
-                                                            onclick={{
-                                                                let active_tab = active_tab.clone();
-                                                                Callback::from(move |_| active_tab.set(DashboardTab::Media))
-                                                            }}
-                                                        >
-                                                            {"Media"}
-                                                        </button>
-                                                    }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
+                                            <button
+                                                class={classes!("tab-button", (*active_tab == DashboardTab::Media).then(|| "active"))}
+                                                onclick={{
+                                                    let active_tab = active_tab.clone();
+                                                    Callback::from(move |_| active_tab.set(DashboardTab::Media))
+                                                }}
+                                            >
+                                                {"Media"}
+                                            </button>
                                             <button
                                                 class={classes!("tab-button", (*active_tab == DashboardTab::Billing).then(|| "active"))}
                                                 onclick={{
