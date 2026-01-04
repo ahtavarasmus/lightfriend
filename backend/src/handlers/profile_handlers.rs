@@ -436,11 +436,11 @@ pub async fn patch_profile_field(
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "notification_type must be a string"}))
             ))?;
-            let allowed_types = vec!["sms", "call"];
+            let allowed_types = vec!["sms", "call", "call_sms"];
             if !allowed_types.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid notification type. Must be 'sms' or 'call'"}))
+                    Json(json!({"error": "Invalid notification type. Must be 'sms', 'call', or 'call_sms'"}))
                 ));
             }
             state.user_core.update_notification_type(user_id, Some(value)).map_err(|e| (
