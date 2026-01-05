@@ -557,6 +557,160 @@ impl UserRepository {
         Ok(count > 0)
     }
 
+    pub fn get_task_by_id(&self, user_id: i32, task_id: i32) -> Result<Option<Task>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        tasks::table
+            .filter(tasks::id.eq(task_id))
+            .filter(tasks::user_id.eq(user_id))
+            .first::<Task>(&mut conn)
+            .optional()
+    }
+
+    pub fn update_task_permanence(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        is_permanent: bool,
+        recurrence_rule: Option<String>,
+        recurrence_time: Option<String>,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id))
+        )
+            .set((
+                tasks::is_permanent.eq(if is_permanent { 1 } else { 0 }),
+                tasks::recurrence_rule.eq(recurrence_rule),
+                tasks::recurrence_time.eq(recurrence_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update task trigger for rescheduling permanent tasks
+    pub fn reschedule_task(&self, task_id: i32, new_trigger: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(tasks::table.filter(tasks::id.eq(task_id)))
+            .set((
+                tasks::trigger.eq(new_trigger),
+                tasks::status.eq("active"),
+                tasks::completed_at.eq::<Option<i32>>(None),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Complete a task - if permanent with recurrence, reschedules; otherwise marks completed
+    /// Returns true if task was rescheduled, false if completed normally
+    pub fn complete_or_reschedule_task(&self, task: &Task, user_timezone: &str) -> Result<bool, DieselError> {
+        let task_id = task.id.ok_or(DieselError::NotFound)?;
+
+        // Check if task is permanent with recurrence settings
+        let is_permanent = task.is_permanent.unwrap_or(0) == 1;
+        let has_recurrence = task.recurrence_rule.is_some() && task.recurrence_time.is_some();
+
+        if is_permanent && has_recurrence && task.trigger.starts_with("once_") {
+            // Calculate next occurrence
+            if let Some(new_trigger) = self.calculate_next_trigger(task, user_timezone) {
+                tracing::debug!("Rescheduling permanent task {} with new trigger: {}", task_id, new_trigger);
+                self.reschedule_task(task_id, &new_trigger)?;
+                return Ok(true);
+            }
+        }
+
+        // Default: mark as completed
+        self.update_task_status(task_id, "completed")?;
+        Ok(false)
+    }
+
+    /// Calculate the next trigger timestamp based on recurrence rule and time
+    fn calculate_next_trigger(&self, task: &Task, user_timezone: &str) -> Option<String> {
+        use chrono::{Datelike, TimeZone, Timelike, Duration};
+
+        let recurrence_rule = task.recurrence_rule.as_ref()?;
+        let recurrence_time = task.recurrence_time.as_ref()?;
+
+        // Parse timezone
+        let tz: chrono_tz::Tz = user_timezone.parse().unwrap_or(chrono_tz::UTC);
+
+        // Parse time (HH:MM)
+        let parts: Vec<&str> = recurrence_time.split(':').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let target_hour: u32 = parts[0].parse().ok()?;
+        let target_minute: u32 = parts[1].parse().ok()?;
+
+        // Get current time in user's timezone
+        let now = chrono::Utc::now().with_timezone(&tz);
+
+        let next_date = if recurrence_rule == "daily" {
+            // Tomorrow at the specified time
+            let tomorrow = now.date_naive() + Duration::days(1);
+            tomorrow
+        } else if recurrence_rule.starts_with("weekly:") {
+            // Parse days (1=Mon, 7=Sun)
+            let days_str = &recurrence_rule[7..];
+            let target_days: Vec<u32> = days_str.split(',')
+                .filter_map(|s| s.parse().ok())
+                .collect();
+
+            if target_days.is_empty() {
+                return None;
+            }
+
+            // Find next matching day
+            let current_weekday = now.weekday().num_days_from_monday() + 1; // 1=Mon
+            let mut days_ahead = 1u32;
+
+            loop {
+                let check_day = ((current_weekday + days_ahead - 1) % 7) + 1;
+                if target_days.contains(&check_day) {
+                    break;
+                }
+                days_ahead += 1;
+                if days_ahead > 7 {
+                    // Fallback: use first target day next week
+                    days_ahead = (7 - current_weekday + target_days[0]) % 7;
+                    if days_ahead == 0 { days_ahead = 7; }
+                    break;
+                }
+            }
+
+            now.date_naive() + Duration::days(days_ahead as i64)
+        } else if recurrence_rule.starts_with("monthly:") {
+            // Parse target day of month
+            let target_day: u32 = recurrence_rule[8..].parse().ok()?;
+
+            // Get next month's date with that day
+            let current_day = now.day();
+            let next_date = if current_day < target_day {
+                // Later this month
+                now.date_naive().with_day(target_day.min(31))?
+            } else {
+                // Next month
+                let next_month = if now.month() == 12 {
+                    chrono::NaiveDate::from_ymd_opt(now.year() + 1, 1, target_day.min(31))?
+                } else {
+                    chrono::NaiveDate::from_ymd_opt(now.year(), now.month() + 1, target_day.min(31))?
+                };
+                next_month
+            };
+            next_date
+        } else {
+            return None;
+        };
+
+        // Combine date with target time
+        let next_naive = next_date.and_hms_opt(target_hour, target_minute, 0)?;
+        let next_local = tz.from_local_datetime(&next_naive).single()?;
+        let next_utc = next_local.with_timezone(&chrono::Utc);
+
+        Some(format!("once_{}", next_utc.timestamp()))
+    }
+
     pub fn delete_old_tasks(&self, before_timestamp: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::delete(

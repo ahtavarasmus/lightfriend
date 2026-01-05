@@ -577,6 +577,7 @@ async fn main() {
         // Task routes (reminders and message monitoring)
         .route("/api/filters/tasks", get(filter_handlers::get_tasks))
         .route("/api/filters/task/{task_id}", delete(filter_handlers::cancel_task))
+        .route("/api/filters/task/{task_id}/permanence", patch(filter_handlers::set_task_permanence))
         .route("/api/filters/monitored-contacts", get(filter_handlers::get_priority_senders))
         .route("/api/filters/monitored-contact/{service_type}", post(filter_handlers::create_priority_sender))
         .route("/api/filters/monitored-contact/{service_type}/{content}", delete(filter_handlers::delete_priority_sender))

@@ -667,15 +667,9 @@ pub fn Home() -> Html {
                                 user_verified.set(profile.verified);
                                 profile_data.set(Some(profile.clone()));
                                 error.set(None);
-                                // Show onboarding for first-time subscribers
-                                if profile.sub_tier.is_some() {
-                                    if let Some(w) = window() {
-                                        if let Ok(Some(storage)) = w.local_storage() {
-                                            if storage.get_item("onboarding_seen").ok().flatten().is_none() {
-                                                show_onboarding.set(true);
-                                            }
-                                        }
-                                    }
+                                // Show onboarding for subscribers who haven't connected any services yet
+                                if profile.sub_tier.is_some() && !profile.has_any_connection {
+                                    show_onboarding.set(true);
                                 }
                                 // Fetch magic link if tier 3
                                 if profile.sub_tier.as_deref() == Some("tier 3") {
@@ -781,11 +775,6 @@ pub fn Home() -> Html {
                 let show_onboarding = show_onboarding.clone();
                 Callback::from(move |_: MouseEvent| {
                     show_onboarding.set(false);
-                    if let Some(w) = window() {
-                        if let Ok(Some(storage)) = w.local_storage() {
-                            let _ = storage.set_item("onboarding_seen", "true");
-                        }
-                    }
                 })
             };
         html! {

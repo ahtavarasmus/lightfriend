@@ -55,6 +55,7 @@ pub struct UserProfile {
     pub plan_type: Option<String>,
     pub phone_service_active: Option<bool>, // whether phone service is active - can be disabled for security
     pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
+    pub has_any_connection: bool, // whether user has connected any service (for onboarding modal)
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

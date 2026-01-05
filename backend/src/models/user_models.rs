@@ -394,6 +394,9 @@ pub struct Task {
     pub status: Option<String>,       // "active", "completed", "cancelled"
     pub created_at: i32,
     pub completed_at: Option<i32>,
+    pub is_permanent: Option<i32>,           // 0 or 1, set via dashboard only
+    pub recurrence_rule: Option<String>,     // "daily", "weekly:1,3,5", "monthly:15"
+    pub recurrence_time: Option<String>,     // "09:00" (HH:MM in user timezone)
 }
 
 #[derive(Insertable)]

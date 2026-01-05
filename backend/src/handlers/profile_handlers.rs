@@ -92,6 +92,7 @@ pub struct ProfileResponse {
     plan_type: Option<String>, // "monitor" or "digest"
     phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
+    has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -221,6 +222,13 @@ pub async fn get_profile(
             };
             // Calculate total estimated monitoring cost
             let estimated_monitoring_cost = estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
+            // Check if user has any connected services (for onboarding modal)
+            let has_any_connection =
+                state.user_repository.has_active_google_calendar(auth_user.user_id).unwrap_or(false) ||
+                state.user_repository.get_imap_credentials(auth_user.user_id).ok().flatten().is_some() ||
+                state.user_repository.get_bridge(auth_user.user_id, "whatsapp").ok().flatten().is_some() ||
+                state.user_repository.get_bridge(auth_user.user_id, "telegram").ok().flatten().is_some() ||
+                state.user_repository.get_bridge(auth_user.user_id, "signal").ok().flatten().is_some();
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -257,6 +265,7 @@ pub async fn get_profile(
                 plan_type: user.plan_type,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
+                has_any_connection,
             }))
         }
         None => Err((

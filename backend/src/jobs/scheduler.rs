@@ -313,9 +313,18 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
                                                         let action_spec = task.action.clone();
 
-                                                        // Mark the task as completed
-                                                        if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
-                                                            tracing::error!("Failed to complete task {}: {}", task_id, e);
+                                                        // Complete or reschedule the task (for permanent recurring tasks)
+                                                        let user_tz = state.user_core.get_user_info(user.id)
+                                                            .ok()
+                                                            .and_then(|info| info.timezone)
+                                                            .unwrap_or_else(|| "UTC".to_string());
+                                                        match state.user_repository.complete_or_reschedule_task(&task, &user_tz) {
+                                                            Ok(rescheduled) => {
+                                                                if rescheduled {
+                                                                    tracing::debug!("Rescheduled permanent task {}", task_id);
+                                                                }
+                                                            }
+                                                            Err(e) => tracing::error!("Failed to complete task {}: {}", task_id, e),
                                                         }
 
                                                         // Execute the action_spec through AI + tools, passing the email context
@@ -605,6 +614,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     debug!("Found {} due scheduled tasks", tasks.len());
                     for task in tasks {
                         let state = state.clone();
+                        let task_clone = task.clone();
                         let task_id = task.id.unwrap_or(0);
                         let user_id = task.user_id;
                         let action = task.action.clone();
@@ -638,9 +648,20 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 }
                             }
 
-                            // Mark task as completed
-                            if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
-                                error!("Failed to mark task {} as completed: {}", task_id, e);
+                            // Complete or reschedule the task (for permanent recurring tasks)
+                            let user_tz = state.user_core.get_user_info(user_id)
+                                .ok()
+                                .and_then(|info| info.timezone)
+                                .unwrap_or_else(|| "UTC".to_string());
+                            match state.user_repository.complete_or_reschedule_task(&task_clone, &user_tz) {
+                                Ok(rescheduled) => {
+                                    if rescheduled {
+                                        debug!("Rescheduled permanent task {}", task_id);
+                                    } else {
+                                        debug!("Task {} marked as completed", task_id);
+                                    }
+                                }
+                                Err(e) => error!("Failed to complete task {}: {}", task_id, e),
                             }
                         });
                     }

@@ -220,6 +220,9 @@ diesel::table! {
         status -> Nullable<Text>,
         created_at -> Integer,
         completed_at -> Nullable<Integer>,
+        is_permanent -> Nullable<Integer>,
+        recurrence_rule -> Nullable<Text>,
+        recurrence_time -> Nullable<Text>,
     }
 }
 

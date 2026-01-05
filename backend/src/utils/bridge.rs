@@ -1232,9 +1232,18 @@ pub async fn handle_bridge_message(
                     let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
                     let action_spec = task.action.clone();
 
-                    // Mark the task as completed
-                    if let Err(e) = state.user_repository.update_task_status(task_id, "completed") {
-                        tracing::error!("Failed to complete task {}: {}", task_id, e);
+                    // Complete or reschedule the task (for permanent recurring tasks)
+                    let user_tz = state.user_core.get_user_info(user_id)
+                        .ok()
+                        .and_then(|info| info.timezone)
+                        .unwrap_or_else(|| "UTC".to_string());
+                    match state.user_repository.complete_or_reschedule_task(&task, &user_tz) {
+                        Ok(rescheduled) => {
+                            if rescheduled {
+                                tracing::debug!("Rescheduled permanent task {}", task_id);
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to complete task {}: {}", task_id, e),
                     }
 
                     // Execute the action_spec through AI + tools, passing the message context

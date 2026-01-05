@@ -42,6 +42,16 @@ pub struct TaskResponse {
     notification_type: Option<String>,
     status: Option<String>,
     created_at: i32,
+    is_permanent: Option<i32>,
+    recurrence_rule: Option<String>,
+    recurrence_time: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetPermanenceRequest {
+    pub is_permanent: bool,
+    pub recurrence_rule: Option<String>,  // "daily", "weekly:1,3,5", "monthly:15"
+    pub recurrence_time: Option<String>,  // "09:00" (HH:MM)
 }
 
 #[derive(Serialize)]
@@ -79,6 +89,61 @@ pub async fn cancel_task(
     }
 }
 
+pub async fn set_task_permanence(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(task_id): Path<i32>,
+    Json(request): Json<SetPermanenceRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Setting permanence for task {} for user {}", task_id, auth_user.user_id);
+
+    // Validate recurrence settings
+    if request.is_permanent {
+        if let Some(ref rule) = request.recurrence_rule {
+            // Validate rule format
+            if !rule.starts_with("daily") && !rule.starts_with("weekly:") && !rule.starts_with("monthly:") {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid recurrence rule. Use 'daily', 'weekly:1,2,3', or 'monthly:15'"}))
+                ));
+            }
+        }
+        if let Some(ref time) = request.recurrence_time {
+            // Validate time format (HH:MM)
+            if time.len() != 5 || !time.contains(':') {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid time format. Use HH:MM (e.g., '09:00')"}))
+                ));
+            }
+        }
+    }
+
+    match state.user_repository.update_task_permanence(
+        auth_user.user_id,
+        task_id,
+        request.is_permanent,
+        request.recurrence_rule,
+        request.recurrence_time,
+    ) {
+        Ok(true) => {
+            tracing::debug!("Successfully updated permanence for task {} for user {}", task_id, auth_user.user_id);
+            Ok(Json(json!({"message": "Task permanence updated successfully"})))
+        },
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Task not found"}))
+        )),
+        Err(e) => {
+            tracing::error!("Failed to update task permanence {}: {}", task_id, e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))
+        },
+    }
+}
+
 pub async fn get_tasks(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser
@@ -103,6 +168,9 @@ pub async fn get_tasks(
         notification_type: task.notification_type,
         status: task.status,
         created_at: task.created_at,
+        is_permanent: task.is_permanent,
+        recurrence_rule: task.recurrence_rule,
+        recurrence_time: task.recurrence_time,
     }).collect();
 
     Ok(Json(response))
