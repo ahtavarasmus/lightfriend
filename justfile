@@ -33,6 +33,18 @@ build-push REGISTRY="docker.io/yourusername":
         --push \
         ..
 
+# Push locally-built core image to Docker Hub (requires docker login first)
+# Usage: just push-dockerhub yourusername
+# Prerequisites:
+#   1. Run 'docker login' first
+#   2. Build image with 'just build-native' or 'just build'
+push-dockerhub REGISTRY:
+    @echo "Tagging image for Docker Hub..."
+    docker tag lightfriend-core:latest {{REGISTRY}}/lightfriend-core:latest
+    @echo "Pushing to {{REGISTRY}}/lightfriend-core:latest..."
+    docker push {{REGISTRY}}/lightfriend-core:latest
+    @echo "✓ Successfully pushed to Docker Hub!"
+
 # Build only the core image (current platform)
 build-core:
     cd docker && docker compose build core

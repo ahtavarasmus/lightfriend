@@ -406,6 +406,58 @@ just up
 
 ---
 
+## Pushing to Docker Hub
+
+To publish the core image to Docker Hub:
+
+### Prerequisites
+
+1. **Create a Docker Hub account** at https://hub.docker.com
+2. **Login to Docker Hub** from your terminal:
+   ```bash
+   docker login
+   ```
+   Enter your Docker Hub username and password when prompted.
+
+### Build and Push Workflow
+
+**Option 1: Push an already-built image** (faster if image exists):
+
+```bash
+# 1. Build the image locally (if not already built)
+just build-native  # For single platform (your current architecture)
+# OR
+just build         # For multi-platform (amd64 + arm64)
+
+# 2. Push to Docker Hub
+just push-dockerhub yourusername
+```
+
+This will tag the local `lightfriend-core:latest` image as `yourusername/lightfriend-core:latest` and push it to Docker Hub.
+
+**Option 2: Build and push in one step** (multi-platform):
+
+```bash
+just build-push yourusername
+```
+
+This builds for both amd64 and arm64 architectures and pushes directly to Docker Hub. Use this if you need cross-platform compatibility.
+
+### Image Repository
+
+After pushing, your image will be available at:
+- **Docker Hub**: `https://hub.docker.com/r/yourusername/lightfriend-core`
+- **Pull command**: `docker pull yourusername/lightfriend-core:latest`
+
+### Notes
+
+- The image is tagged as `:latest` by default
+- **Single platform push**: Use `just push-dockerhub` after `just build-native` for fastest workflow
+- **Multi-platform push**: Use `just build-push` to build and push both amd64 and arm64 in one step
+- Pushing requires `docker login` - you'll be prompted if not logged in
+
+---
+
 ## Common Commands
 
 ```bash
@@ -414,7 +466,8 @@ just build-native   # Build for current platform (RECOMMENDED - fastest)
 just build          # Build multi-platform (amd64 + arm64)
 just build-fast     # Fast build with fewer optimizations
 just build-core     # Build only core service
-just build-push     # Build & push multi-platform to registry
+just build-push yourusername  # Build & push multi-platform to Docker Hub
+just push-dockerhub yourusername  # Push already-built image to Docker Hub
 
 # Lifecycle
 just up             # Start all services
