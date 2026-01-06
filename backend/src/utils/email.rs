@@ -1,39 +1,43 @@
 use std::error::Error;
-use crate::repositories::user_repository::UserRepository;
+use resend_rs::{Resend, types::CreateEmailBaseOptions};
+
+/// Get Resend client and from email from environment.
+/// Returns None if RESEND_API_KEY is not set (email sending is optional).
+fn get_resend_config() -> Option<(Resend, String)> {
+    let api_key = std::env::var("RESEND_API_KEY").ok()?;
+    if api_key.is_empty() {
+        return None;
+    }
+
+    let from_email = std::env::var("RESEND_FROM_EMAIL")
+        .unwrap_or_else(|_| "notifications@lightfriend.ai".to_string());
+
+    Some((Resend::new(&api_key), from_email))
+}
 
 /// Send a magic link email to a new user for password setup
 ///
-/// Uses user 1's IMAP credentials (same as broadcast emails).
+/// Uses Resend API for reliable email delivery.
+/// If Resend is not configured, logs a warning and returns Ok (graceful fallback).
 ///
 /// # Arguments
-/// * `user_repository` - Repository to fetch IMAP credentials
 /// * `to_email` - Recipient email address
 /// * `magic_link` - The full URL with token for password setup
 ///
 /// # Returns
-/// * `Ok(())` - Email sent successfully
+/// * `Ok(())` - Email sent successfully (or skipped if Resend not configured)
 /// * `Err` - Failed to send email
 pub async fn send_magic_link_email(
-    user_repository: &UserRepository,
     to_email: &str,
     magic_link: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use lettre::{Message, SmtpTransport, Transport};
-    use lettre::transport::smtp::authentication::Credentials;
-    use lettre::message::{header::ContentType, SinglePart};
-
-    // Use user 1's IMAP credentials (same as broadcast emails)
-    let (from_email, password, imap_server, _) = user_repository
-        .get_imap_credentials(1)
-        .map_err(|e| format!("Failed to get IMAP credentials: {}", e))?
-        .ok_or("No IMAP credentials found for admin user (id=1)")?;
-
-    // Derive SMTP server from IMAP server (e.g., imap.gmail.com -> smtp.gmail.com)
-    let smtp_server = imap_server
-        .as_deref()
-        .unwrap_or("smtp.gmail.com")
-        .replace("imap", "smtp");
-    let smtp_port: u16 = 587;
+    let (resend, from_email) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            tracing::warn!("Magic link email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            return Ok(());
+        }
+    };
 
     let email_body = format!(
         r#"<!DOCTYPE html>
@@ -64,24 +68,10 @@ pub async fn send_magic_link_email(
         magic_link, magic_link, magic_link
     );
 
-    let email = Message::builder()
-        .from(from_email.parse()?)
-        .to(to_email.parse()?)
-        .subject("Set your Lightfriend password")
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_HTML)
-                .body(email_body)
-        )?;
+    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Set your Lightfriend password")
+        .with_html(&email_body);
 
-    let creds = Credentials::new(from_email.clone(), password);
-
-    let mailer = SmtpTransport::starttls_relay(&smtp_server)?
-        .port(smtp_port)
-        .credentials(creds)
-        .build();
-
-    mailer.send(&email)?;
+    resend.emails.send(email).await?;
 
     tracing::info!("Magic link email sent to {}", to_email);
 
@@ -90,37 +80,27 @@ pub async fn send_magic_link_email(
 
 /// Send a password reset link email
 ///
-/// Uses user 1's IMAP credentials (same as broadcast emails).
+/// Uses Resend API for reliable email delivery.
+/// If Resend is not configured, logs a warning and returns Ok (graceful fallback).
 ///
 /// # Arguments
-/// * `user_repository` - Repository to fetch IMAP credentials
 /// * `to_email` - Recipient email address
 /// * `reset_link` - The full URL with token for password reset
 ///
 /// # Returns
-/// * `Ok(())` - Email sent successfully
+/// * `Ok(())` - Email sent successfully (or skipped if Resend not configured)
 /// * `Err` - Failed to send email
 pub async fn send_password_reset_email(
-    user_repository: &UserRepository,
     to_email: &str,
     reset_link: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use lettre::{Message, SmtpTransport, Transport};
-    use lettre::transport::smtp::authentication::Credentials;
-    use lettre::message::{header::ContentType, SinglePart};
-
-    // Use user 1's IMAP credentials (same as broadcast emails)
-    let (from_email, password, imap_server, _) = user_repository
-        .get_imap_credentials(1)
-        .map_err(|e| format!("Failed to get IMAP credentials: {}", e))?
-        .ok_or("No IMAP credentials found for admin user (id=1)")?;
-
-    // Derive SMTP server from IMAP server (e.g., imap.gmail.com -> smtp.gmail.com)
-    let smtp_server = imap_server
-        .as_deref()
-        .unwrap_or("smtp.gmail.com")
-        .replace("imap", "smtp");
-    let smtp_port: u16 = 587;
+    let (resend, from_email) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            tracing::warn!("Password reset email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            return Ok(());
+        }
+    };
 
     let email_body = format!(
         r#"<!DOCTYPE html>
@@ -153,24 +133,10 @@ pub async fn send_password_reset_email(
         reset_link, reset_link, reset_link
     );
 
-    let email = Message::builder()
-        .from(from_email.parse()?)
-        .to(to_email.parse()?)
-        .subject("Lightfriend Password Reset")
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_HTML)
-                .body(email_body)
-        )?;
+    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Lightfriend Password Reset")
+        .with_html(&email_body);
 
-    let creds = Credentials::new(from_email.clone(), password);
-
-    let mailer = SmtpTransport::starttls_relay(&smtp_server)?
-        .port(smtp_port)
-        .credentials(creds)
-        .build();
-
-    mailer.send(&email)?;
+    resend.emails.send(email).await?;
 
     tracing::info!("Password reset email sent to {}", to_email);
 
@@ -179,25 +145,18 @@ pub async fn send_password_reset_email(
 
 /// Send a subscription activated email to an existing user who subscribed via guest checkout
 ///
-/// Uses user 1's IMAP credentials (same as broadcast emails).
+/// Uses Resend API for reliable email delivery.
+/// If Resend is not configured, logs a warning and returns Ok (graceful fallback).
 pub async fn send_subscription_activated_email(
-    user_repository: &UserRepository,
     to_email: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use lettre::{Message, SmtpTransport, Transport};
-    use lettre::transport::smtp::authentication::Credentials;
-    use lettre::message::{header::ContentType, SinglePart};
-
-    let (from_email, password, imap_server, _) = user_repository
-        .get_imap_credentials(1)
-        .map_err(|e| format!("Failed to get IMAP credentials: {}", e))?
-        .ok_or("No IMAP credentials found for admin user (id=1)")?;
-
-    let smtp_server = imap_server
-        .as_deref()
-        .unwrap_or("smtp.gmail.com")
-        .replace("imap", "smtp");
-    let smtp_port: u16 = 587;
+    let (resend, from_email) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            tracing::warn!("Subscription activated email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            return Ok(());
+        }
+    };
 
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
     let login_url = format!("{}/login", frontend_url);
@@ -231,24 +190,10 @@ pub async fn send_subscription_activated_email(
         login_url, login_url, login_url
     );
 
-    let email = Message::builder()
-        .from(from_email.parse()?)
-        .to(to_email.parse()?)
-        .subject("Your Lightfriend subscription is active")
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_HTML)
-                .body(email_body)
-        )?;
+    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Your Lightfriend subscription is active")
+        .with_html(&email_body);
 
-    let creds = Credentials::new(from_email.clone(), password);
-
-    let mailer = SmtpTransport::starttls_relay(&smtp_server)?
-        .port(smtp_port)
-        .credentials(creds)
-        .build();
-
-    mailer.send(&email)?;
+    resend.emails.send(email).await?;
 
     tracing::info!("Subscription activated email sent to {}", to_email);
 

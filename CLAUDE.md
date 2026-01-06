@@ -229,6 +229,13 @@ let response = Request::post(&format!("{}/api/endpoint", config::get_backend_url
 - Long-running tasks spawned with `tokio::spawn`
 - Use `async fn` and `.await` consistently
 
+## Git Commits
+
+When making commits:
+- Do NOT add "Generated with Claude Code" or any Claude/AI attribution to commit messages
+- Do NOT add Co-Authored-By lines mentioning Claude or AI
+- Keep commit messages clean and focused on what changed
+
 ## Common Development Tasks
 
 ### Adding a New Integration

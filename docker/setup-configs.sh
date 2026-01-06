@@ -180,8 +180,8 @@ for bridge in whatsapp signal messenger instagram; do
 
         if [ $? -eq 0 ]; then
             # Fix permissions so synapse and validation can read the files
-            sudo chmod 644 "bridges/${bridge}/${bridge}-registration.yaml"
-            sudo chmod 644 "bridges/${bridge}/config.yaml"
+            chmod 644 "bridges/${bridge}/${bridge}-registration.yaml" 2>/dev/null || true
+            chmod 644 "bridges/${bridge}/config.yaml" 2>/dev/null || true
             echo "✓ Generated bridges/${bridge}/${bridge}-registration.yaml"
         else
             echo "✗ Failed to generate ${bridge}-registration.yaml"

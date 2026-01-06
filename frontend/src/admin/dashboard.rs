@@ -21,6 +21,11 @@ struct EmailBroadcastMessage {
     message: String,
 }
 
+#[derive(Serialize)]
+struct ChangePasswordRequest {
+    new_password: String,
+}
+
 
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
@@ -87,6 +92,8 @@ pub fn admin_dashboard() -> Html {
         user_email: None,
     });
     let reset_link_status = use_state(|| None::<(i32, String)>); // (user_id, message)
+    let new_password = use_state(|| String::new());
+    let password_status = use_state(|| None::<String>);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
@@ -314,6 +321,89 @@ pub fn admin_dashboard() -> Html {
                     {"Test Backend"}
                 </button>
             </div>
+
+                // Change Password Section
+                <div class="password-section">
+                    <h2>{"Change Admin Password"}</h2>
+                    <div class="password-form">
+                        <input
+                            type="password"
+                            value={(*new_password).clone()}
+                            onchange={{
+                                let new_password = new_password.clone();
+                                Callback::from(move |e: Event| {
+                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                    new_password.set(input.value());
+                                })
+                            }}
+                            placeholder="Enter new password (min 6 characters)..."
+                            class="password-input"
+                        />
+                        <button
+                            onclick={{
+                                let new_password = new_password.clone();
+                                let password_status = password_status.clone();
+                                Callback::from(move |_| {
+                                    let password_value = (*new_password).clone();
+                                    let new_password = new_password.clone();
+                                    let password_status = password_status.clone();
+
+                                    if password_value.len() < 6 {
+                                        password_status.set(Some("Password must be at least 6 characters".to_string()));
+                                        return;
+                                    }
+
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        let request = ChangePasswordRequest {
+                                            new_password: password_value,
+                                        };
+
+                                        match Api::post("/api/admin/change-password")
+                                            .json(&request)
+                                            .unwrap()
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                if response.ok() {
+                                                    new_password.set(String::new());
+                                                    password_status.set(Some("Password updated successfully!".to_string()));
+                                                    // Clear message after 3 seconds
+                                                    let password_status = password_status.clone();
+                                                    gloo_timers::callback::Timeout::new(3000, move || {
+                                                        password_status.set(None);
+                                                    }).forget();
+                                                } else {
+                                                    password_status.set(Some("Failed to update password".to_string()));
+                                                }
+                                            }
+                                            Err(_) => {
+                                                password_status.set(Some("Failed to send request".to_string()));
+                                            }
+                                        }
+                                    });
+                                })
+                            }}
+                            class="broadcast-button"
+                        >
+                            {"Change Password"}
+                        </button>
+                        {
+                            if let Some(status) = (*password_status).as_ref() {
+                                html! {
+                                    <span class={classes!(
+                                        "password-status",
+                                        if status.contains("success") { "success" } else { "error" }
+                                    )}>
+                                        {status}
+                                    </span>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+                </div>
 
                 // Test SMS Chat Section
                 <div class="test-chat-section">
@@ -1258,6 +1348,58 @@ pub fn admin_dashboard() -> Html {
             </div>
             <style>
                 {r#"
+                .password-section {
+                    margin: 2rem 0;
+                    padding: 1.5rem;
+                    background: rgba(30, 30, 30, 0.7);
+                    border-radius: 8px;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                }
+
+                .password-section h2 {
+                    margin-bottom: 1rem;
+                    color: #1E90FF;
+                }
+
+                .password-form {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    flex-wrap: wrap;
+                }
+
+                .password-input {
+                    flex: 1;
+                    min-width: 200px;
+                    padding: 0.75rem;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    border-radius: 4px;
+                    background: rgba(0, 0, 0, 0.3);
+                    color: #fff;
+                    font-size: 1rem;
+                }
+
+                .password-input:focus {
+                    outline: none;
+                    border-color: #1E90FF;
+                }
+
+                .password-status {
+                    padding: 0.5rem 1rem;
+                    border-radius: 4px;
+                    font-size: 0.9rem;
+                }
+
+                .password-status.success {
+                    background: rgba(76, 175, 80, 0.2);
+                    color: #4CAF50;
+                }
+
+                .password-status.error {
+                    background: rgba(255, 107, 107, 0.2);
+                    color: #FF6B6B;
+                }
+
                 .test-chat-section {
                     margin: 2rem 0;
                     padding: 1rem;

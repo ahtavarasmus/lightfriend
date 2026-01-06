@@ -260,6 +260,73 @@ pub fn validate_env() {
     // - SENTRY_DSN (error tracking, optional)
     // - Bridge bot IDs (may have defaults)
 }
+
+/// Bootstrap an admin user on first startup if the database is empty.
+/// This is safe to call on every startup - it only creates a user if:
+/// 1. No users exist in the database
+/// 2. ADMIN_EMAILS env var is set (uses first email from the list)
+///
+/// CRITICAL: This never overrides existing users.
+async fn bootstrap_admin_if_needed(
+    user_core: &Arc<UserCore>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::handlers::auth_dtos::NewUser;
+
+    // Check if any users exist - if so, skip bootstrap entirely
+    let users = user_core.get_all_users()?;
+    if !users.is_empty() {
+        tracing::info!("Database has {} users, skipping admin bootstrap", users.len());
+        return Ok(());
+    }
+
+    // Get first email from ADMIN_EMAILS list for bootstrap
+    let admin_emails = std::env::var("ADMIN_EMAILS")
+        .expect("ADMIN_EMAILS environment variable is required");
+
+    let email = admin_emails
+        .split(',')
+        .next()
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty())
+        .expect("ADMIN_EMAILS must contain at least one email");
+
+    // Password defaults to 12345678 if not set
+    let password = std::env::var("BOOTSTRAP_ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "12345678".to_string());
+
+    let phone = std::env::var("BOOTSTRAP_ADMIN_PHONE")
+        .unwrap_or_else(|_| "+12345678".to_string());
+
+    // Hash the password
+    let password_hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)?;
+
+    // Create the admin user
+    let new_user = NewUser {
+        email: email.clone(),
+        password_hash,
+        phone_number: phone.clone(),
+        time_to_live: 60,
+        verified: true,
+        credits: 1000.0,
+        credits_left: 1000.0,
+        charge_when_under: false,
+        waiting_checks_count: 0,
+        discount: false,
+        sub_tier: Some("2".to_string()), // tier 2 = sentinel (full access)
+    };
+
+    match user_core.create_user(new_user) {
+        Ok(()) => {
+            tracing::info!("✓ Bootstrap admin created: {} (phone={})", email, phone);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Failed to create bootstrap admin: {}", e);
+            Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     dotenv().ok();
@@ -287,6 +354,16 @@ async fn main() {
         .with_file(true)
         .with_line_number(true)
         .init();
+
+    // Validate required ADMIN_EMAILS env var early
+    let admin_emails = std::env::var("ADMIN_EMAILS")
+        .expect("ADMIN_EMAILS environment variable is required");
+    let admin_list: Vec<&str> = admin_emails.split(',').map(|e| e.trim()).filter(|e| !e.is_empty()).collect();
+    if admin_list.is_empty() {
+        panic!("ADMIN_EMAILS must contain at least one email address");
+    }
+    tracing::info!("Admin emails configured: {:?}", admin_list);
+
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set in environment");
     let manager = ConnectionManager::<SqliteConnection>::new(database_url);
@@ -295,6 +372,12 @@ async fn main() {
         .build(manager)
         .expect("Failed to create pool");
     let user_core= Arc::new(UserCore::new(pool.clone()));
+
+    // Bootstrap admin user on first startup (only if database is empty)
+    if let Err(e) = bootstrap_admin_if_needed(&user_core).await {
+        tracing::warn!("Admin bootstrap failed (app will continue): {}", e);
+    }
+
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
@@ -460,6 +543,7 @@ async fn main() {
         .route("/api/admin/monthly-credits/{user_id}/{amount}", post(admin_handlers::update_monthly_credits))
         .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
         .route("/api/admin/send-password-reset/{user_id}", post(admin_handlers::send_password_reset_link))
+        .route("/api/admin/change-password", post(admin_handlers::change_admin_password))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
     // Protected routes that need user authentication
     let protected_routes = Router::new()

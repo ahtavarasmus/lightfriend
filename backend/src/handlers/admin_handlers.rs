@@ -808,7 +808,6 @@ pub async fn send_password_reset_link(
 
     // Send email with reset link
     if let Err(e) = crate::utils::email::send_password_reset_email(
-        &state.user_repository,
         &user.email,
         &reset_link,
     ).await {
@@ -824,6 +823,47 @@ pub async fn send_password_reset_link(
     Ok(Json(json!({
         "message": format!("Password reset link sent to {}", user.email),
         "email": user.email
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub new_password: String,
+}
+
+/// Change admin's own password
+/// POST /api/admin/change-password
+pub async fn change_admin_password(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate password length
+    if req.new_password.len() < 6 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Password must be at least 6 characters"}))
+        ));
+    }
+
+    // Hash the new password
+    let password_hash = bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST)
+        .map_err(|e| {
+            tracing::error!("Failed to hash password: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to hash password"})))
+        })?;
+
+    // Update the password
+    state.user_core.update_password(auth_user.user_id, &password_hash)
+        .map_err(|e| {
+            tracing::error!("Failed to update password for admin {}: {}", auth_user.user_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to update password"})))
+        })?;
+
+    tracing::info!("Admin {} changed their password", auth_user.user_id);
+
+    Ok(Json(json!({
+        "message": "Password updated successfully"
     })))
 }
 
