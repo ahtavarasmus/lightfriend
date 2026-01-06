@@ -713,7 +713,7 @@ pub fn youtube_hub(props: &YouTubeHubProps) -> Html {
                             let loading = loading.clone();
                             loading.set(true);
                             spawn_local(async move {
-                                match Api::get(&format!("/api/youtube/video/{}", video_id)).send().await {
+                                match Api::get(&format!("/api/youtube/video?id={}", js_sys::encode_uri_component(&video_id))).send().await {
                                     Ok(response) => {
                                         if response.ok() {
                                             if let Ok(data) = response.json::<VideoDetailsResponse>().await {
@@ -815,7 +815,7 @@ pub fn youtube_hub(props: &YouTubeHubProps) -> Html {
                     loading.set(true);
                     spawn_local(async move {
                         let encoded_query = js_sys::encode_uri_component(&query);
-                        match Api::get(&format!("/api/youtube/video/{}", encoded_query)).send().await {
+                        match Api::get(&format!("/api/youtube/video?id={}", encoded_query)).send().await {
                             Ok(response) => {
                                 if response.ok() {
                                     match response.json::<VideoDetailsResponse>().await {
@@ -1410,7 +1410,7 @@ pub fn youtube_hub(props: &YouTubeHubProps) -> Html {
             let error = error.clone();
             loading.set(true);
             spawn_local(async move {
-                match Api::get(&format!("/api/youtube/video/{}", video_id)).send().await {
+                match Api::get(&format!("/api/youtube/video?id={}", js_sys::encode_uri_component(&video_id))).send().await {
                     Ok(response) => {
                         if response.ok() {
                             match response.json::<VideoDetailsResponse>().await {

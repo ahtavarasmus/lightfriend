@@ -80,6 +80,11 @@ pub struct SearchQuery {
     pub channel_id: Option<String>,  // Filter videos by channel ID
 }
 
+#[derive(Debug, Deserialize)]
+pub struct VideoQuery {
+    pub id: String, // Video ID or URL
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Channel {
     pub id: String,
@@ -586,10 +591,10 @@ async fn fetch_video_details_with_token(
 pub async fn get_video_details(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Path(video_id_or_url): Path<String>,
+    Query(query): Query<VideoQuery>,
 ) -> Result<Json<VideoDetailsResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Extract video ID from URL if needed
-    let video_id = match extract_video_id(&video_id_or_url) {
+    let video_id = match extract_video_id(&query.id) {
         Some(id) => id,
         None => {
             return Err((
