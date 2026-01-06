@@ -536,11 +536,21 @@ impl UserCore {
     }
 
     pub fn is_admin(&self, user_id: i32) -> Result<bool, DieselError> {
+        let admin_emails = std::env::var("ADMIN_EMAILS")
+            .expect("ADMIN_EMAILS environment variable must be set");
+
+        // Parse comma-separated list, trim whitespace
+        let admin_list: Vec<&str> = admin_emails
+            .split(',')
+            .map(|e| e.trim())
+            .filter(|e| !e.is_empty())
+            .collect();
+
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
-        Ok(user.email == "rasmus@ahtava.com" && user.id == 1)
+        Ok(admin_list.contains(&user.email.as_str()))
     }
 
     pub fn update_blocker_password(&self, user_id: i32, new_password: Option<&str>) -> Result<(), DieselError> {

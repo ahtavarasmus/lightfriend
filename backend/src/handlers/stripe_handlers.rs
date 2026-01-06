@@ -1137,9 +1137,8 @@ pub async fn stripe_webhook(
 
                                 // Send welcome back email to let them know subscription is active
                                 let email_clone = email.clone();
-                                let user_repo = state.user_repository.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_subscription_activated_email(&user_repo, &email_clone).await {
+                                    if let Err(e) = crate::utils::email::send_subscription_activated_email(&email_clone).await {
                                         tracing::error!("Failed to send subscription activated email: {}", e);
                                     }
                                 });
@@ -1204,10 +1203,9 @@ pub async fn stripe_webhook(
                                 let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
                                 let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
                                 let email_clone = email.clone();
-                                let user_repo = state.user_repository.clone();
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_magic_link_email(&user_repo, &email_clone, &magic_link).await {
+                                    if let Err(e) = crate::utils::email::send_magic_link_email(&email_clone, &magic_link).await {
                                         tracing::error!("Failed to send magic link email: {}", e);
                                     }
                                 });

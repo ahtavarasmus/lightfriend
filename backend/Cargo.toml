@@ -65,3 +65,4 @@ p256 = { version = "0.13", features = ["pem"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
 async-stream = "0.3"
 tokio-stream = "0.1"
+resend-rs = "0.9"

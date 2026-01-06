@@ -1,0 +1,41 @@
+# Lightfriend Core Only - Standalone Backend
+# Use this to run ONLY the core backend (without Synapse/bridges)
+#
+# For VPS deployment: Set path env vars in .env:
+#   DATA_DIR=/var/lib/lightfriend
+#   MATRIX_STORE_DIR=/home/user/matrix-server/.matrix_store
+#   UPLOADS_DIR=/var/lib/lightfriend/uploads
+#   TESLA_PRIVATE_KEY=/path/to/tesla_private_key.pem
+#   TESLA_PUBLIC_KEY=/path/to/tesla_public_key.pem
+#
+# For local testing: Defaults work (./data, ./matrix_store, ./uploads)
+
+services:
+  core:
+    image: ${CORE_IMAGE:-lightfriend-core:latest}
+    container_name: lightfriend-core
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: /app/data/database.db
+      MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER:-http://host.docker.internal:8008}
+      # Note: App uses ENVIRONMENT to determine port (staging=3100, else=3000)
+      # Force staging to use port 3100 (overrides .env)
+      ENVIRONMENT: staging
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+      - ${MATRIX_STORE_DIR:-./matrix_store}:/app/matrix_store
+      - ${UPLOADS_DIR:-./uploads}:/app/uploads
+      - ${TESLA_PRIVATE_KEY:-./tesla_private_key.pem}:/app/tesla_private_key.pem:ro
+      - ${TESLA_PUBLIC_KEY:-./tesla_public_key.pem}:/app/tesla_public_key.pem:ro
+    ports:
+      - "3100:3100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3100/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
