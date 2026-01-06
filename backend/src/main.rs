@@ -633,7 +633,7 @@ async fn main() {
         .route("/api/auth/youtube/connection", delete(youtube_auth::delete_youtube_connection))
         .route("/api/youtube/subscriptions", get(youtube::get_subscription_feed))
         .route("/api/youtube/search", get(youtube::search_youtube))
-        .route("/api/youtube/video/{video_id}", get(youtube::get_video_details))
+        .route("/api/youtube/video/{*video_id}", get(youtube::get_video_details))
         .route("/api/youtube/subscribe", post(youtube::subscribe_to_channel))
         .route("/api/youtube/unsubscribe/{channel_id}", delete(youtube::unsubscribe_from_channel))
         .route("/api/youtube/video/{video_id}/comments", get(youtube::get_video_comments))
