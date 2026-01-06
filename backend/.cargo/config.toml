@@ -1,17 +1,10 @@
 # Cargo build configuration for faster compilation
+#
+# NOTE: mold linker is configured via RUSTFLAGS in Docker only (see Dockerfile)
+# This allows native builds on servers without mold installed
 
 [build]
 # Use all available CPU cores for parallel compilation (default behavior)
-
-[target.x86_64-unknown-linux-gnu]
-# Use mold linker for 2-3x faster linking on Linux x86_64
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-[target.aarch64-unknown-linux-gnu]
-# Use mold linker for ARM64 as well
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [profile.release]
 # Optimize for speed while keeping reasonable build times
