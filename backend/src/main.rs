@@ -206,7 +206,7 @@ pub fn validate_env() {
         "JWT_REFRESH_KEY",
         "DATABASE_URL",
         "ENCRYPTION_KEY",
-        "MATRIX_HOMESERVER_SHARED_SECRET",
+        "MATRIX_SHARED_SECRET",
     ];
 
     for var in core_vars.iter() {
