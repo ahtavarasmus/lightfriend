@@ -19,3 +19,19 @@ backend/tesla_private_key.pem
 backend/tesla_public_key.pem
 backend/tesla-proxy-tls/key.pem
 backend/tesla-proxy-tls/cert.pem
+
+# Docker
+docker/postgres-init/*.sql
+docker/synapse/signing.key
+docker/synapse/*.log
+
+# Generated config files with secrets (keep .template files in git)
+docker/synapse/homeserver.yaml
+docker/bridges/*/config.yaml
+docker/bridges/*/*.yaml
+docker/bridges/*.yaml
+docker/postgres-init/init-databases.sh
+!docker/bridges/**/*.template
+
+# Matrix store
+backend/matrix_store/

@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+# Create databases and users for all services
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    -- Synapse database
+    CREATE USER synapse_user WITH PASSWORD '${SYNAPSE_DB_PASSWORD}';
+    CREATE DATABASE synapse_db OWNER synapse_user
+        ENCODING 'UTF8'
+        LC_COLLATE='C'
+        LC_CTYPE='C'
+        TEMPLATE template0;
+
+    -- WhatsApp bridge database
+    CREATE USER whatsapp_user WITH PASSWORD 'whatsapp_password';
+    CREATE DATABASE whatsapp_db OWNER whatsapp_user;
+
+    -- Signal bridge database
+    CREATE USER signal_user WITH PASSWORD 'signal_password';
+    CREATE DATABASE signal_db OWNER signal_user;
+
+    -- Messenger bridge database
+    CREATE USER messenger_user WITH PASSWORD 'messenger_password';
+    CREATE DATABASE messenger_db OWNER messenger_user;
+
+    -- Instagram bridge database
+    CREATE USER instagram_user WITH PASSWORD 'instagram_password';
+    CREATE DATABASE instagram_db OWNER instagram_user;
+EOSQL
+
+echo "All databases created successfully"
