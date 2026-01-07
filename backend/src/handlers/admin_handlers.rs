@@ -322,7 +322,7 @@ pub async fn broadcast_email(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            // Prepare HTML body
+            // Prepare HTML body with Lightfriend branding
             let html_body = format!(
                 r#"<!DOCTYPE html>
 <html>
@@ -330,16 +330,25 @@ pub async fn broadcast_email(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    {}
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #fafafa;">
+    <!-- Main Content -->
+    <div style="background-color: white; border-radius: 8px; padding: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        {}
 
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
 
-    <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+        <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+    </div>
 
-    <p style="margin-top: 40px; font-size: 12px; color: #999;">
-        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
-    </p>
+    <!-- Footer -->
+    <div style="text-align: center; padding: 20px 0; margin-top: 20px;">
+        <p style="font-size: 12px; color: #888; margin: 0;">
+            <a href="https://lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">lightfriend.ai</a>
+        </p>
+        <p style="margin-top: 15px; font-size: 12px; color: #999;">
+            <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+        </p>
+    </div>
 </body>
 </html>"#,
                 html_message, unsubscribe_link
@@ -393,7 +402,7 @@ pub async fn broadcast_email(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            // Prepare HTML body
+            // Prepare HTML body with Lightfriend branding
             let html_body = format!(
                 r#"<!DOCTYPE html>
 <html>
@@ -401,16 +410,25 @@ pub async fn broadcast_email(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    {}
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #fafafa;">
+    <!-- Main Content -->
+    <div style="background-color: white; border-radius: 8px; padding: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        {}
 
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
 
-    <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+        <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+    </div>
 
-    <p style="margin-top: 40px; font-size: 12px; color: #999;">
-        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
-    </p>
+    <!-- Footer -->
+    <div style="text-align: center; padding: 20px 0; margin-top: 20px;">
+        <p style="font-size: 12px; color: #888; margin: 0;">
+            <a href="https://lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">lightfriend.ai</a>
+        </p>
+        <p style="margin-top: 15px; font-size: 12px; color: #999;">
+            <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+        </p>
+    </div>
 </body>
 </html>"#,
                 html_message, unsubscribe_link
