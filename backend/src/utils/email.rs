@@ -1,9 +1,9 @@
 use std::error::Error;
 use resend_rs::{Resend, types::CreateEmailBaseOptions};
 
-/// Get Resend client and from email from environment.
+/// Get Resend client, from email, and reply-to email from environment.
 /// Returns None if RESEND_API_KEY is not set (email sending is optional).
-fn get_resend_config() -> Option<(Resend, String)> {
+fn get_resend_config() -> Option<(Resend, String, String)> {
     let api_key = std::env::var("RESEND_API_KEY").ok()?;
     if api_key.is_empty() {
         return None;
@@ -12,7 +12,11 @@ fn get_resend_config() -> Option<(Resend, String)> {
     let from_email = std::env::var("RESEND_FROM_EMAIL")
         .unwrap_or_else(|_| "notifications@lightfriend.ai".to_string());
 
-    Some((Resend::new(&api_key), from_email))
+    // Reply-to email - where replies should go (defaults to rasmus@lightfriend.ai)
+    let reply_to = std::env::var("RESEND_REPLY_TO_EMAIL")
+        .unwrap_or_else(|_| "rasmus@lightfriend.ai".to_string());
+
+    Some((Resend::new(&api_key), from_email, reply_to))
 }
 
 /// Send a magic link email to a new user for password setup
@@ -31,7 +35,7 @@ pub async fn send_magic_link_email(
     to_email: &str,
     magic_link: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let (resend, from_email) = match get_resend_config() {
+    let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
             tracing::warn!("Magic link email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
@@ -62,14 +66,18 @@ pub async fn send_magic_link_email(
 
     <p style="font-size: 14px; color: #666;">If you didn't sign up for Lightfriend, you can ignore this email.</p>
 
-    <p style="margin-top: 30px;">-Rasmus</p>
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
+
+    <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
 </body>
 </html>"#,
         magic_link, magic_link, magic_link
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Set your Lightfriend password")
-        .with_html(&email_body);
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Set your Lightfriend password")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -94,7 +102,7 @@ pub async fn send_password_reset_email(
     to_email: &str,
     reset_link: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let (resend, from_email) = match get_resend_config() {
+    let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
             tracing::warn!("Password reset email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
@@ -127,14 +135,18 @@ pub async fn send_password_reset_email(
 
     <p style="font-size: 14px; color: #666;">If you didn't request a password reset, you can safely ignore this email.</p>
 
-    <p style="margin-top: 30px;">-Rasmus</p>
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
+
+    <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
 </body>
 </html>"#,
         reset_link, reset_link, reset_link
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Lightfriend Password Reset")
-        .with_html(&email_body);
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Lightfriend Password Reset")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -150,7 +162,7 @@ pub async fn send_password_reset_email(
 pub async fn send_subscription_activated_email(
     to_email: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let (resend, from_email) = match get_resend_config() {
+    let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
             tracing::warn!("Subscription activated email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
@@ -182,20 +194,66 @@ pub async fn send_subscription_activated_email(
     <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
     <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
 
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">If you have any questions, just reply to this email.</p>
+    <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
 
-    <p style="margin-top: 30px;">-Rasmus</p>
+    <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
 </body>
 </html>"#,
         login_url, login_url, login_url
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Your Lightfriend subscription is active")
-        .with_html(&email_body);
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Your Lightfriend subscription is active")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
     tracing::info!("Subscription activated email sent to {}", to_email);
 
     Ok(())
+}
+
+/// Send a broadcast email (admin feature updates, announcements, etc.)
+///
+/// Uses Resend API for reliable email delivery.
+/// Unlike other email functions, this returns an error if Resend is not configured.
+///
+/// # Arguments
+/// * `to_email` - Recipient email address
+/// * `subject` - Email subject line
+/// * `html_body` - Pre-formatted HTML body (caller handles formatting)
+///
+/// # Returns
+/// * `Ok(())` - Email sent successfully
+/// * `Err` - Failed to send email or Resend not configured
+pub async fn send_broadcast_email(
+    to_email: &str,
+    subject: &str,
+    html_body: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let (resend, from_email, reply_to) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            return Err("RESEND_API_KEY not configured - cannot send broadcast emails".into());
+        }
+    };
+
+    // Format as "Lightfriend <email>" for display name
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], subject)
+        .with_html(html_body)
+        .with_reply(&reply_to);
+
+    resend.emails.send(email).await?;
+
+    tracing::info!("Broadcast email sent to {}", to_email);
+
+    Ok(())
+}
+
+/// Check if Resend is configured
+pub fn is_resend_configured() -> bool {
+    get_resend_config().is_some()
 }
