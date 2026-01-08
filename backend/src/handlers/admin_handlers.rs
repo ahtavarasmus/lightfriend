@@ -224,8 +224,6 @@ pub async fn broadcast_email(
 
     // Spawn the background task
     tokio::spawn(async move {
-        let auth_user = crate::handlers::auth_middleware::AuthUser { user_id: 1, is_admin: false }; // Hardcode user_id to 1
-
         let mut success_count = 0;
         let mut failed_count = 0;
         let mut error_details = Vec::new();
@@ -273,7 +271,7 @@ pub async fn broadcast_email(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            // Prepare HTML body
+            // Prepare HTML body with Lightfriend branding
             let html_body = format!(
                 r#"<!DOCTYPE html>
 <html>
@@ -281,39 +279,43 @@ pub async fn broadcast_email(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    {}
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #fafafa;">
+    <!-- Main Content -->
+    <div style="background-color: white; border-radius: 8px; padding: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        {}
 
-    <p style="margin-top: 30px;">-Rasmus</p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
 
-    <p style="margin-top: 40px; font-size: 12px; color: #999;">
-        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
-    </p>
+        <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; padding: 20px 0; margin-top: 20px;">
+        <p style="font-size: 12px; color: #888; margin: 0;">
+            <a href="https://lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">lightfriend.ai</a>
+        </p>
+        <p style="margin-top: 15px; font-size: 12px; color: #999;">
+            <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+        </p>
+    </div>
 </body>
 </html>"#,
                 html_message, unsubscribe_link
             );
 
-            // Prepare the email request for the send_email handler
-            let email_request = crate::handlers::imap_handlers::SendEmailRequest {
-                to: user.email.clone(),
-                subject: request_clone.subject.clone(),
-                body: html_body,
-            };
-
-            // Call the existing send_email handler
-            match crate::handlers::imap_handlers::send_email(
-                State(state_clone.clone()),
-                auth_user,
-                Json(email_request)
+            // Send via Resend
+            match crate::utils::email::send_broadcast_email(
+                &user.email,
+                &request_clone.subject,
+                &html_body,
             ).await {
                 Ok(_) => {
                     success_count += 1;
                     tracing::info!("Successfully sent email to {}", user.email);
                 }
-                Err((_status, err)) => {
+                Err(e) => {
                     failed_count += 1;
-                    let error_msg = format!("Failed to send to {}: {:?}", user.email, err);
+                    let error_msg = format!("Failed to send to {}: {}", user.email, e);
                     tracing::error!("{}", error_msg);
                     error_details.push(error_msg);
                 }
@@ -349,7 +351,7 @@ pub async fn broadcast_email(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            // Prepare HTML body
+            // Prepare HTML body with Lightfriend branding
             let html_body = format!(
                 r#"<!DOCTYPE html>
 <html>
@@ -357,37 +359,43 @@ pub async fn broadcast_email(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    {}
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #fafafa;">
+    <!-- Main Content -->
+    <div style="background-color: white; border-radius: 8px; padding: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        {}
 
-    <p style="margin-top: 30px;">-Rasmus</p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>
 
-    <p style="margin-top: 40px; font-size: 12px; color: #999;">
-        <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
-    </p>
+        <p style="margin-top: 20px;">-Rasmus from Lightfriend</p>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; padding: 20px 0; margin-top: 20px;">
+        <p style="font-size: 12px; color: #888; margin: 0;">
+            <a href="https://lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">lightfriend.ai</a>
+        </p>
+        <p style="margin-top: 15px; font-size: 12px; color: #999;">
+            <a href="{}" style="color: #999;">Unsubscribe from feature updates</a>
+        </p>
+    </div>
 </body>
 </html>"#,
                 html_message, unsubscribe_link
             );
 
-            let email_request = crate::handlers::imap_handlers::SendEmailRequest {
-                to: entry.email.clone(),
-                subject: request_clone.subject.clone(),
-                body: html_body,
-            };
-
-            match crate::handlers::imap_handlers::send_email(
-                State(state_clone.clone()),
-                auth_user,
-                Json(email_request)
+            // Send via Resend
+            match crate::utils::email::send_broadcast_email(
+                &entry.email,
+                &request_clone.subject,
+                &html_body,
             ).await {
                 Ok(_) => {
                     success_count += 1;
                     tracing::info!("Successfully sent email to waitlist entry {}", entry.email);
                 }
-                Err((_status, err)) => {
+                Err(e) => {
                     failed_count += 1;
-                    let error_msg = format!("Failed to send to waitlist {}: {:?}", entry.email, err);
+                    let error_msg = format!("Failed to send to waitlist {}: {}", entry.email, e);
                     tracing::error!("{}", error_msg);
                     error_details.push(error_msg);
                 }
@@ -408,16 +416,6 @@ pub async fn broadcast_email(
     // Respond immediately
     Ok(Json(json!({
         "message": "Email broadcast queued and will process in the background"
-    })))
-}
-
-
-pub async fn broadcast_message(
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Immediately return a success response
-    Ok(Json(json!({
-        "message": "Broadcast is currently disabled(create it for programmable messaging)",
-        "status": "ok"
     })))
 }
 

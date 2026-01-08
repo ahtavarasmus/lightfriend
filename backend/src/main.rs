@@ -524,7 +524,6 @@ async fn main() {
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
-        .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
         .route("/api/admin/broadcast-email", post(admin_handlers::broadcast_email))
         .route("/api/admin/usage-logs", get(admin_handlers::get_usage_logs))
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
