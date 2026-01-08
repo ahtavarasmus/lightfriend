@@ -805,3 +805,23 @@ pub async fn change_admin_password(
     })))
 }
 
+#[derive(Deserialize)]
+pub struct SetTwilioCredsRequest {
+    pub user_id: i32,
+    pub account_sid: String,
+    pub auth_token: String,
+}
+
+pub async fn set_user_twilio_credentials(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetTwilioCredsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state.user_core.update_twilio_credentials(req.user_id, &req.account_sid, &req.auth_token)
+        .map_err(|e| {
+            tracing::error!("Failed to set twilio creds: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+        })?;
+
+    tracing::info!("Set Twilio credentials for user {}", req.user_id);
+    Ok(Json(json!({"success": true})))
+}
