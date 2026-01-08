@@ -97,3 +97,24 @@ Found code was in broken state due to incomplete tier 3 removal. Fixed by:
 
 Code now compiles cleanly.
 
+## Iteration 3 - 2026-01-09
+### Task 3: Remove server_ip validation
+Status: COMPLETE
+
+#### Changes made:
+
+1. **Removed from profile_handlers.rs:**
+   - Removed `server_ip` field from `ProfileResponse` struct
+   - Removed `server_ip` from response construction
+
+2. **Removed from user_core.rs:**
+   - Removed `find_by_server_ip()` function
+   - Removed `update_server_ip()` function
+   - Removed `get_server_ip()` function
+
+#### KEPT (as per rules - migration cleanup later):
+- `schema.rs` and `schema_new.rs` - database schema field
+- `user_models.rs` - model field `server_ip: Option<String>`
+
+Code compiles cleanly.
+

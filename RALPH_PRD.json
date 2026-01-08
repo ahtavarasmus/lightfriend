@@ -28,7 +28,7 @@
       "id": 3,
       "title": "Remove server_ip validation",
       "description": "Remove IP address validation logic for self-hosted users (server_ip field usage), but keep the database field (migration cleanup later)",
-      "passes": false
+      "passes": true
     },
     {
       "id": 4,

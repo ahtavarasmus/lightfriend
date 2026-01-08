@@ -68,25 +68,6 @@ impl UserCore {
         Ok(user)
     }
 
-    pub fn find_by_server_ip(&self, server_ip: &str) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user_id_opt: Option<i32> = user_settings::table
-            .filter(user_settings::server_ip.eq(Some(server_ip)))
-            .select(user_settings::user_id)
-            .first::<i32>(&mut conn)
-            .optional()?;
-        match user_id_opt {
-            Some(user_id) => {
-                let user = users::table
-                    .find(user_id)
-                    .first::<User>(&mut conn)
-                    .optional()?;
-                Ok(user)
-            }
-            None => Ok(None),
-        }
-    }
-
     pub fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
@@ -1165,34 +1146,6 @@ impl UserCore {
             .execute(&mut conn)?;
 
         Ok(())
-    }
-
-    pub fn update_server_ip(&self, user_id: i32, server_ip: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the last ping timestamp
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_ip.eq(server_ip))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn get_server_ip(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Search for a user_settings record with matching server_instance_id
-        let ip = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::server_ip)
-            .first::<Option<String>>(&mut conn)?;
-            
-        Ok(ip)
     }
 
     pub fn get_next_billing_date(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
