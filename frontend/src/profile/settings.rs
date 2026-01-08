@@ -1762,11 +1762,10 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 }
             }
 
-            // Email field (hidden for self-hosted)
+            // Email field
             {
-                if (*user_profile).sub_tier != Some("self_hosted".to_string()) {
-                    html! {
-                        <div class="profile-field">
+                html! {
+                    <div class="profile-field">
                             <span class="field-label">{"Email"}</span>
                             <div class="field-input-container">
                                 <input
@@ -1784,9 +1783,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 {render_save_indicator(&*email_save_state)}
                             </div>
                         </div>
-                    }
-                } else {
-                    html! {}
                 }
             }
 
@@ -2050,9 +2046,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 </div>
             </div>
 
-            // LLM Provider field (only show to subscribers, not self-hosted)
+            // LLM Provider field (only show to subscribers)
             {
-                if (*user_profile).sub_tier.is_some() && (*user_profile).sub_tier != Some("self_hosted".to_string()) {
+                if (*user_profile).sub_tier.is_some() {
                     html! {
                         <div class="profile-field">
                             <div class="field-label-group">

@@ -13,7 +13,6 @@ use crate::pages::landing::Landing;
 use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
-use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
 use crate::controls::tesla_controls::TeslaControls;
 use crate::media::youtube_hub::YouTubeHub;
 
@@ -67,43 +66,6 @@ pub fn is_logged_in() -> bool {
     // Cookie-based auth - we can't check from client side
     // This will be verified by the backend on API calls
     true
-}
-
-#[derive(Properties, PartialEq, Clone)]
-pub struct MagicLinkProps {
-    pub link: Option<String>,
-    pub error: Option<String>,
-    pub on_regenerate: Callback<()>,
-}
-
-#[function_component]
-fn MagicLinkSection(props: &MagicLinkProps) -> Html {
-    let link = &props.link;
-    let on_regenerate = props.on_regenerate.clone();
-    html! {
-        <div class="magic-link-item" style="position: relative; width: 100%;">
-            <span class="credit-label">{"Self-Hosted Login Link"}</span>
-            if let Some(l) = link.as_ref() {
-                <>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
-                        <a href={l.clone()} rel="noopener noreferrer" style="color: #7EB2FF; text-decoration: none; font-size: 0.9rem; word-break: break-all; max-width: 200px;">
-                            {l.clone()}
-                        </a>
-                        <button onclick={Callback::from(move |_| on_regenerate.emit(()))} style="padding: 0.25rem 0.5rem; background: rgba(255, 68, 68, 0.2); border: 1px solid rgba(255, 68, 68, 0.3); border-radius: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
-                            {"Regenerate"}
-                        </button>
-                    </div>
-                </>
-            } else if let Some(err) = props.error.as_ref() {
-                <span style="color: #ff4444; font-size: 0.8rem;">{err}</span>
-            } else {
-                <span style="color: #999; font-size: 0.9rem;">{"Loading..."}</span>
-            }
-            <div class="credit-tooltip">
-                {"Click the link to log in to your self-hosted instance. Regenerate if expired or compromised. Single-use for security."}
-            </div>
-        </div>
-    }
 }
 
 /// Usage status indicator component - compact inline display
@@ -292,8 +254,6 @@ pub fn Home() -> Html {
     let active_tab = use_state(|| DashboardTab::Connections);
     let navigator = use_navigator().unwrap();
     let location = use_location().unwrap();
-    let magic_link = use_state(|| None::<String>);
-    let magic_error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let totp_enabled = use_state(|| None::<bool>);
     let banner_dismissed = use_state(|| {
@@ -339,7 +299,7 @@ pub fn Home() -> Html {
             // Only focus when profile is loaded, has subscription, and we haven't focused yet
             if !**already_focused {
                 if let Some(p) = profile.as_ref() {
-                    if p.sub_tier.is_some() && p.sub_tier.as_deref() != Some("tier 3") {
+                    if p.sub_tier.is_some() {
                         // Small delay to ensure DOM is updated
                         let chat_input_ref = chat_input_ref.clone();
                         let has_focused_chat = has_focused_chat_inner.clone();
@@ -481,15 +441,11 @@ pub fn Home() -> Html {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
-        let magic_link = magic_link.clone();
-        let magic_error = magic_error.clone();
         let auth_status = auth_status.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: ()| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
             let error = error.clone();
-            let magic_link = magic_link.clone();
-            let magic_error = magic_error.clone();
             let auth_status = auth_status.clone();
             spawn_local(async move {
                 let result = Api::get("/api/profile").send().await;
@@ -507,34 +463,6 @@ pub fn Home() -> Html {
                                 user_verified.set(profile.verified);
                                 profile_data.set(Some(profile.clone()));
                                 error.set(None);
-                                if profile.sub_tier.as_deref() == Some("tier 3") {
-                                    spawn_local(async move {
-                                        let result = Api::get("/api/profile/magic-link")
-                                            .send()
-                                            .await;
-                                        match result {
-                                            Ok(resp) => {
-                                                if resp.ok() {
-                                                    match resp.json::<Value>().await {
-                                                        Ok(data) => {
-                                                            if let Some(l) = data["link"].as_str() {
-                                                                magic_link.set(Some(l.to_string()));
-                                                            }
-                                                        }
-                                                        Err(_) => {
-                                                            magic_error.set(Some("Failed to parse link".to_string()));
-                                                        }
-                                                    }
-                                                } else {
-                                                    magic_error.set(Some("Failed to fetch link".to_string()));
-                                                }
-                                            }
-                                            Err(_) => {
-                                                magic_error.set(Some("Network error".to_string()));
-                                            }
-                                        }
-                                    });
-                                }
                             }
                             Err(_) => {
                                 error.set(Some("Failed to parse profile data".to_string()));
@@ -639,16 +567,12 @@ pub fn Home() -> Html {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
-        let magic_link = magic_link.clone();
-        let magic_error = magic_error.clone();
         let auth_status = auth_status.clone();
         let show_onboarding = show_onboarding.clone();
         use_effect_with_deps(move |_| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
             let error = error.clone();
-            let magic_link = magic_link.clone();
-            let magic_error = magic_error.clone();
             let auth_status = auth_status.clone();
             let show_onboarding = show_onboarding.clone();
             spawn_local(async move {
@@ -671,35 +595,6 @@ pub fn Home() -> Html {
                                 if profile.sub_tier.is_some() && !profile.has_any_connection {
                                     show_onboarding.set(true);
                                 }
-                                // Fetch magic link if tier 3
-                                if profile.sub_tier.as_deref() == Some("tier 3") {
-                                    spawn_local(async move {
-                                        let result = Api::get("/api/profile/magic-link")
-                                            .send()
-                                            .await;
-                                        match result {
-                                            Ok(resp) => {
-                                                if resp.ok() {
-                                                    match resp.json::<Value>().await {
-                                                        Ok(data) => {
-                                                            if let Some(l) = data["link"].as_str() {
-                                                                magic_link.set(Some(l.to_string()));
-                                                            }
-                                                        }
-                                                        Err(_) => {
-                                                            magic_error.set(Some("Failed to parse link".to_string()));
-                                                        }
-                                                    }
-                                                } else {
-                                                    magic_error.set(Some("Failed to fetch link".to_string()));
-                                                }
-                                            }
-                                            Err(_) => {
-                                                magic_error.set(Some("Network error".to_string()));
-                                            }
-                                        }
-                                    });
-                                }
                             }
                             Err(_) => {
                                 error.set(Some("Failed to parse profile data".to_string()));
@@ -711,7 +606,7 @@ pub fn Home() -> Html {
                     }
                 }
             });
-   
+
             || ()
         }, ());
     }
@@ -866,8 +761,7 @@ pub fn Home() -> Html {
                     <div class="status-section">
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
-                                if profile.sub_tier.as_deref() != Some("tier 3") {
-                                    let active_tab_for_usage = active_tab.clone();
+                                let active_tab_for_usage = active_tab.clone();
                                     let refetch_usage_for_details = refetch_usage.clone();
                                     let is_byot = profile.plan_type.as_deref() == Some("byot");
                                     let byot_data = (*byot_usage_data).clone();
@@ -949,77 +843,6 @@ pub fn Home() -> Html {
                                             }
                                         </div>
                                     }
-                                } else {
-                                    html! {}
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
-                        {
-                            if let Some(profile) = (*profile_data).as_ref() {
-                                if profile.sub_tier.as_deref() == Some("tier 3") {
-                                    if profile.server_ip.is_some() {
-                                        html! {
-                                            <ServerSelfHostInstructions
-                                                is_logged_in={true}
-                                                sub_tier={profile.sub_tier.clone()}
-                                                server_ip={profile.server_ip.clone()}
-                                                user_id={Some(profile.id.to_string())}
-                                                message={if profile.server_ip.is_none() {
-                                                    "Set up your self-hosted server below.".to_string()
-                                                } else {
-                                                    String::new()
-                                                }}
-                                                on_update={Some(refetch_profile.clone())}
-                                            />
-                                        }
-                                    } else {
-                                        html! {
-                                            <MagicLinkSection
-                                                link={(*magic_link).clone()}
-                                                error={(*magic_error).clone()}
-                                                on_regenerate={{
-                                                    let magic_link = magic_link.clone();
-                                                    let magic_error = magic_error.clone();
-                                                    Callback::from(move |_| {
-                                                        let magic_link = magic_link.clone();
-                                                        let magic_error = magic_error.clone();
-                                                        spawn_local(async move {
-                                                            match Api::get("/api/profile/magic-link?regenerate=true")
-                                                                .send()
-                                                                .await
-                                                            {
-                                                                Ok(resp) => {
-                                                                    if resp.ok() {
-                                                                        match resp.json::<Value>().await {
-                                                                            Ok(data) => {
-                                                                                if let Some(new_link) = data["link"].as_str() {
-                                                                                    magic_link.set(Some(new_link.to_string()));
-                                                                                    magic_error.set(None);
-                                                                                }
-                                                                            }
-                                                                            Err(_) => {
-                                                                                magic_error.set(Some("Failed to regenerate".to_string()));
-                                                                            }
-                                                                        }
-                                                                    } else {
-                                                                        magic_error.set(Some("Failed to regenerate".to_string()));
-                                                                    }
-                                                                }
-                                                                Err(_) => {
-                                                                    magic_error.set(Some("Network error".to_string()));
-                                                                }
-                                                            }
-                                                        });
-                                                    })
-                                                }}
-                                            />
-                                        }
-                                    }
-                                } else {
-                                    html! {}
-                                }
                             } else {
                                 html! {}
                             }
@@ -1028,7 +851,7 @@ pub fn Home() -> Html {
                     // Web Chat Section
                     {
                         if let Some(profile) = (*profile_data).as_ref() {
-                            if profile.sub_tier.is_some() && profile.sub_tier.as_deref() != Some("tier 3") {
+                            if profile.sub_tier.is_some() {
                                 let on_send = {
                                     let chat_input = chat_input.clone();
                                     let chat_user_msg = chat_user_msg.clone();
@@ -1571,10 +1394,9 @@ pub fn Home() -> Html {
                         }
                     }
                     {
-                        if let Some(profile) = (*profile_data).as_ref() {
-                            if profile.sub_tier.as_deref() != Some("tier 3") {
-                                html! {
-                                    <>
+                        if (*profile_data).is_some() {
+                            html! {
+                                <>
                                         <br/>
                                         <div class="dashboard-tabs">
                                             <button
@@ -1721,9 +1543,6 @@ pub fn Home() -> Html {
                                         }
                                     </>
                                 }
-                            } else {
-                                html! {}
-                            }
                         } else {
                             html! {}
                         }

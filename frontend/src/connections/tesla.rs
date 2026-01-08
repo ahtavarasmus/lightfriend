@@ -619,7 +619,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             }
 
             // Check subscription tier
-            if props.sub_tier == Some("tier 2".to_string()) || props.sub_tier == Some("tier 3".to_string()) {
+            if props.sub_tier == Some("tier 2".to_string()) {
                 if !*tesla_connected {
                     <FeaturePreview
                         gif_src="/assets/previews/tesla-controls-preview.gif"

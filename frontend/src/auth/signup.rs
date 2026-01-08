@@ -1019,23 +1019,14 @@ pub mod register {
     use yew_router::prelude::*;
     use crate::Route;
     use crate::config;
-    use crate::SelfHostingStatus;
     use gloo_console::log;
-    #[derive(Properties, PartialEq)]
-    pub struct RegisterProps {
-        #[prop_or(SelfHostingStatus::Normal)]
-        pub self_hosting_status: SelfHostingStatus,
-    }
+    #[derive(Properties, PartialEq, Default)]
+    pub struct RegisterProps {}
     #[derive(Serialize)]
     pub struct RegisterRequest {
         email: String,
         password: String,
         phone_number: String,
-    }
-    #[derive(Serialize)]
-    pub struct SelfHostedLoginRequest {
-        email: String,
-        password: String,
     }
     #[derive(Deserialize)]
     pub struct RegisterResponse {
@@ -1055,7 +1046,7 @@ pub mod register {
         phone.starts_with('+')
     }
     #[function_component]
-    pub fn Register(props: &RegisterProps) -> Html {
+    pub fn Register(_props: &RegisterProps) -> Html {
         let email = use_state(String::new);
         let password = use_state(String::new);
         let phone_number = use_state(String::new);
@@ -1063,63 +1054,6 @@ pub mod register {
         let success = use_state(|| None::<String>);
         let email_valid = use_state(|| true); // Track email validity
         let terms_accepted = use_state(|| false); // Track terms acceptance
-        let self_hosted_login = {
-            let email = email.clone();
-            let password = password.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-          
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let email = (*email).clone();
-                let password = (*password).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post(&format!("{}/api/self-hosted/login", config::get_backend_url()))
-                        .credentials(web_sys::RequestCredentials::Include)
-                        .json(&SelfHostedLoginRequest { email: email.clone(), password })
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                match response.json::<RegisterResponse>().await {
-                                    Ok(resp) => {
-                                        log!("Self-hosted login successful, cookies set by backend");
-                                        error_setter.set(None);
-                                        success_setter.set(Some(resp.message));
-
-                                        // Redirect to home page after a short delay
-                                        let window = web_sys::window().unwrap();
-                                        wasm_bindgen_futures::spawn_local(async move {
-                                            gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                            let _ = window.location().set_href("/");
-                                        });
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
-                                    }
-                                }
-                            } else {
-                                match response.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("An unknown error occurred".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
         let onsubmit = {
             let email = email.clone();
             let password = password.clone();
@@ -1321,162 +1255,113 @@ pub mod register {
                 </style>
                 <div class="hero-background"></div>
                 <div class="register-container">
+                    <h1>{"Register"}</h1>
                     {
-                        match props.self_hosting_status {
-                            SelfHostingStatus::SelfHostedLogin => html! {
-                                <>
-                                    <h1>{"Self-Hosted Login"}</h1>
-                                    {
-                                        if let Some(error_message) = (*error).as_ref() {
-                                            html! {
-                                                <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                                    {error_message}
-                                                </div>
-                                            }
-                                        } else if let Some(success_message) = (*success).as_ref() {
-                                            html! {
-                                                <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                                    {success_message}
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                    <form onsubmit={self_hosted_login}>
-                                        <input
-                                            type="email"
-                                            placeholder="Email"
-                                            onchange={let email = email.clone(); move |e: Event| {
-                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                email.set(input.value());
-                                            }}
-                                        />
-                                        <input
-                                            type="password"
-                                            placeholder="Password"
-                                            onchange={let password = password.clone(); move |e: Event| {
-                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                password.set(input.value());
-                                            }}
-                                        />
-                                        <button type="submit">{"Login"}</button>
-                                    </form>
-                                </>
-                            },
-                            SelfHostingStatus::Normal => html! {
-                                <>
-                                    <h1>{"Register"}</h1>
-                                    {
-                                        if let Some(error_message) = (*error).as_ref() {
-                                            html! {
-                                                <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                                    {error_message}
-                                                </div>
-                                            }
-                                        } else if let Some(success_message) = (*success).as_ref() {
-                                            html! {
-                                                <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                                    {success_message}
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                    <form onsubmit={onsubmit}>
-                                        <input
-                                            type="email"
-                                            placeholder="Email"
-                                            onchange={
-                                                let email = email.clone();
-                                                let email_valid = email_valid.clone();
-                                                let error_setter = error.clone();
-                                                move |e: Event| {
-                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                    let value = input.value();
-                                                    let is_valid = is_valid_email(&value);
-                                                    email_valid.set(is_valid);
-                                                    if !is_valid {
-                                                        error_setter.set(Some("Please enter a valid email address".to_string()));
-                                                    } else {
-                                                        error_setter.set(None);
-                                                    }
-                                                    email.set(value);
-                                                }
-                                            }
-                                            class={if !*email_valid {"invalid-input"} else {""}}
-                                        />
-                                        <input
-                                            type="tel"
-                                            placeholder="Phone Number"
-                                            onchange={
-                                                let phone_number = phone_number.clone();
-                                                let error_setter = error.clone();
-                                                move |e: Event| {
-                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                    let value = input.value();
-                                                    if !is_valid_phone(&value) {
-                                                        error_setter.set(Some("Phone number must start with '+'".to_string()));
-                                                    } else {
-                                                        error_setter.set(None);
-                                                    }
-                                                    phone_number.set(value);
-                                                }
-                                            }
-                                        />
-                                        <input
-                                            type="password"
-                                            placeholder="Password"
-                                            onchange={let password = password.clone(); move |e: Event| {
-                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                password.set(input.value());
-                                            }}
-                                        />
-                                        <div id="terms-checkbox-container">
-                                            <label>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={*terms_accepted}
-                                                    onchange={
-                                                        let terms_accepted = terms_accepted.clone();
-                                                        move |e: Event| {
-                                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                                            terms_accepted.set(input.checked());
-                                                        }
-                                                    }
-                                                />
-                                                <span>
-                                                    {"By signing up you agree to our "}
-                                                    <a href="/terms" target="_blank">{"terms of service"}</a>
-                                                    {" and "}
-                                                    <a href="/privacy" target="_blank">{"privacy policy"}</a>
-                                                    {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
-                                                </span>
-                                            </label>
-                                        </div>
-                                        <button
-                                            type="submit"
-                                            disabled={!*terms_accepted}
-                                            style={if !*terms_accepted {
-                                                "opacity: 0.5; cursor: not-allowed;"
-                                            } else {
-                                                ""
-                                            }}
-                                        >
-                                            {"Register"}
-                                        </button>
-                                    </form>
-                                    <div class="auth-redirect">
-                                        {"Already have an account? "}
-                                        <Link<Route> to={Route::Login}>
-                                            {"Login here"}
-                                        </Link<Route>>
-                                    </div>
-                                </>
+                        if let Some(error_message) = (*error).as_ref() {
+                            html! {
+                                <div class="error-message" style="color: red; margin-bottom: 10px;">
+                                    {error_message}
+                                </div>
                             }
+                        } else if let Some(success_message) = (*success).as_ref() {
+                            html! {
+                                <div class="success-message" style="color: green; margin-bottom: 10px;">
+                                    {success_message}
+                                </div>
+                            }
+                        } else {
+                            html! {}
                         }
                     }
+                    <form onsubmit={onsubmit}>
+                        <input
+                            type="email"
+                            placeholder="Email"
+                            onchange={
+                                let email = email.clone();
+                                let email_valid = email_valid.clone();
+                                let error_setter = error.clone();
+                                move |e: Event| {
+                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                    let value = input.value();
+                                    let is_valid = is_valid_email(&value);
+                                    email_valid.set(is_valid);
+                                    if !is_valid {
+                                        error_setter.set(Some("Please enter a valid email address".to_string()));
+                                    } else {
+                                        error_setter.set(None);
+                                    }
+                                    email.set(value);
+                                }
+                            }
+                            class={if !*email_valid {"invalid-input"} else {""}}
+                        />
+                        <input
+                            type="tel"
+                            placeholder="Phone Number"
+                            onchange={
+                                let phone_number = phone_number.clone();
+                                let error_setter = error.clone();
+                                move |e: Event| {
+                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                    let value = input.value();
+                                    if !is_valid_phone(&value) {
+                                        error_setter.set(Some("Phone number must start with '+'".to_string()));
+                                    } else {
+                                        error_setter.set(None);
+                                    }
+                                    phone_number.set(value);
+                                }
+                            }
+                        />
+                        <input
+                            type="password"
+                            placeholder="Password"
+                            onchange={let password = password.clone(); move |e: Event| {
+                                let input: HtmlInputElement = e.target_unchecked_into();
+                                password.set(input.value());
+                            }}
+                        />
+                        <div id="terms-checkbox-container">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={*terms_accepted}
+                                    onchange={
+                                        let terms_accepted = terms_accepted.clone();
+                                        move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            terms_accepted.set(input.checked());
+                                        }
+                                    }
+                                />
+                                <span>
+                                    {"By signing up you agree to our "}
+                                    <a href="/terms" target="_blank">{"terms of service"}</a>
+                                    {" and "}
+                                    <a href="/privacy" target="_blank">{"privacy policy"}</a>
+                                    {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
+                                </span>
+                            </label>
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={!*terms_accepted}
+                            style={if !*terms_accepted {
+                                "opacity: 0.5; cursor: not-allowed;"
+                            } else {
+                                ""
+                            }}
+                        >
+                            {"Register"}
+                        </button>
+                    </form>
+                    <div class="auth-redirect">
+                        {"Already have an account? "}
+                        <Link<Route> to={Route::Login}>
+                            {"Login here"}
+                        </Link<Route>>
+                    </div>
                 </div>
             </div>
         }

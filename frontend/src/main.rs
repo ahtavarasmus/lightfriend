@@ -32,11 +32,6 @@ mod pages {
     pub mod proactive;
     pub mod faq;
     pub mod supported_countries;
-    pub mod twilio_self_host_instructions;
-    pub mod llm_self_host_instructions;
-    pub mod voice_self_host_instructions;
-    pub mod server_self_host_instructions;
-    pub mod self_host_instructions;
     pub mod setup_costs;
     pub mod bring_own_number;
     pub mod lightphone3_whatsapp_guide;
@@ -91,7 +86,6 @@ use pages::{
     supported_countries::SupportedCountries,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::UnifiedPricing,
-    self_host_instructions::SelfHostInstructions,
     bring_own_number::TwilioHostedInstructions,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     blog::Blog,
@@ -112,15 +106,9 @@ use admin::dashboard::AdminDashboard;
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
 use gloo_net::http::Request;
-#[derive(Clone, PartialEq)]
-pub enum SelfHostingStatus {
-    SelfHostedLogin,
-    Normal,
-}
+
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
-    #[at("/self-hosted")]
-    SelfHosted,
     #[at("/password-reset")]
     PasswordReset,
     #[at("/password-reset/:token")]
@@ -131,8 +119,6 @@ pub enum Route {
     Blog,
     #[at("/updates")]
     Changelog,
-    #[at("/host-instructions")]
-    SelfHostInstructions,
     #[at("/supported-countries")]
     SupportedCountries,
     #[at("/bring-own-number")]
@@ -164,27 +150,8 @@ pub enum Route {
     #[at("/subscription-success")]
     SubscriptionSuccess,
 }
-fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
-    if matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-        return match routes {
-            Route::SelfHosted => {
-                info!("Rendering Self Hosted page");
-                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
-            },
-            _ => {
-                html! { <Redirect<Route> to={Route::SelfHosted} /> }
-            }
-        };
-    }
+fn switch(routes: Route, logged_in: bool) -> Html {
     match routes {
-        Route::SelfHosted => {
-            if !logged_in {
-                info!("Rendering Self Hosted page");
-                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
-            } else {
-                html! { <Redirect<Route> to={Route::Home} /> }
-            }
-        },
         Route::PasswordReset => {
             info!("Rendering Password Reset page");
             html! { <PasswordReset /> }
@@ -204,10 +171,6 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Changelog => {
             info!("Rendering Changelog page");
             html! { <Changelog /> }
-        },
-        Route::SelfHostInstructions => {
-            info!("Rendering Self Host Instructions page");
-            html! { <SelfHostInstructionsWrapper /> }
         },
         Route::SupportedCountries => {
             info!("Rendering SupportedCountries page");
@@ -324,64 +287,6 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
         }
     }
 }
-#[function_component(SelfHostInstructionsWrapper)]
-pub fn self_host_instructions_wrapper() -> Html {
-    let profile_data = use_state(|| None::<UserProfile>);
-   
-    {
-        let profile_data = profile_data.clone();
-
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                match Api::get("/api/profile")
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if let Ok(profile) = response.json::<UserProfile>().await {
-                            profile_data.set(Some(profile));
-                        }
-                    }
-                    Err(_) => {}
-                }
-            });
-
-            || ()
-        }, ());
-    }
-    if let Some(profile) = (*profile_data).as_ref() {
-        html! {
-            <SelfHostInstructions
-                is_logged_in={true}
-                sub_tier={profile.sub_tier.clone()}
-                user_id={profile.id.clone().to_string()}
-                server_ip={profile.server_ip.clone()}
-                twilio_phone={profile.preferred_number.clone()}
-                twilio_sid={profile.twilio_sid.clone()}
-                twilio_token={profile.twilio_token.clone()}
-                textbee_api_key={profile.textbee_api_key.clone()}
-                textbee_device_id={profile.textbee_device_id.clone()}
-                openrouter_api_key={profile.openrouter_api_key.clone()}
-            />
-        }
-    } else {
-        html! {
-            <SelfHostInstructions
-                is_logged_in={false}
-                sub_tier={None::<String>}
-                user_id={None::<String>}
-                server_ip={None::<String>}
-                twilio_phone={None::<String>}
-                twilio_sid={None::<String>}
-                twilio_token={None::<String>}
-                textbee_api_key={None::<String>}
-                textbee_device_id={None::<String>}
-                openrouter_api_key={None::<String>}
-            />
-        }
-    }
-}
-
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -536,11 +441,10 @@ pub fn pricing_wrapper() -> Html {
 pub struct NavProps {
     pub logged_in: bool,
     pub on_logout: Callback<()>,
-    pub self_hosting_status: SelfHostingStatus,
 }
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
-    let NavProps { logged_in, on_logout, self_hosting_status } = props;
+    let NavProps { logged_in, on_logout } = props;
     let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
     {
@@ -606,31 +510,21 @@ pub fn nav(props: &NavProps) -> Html {
                 </button>
                 <div class={menu_class}>
                     <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
-                    {
-                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedLogin) {
-                            html! {
-                                <>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Faq} classes="nav-link">
-                                            {"FAQ"}
-                                        </Link<Route>>
-                                    </div>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Blog} classes="nav-link">
-                                            {"Blog"}
-                                        </Link<Route>>
-                                    </div>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Pricing} classes="nav-link">
-                                            {"Pricing"}
-                                        </Link<Route>>
-                                    </div>
-                                </>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
+                    <div onclick={close_menu.clone()}>
+                        <Link<Route> to={Route::Faq} classes="nav-link">
+                            {"FAQ"}
+                        </Link<Route>>
+                    </div>
+                    <div onclick={close_menu.clone()}>
+                        <Link<Route> to={Route::Blog} classes="nav-link">
+                            {"Blog"}
+                        </Link<Route>>
+                    </div>
+                    <div onclick={close_menu.clone()}>
+                        <Link<Route> to={Route::Pricing} classes="nav-link">
+                            {"Pricing"}
+                        </Link<Route>>
+                    </div>
                     {
                         if *logged_in {
                             html! {
@@ -665,7 +559,6 @@ pub fn nav(props: &NavProps) -> Html {
 #[function_component]
 fn App() -> Html {
     let logged_in = use_state(|| false); // Default to false, will be checked via API
-    let self_hosting_status = use_state(|| SelfHostingStatus::Normal);
     let auth_check_started = use_state(|| false); // Track if auth check has started
 
     // Check authentication status with automatic token refresh
@@ -695,49 +588,6 @@ fn App() -> Html {
         }, ());
     }
 
-    {
-        let self_hosting_status = self_hosting_status.clone();
-        let self_hosting_check_started = use_state(|| false);
-        use_effect_with_deps(move |_| {
-            // Only run once
-            if !*self_hosting_check_started {
-                self_hosting_check_started.set(true);
-
-                wasm_bindgen_futures::spawn_local(async move {
-                    info!("Fetching self-hosting status...");
-                    if let Ok(response) = Request::get(&format!("{}/api/self-hosting-status", config::get_backend_url()))
-                        .send()
-                        .await
-                    {
-                        if let Ok(status) = response.text().await {
-                            info!("Received self-hosting status: {}", status);
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&status) {
-                                if let Some(status_value) = json.get("status").and_then(|s| s.as_str()) {
-                                    match status_value {
-                                        "self-hosted-login" => {
-                                            info!("Setting status to SelfHostedLogin");
-                                            self_hosting_status.set(SelfHostingStatus::SelfHostedLogin)
-                                        },
-                                        _ => {
-                                            info!("Setting status to Normal");
-                                            self_hosting_status.set(SelfHostingStatus::Normal)
-                                        },
-                                    }
-                                } else {
-                                    self_hosting_status.set(SelfHostingStatus::Normal)
-                                }
-                            } else {
-                                self_hosting_status.set(SelfHostingStatus::Normal)
-                            }
-                        }
-                    } else {
-                        info!("Failed to fetch self-hosting status");
-                    }
-                });
-            }
-            || ()
-        }, ());
-    }
     let handle_logout = {
         let logged_in = logged_in.clone();
         Callback::from(move |_| {
@@ -757,11 +607,12 @@ fn App() -> Html {
             });
         })
     };
+
     html! {
         <>
             <BrowserRouter>
-                <Nav logged_in={*logged_in} on_logout={handle_logout} self_hosting_status={(*self_hosting_status).clone()} />
-                <Switch<Route> render={move |routes| switch(routes, &self_hosting_status, *logged_in)} />
+                <Nav logged_in={*logged_in} on_logout={handle_logout} />
+                <Switch<Route> render={move |routes| switch(routes, *logged_in)} />
             </BrowserRouter>
         </>
     }

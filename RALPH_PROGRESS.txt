@@ -157,3 +157,64 @@ Status: COMPLETE
 
 Code compiles cleanly. All tier 3 references removed from backend.
 
+## Iteration 5 - 2026-01-09
+### Task 5: Remove tier 3 frontend UI
+Status: COMPLETE
+
+#### Changes made:
+
+1. **frontend/src/main.rs (already done in prior iteration):**
+   - Removed self-host instruction page module declarations
+   - Removed `SelfHostingStatus` enum
+   - Removed `SelfHosted` and `SelfHostInstructions` routes
+   - Simplified `switch()` function and `NavProps`
+   - Removed `SelfHostInstructionsWrapper` component
+
+2. **frontend/src/pages/home.rs:**
+   - Removed `ServerSelfHostInstructions` import
+   - Removed `MagicLinkProps` and `MagicLinkSection` components
+   - Removed `magic_link` and `magic_error` state variables
+   - Removed tier 3 magic link fetch code from `refetch_profile` callback
+   - Removed tier 3 magic link fetch from initial profile load effect
+   - Removed tier 3 checks from chat focus effect
+   - Removed tier 3 status section wrapper
+   - Removed tier 3 specific `ServerSelfHostInstructions` and `MagicLinkSection` blocks
+   - Removed tier 3 checks from web chat section
+   - Removed tier 3 checks from dashboard tabs section
+
+3. **frontend/src/auth/signup.rs:**
+   - Removed `SelfHostingStatus` import
+   - Simplified `RegisterProps` to empty struct
+   - Removed `SelfHostedLoginRequest` struct and `self_hosted_login` callback
+   - Removed `SelfHostedLogin` branch from HTML match statement
+
+4. **frontend/src/connections/tesla.rs:**
+   - Simplified tier check to only `tier 2` (removed `tier 3` OR check)
+
+5. **frontend/src/admin/dashboard.rs:**
+   - Removed tier 3 from user row CSS class matching
+   - Removed tier 3 blue badge display
+   - Removed tier 3 from tier badge color matching
+   - Updated tier cycle button to skip tier 3
+
+6. **frontend/src/profile/settings.rs:**
+   - Removed self-hosted check from email field visibility
+   - Simplified LLM provider field visibility check
+
+7. **Deleted frontend pages (already done in prior iteration):**
+   - `frontend/src/pages/self_host_instructions.rs`
+   - `frontend/src/pages/twilio_self_host_instructions.rs`
+   - `frontend/src/pages/llm_self_host_instructions.rs`
+   - `frontend/src/pages/voice_self_host_instructions.rs`
+   - `frontend/src/pages/server_self_host_instructions.rs`
+
+#### Remaining tier 3 references (informational/documentation only - kept as-is):
+- `pages/setup_costs.rs` - Cost comparison text mentioning self-hosting
+- `pages/change_log.rs` - Historical changelog entries
+- `pages/money.rs` - CSS class name and footnote about self-hosting from source
+- `pages/faq.rs` - FAQ text about open source self-hosting
+
+These are documentation/informational and don't affect functionality.
+
+Code compiles cleanly.
+

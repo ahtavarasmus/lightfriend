@@ -40,7 +40,7 @@
       "id": 5,
       "title": "Remove tier 3 frontend UI",
       "description": "Remove tier 3 signup flows, self-hosted configuration pages, and tier 3 specific settings sections. Keep BYOT UI.",
-      "passes": false
+      "passes": true
     },
     {
       "id": 6,
