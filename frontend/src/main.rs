@@ -97,7 +97,6 @@ use blog::{
     read_books_accidentally::ReadMoreAccidentallyGuide,
 };
 use auth::{
-    signup::register::Register,
     signup::login::Login,
     signup::password_reset::{PasswordReset, PasswordResetWithToken},
     set_password::SetPassword,

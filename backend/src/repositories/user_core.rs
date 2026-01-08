@@ -12,9 +12,6 @@ use diesel::dsl::sql;
 use diesel::sql_types::BigInt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::{thread_rng, Rng};
-use hex;
-
 define_sql_function! {
     fn lower(x: Text) -> Text;
 }

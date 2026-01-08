@@ -1,6 +1,6 @@
 use crate::handlers::imap_handlers::ImapError;
 use crate::AppState;
-use crate::{AiProvider, ModelPurpose};
+use crate::ModelPurpose;
 use std::sync::Arc;
 
 pub fn get_fetch_emails_tool() -> openai_api_rs::v1::chat_completion::Tool {

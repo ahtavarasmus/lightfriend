@@ -627,7 +627,7 @@ impl UserRepository {
 
     /// Calculate the next trigger timestamp based on recurrence rule and time
     fn calculate_next_trigger(&self, task: &Task, user_timezone: &str) -> Option<String> {
-        use chrono::{Datelike, TimeZone, Timelike, Duration};
+        use chrono::{Datelike, TimeZone, Duration};
 
         let recurrence_rule = task.recurrence_rule.as_ref()?;
         let recurrence_time = task.recurrence_time.as_ref()?;

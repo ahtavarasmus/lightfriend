@@ -46,7 +46,7 @@
       "id": 6,
       "title": "Clean up imports and dead code",
       "description": "Remove unused imports after tier 3 code removal, run cargo check to verify no compile errors",
-      "passes": false
+      "passes": true
     },
     {
       "id": 7,

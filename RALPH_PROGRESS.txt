@@ -218,3 +218,20 @@ These are documentation/informational and don't affect functionality.
 
 Code compiles cleanly.
 
+## Iteration 6 - 2026-01-09
+### Task 6: Clean up imports and dead code
+Status: COMPLETE
+
+#### Backend imports cleaned:
+1. **handlers/webauthn_handlers.rs:** Removed `IntoResponse`
+2. **tool_call_utils/email.rs:** Removed `AiProvider`
+3. **repositories/user_core.rs:** Removed `rand::{thread_rng, Rng}`, `hex`
+4. **repositories/user_repository.rs:** Removed `Timelike` from chrono
+
+#### Frontend imports cleaned:
+1. **proactive/waiting_checks.rs:** Removed `pub use TasksSection as WaitingChecksSection`
+2. **auth/connect.rs:** Removed `yew_router::prelude`, `crate::Route`
+3. **main.rs:** Removed `signup::register::Register`
+
+Both backend and frontend compile cleanly with no unused import warnings.
+
