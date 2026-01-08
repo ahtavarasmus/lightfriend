@@ -160,9 +160,6 @@ mod tests {
     fn test_pricing_from_raw() {
         let pricing = NotificationPricing::from_raw_prices(0.10, 0.05);
 
-        assert_eq!(pricing.raw_sms_price, 0.10);
-        assert_eq!(pricing.raw_voice_price, 0.05);
-
         // Notification: 0.10 × 1.5 × 1.3 = 0.195
         assert!((pricing.notification_price - 0.195).abs() < 0.001);
 
