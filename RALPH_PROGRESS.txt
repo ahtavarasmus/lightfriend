@@ -1,0 +1,50 @@
+# Ralph Wiggum Progress Log - Tier 3 Removal
+# Each iteration appends its progress below this line
+# ================================================
+
+## Iteration 1 - 2026-01-09
+### Task 1: Search and document all tier 3 self-hosted code locations
+Status: COMPLETE
+
+#### TIER 3 CODE TO REMOVE (self-hosted specific):
+
+**Backend Handlers - backend/src/handlers/self_host_handlers.rs:**
+- `setup_subdomain()` (lines 196-426) - DNS setup for my.{user_id}.lightfriend.ai
+- `verify_token()` (lines 452-494) - Uses Tier3SelfHostedUser extractor, magic login
+- `get_magic_link()` (lines 508-559) - Requires tier 3 subscription
+- `update_server_ip()` (lines 561-607) - Requires tier 3, sets server_ip
+- `create_temp_tinfoil_api_key()` (lines 611-653) - For self-hosted instances
+- `check_tier3_availability()` (lines 661-697) - Tier 3 country pricing
+- `renew_tinfoil_key()` (lines 712-785) - For self-hosted Tinfoil key renewal
+
+**Backend Auth Middleware - backend/src/handlers/auth_middleware.rs:**
+- `Tier3SelfHostedUser` extractor - validates server_ip for self-hosted
+
+**Backend Utils:**
+- backend/src/utils/self_host_twilio.rs:626 - `provision_tier3_subaccount()` function
+
+**Backend Migrations (DO NOT DELETE - just document):**
+- backend/migrations/2025-07-15-124431_ip_to_self_hosted_user/ - server_ip field
+- backend/migrations/2025-10-07-084831_magic_link/ - magic login tokens
+- backend/migrations/2025-11-09-101743_add_tier3_geographic_pricing/ - tier 3 pricing
+
+**Frontend Pages:**
+- frontend/src/pages/self_host_instructions.rs - Tier 3 setup instructions
+- frontend/src/pages/server_self_host_instructions.rs - Server setup page
+- frontend/src/main.rs - Routes for self-hosted pages
+
+**Other tier 3 references:**
+- backend/src/main.rs - Routes for tier 3 endpoints
+- backend/src/handlers/stripe_handlers.rs - Tier 3 subscription handling
+- frontend/src/pages/money.rs - Tier 3 pricing display
+- frontend/src/auth/signup.rs - Tier 3 signup flow
+- frontend/src/profile/settings.rs - Tier 3 settings
+
+#### CODE TO KEEP (BYOT - NOT tier 3):
+- update_twilio_phone() - BYOT users setting their Twilio phone
+- update_twilio_creds() - BYOT users setting their Twilio credentials
+- clear_twilio_creds() - BYOT clearing credentials
+- update_textbee_creds() - Textbee is BYOT, not tier 3
+- /api/sms/server endpoints - For BYOT webhooks
+- Subaccount management (except provision_tier3_subaccount)
+
