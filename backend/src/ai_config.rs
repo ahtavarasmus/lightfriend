@@ -1,8 +1,8 @@
-/// Centralized AI provider configuration
-///
-/// Users can choose their preferred provider in settings:
-/// - "openai" (default): Uses OpenRouter with GPT-4o (faster, smarter)
-/// - "tinfoil": Uses Tinfoil for privacy-focused LLM (slower but private)
+//! Centralized AI provider configuration
+//!
+//! Users can choose their preferred provider in settings:
+//! - "openai" (default): Uses OpenRouter with GPT-4o (faster, smarter)
+//! - "tinfoil": Uses Tinfoil for privacy-focused LLM (slower but private)
 
 use openai_api_rs::v1::api::OpenAIClient;
 
@@ -109,7 +109,6 @@ impl AiConfig {
             .with_endpoint(self.endpoint(provider))
             .with_api_key(self.api_key(provider))
             .build()
-            .map_err(|e| e.into())
     }
 
     /// Call vision model to describe an image (for two-step processing)
@@ -166,7 +165,7 @@ impl AiConfig {
 
         let response = client.chat_completion(request).await?;
 
-        let content = response.choices.get(0)
+        let content = response.choices.first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_else(|| "Unable to describe image".to_string());
 

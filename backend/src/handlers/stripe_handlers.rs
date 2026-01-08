@@ -482,7 +482,6 @@ pub struct GuestCheckoutBody {
 /// Create a checkout session for users without an account
 /// POST /api/stripe/guest-checkout
 pub async fn create_guest_checkout(
-    State(state): State<Arc<AppState>>,
     Json(body): Json<GuestCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     tracing::debug!("Starting guest checkout for country: {}", body.selected_country);
@@ -836,7 +835,7 @@ pub async fn create_checkout_session(
     // Save the session ID for later use (optional, if you need to track it)
     state
         .user_repository
-        .set_stripe_checkout_session_id(user_id, &checkout_session.id.to_string())
+        .set_stripe_checkout_session_id(user_id, checkout_session.id.as_ref())
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
@@ -875,7 +874,7 @@ async fn create_new_customer(
     tracing::info!("Created new Stripe customer");
     state
         .user_repository
-        .set_stripe_customer_id(user_id, &customer.id.to_string())
+        .set_stripe_customer_id(user_id, customer.id.as_ref())
         .map_err(|e| {
             tracing::error!("Failed to update database with new customer ID: {}", e);
             (
@@ -945,19 +944,6 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
 
     info
 }
-fn is_sentinel_price_id(price_id: &str) -> bool {
-    const COUNTRIES: [&str; 6] = ["US", "FI", "UK", "NL", "AU", "OTHER"];
-    COUNTRIES.iter().any(|cty| {
-        let var_name = format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", cty);
-        let var_name_two = format!("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_{}", cty);
-        // If the env-var is missing, simply skip that entry.
-        if std::env::var(var_name).map_or(false, |v| v == price_id) || std::env::var(var_name_two).map_or(false, |v| v == price_id) {
-            true
-        } else {
-            false
-        }
-    })
-}
 
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
@@ -989,7 +975,7 @@ pub async fn stripe_webhook(
     // Construct and verify the Stripe event using the signature
     let event = stripe::Webhook::construct_event(
         &payload_str,
-        &sig_header,
+        sig_header,
         &webhook_secret,
     ).map_err(|e| (
         StatusCode::BAD_REQUEST,
@@ -1055,7 +1041,7 @@ pub async fn stripe_webhook(
                             // Check if upgrading to Digest and eligible for automatic refund
                             if is_digest_plan_price(&price_id) {
                                 // Get user for credit usage check
-                                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(customer_id.as_str()) {
                                     if let Some((payment_intent_id, amount)) = check_upgrade_refund_eligibility(
                                         &client, &state, &user, existing_sub
                                     ).await {
@@ -1100,7 +1086,7 @@ pub async fn stripe_webhook(
                 }
 
                 // Find or create user (only on Created event, not Updated)
-                let user_id: i32 = match state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                let user_id: i32 = match state.user_repository.find_by_stripe_customer_id(customer_id.as_str()) {
                     Ok(Some(user)) => user.id,
                     Ok(None) if event.type_ == stripe::EventType::CustomerSubscriptionCreated => {
                         // Guest checkout - create user from Stripe customer
@@ -1124,7 +1110,7 @@ pub async fn stripe_webhook(
                             Ok(Some(existing_user)) => {
                                 // Link existing user to Stripe customer
                                 tracing::info!("Found existing user {} with email {}, linking to Stripe customer", existing_user.id, email);
-                                let _ = state.user_repository.set_stripe_customer_id(existing_user.id, &customer_id.to_string());
+                                let _ = state.user_repository.set_stripe_customer_id(existing_user.id, customer_id.as_ref());
 
                                 // Update phone if they provided one and don't have one set
                                 if !phone.is_empty() && existing_user.phone_number.is_empty() {
@@ -1184,7 +1170,7 @@ pub async fn stripe_webhook(
                                 tracing::info!("Created new user {} from guest checkout", created_user.id);
 
                                 // Link to Stripe customer
-                                let _ = state.user_repository.set_stripe_customer_id(created_user.id, &customer_id.to_string());
+                                let _ = state.user_repository.set_stripe_customer_id(created_user.id, customer_id.as_ref());
 
                                 // Set phone country and preferred number
                                 if !phone.is_empty() {
@@ -1241,7 +1227,7 @@ pub async fn stripe_webhook(
 
                 // Use centralized subscription setup (idempotent)
                 let phone_country = user.phone_number_country.as_deref();
-                if let Err(e) = setup_user_subscription(&state, user.id, &price_id, subscription.current_period_end as i64, phone_country).await {
+                if let Err(e) = setup_user_subscription(&state, user.id, &price_id, subscription.current_period_end, phone_country).await {
                     tracing::error!("Failed to setup subscription: {}", e);
                 }
 
@@ -1253,12 +1239,11 @@ pub async fn stripe_webhook(
                 }
 
                 // Clear BYOT credentials if switching to non-BYOT plan
-                if !crate::utils::country::is_byot_plan_price(&price_id) {
-                    if state.user_core.has_twilio_credentials(user.id) {
+                if !crate::utils::country::is_byot_plan_price(&price_id)
+                    && state.user_core.has_twilio_credentials(user.id) {
                         tracing::info!("User {} switching to non-BYOT plan, clearing BYOT credentials", user.id);
                         let _ = state.user_core.clear_twilio_credentials(user.id);
                     }
-                }
 
                 // Set preferred Lightfriend number (for non-BYOT plans)
                 if !crate::utils::country::is_byot_plan_price(&price_id) && user.preferred_number.is_none() {
@@ -1326,7 +1311,7 @@ pub async fn stripe_webhook(
                     return Ok(StatusCode::OK);
                 }
               
-                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(customer_id.as_str()) {
                     // Check for other active subscriptions
                     let active_subscriptions = stripe::Subscription::list(
                         &client,
@@ -1534,79 +1519,6 @@ pub async fn stripe_webhook(
     }
     tracing::info!("Webhook processed successfully");
     Ok(StatusCode::OK) // Return 200 OK for successful webhook processing
-}
-
-pub async fn fetch_next_billing_date(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(user_id): Path<i32>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    tracing::debug!("Starting fetch_next_billing_date for user_id: {}", user_id);
-    // Check if user is accessing their own data or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Access denied"})),
-        ));
-    }
-    // Initialize Stripe client
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
-        .expect("STRIPE_SECRET_KEY must be set in environment");
-    let client = Client::new(stripe_secret_key);
-    tracing::debug!("Stripe client initialized");
-    // Get Stripe customer ID
-    let customer_id = state
-        .user_repository
-        .get_stripe_customer_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        ))?
-        .ok_or_else(|| (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "No Stripe customer ID found for user"})),
-        ))?;
-    tracing::debug!("Found Stripe customer ID: {}", customer_id);
-    // List all subscriptions for the customer
-    let subscriptions = stripe::Subscription::list(
-        &client,
-        &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().unwrap()),
-            status: Some(stripe::SubscriptionStatusFilter::Active),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to list subscriptions: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to fetch subscriptions: {}", e)})),
-        )
-    })?;
-    // Find the latest end date among all active subscriptions
-    let latest_end_date = subscriptions
-        .data
-        .iter()
-        .map(|sub| sub.current_period_end)
-        .max()
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "No active subscriptions found"})),
-        ))?;
-    // Update the user's next billing date
-    state
-        .user_core
-        .update_next_billing_date(user_id, latest_end_date as i32)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update next billing date: {}", e)})),
-        ))?;
-    tracing::info!("Successfully updated next billing date to {}", latest_end_date);
-    Ok(Json(json!({
-        "message": "Successfully updated next billing date",
-        "next_billing_date": latest_end_date
-    })))
 }
 
 pub async fn automatic_charge(

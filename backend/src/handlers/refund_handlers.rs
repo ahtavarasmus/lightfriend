@@ -377,7 +377,7 @@ pub async fn request_refund(
     let user_id = auth_user.user_id;
 
     // First check eligibility (re-verify, don't trust client)
-    let eligibility = get_refund_eligibility(State(state.clone()), auth_user.clone()).await?;
+    let eligibility = get_refund_eligibility(State(state.clone()), auth_user).await?;
 
     if !eligibility.eligible {
         return Ok(Json(RefundRequestResponse {
@@ -443,7 +443,7 @@ pub async fn request_refund(
 
     Ok(Json(RefundRequestResponse {
         success: true,
-        message: format!("Refund processed successfully. You should see the refund in 5-10 business days."),
+        message: "Refund processed successfully. You should see the refund in 5-10 business days.".to_string(),
         refund_id: Some(refund.id.to_string()),
     }))
 }

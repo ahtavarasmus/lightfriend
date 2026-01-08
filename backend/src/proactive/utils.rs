@@ -1,6 +1,7 @@
 use crate::models::user_models::{Task, ContactProfile};
 use crate::AppState;
 use crate::ModelPurpose;
+use crate::repositories::user_repository::LogUsageParams;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use openai_api_rs::v1::{
@@ -17,7 +18,6 @@ use chrono::{Utc, Duration};
 /// Definition of a **critical** message: something that will cause human‑safety risk,
 /// major financial/data loss, legal breach, or production outage if it waits >2 h.
 /// The model must default to *non‑critical* when uncertain.
-
 /// Prompt for matching incoming messages against the user’s *waiting checks*.
 /// A waiting check represents something the user explicitly asked to be notified
 /// about (e.g. \"Tell me when the shipment arrives\").
@@ -120,9 +120,9 @@ pub async fn check_task_condition_match(
     state: &Arc<AppState>,
     user_id: i32,
     message: &str,
-    tasks: &Vec<Task>,
+    tasks: &[Task],
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
+    let (client, provider) = create_openai_client_for_user(state, user_id)?;
 
     // Format tasks with their conditions for matching
     let tasks_str = tasks
@@ -264,7 +264,6 @@ pub struct MatchResponse {
 /// Result of processing contact profiles for digest filtering
 pub struct DigestContactMaps {
     pub priority_map: HashMap<String, HashSet<String>>,
-    pub ignore_map: HashMap<String, HashSet<String>>,
 }
 
 /// Builds priority and ignore maps from contact profiles, then filters messages
@@ -276,12 +275,12 @@ fn build_contact_maps_and_filter_messages(
 ) -> DigestContactMaps {
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     let mut ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
 
     for profile in &profiles {
         let profile_id = profile.id.unwrap_or(0);
         // Get all exceptions for this profile
-        let exceptions = state.user_repository.get_profile_exceptions(profile_id).unwrap_or(Vec::new());
+        let exceptions = state.user_repository.get_profile_exceptions(profile_id).unwrap_or_default();
 
         // Helper to check if a platform has an exception and get its mode
         let get_effective_mode = |platform: &str| -> String {
@@ -294,34 +293,34 @@ fn build_contact_maps_and_filter_messages(
         if let Some(ref wa) = profile.whatsapp_chat {
             let mode = get_effective_mode("whatsapp");
             if mode == "ignore" {
-                ignore_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
+                ignore_map.entry("whatsapp".to_string()).or_default().insert(wa.to_lowercase());
             } else {
-                priority_map.entry("whatsapp".to_string()).or_insert_with(HashSet::new).insert(wa.to_lowercase());
+                priority_map.entry("whatsapp".to_string()).or_default().insert(wa.to_lowercase());
             }
         }
         if let Some(ref tg) = profile.telegram_chat {
             let mode = get_effective_mode("telegram");
             if mode == "ignore" {
-                ignore_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
+                ignore_map.entry("telegram".to_string()).or_default().insert(tg.to_lowercase());
             } else {
-                priority_map.entry("telegram".to_string()).or_insert_with(HashSet::new).insert(tg.to_lowercase());
+                priority_map.entry("telegram".to_string()).or_default().insert(tg.to_lowercase());
             }
         }
         if let Some(ref sig) = profile.signal_chat {
             let mode = get_effective_mode("signal");
             if mode == "ignore" {
-                ignore_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
+                ignore_map.entry("signal".to_string()).or_default().insert(sig.to_lowercase());
             } else {
-                priority_map.entry("signal".to_string()).or_insert_with(HashSet::new).insert(sig.to_lowercase());
+                priority_map.entry("signal".to_string()).or_default().insert(sig.to_lowercase());
             }
         }
         if let Some(ref emails) = profile.email_addresses {
             let mode = get_effective_mode("email");
             for email in emails.split(',') {
                 if mode == "ignore" {
-                    ignore_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());
+                    ignore_map.entry("email".to_string()).or_default().insert(email.trim().to_lowercase());
                 } else {
-                    priority_map.entry("email".to_string()).or_insert_with(HashSet::new).insert(email.trim().to_lowercase());
+                    priority_map.entry("email".to_string()).or_default().insert(email.trim().to_lowercase());
                 }
             }
         }
@@ -335,7 +334,7 @@ fn build_contact_maps_and_filter_messages(
     let original_count = messages.len();
     messages.retain(|msg| {
         let sender_lower = msg.sender.to_lowercase();
-        !ignore_map.get(&msg.platform).map_or(false, |set| {
+        !ignore_map.get(&msg.platform).is_some_and(|set| {
             set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
         })
     });
@@ -343,7 +342,7 @@ fn build_contact_maps_and_filter_messages(
         tracing::debug!("Filtered out {} messages from ignored contacts", original_count - messages.len());
     }
 
-    DigestContactMaps { priority_map, ignore_map }
+    DigestContactMaps { priority_map }
 }
 
 /// Resolves a sender name to a contact profile nickname if one exists.
@@ -404,7 +403,7 @@ fn format_disconnection_notice(
     let notices: Vec<String> = events.iter().map(|event| {
         // Convert timestamp to user's timezone
         let datetime = chrono::DateTime::from_timestamp(event.detected_at as i64, 0)
-            .unwrap_or_else(|| Utc::now())
+            .unwrap_or_else(Utc::now)
             .with_timezone(&tz);
 
         // Format time as "2pm" or "10am"
@@ -461,7 +460,7 @@ pub async fn check_message_importance(
         }
     }
     // Build the chat payload ----------------------------------------------
-    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
+    let (client, provider) = create_openai_client_for_user(state, user_id)?;
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -688,7 +687,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
 
             // Fetch contact profiles for resolving sender nicknames
-            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
 
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
@@ -920,7 +919,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Build contact maps and filter out ignored contacts
-            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+            let DigestContactMaps { priority_map } = build_contact_maps_and_filter_messages(state, user_id, &mut messages);
 
             // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
@@ -931,11 +930,11 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
                     let sender_lower = a.sender.to_lowercase();
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                    let a_pri = priority_map.get(&a.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
                     );
                     let sender_lower_b = b.sender.to_lowercase();
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                    let b_pri = priority_map.get(&b.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
                     );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
@@ -959,7 +958,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
@@ -968,7 +967,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Append disconnection notices if any
-            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+            if let Some(notice) = format_disconnection_notice(state, user_id, &timezone) {
                 digest_message = format!("{} {}", digest_message, notice);
             }
 
@@ -1077,7 +1076,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let start_timestamp = cutoff_time.timestamp();
 
             // Fetch contact profiles for resolving sender nicknames
-            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
 
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
@@ -1281,7 +1280,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             );
 
             // Build contact maps and filter out ignored contacts
-            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+            let DigestContactMaps { priority_map } = build_contact_maps_and_filter_messages(state, user_id, &mut messages);
 
             // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
@@ -1292,11 +1291,11 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
                     let sender_lower = a.sender.to_lowercase();
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                    let a_pri = priority_map.get(&a.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
                     );
                     let sender_lower_b = b.sender.to_lowercase();
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                    let b_pri = priority_map.get(&b.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
                     );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
@@ -1318,7 +1317,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Generate the digest
-            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
@@ -1327,7 +1326,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Append disconnection notices if any
-            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+            if let Some(notice) = format_disconnection_notice(state, user_id, &timezone) {
                 digest_message = format!("{} {}", digest_message, notice);
             }
 
@@ -1459,7 +1458,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
 
             // Fetch contact profiles for resolving sender nicknames
-            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+            let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
 
             // Check if user has IMAP credentials before fetching emails
             let mut messages = match state.user_repository.get_imap_credentials(user_id) {
@@ -1664,7 +1663,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Build contact maps and filter out ignored contacts
-            let DigestContactMaps { priority_map, ignore_map: _ } = build_contact_maps_and_filter_messages(&state, user_id, &mut messages);
+            let DigestContactMaps { priority_map } = build_contact_maps_and_filter_messages(state, user_id, &mut messages);
 
             // return if no new nothing (after filtering ignored contacts)
             if messages.is_empty() && calendar_events.is_empty() {
@@ -1675,11 +1674,11 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 let plat_cmp = a.platform.cmp(&b.platform);
                 if plat_cmp == std::cmp::Ordering::Equal {
                     let sender_lower = a.sender.to_lowercase();
-                    let a_pri = priority_map.get(&a.platform).map_or(false, |set|
+                    let a_pri = priority_map.get(&a.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower.contains(s) || s.contains(&sender_lower))
                     );
                     let sender_lower_b = b.sender.to_lowercase();
-                    let b_pri = priority_map.get(&b.platform).map_or(false, |set|
+                    let b_pri = priority_map.get(&b.platform).is_some_and(|set|
                         set.iter().any(|s| sender_lower_b.contains(s) || s.contains(&sender_lower_b))
                     );
                     b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
@@ -1701,7 +1700,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let mut digest_message = match generate_digest(&state, user_id, digest_data, priority_map).await {
+            let mut digest_message = match generate_digest(state, user_id, digest_data, priority_map).await {
                 Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
@@ -1710,7 +1709,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Append disconnection notices if any
-            if let Some(notice) = format_disconnection_notice(&state, user_id, &timezone) {
+            if let Some(notice) = format_disconnection_notice(state, user_id, &timezone) {
                 digest_message = format!("{} {}", digest_message, notice);
             }
 
@@ -1751,12 +1750,12 @@ pub async fn generate_digest(
     data: DigestData,
     priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(&state, user_id)?;
+    let (client, provider) = create_openai_client_for_user(state, user_id)?;
     // Format messages for the prompt
     let messages_str = data.messages
         .iter()
         .map(|msg| {
-            let priority_tag = if priority_map.get(&msg.platform).map_or(false, |set| set.contains(&msg.sender)) {
+            let priority_tag = if priority_map.get(&msg.platform).is_some_and(|set| set.contains(&msg.sender)) {
                 " [PRIORITY]".to_string()
             } else {
                 String::new()
@@ -1950,7 +1949,7 @@ pub async fn send_notification(
 
     match notification_type {
         "call" => {
-            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_call", None).await {
+            if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "noti_call", None).await {
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
             }
@@ -1992,23 +1991,23 @@ pub async fn send_notification(
                     }
 
                     // Log successful call notification
-                    if let Err(e) = state.user_repository.log_usage(
+                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                         user_id,
-                        response.get("sid").and_then(|v| v.as_str()).map(String::from),
-                        content_type,
-                        None,
-                        None,
-                        Some(true),
-                        None,
-                        Some("completed".to_string()),
-                        None,
-                        None,
-                    ) {
+                        sid: response.get("sid").and_then(|v| v.as_str()).map(String::from),
+                        activity_type: content_type,
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(true),
+                        reason: None,
+                        status: Some("completed".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
                         tracing::error!("Failed to log call notification usage: {}", e);
                     }
 
                     // Deduct credits after successful notification
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_call", None) {
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "noti_call", None) {
                         tracing::error!("Failed to deduct credits for user {} after call notification: {}", user_id, e);
                     }
                 }
@@ -2016,18 +2015,18 @@ pub async fn send_notification(
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
 
                     // Log failed call notification
-                    if let Err(e) = state.user_repository.log_usage(
+                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                         user_id,
-                        None,
-                        content_type,
-                        None,
-                        None,
-                        Some(false),
-                        Some(format!("Failed to initiate call: {:?}", json_err)),
-                        Some("failed".to_string()),
-                        None,
-                        None,
-                    ) {
+                        sid: None,
+                        activity_type: content_type,
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(false),
+                        reason: Some(format!("Failed to initiate call: {:?}", json_err)),
+                        status: Some("failed".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
                         tracing::error!("Failed to log failed call notification: {}", e);
                     }
                 }
@@ -2040,15 +2039,15 @@ pub async fn send_notification(
             // we don't charge for the call - only for the SMS.
 
             // Step 1: Check credits for SMS (always required)
-            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+            if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "noti_msg", None).await {
                 tracing::warn!("User {} has insufficient credits for Call+SMS notification: {}", user.id, e);
                 return;
             }
 
             // Step 2: Send SMS first (this is always charged)
             let sms_success = match crate::api::twilio_utils::send_conversation_message(
-                &state,
-                &notification,
+                state,
+                notification,
                 None,
                 &user,
             ).await {
@@ -2072,23 +2071,23 @@ pub async fn send_notification(
                     }
 
                     // Log SMS usage
-                    if let Err(e) = state.user_repository.log_usage(
+                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                         user_id,
-                        Some(response_sid),
-                        format!("{}_sms", content_type),
-                        None,
-                        None,
-                        Some(true),
-                        None,
-                        Some("delivered".to_string()),
-                        None,
-                        None,
-                    ) {
+                        sid: Some(response_sid),
+                        activity_type: format!("{}_sms", content_type),
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(true),
+                        reason: None,
+                        status: Some("delivered".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
                         tracing::error!("Failed to log Call+SMS SMS usage: {}", e);
                     }
 
                     // Deduct credits for SMS
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_msg", None) {
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "noti_msg", None) {
                         tracing::error!("Failed to deduct SMS credits for Call+SMS user {}: {}", user_id, e);
                     }
 
@@ -2105,7 +2104,7 @@ pub async fn send_notification(
             // If declined/no-answer (call_initiation_failure webhook), no charge for call
             if sms_success {
                 // Check if user has credits for call (but don't charge yet - webhook handles it)
-                if crate::utils::usage::check_user_credits(&state, &user, "noti_call", None).await.is_ok() {
+                if crate::utils::usage::check_user_credits(state, &user, "noti_call", None).await.is_ok() {
                     match crate::api::elevenlabs::make_notification_call(
                         &state.clone(),
                         format!("{}_call_conditional", content_type), // Mark as conditional for webhook
@@ -2119,18 +2118,18 @@ pub async fn send_notification(
 
                             // Log call usage as "ongoing" - it will be updated by webhook
                             // Don't deduct credits here - the webhook will handle it based on answer status
-                            if let Err(e) = state.user_repository.log_usage(
+                            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                                 user_id,
-                                response.get("sid").and_then(|v| v.as_str()).map(String::from),
-                                format!("{}_call_conditional", content_type),
-                                None,
-                                None,
-                                None, // Don't set success yet
-                                None,
-                                Some("ongoing".to_string()),
-                                None,
-                                None,
-                            ) {
+                                sid: response.get("sid").and_then(|v| v.as_str()).map(String::from),
+                                activity_type: format!("{}_call_conditional", content_type),
+                                credits: None,
+                                time_consumed: None,
+                                success: None, // Don't set success yet
+                                reason: None,
+                                status: Some("ongoing".to_string()),
+                                recharge_threshold_timestamp: None,
+                                zero_credits_timestamp: None,
+                            }) {
                                 tracing::error!("Failed to log Call+SMS call usage: {}", e);
                             }
                         }
@@ -2147,13 +2146,13 @@ pub async fn send_notification(
         _ => {
 
             // Default to SMS notification
-            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+            if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "noti_msg", None).await {
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
             }
             match crate::api::twilio_utils::send_conversation_message(
-                &state,
-                &notification,
+                state,
+                notification,
                 None,
                 &user,
             ).await {
@@ -2178,22 +2177,22 @@ pub async fn send_notification(
                     }
                     
                     // Log successful SMS notification
-                    if let Err(e) = state.user_repository.log_usage(
+                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                         user_id,
-                        Some(response_sid),
-                        content_type,
-                        None,
-                        None,
-                        Some(true),
-                        None,
-                        Some("delivered".to_string()),
-                        None,
-                        None,
-                    ) {
+                        sid: Some(response_sid),
+                        activity_type: content_type,
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(true),
+                        reason: None,
+                        status: Some("delivered".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
                         tracing::error!("Failed to log SMS notification usage: {}", e);
                     }
                     // Deduct credits after successful notification
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_msg", None) {
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "noti_msg", None) {
                         tracing::error!("Failed to deduct credits for user {} after SMS notification: {}", user_id, e);
                     }
                 }
@@ -2201,18 +2200,18 @@ pub async fn send_notification(
                     tracing::error!("Failed to send notification: {}", e);
 
                     // Log failed SMS notification
-                    if let Err(log_err) = state.user_repository.log_usage(
+                    if let Err(log_err) = state.user_repository.log_usage(LogUsageParams {
                         user_id,
-                        None,
-                        content_type,
-                        None,
-                        None,
-                        Some(false),
-                        Some(format!("Failed to send SMS: {}", e)),
-                        Some("failed".to_string()),
-                        None,
-                        None,
-                    ) {
+                        sid: None,
+                        activity_type: content_type,
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(false),
+                        reason: Some(format!("Failed to send SMS: {}", e)),
+                        status: Some("failed".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
                         tracing::error!("Failed to log failed SMS notification: {}", log_err);
                     }
                 }

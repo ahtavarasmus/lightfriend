@@ -42,13 +42,13 @@ fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
 /// For Telegram, it might be username like @username or phone number
 fn extract_connected_account(message: &str) -> Option<String> {
     // First try to find a phone number pattern
-    if let Some(re) = regex::Regex::new(r"\+\d{6,15}").ok() {
+    if let Ok(re) = regex::Regex::new(r"\+\d{6,15}") {
         if let Some(m) = re.find(message) {
             return Some(m.as_str().to_string());
         }
     }
     // Then try to find @username pattern
-    if let Some(re) = regex::Regex::new(r"@[\w]+").ok() {
+    if let Ok(re) = regex::Regex::new(r"@[\w]+") {
         if let Some(m) = re.find(message) {
             return Some(m.as_str().to_string());
         }
@@ -103,7 +103,7 @@ async fn connect_telegram_with_retry(
                     sleep(RETRY_DELAY).await;
                     
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -114,12 +114,10 @@ async fn connect_telegram_with_retry(
                             return Err(init_err);
                         }
                     }
+                } else if is_one_time_key_conflict(&e) {
+                    return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
                 } else {
-                    if is_one_time_key_conflict(&e) {
-                        return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
-                    } else {
-                        return Err(e);
-                    }
+                    return Err(e);
                 }
             }
         }
@@ -148,7 +146,7 @@ async fn connect_telegram(
 
     tracing::debug!("🏠 Created room with ID: {}", room_id);
     
-    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
     
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
@@ -176,12 +174,12 @@ async fn connect_telegram(
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
     // Send cancel command to get rid of the previous login
-    let cancel_command = format!("!tg cancel");
+    let cancel_command = "!tg cancel".to_string();
     room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
 
 
     // Send login command
-    let login_command = format!("!tg login");
+    let login_command = "!tg login".to_string();
     tracing::debug!("📤 Sending Telegram login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
 
@@ -198,13 +196,13 @@ async fn connect_telegram(
         client.sync_once(sync_settings.clone()).await?;
 
 
-        if let Some(room) = client.get_room(&room_id) {
+        if let Some(room) = client.get_room(room_id) {
             // Get only the most recent messages to reduce processing time
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from 10 to 5
             let messages = room.messages(options).await?;
             
-            for (_i, msg) in messages.chunk.iter().enumerate() {
+            for msg in messages.chunk.iter() {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
@@ -510,7 +508,7 @@ async fn monitor_telegram_connection(
 
                                 sync_tasks.insert(user_id, handle);
 
-                                if let Some(room) = client.get_room(&room_id) {
+                                if let Some(room) = client.get_room(room_id) {
                                     room.send(RoomMessageEventContent::text_plain("sync contacts")).await?;
                                     tracing::debug!("Sent contacts sync command for user {}", user_id);
                                     sleep(Duration::from_millis(500)).await;

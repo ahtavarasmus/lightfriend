@@ -24,7 +24,7 @@ pub async fn revoke_subaccount_access(
     // Mock mode: Just update DB
     if is_mock_mode() {
         use uuid::Uuid;
-        let new_mock_token = format!("mock_token_revoked_{}", Uuid::new_v4().to_string().replace("-", "")[..24].to_string());
+        let new_mock_token = format!("mock_token_revoked_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
 
         state.user_core.update_subaccount_user_and_token(
             subaccount_id,
@@ -188,13 +188,13 @@ pub async fn regenerate_tinfoil_key(
         user_id.to_string(),
         new_expiry,
     ).await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-        Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        Box::new(std::io::Error::other(e.to_string()))
     })?;
 
     // Update subaccount's tinfoil_key in database
     let subaccount = state.user_core.find_subaccount_by_user_id(user_id)
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?
         .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
             Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "No active subaccount found for user"))
@@ -203,7 +203,7 @@ pub async fn regenerate_tinfoil_key(
     // Update the tinfoil_key field using repository method
     state.user_core.update_subaccount_tinfoil_key(subaccount.id, &new_key)
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?;
 
     tracing::info!("Successfully regenerated Tinfoil API key for user {}", user_id);

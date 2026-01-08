@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use crate::AppState;
+use crate::repositories::user_repository::LogUsageParams;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -196,7 +197,7 @@ pub async fn handle_regular_sms(
     match state.user_core.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
             if let Some(tier) = user.discount_tier {
-                if tier == "msg".to_string() {
+                if tier == "msg" {
                     tracing::warn!("User {} with discount_tier equal to msg attempted to use regular SMS endpoint", user.id);
                     return (
                         StatusCode::FORBIDDEN,
@@ -330,7 +331,7 @@ pub async fn process_sms(
     }
 
     // Check if user has sufficient credits before processing the message
-    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
+    if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "message", None).await {
         tracing::warn!("User {} has insufficient credits: {}", user.id, e);
         return (
             StatusCode::PAYMENT_REQUIRED,
@@ -369,18 +370,18 @@ pub async fn process_sms(
                             Ok(message_sid) => {
                                 // Log usage (similar to regular message)
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
-                                if let Err(e) = state_clone.user_repository.log_usage(
-                                    user_clone.id,
-                                    Some(message_sid.clone()),
-                                    "sms".to_string(),
-                                    None,
-                                    Some(processing_time_secs as i32),
-                                    Some(true), // Assume success for cancel
-                                    Some("cancel handling".to_string()),
-                                    None,
-                                    None,
-                                    None,
-                                ) {
+                                if let Err(e) = state_clone.user_repository.log_usage(LogUsageParams {
+                                    user_id: user_clone.id,
+                                    sid: Some(message_sid.clone()),
+                                    activity_type: "sms".to_string(),
+                                    credits: None,
+                                    time_consumed: Some(processing_time_secs as i32),
+                                    success: Some(true), // Assume success for cancel
+                                    reason: Some("cancel handling".to_string()),
+                                    status: None,
+                                    recharge_threshold_timestamp: None,
+                                    zero_credits_timestamp: None,
+                                }) {
                                     tracing::error!("Failed to log SMS usage for cancel: {}", e);
                                 }
                                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
@@ -392,18 +393,18 @@ pub async fn process_sms(
                                 // Log the failed attempt
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
                                 let error_status = format!("failed to send: {}", e);
-                                if let Err(log_err) = state_clone.user_repository.log_usage(
-                                    user_clone.id,
-                                    None,
-                                    "sms".to_string(),
-                                    None,
-                                    Some(processing_time_secs as i32),
-                                    Some(false), // Mark as unsuccessful
-                                    Some("cancel handling".to_string()),
-                                    Some(error_status),
-                                    None,
-                                    None,
-                                ) {
+                                if let Err(log_err) = state_clone.user_repository.log_usage(LogUsageParams {
+                                    user_id: user_clone.id,
+                                    sid: None,
+                                    activity_type: "sms".to_string(),
+                                    credits: None,
+                                    time_consumed: Some(processing_time_secs as i32),
+                                    success: Some(false), // Mark as unsuccessful
+                                    reason: Some("cancel handling".to_string()),
+                                    status: Some(error_status),
+                                    recharge_threshold_timestamp: None,
+                                    zero_credits_timestamp: None,
+                                }) {
                                     tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
                                 }
                             }
@@ -585,7 +586,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(&state, &media_sid, &user).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(state, media_sid, &user).await {
                     Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                     Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -699,7 +700,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             if needs_two_step {
                 tracing::info!("Using two-step vision for {:?} provider (user {})", provider, user.id);
 
-                match state.ai_config.describe_image(provider, &media_url, &processed_body).await {
+                match state.ai_config.describe_image(provider, media_url, &processed_body).await {
                     Ok(description) => {
                         tracing::info!("Got vision description: {}", &description[..description.len().min(100)]);
 
@@ -817,7 +818,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     ];
 
     // Create client for the user's provider
-    let client = match create_openai_client_for_user(&state, user.id) {
+    let client = match create_openai_client_for_user(state, user.id) {
         Ok((client, _)) => client,
         Err(e) => {
             tracing::error!("Failed to create AI client: {}", e);
@@ -852,7 +853,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // Get the model for this provider
     // For two-step vision providers, images were already converted to text,
     // so we always use the Default (tool-calling) model
-    let model = get_model(&state, provider, ModelPurpose::Default);
+    let model = get_model(state, provider, ModelPurpose::Default);
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
             model.clone(),
@@ -880,8 +881,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         None | Some(chat_completion::FinishReason::stop) => {
             tracing::debug!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
-            let resp = result.choices[0].message.content.clone().unwrap_or_default();
-            resp
+            
+            result.choices[0].message.content.clone().unwrap_or_default()
         }
         Some(chat_completion::FinishReason::tool_calls) => {
             tracing::debug!("Model requested tool calls - beginning tool execution phase");
@@ -945,7 +946,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     let query = format!("User info: {}. Query: {}", user_given_info, c.query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_given_info);
-                    match crate::utils::tool_exec::ask_perplexity(&state, &query, &sys_prompt).await {
+                    match crate::utils::tool_exec::ask_perplexity(state, &query, &sys_prompt).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received Perplexity answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -974,7 +975,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     let units = c.units;
                     let forecast_type = c.forecast_type.unwrap_or_else(|| "current".to_string());
 
-                    match crate::utils::tool_exec::get_weather(&state, &location, &units, &forecast_type, user.id).await {
+                    match crate::utils::tool_exec::get_weather(state, &location, &units, &forecast_type, user.id).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1039,7 +1040,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     };
                 } else if name == "fetch_emails" {
                     tracing::debug!("Executing fetch_emails tool call");
-                    let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
+                    let response = crate::tool_call_utils::email::handle_fetch_emails(state, user.id).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_specific_email" {
                     tracing::debug!("Executing fetch_specific_email tool call");
@@ -1057,7 +1058,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     };
 
                     // First get the email ID
-                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
+                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(state, user.id, &query.query).await;
                     let auth_user = crate::handlers::auth_middleware::AuthUser {
                         user_id: user.id,
                         is_admin: false,
@@ -1085,7 +1086,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "send_email" {
                     tracing::debug!("Executing send_email tool call");
                     match crate::tool_call_utils::email::handle_send_email(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1148,7 +1149,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "respond_to_email" {
                     tracing::debug!("Executing respond_to_email tool call");
                     match crate::tool_call_utils::email::handle_respond_to_email(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1211,7 +1212,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     }
                 } else if name == "create_task" {
                     tracing::debug!("Executing create_task tool call");
-                    match crate::tool_call_utils::management::handle_create_task(&state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_create_task(state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
@@ -1222,7 +1223,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     }
                 } else if name == "update_monitoring_status" {
                     tracing::debug!("Executing update_monitoring_status tool call");
-                    match crate::tool_call_utils::management::handle_set_proactive_agent(&state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_set_proactive_agent(state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
@@ -1234,7 +1235,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "create_calendar_event" {
                     tracing::debug!("Executing create_calendar_event tool call");
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1300,7 +1301,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "search_chat_contacts" {
                     tracing::debug!("Executing search_chat_contacts tool call");
                     let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1308,7 +1309,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_recent_messages" {
                     tracing::debug!("Executing fetch_recent_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_recent_messages(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1316,7 +1317,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_chat_messages" {
                     tracing::debug!("Executing fetch_chat_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_chat_messages(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1324,7 +1325,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "send_chat_message" {
                     tracing::debug!("Executing send_chat_message tool call");
                     match crate::tool_call_utils::bridge::handle_send_chat_message(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1393,7 +1394,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_calendar_events" {
                     tracing::debug!("Executing fetch_calendar_events tool call");
                     let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1401,7 +1402,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "control_tesla" {
                     tracing::debug!("Executing control_tesla tool call");
                     let response = crate::tool_call_utils::tesla::handle_tesla_command(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         false, // send notification for SMS-initiated commands
@@ -1410,7 +1411,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "switch_selected_tesla_vehicle" {
                     tracing::debug!("Executing switch_selected_tesla_vehicle tool call");
                     let response = crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(
-                        &state,
+                        state,
                         user.id,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
@@ -1573,18 +1574,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
         // Log the test usage without actually sending the message
-        if let Err(e) = state.user_repository.log_usage(
-            user.id,
-            None,  // No message SID in test mode
-            "sms_test".to_string(),
-            None,
-            Some(processing_time_secs as i32),
-            None,
-            None,
-            None,
-            None,
-            None
-        ) {
+        if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+            user_id: user.id,
+            sid: None,  // No message SID in test mode
+            activity_type: "sms_test".to_string(),
+            credits: None,
+            time_consumed: Some(processing_time_secs as i32),
+            success: None,
+            reason: None,
+            status: None,
+            recharge_threshold_timestamp: None,
+            zero_credits_timestamp: None,
+        }) {
             tracing::error!("Failed to log test SMS usage: {}", e);
         }
 
@@ -1627,31 +1628,31 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(
-        &state,
+        state,
         &clean_response,
         media_sid,
         &user
     ).await {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history
-            
+
             // Log usage
-            if let Err(e) = state.user_repository.log_usage(
-                user.id,
-                Some(message_sid.clone()),
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ) {
+            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: Some(message_sid.clone()),
+                activity_type: "sms".to_string(),
+                credits: None,
+                time_consumed: Some(processing_time_secs as i32),
+                success: None,
+                reason: None,
+                status: None,
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            }) {
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user.id, "message", None) {
                 tracing::error!("Failed to deduct user credits: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -1669,7 +1670,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         // Get user information
                         if user.charge_when_under {
                             use axum::extract::{State, Path};
-                            let state_clone = Arc::clone(&state);
+                            let state_clone = Arc::clone(state);
                             tokio::spawn(async move {
                                 let _ = crate::handlers::stripe_handlers::automatic_charge(
                                     State(state_clone),
@@ -1695,18 +1696,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             tracing::error!("Failed to send conversation message: {}", e);
             // Log the failed attempt with error message in status
             let error_status = format!("failed to send: {}", e);
-            if let Err(log_err) = state.user_repository.log_usage(
-                user.id,
-                None,
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                Some(false),  // Mark as unsuccessful
-                None,
-                Some(error_status),
-                None,
-                None,
-            ) {
+            if let Err(log_err) = state.user_repository.log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: None,
+                activity_type: "sms".to_string(),
+                credits: None,
+                time_consumed: Some(processing_time_secs as i32),
+                success: Some(false),  // Mark as unsuccessful
+                reason: None,
+                status: Some(error_status),
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            }) {
                 tracing::error!("Failed to log SMS usage after send error: {}", log_err);
             }
             (

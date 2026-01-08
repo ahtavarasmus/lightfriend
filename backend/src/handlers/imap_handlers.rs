@@ -123,7 +123,7 @@ pub async fn fetch_full_imap_emails(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
     let mut limit = params.limit;
-    if let None = limit {
+    if limit.is_none() {
         limit = Some(5);
     }
     match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
@@ -445,7 +445,7 @@ pub async fn fetch_emails_imap(
         .user_repository
         .get_imap_credentials(user_id)
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
-        .ok_or_else(|| ImapError::NoConnection)?;
+        .ok_or(ImapError::NoConnection)?;
     // Add logging for debugging (remove in production)
     tracing::debug!("Fetching IMAP emails for user {} with email {}", user_id, email);
     // Set up TLS

@@ -114,7 +114,7 @@ pub async fn login_with_password(client: &MatrixClient, state: &Arc<AppState>, u
         
         // Store the new device_id and access_token
         tracing::debug!("💾 Saving new device ID and access token to database");
-        state.user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
+        state.user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, response.device_id.as_str())?;
         tracing::debug!("✅ Successfully saved credentials");
         
     } else {
@@ -195,7 +195,7 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
                     user.id,
                     &username,
                     &stored_session.tokens.access_token,
-                    &response.device_id.expect("default").as_str(),
+                    response.device_id.expect("default").as_str(),
                     &password,
                 )?;
             } else {
@@ -214,22 +214,22 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
             let session = matrix_sdk::authentication::matrix::MatrixSession {
                 meta: matrix_sdk::SessionMeta {
                     user_id: OwnedUserId::try_from(full_user_id.clone()).unwrap(),
-                    device_id: matrix_sdk::ruma::OwnedDeviceId::try_from(device_id.clone().unwrap()).unwrap(),
+                    device_id: matrix_sdk::ruma::OwnedDeviceId::from(device_id.clone().unwrap()),
                 },
                 tokens: matrix_sdk::authentication::SessionTokens {
                     access_token: access_token.clone(),
                     refresh_token: None,
                 },
             };
-            if let Ok(_) = client.matrix_auth().restore_session(session.clone(), RoomLoadSettings::default()).await {
+            if client.matrix_auth().restore_session(session.clone(), RoomLoadSettings::default()).await.is_ok() {
                 tracing::debug!("✅ Token-based session restored");
                 // Verify session
                 if let Ok(response) = client.whoami().await {
                     state.user_repository.set_matrix_credentials(
                         user.id,
                         &username,
-                        &access_token.as_str(),
-                        &response.device_id.expect("default").as_str(),
+                        access_token.as_str(),
+                        response.device_id.expect("default").as_str(),
                         &password,
                     )?;
                     session_restored = true;
@@ -240,7 +240,7 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         // Fallback to password login if token-based login fails
         if !session_restored {
             tracing::debug!("🔄 Attempting password-based login");
-            login_with_password(&client, &state, &username, &password, device_id.as_deref(), user.id).await?;
+            login_with_password(&client, state, &username, &password, device_id.as_deref(), user.id).await?;
         }
     }
     tracing::info!("✅ Authentication complete - client is logged already in");

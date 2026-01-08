@@ -111,7 +111,7 @@ async fn connect_whatsapp_with_retry(
                     sleep(RETRY_DELAY).await;
                     
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -122,12 +122,10 @@ async fn connect_whatsapp_with_retry(
                             return Err(init_err);
                         }
                     }
+                } else if is_one_time_key_conflict(&e) {
+                    return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
                 } else {
-                    if is_one_time_key_conflict(&e) {
-                        return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
-                    } else {
-                        return Err(e);
-                    }
+                    return Err(e);
                 }
             }
         }
@@ -156,7 +154,7 @@ async fn connect_whatsapp(
 
     tracing::debug!("🏠 Created room with ID: {}", room_id);
 
-    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
 
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
@@ -203,7 +201,7 @@ async fn connect_whatsapp(
         println!("📡 Sync attempt #{}/60", attempt);
         client.sync_once(sync_settings.clone()).await?;
 
-        if let Some(room) = client.get_room(&room_id) {
+        if let Some(room) = client.get_room(room_id) {
             // Get only the most recent messages to reduce processing time
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
@@ -387,13 +385,7 @@ pub async fn start_whatsapp_connection(
 
     // Fetch QR code media bytes and convert to base64 data URL
     tracing::info!("📥 Fetching QR code media bytes via SDK...");
-    let mxc = matrix_sdk::ruma::OwnedMxcUri::try_from(qr_code_mxc.as_str()).map_err(|e| {
-        tracing::error!("Invalid MXC URI: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid QR code URI"})),
-        )
-    })?;
+    let mxc: matrix_sdk::ruma::OwnedMxcUri = qr_code_mxc.as_str().into();
 
     let request = MediaRequestParameters {
         source: MediaSource::Plain(mxc.to_owned()),

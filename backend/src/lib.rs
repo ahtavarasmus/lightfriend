@@ -10,8 +10,8 @@ pub struct TwilioConfig {
     pub from_number: String,
 }
 
-impl TwilioConfig {
-    pub fn new() -> Self {
+impl Default for TwilioConfig {
+    fn default() -> Self {
         Self {
             account_sid: std::env::var("TWILIO_ACCOUNT_SID")
                 .expect("TWILIO_ACCOUNT_SID must be set"),
@@ -20,6 +20,12 @@ impl TwilioConfig {
             from_number: std::env::var("TWILIO_FROM_NUMBER")
                 .expect("TWILIO_FROM_NUMBER must be set"),
         }
+    }
+}
+
+impl TwilioConfig {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

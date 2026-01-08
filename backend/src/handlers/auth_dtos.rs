@@ -54,6 +54,5 @@ pub struct UserResponse {
 #[derive(Debug, Deserialize)]
 pub struct Claims {
     pub sub: i32,
-    pub exp: i64,
 }
 

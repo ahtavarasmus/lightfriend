@@ -57,13 +57,8 @@ fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
     } else {
         dt_utc.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     };
-    
-    formatted
-}
 
-fn get_bridge_bot_username(service: &str) -> String {
-    let env_key = format!("{}_BRIDGE_BOT", service.to_uppercase());
-    std::env::var(env_key).unwrap_or_else(|_| format!("@{}bot:", service).to_string())
+    formatted
 }
 
 fn get_sender_prefix(service: &str) -> String {
@@ -269,60 +264,58 @@ pub async fn get_triggering_message_in_room(
     let mut found_prompt = false;
     for event in response.chunk {
         if let Ok(AnySyncTimelineEvent::MessageLike(
-            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(SyncRoomMessageEvent::Original(e))
         )) = event.raw().deserialize() {
-            if let SyncRoomMessageEvent::Original(e) = msg {
-                let sender_localpart = e.sender.localpart().to_string();
+            let sender_localpart = e.sender.localpart().to_string();
 
-                if !found_prompt {
-                    // Look for the AI prompt sent by the user
-                    if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
-                        let body = match e.content.msgtype {
-                            MessageType::Text(ref t) => t.body.clone(),
-                            _ => continue,
-                        };
-                        if body.contains(AI_PROMPT_TEXT) {
-                            found_prompt = true;
-                            continue; // Skip to the next message (older)
-                        }
+            if !found_prompt {
+                // Look for the AI prompt sent by the user
+                if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
+                    let body = match e.content.msgtype {
+                        MessageType::Text(ref t) => t.body.clone(),
+                        _ => continue,
+                    };
+                    if body.contains(AI_PROMPT_TEXT) {
+                        found_prompt = true;
+                        continue; // Skip to the next message (older)
                     }
-                } else {
-                    // After finding the prompt, look for the next incoming message
-                    if sender_localpart.starts_with(&sender_prefix) {
-                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                }
+            } else {
+                // After finding the prompt, look for the next incoming message
+                if sender_localpart.starts_with(&sender_prefix) {
+                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
 
-                        // Extract message type and body
-                        let (msgtype, body) = match e.content.msgtype {
-                            MessageType::Text(t) => ("text", t.body),
-                            MessageType::Notice(n) => ("notice", n.body),
-                            MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
-                            MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
-                            MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
-                            MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
-                            MessageType::Location(_l) => ("location", "📍 LOCATION".into()),
-                            MessageType::Emote(t) => ("emote", t.body),
-                            _ => continue,
-                        };
+                    // Extract message type and body
+                    let (msgtype, body) = match e.content.msgtype {
+                        MessageType::Text(t) => ("text", t.body),
+                        MessageType::Notice(n) => ("notice", n.body),
+                        MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                        MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                        MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                        MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                        MessageType::Location(_l) => ("location", "📍 LOCATION".into()),
+                        MessageType::Emote(t) => ("emote", t.body),
+                        _ => continue,
+                    };
 
-                        // Skip error-like messages
-                        if body.contains("Failed to bridge media") ||
-                           body.contains("media no longer available") ||
-                           body.contains("Decrypting message from WhatsApp failed") ||
-                           body.starts_with("* Failed to") {
-                            continue;
-                        }
-
-                        return Ok(Some(BridgeMessage {
-                            sender: e.sender.to_string(),
-                            sender_display_name: sender_localpart,
-                            content: body,
-                            timestamp,
-                            formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
-                            message_type: msgtype.to_string(),
-                            room_name: cleaned_room_name,
-                            media_url: None,
-                        }));
+                    // Skip error-like messages
+                    if body.contains("Failed to bridge media") ||
+                       body.contains("media no longer available") ||
+                       body.contains("Decrypting message from WhatsApp failed") ||
+                       body.starts_with("* Failed to") {
+                        continue;
                     }
+
+                    return Ok(Some(BridgeMessage {
+                        sender: e.sender.to_string(),
+                        sender_display_name: sender_localpart,
+                        content: body,
+                        timestamp,
+                        formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
+                        message_type: msgtype.to_string(),
+                        room_name: cleaned_room_name,
+                        media_url: None,
+                    }));
                 }
             }
         }
@@ -384,46 +377,44 @@ pub async fn get_latest_sent_message_in_room(
 
     for event in response.chunk {
         if let Ok(AnySyncTimelineEvent::MessageLike(
-            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(SyncRoomMessageEvent::Original(e))
         )) = event.raw().deserialize() {
-            if let SyncRoomMessageEvent::Original(e) = msg {
-                let sender_localpart = e.sender.localpart().to_string();
-                // Check if sender is the user (matches user_matrix_id and not a bridge bot prefix)
-                if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
-                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+            let sender_localpart = e.sender.localpart().to_string();
+            // Check if sender is the user (matches user_matrix_id and not a bridge bot prefix)
+            if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
+                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
 
-                    // Extract message type and body
-                    let (msgtype, body) = match e.content.msgtype {
-                        MessageType::Text(t) => ("text", t.body),
-                        MessageType::Notice(n) => ("notice", n.body),
-                        MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
-                        MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
-                        MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
-                        MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
-                        MessageType::Location(_l) => ("location", "📍 LOCATION".into()),
-                        MessageType::Emote(t) => ("emote", t.body),
-                        _ => continue,
-                    };
+                // Extract message type and body
+                let (msgtype, body) = match e.content.msgtype {
+                    MessageType::Text(t) => ("text", t.body),
+                    MessageType::Notice(n) => ("notice", n.body),
+                    MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                    MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                    MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                    MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                    MessageType::Location(_l) => ("location", "📍 LOCATION".into()),
+                    MessageType::Emote(t) => ("emote", t.body),
+                    _ => continue,
+                };
 
-                    // Skip error-like messages if needed (adapted from existing logic)
-                    if body.contains("Failed to bridge media") ||
-                       body.contains("media no longer available") ||
-                       body.contains("Decrypting message from WhatsApp failed") ||
-                       body.starts_with("* Failed to") {
-                        continue;
-                    }
-
-                    return Ok(Some(BridgeMessage {
-                        sender: "You".to_string(),
-                        sender_display_name: "You".to_string(),
-                        content: body,
-                        timestamp,
-                        formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
-                        message_type: msgtype.to_string(),
-                        room_name: cleaned_room_name,
-                        media_url: None,
-                    }));
+                // Skip error-like messages if needed (adapted from existing logic)
+                if body.contains("Failed to bridge media") ||
+                   body.contains("media no longer available") ||
+                   body.contains("Decrypting message from WhatsApp failed") ||
+                   body.starts_with("* Failed to") {
+                    continue;
                 }
+
+                return Ok(Some(BridgeMessage {
+                    sender: "You".to_string(),
+                    sender_display_name: "You".to_string(),
+                    content: body,
+                    timestamp,
+                    formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
+                    message_type: msgtype.to_string(),
+                    room_name: cleaned_room_name,
+                    media_url: None,
+                }));
             }
         }
     }
@@ -442,19 +433,19 @@ pub async fn fetch_bridge_room_messages(
 ) -> Result<(Vec<BridgeMessage>, String)> {
     tracing::info!(
         "Starting {} message fetch - User: {}, chat: {}, limit: {}",
-        capitalize(&service),
+        capitalize(service),
         user_id,
         chat_name,
         limit.unwrap_or(20)
     );
     if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
         if bridge.status != "connected" {
-            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
+            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
         }
     } else {
-        return Err(anyhow!("{} bridge not found", capitalize(&service)));
+        return Err(anyhow!("{} bridge not found", capitalize(service)));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let rooms = get_service_rooms(&client, service).await?;
     let matching_room = search_best_match(&rooms, chat_name);
     let user_info = state.user_core.get_user_info(user_id)?;
@@ -470,7 +461,7 @@ pub async fn fetch_bridge_room_messages(
             };
             fetch_messages_from_room(service, room, limit, user_info.timezone).await
         }
-        None => Err(anyhow!("No matching {} room found for '{}'", capitalize(&service), chat_name))
+        None => Err(anyhow!("No matching {} room found for '{}'", capitalize(service), chat_name))
     }
 }
 
@@ -487,10 +478,10 @@ pub async fn fetch_bridge_messages(
   
     let user_info= state.user_core.get_user_info(user_id)?;
     // Get Matrix client and check bridge status (use cached version for better performance)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
     }
     // Get last_seen_online from the bridge for additional filtering when unread_only
     let bridge_last_seen = state.user_repository.get_bridge(user_id, service)?
@@ -556,64 +547,62 @@ pub async fn fetch_bridge_messages(
             match room.messages(options).await {
                 Ok(response) => {
                     for event in response.chunk.iter() {
-                        if let Ok(any_sync_event) = event.raw().deserialize() {
-                            if let AnySyncTimelineEvent::MessageLike(
-                                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                            ) = any_sync_event {
-                                let (sender, timestamp, content) = match msg {
-                                    SyncRoomMessageEvent::Original(e) => {
-                                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
-                                        (e.sender, timestamp, e.content)
-                                    }
-                                    _ => continue,
-                                };
-                                // Skip messages that user has already seen (or outside time range)
-                                if timestamp <= seen_until {
-                                    if debug_user {
-                                        tracing::info!("DEBUG user 1: Skipping msg in {} - timestamp {} <= seen_until {}", room_name, timestamp, seen_until);
-                                    }
-                                    continue;
+                        if let Ok(AnySyncTimelineEvent::MessageLike(
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                        )) = event.raw().deserialize() {
+                            let (sender, timestamp, content) = match msg {
+                                SyncRoomMessageEvent::Original(e) => {
+                                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                                    (e.sender, timestamp, e.content)
                                 }
-                                if !sender.localpart().starts_with(&sender_prefix) {
-                                    if debug_user {
-                                        tracing::info!("DEBUG user 1: Skipping msg in {} - sender {} doesn't start with {}", room_name, sender.localpart(), sender_prefix);
-                                    }
-                                    continue;
-                                }
-                                let (msgtype, body) = match content.msgtype {
-                                    MessageType::Text(t) => ("text", t.body),
-                                    MessageType::Notice(n) => ("notice", n.body),
-                                    MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
-                                    MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
-                                    MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
-                                    MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
-                                    MessageType::Location(_) => ("location", "📍 LOCATION".into()),
-                                    MessageType::Emote(t) => ("emote", t.body),
-                                    _ => continue,
-                                };
-                                // Skip error messages
-                                if body.contains("Failed to bridge media") ||
-                                   body.contains("media no longer available") ||
-                                   body.contains("Decrypting message from WhatsApp failed") ||
-                                   body.starts_with("* Failed to") {
-                                    continue;
-                                }
+                                _ => continue,
+                            };
+                            // Skip messages that user has already seen (or outside time range)
+                            if timestamp <= seen_until {
                                 if debug_user {
-                                    tracing::info!("DEBUG user 1: Including msg in {} - timestamp {}", room_name, timestamp);
+                                    tracing::info!("DEBUG user 1: Skipping msg in {} - timestamp {} <= seen_until {}", room_name, timestamp, seen_until);
                                 }
-                                messages.push(BridgeMessage {
-                                    sender: sender.to_string(),
-                                    sender_display_name: sender.localpart().to_string(),
-                                    content: body,
-                                    timestamp,
-                                    formatted_timestamp: format_timestamp(timestamp, user_timezone.clone()),
-                                    message_type: msgtype.to_string(),
-                                    room_name: room_name.clone(),
-                                    media_url: None,
-                                });
-                                if messages.len() == 5 {
-                                    break;
+                                continue;
+                            }
+                            if !sender.localpart().starts_with(&sender_prefix) {
+                                if debug_user {
+                                    tracing::info!("DEBUG user 1: Skipping msg in {} - sender {} doesn't start with {}", room_name, sender.localpart(), sender_prefix);
                                 }
+                                continue;
+                            }
+                            let (msgtype, body) = match content.msgtype {
+                                MessageType::Text(t) => ("text", t.body),
+                                MessageType::Notice(n) => ("notice", n.body),
+                                MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                                MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                                MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                                MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                                MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                                MessageType::Emote(t) => ("emote", t.body),
+                                _ => continue,
+                            };
+                            // Skip error messages
+                            if body.contains("Failed to bridge media") ||
+                               body.contains("media no longer available") ||
+                               body.contains("Decrypting message from WhatsApp failed") ||
+                               body.starts_with("* Failed to") {
+                                continue;
+                            }
+                            if debug_user {
+                                tracing::info!("DEBUG user 1: Including msg in {} - timestamp {}", room_name, timestamp);
+                            }
+                            messages.push(BridgeMessage {
+                                sender: sender.to_string(),
+                                sender_display_name: sender.localpart().to_string(),
+                                content: body,
+                                timestamp,
+                                formatted_timestamp: format_timestamp(timestamp, user_timezone.clone()),
+                                message_type: msgtype.to_string(),
+                                room_name: room_name.clone(),
+                                media_url: None,
+                            });
+                            if messages.len() == 5 {
+                                break;
                             }
                         }
                     }
@@ -646,10 +635,10 @@ pub async fn send_bridge_message(
     // Get user for timezone info
     tracing::info!("Sending {} message", service);
    
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
     }
     let service_rooms = get_service_rooms(&client, service).await?;
     let exact_room = find_exact_room(&service_rooms, chat_name);
@@ -667,11 +656,11 @@ pub async fn send_bridge_message(
         None => {
             let suggestions = get_best_matches(&service_rooms, chat_name);
             let error_msg = if suggestions.is_empty() {
-                format!("Could not find exact matching {} room for '{}'", capitalize(&service), chat_name)
+                format!("Could not find exact matching {} room for '{}'", capitalize(service), chat_name)
             } else {
                 format!(
                     "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
-                    capitalize(&service),
+                    capitalize(service),
                     chat_name,
                     suggestions.join("\n")
                 )
@@ -833,7 +822,7 @@ pub async fn get_room_seen_timestamp(
         let request = get_room_event::v3::Request::new(room.room_id().to_owned(), receipt_event_id.clone());
         if let Ok(response) = client.send(request).await {
             if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
-                let receipt_ts = i64::try_from(any_event.origin_server_ts().as_secs()).unwrap_or(0);
+                let receipt_ts = i64::from(any_event.origin_server_ts().as_secs());
                 seen_until = Some(seen_until.unwrap_or(0).max(receipt_ts));
             }
         }
@@ -843,13 +832,11 @@ pub async fn get_room_seen_timestamp(
     let messages = room.messages(MessagesOptions::backward()).await;
     if let Ok(messages) = messages {
         for message_event in messages.chunk {
-            if let Ok(timeline_event) = message_event.raw().deserialize() {
-                if let AnySyncTimelineEvent::MessageLike(msg_event) = timeline_event {
-                    if msg_event.sender() == own_user_id {
-                        let reply_ts = i64::try_from(msg_event.origin_server_ts().as_secs()).unwrap_or(0);
-                        seen_until = Some(seen_until.unwrap_or(0).max(reply_ts));
-                        break; // Found the most recent user reply
-                    }
+            if let Ok(AnySyncTimelineEvent::MessageLike(msg_event)) = message_event.raw().deserialize() {
+                if msg_event.sender() == own_user_id {
+                    let reply_ts = i64::from(msg_event.origin_server_ts().as_secs());
+                    seen_until = Some(seen_until.unwrap_or(0).max(reply_ts));
+                    break; // Found the most recent user reply
                 }
             }
         }
@@ -923,7 +910,7 @@ pub async fn handle_bridge_message(
         }
     }
     tracing::info!("🔍 Checking if room {} is a management room (found {} bridges)", room_id_str, bridges.len());
-    if let Some(bridge) = bridges.iter().find(|b| b.room_id.as_ref().map_or(false, |rid| rid == &room_id_str)) {
+    if let Some(bridge) = bridges.iter().find(|b| b.room_id.as_ref() == Some(&room_id_str)) {
         // This is a management room for a bridge
         tracing::info!("📋 Processing message in {} bridge management room (status: {})", bridge.bridge_type, bridge.status);
         // Skip if bridge is in connecting state (handled by monitor task)
@@ -984,8 +971,7 @@ pub async fn handle_bridge_message(
         }
       
         // Define disconnection patterns (customize per bridge if needed)
-        let disconnection_patterns = vec![
-            "disconnected",
+        let disconnection_patterns = ["disconnected",
             "connection lost",
             "logged out",
             "authentication failed",
@@ -996,8 +982,7 @@ pub async fn handle_bridge_message(
             "wa-logged-out",
             "wa-not-logged-in",
             "device_removed",
-            "relogin to continue",
-        ];
+            "relogin to continue"];
         tracing::info!("📝 Bot message content: {}", content);
         let lower_content = content.to_lowercase();
         if disconnection_patterns.iter().any(|p| lower_content.contains(p)) {
@@ -1139,26 +1124,24 @@ pub async fn handle_bridge_message(
     if let Ok(messages) = messages {
         let mut found_user_reply = false;
         for message_event in messages.chunk {
-            if let Ok(timeline_event) = message_event.raw().deserialize() {
-                if let AnySyncTimelineEvent::MessageLike(msg_event) = timeline_event {
-                    // Check if this message is from the user (not the bridge bot)
-                    if msg_event.sender() == own_user_id {
-                        // Check if user's message came after the trigger message
-                        if msg_event.origin_server_ts().0 > event.origin_server_ts.0 {
-                            tracing::info!("User has sent a reply after this message - skipping notification");
-                            found_user_reply = true;
+            if let Ok(AnySyncTimelineEvent::MessageLike(msg_event)) = message_event.raw().deserialize() {
+                // Check if this message is from the user (not the bridge bot)
+                if msg_event.sender() == own_user_id {
+                    // Check if user's message came after the trigger message
+                    if msg_event.origin_server_ts().0 > event.origin_server_ts.0 {
+                        tracing::info!("User has sent a reply after this message - skipping notification");
+                        found_user_reply = true;
 
-                            // Update last_seen_online based on user's reply timestamp
-                            let last_seen_online = i32::try_from(msg_event.origin_server_ts().as_secs()).unwrap();
-                            let rows = state.user_repository.update_bridge_last_seen_online(
-                                user_id,
-                                service.as_str(),
-                                last_seen_online,
-                            ).unwrap();
-                            tracing::info!("Updated {} rows for last_seen_online based on reply (user_id: {}, service: {}, value: {})",
-                                rows, user_id, service, last_seen_online);
-                            break;
-                        }
+                        // Update last_seen_online based on user's reply timestamp
+                        let last_seen_online = i32::try_from(msg_event.origin_server_ts().as_secs()).unwrap();
+                        let rows = state.user_repository.update_bridge_last_seen_online(
+                            user_id,
+                            service.as_str(),
+                            last_seen_online,
+                        ).unwrap();
+                        tracing::info!("Updated {} rows for last_seen_online based on reply (user_id: {}, service: {}, value: {})",
+                            rows, user_id, service, last_seen_online);
+                        break;
                     }
                 }
             }
@@ -1219,16 +1202,15 @@ pub async fn handle_bridge_message(
     };
     if !messaging_tasks.is_empty() {
         // Check if any tasks match the message
-        if let Ok((task_id_option, _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
+        if let Ok((Some(task_id), _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
             &state,
             user_id,
             &message_context,
             &messaging_tasks,
         ).await {
-            if let Some(task_id) = task_id_option {
-                // Find the matched task to get its action and notification_type
-                let matched_task = messaging_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
-                if let Some(task) = matched_task {
+            // Find the matched task to get its action and notification_type
+            let matched_task = messaging_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
+            if let Some(task) = matched_task {
                     let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
                     let action_spec = task.action.clone();
 
@@ -1268,24 +1250,18 @@ pub async fn handle_bridge_message(
                     });
                     return;
                 }
-            }
         }
     }
 
     // Extract chat_name early for contact profile matching
     let chat_name = remove_bridge_suffix(room_name.as_str());
-    let sender_name = sender_localpart
-        .strip_prefix(&sender_prefix)
-        .unwrap_or(&sender_localpart)
-        .to_string();
 
     // Load contact profiles for matching
-    let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let contact_profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
 
     // Find matching contact profile for this chat/sender
     let matching_profile = contact_profiles.iter().find(|p| {
         let chat_lower = chat_name.to_lowercase();
-        let sender_lower = sender_name.to_lowercase();
         match service.as_str() {
             "whatsapp" => p.whatsapp_chat.as_ref()
                 .map(|c| {
@@ -1407,7 +1383,7 @@ pub async fn handle_bridge_message(
     // chat_name and sender_name already defined earlier for contact profile matching
 
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
-        let prefix = format!("{} from ", capitalize(&service));
+        let prefix = format!("{} from ", capitalize(service));
         let separator = ": ";
         let max_len = 157;
         let static_len = prefix.len() + separator.len();
@@ -1536,7 +1512,6 @@ pub async fn handle_bridge_message(
                             Some(first_message),
                         ).await;
                     });
-                    return;
                 }
                 Err(e) => {
                     tracing::warn!("User {} does not have enough credits for profile notification: {}", user_id, e);
@@ -1614,7 +1589,6 @@ pub async fn handle_bridge_message(
             } else {
                 tracing::debug!("Message will be included in digest (notification_mode=digest)");
             }
-            return;
         }
         _ => {
             // Unknown mode, treat as critical
@@ -1633,9 +1607,9 @@ pub async fn search_bridge_rooms(
     // Validate bridge connection first
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let all_rooms = get_service_rooms(&client, service).await?;
     let search_term_lower = search_term.trim().to_lowercase();
     // Single-pass matching with prioritized results
@@ -1667,55 +1641,9 @@ pub async fn search_bridge_rooms(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(b.1.last_activity.cmp(&a.1.last_activity))
     });
-    tracing::info!("Found {} matching {} rooms", matching_rooms.len(), capitalize(&service));
-   
-    Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
-}
+    tracing::info!("Found {} matching {} rooms", matching_rooms.len(), capitalize(service));
 
-pub async fn fetch_recent_bridge_contacts(
-    service: &str,
-    state: &Arc<AppState>,
-    user_id: i32,
-) -> Result<Vec<String>> {
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
-    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
-    }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-    let rooms = get_service_rooms(&client, service).await?;
-    let mut futures = Vec::new();
-    for bridge_room in rooms {
-        let client = client.clone();
-        futures.push(async move {
-            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(bridge_room.room_id.as_str()) {
-                Ok(id) => id,
-                Err(_) => return None,
-            };
-            let room = match client.get_room(&room_id) {
-                Some(r) => r,
-                None => return None,
-            };
-            let members = match room.members(RoomMemberships::JOIN).await {
-                Ok(m) => m,
-                Err(_) => return None,
-            };
-            if members.len() > 3 {
-                return None;
-            }
-            Some(remove_bridge_suffix(&bridge_room.display_name))
-        });
-    }
-    let results = join_all(futures).await;
-    let mut seen = std::collections::HashSet::new();
-    let mut room_names: Vec<String> = Vec::new();
-    for name in results.into_iter().flatten() {
-        if seen.insert(name.clone()) {
-            room_names.push(name);
-        }
-    }
-    room_names.truncate(10);
-    tracing::info!("Retrieved {} most recent {} contacts", room_names.len(), capitalize(service));
-    Ok(room_names)
+    Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
 }
 
 pub fn capitalize(s: &str) -> String {

@@ -29,10 +29,6 @@ pub struct TestSmsWithImageResponse {
     image_path: String,
 }
 
-#[derive(Deserialize)]
-pub struct BroadcastMessageRequest {
-    pub message: String,
-}
 
 #[derive(Deserialize, Clone)]
 pub struct EmailBroadcastRequest {
@@ -84,12 +80,10 @@ pub async fn update_preferred_number_admin(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
     // Get allowed numbers from environment
-    let allowed_numbers = vec![
-        std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
+    let allowed_numbers = [std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
         std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
-        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-    ];
+        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment")];
 
     // Validate that the preferred number is in the allowed list
     if !allowed_numbers.contains(&preferred_number) {
@@ -180,51 +174,6 @@ pub async fn unsubscribe(
             ))
         }
     }
-}
-
-fn wrap_text(text: &str, max_width: usize) -> String {
-    let mut result = String::new();
-    for line in text.lines() {
-        if line.is_empty() {
-            result.push('\n');
-            continue;
-        }
-        let mut current_line = String::new();
-        for word in line.split_whitespace() {
-            let mut remaining_word = word.to_string();
-            loop {
-                let add_space = !current_line.is_empty();
-                let space_len = if add_space { 1 } else { 0 };
-                if current_line.len() + remaining_word.len() + space_len <= max_width {
-                    if add_space {
-                        current_line.push(' ');
-                    }
-                    current_line.push_str(&remaining_word);
-                    break;
-                } else {
-                    if current_line.is_empty() {
-                        // Break the long word
-                        let chunk_len = max_width;
-                        let (chunk, rest) = remaining_word.split_at(chunk_len);
-                        current_line.push_str(chunk);
-                        remaining_word = rest.to_string();
-                    }
-                    result.push_str(&current_line);
-                    result.push('\n');
-                    current_line = String::new();
-                }
-            }
-        }
-        if !current_line.is_empty() {
-            result.push_str(&current_line);
-        }
-        result.push('\n');
-    }
-    // Remove any trailing newline if the original didn't end with one
-    if !text.ends_with('\n') && result.ends_with('\n') {
-        result.pop();
-    }
-    result
 }
 
 pub async fn broadcast_email(
@@ -355,7 +304,7 @@ pub async fn broadcast_email(
             // Call the existing send_email handler
             match crate::handlers::imap_handlers::send_email(
                 State(state_clone.clone()),
-                auth_user.clone(),
+                auth_user,
                 Json(email_request)
             ).await {
                 Ok(_) => {
@@ -429,7 +378,7 @@ pub async fn broadcast_email(
 
             match crate::handlers::imap_handlers::send_email(
                 State(state_clone.clone()),
-                auth_user.clone(),
+                auth_user,
                 Json(email_request)
             ).await {
                 Ok(_) => {
@@ -464,21 +413,12 @@ pub async fn broadcast_email(
 
 
 pub async fn broadcast_message(
-    State(state): State<Arc<AppState>>,
-    Json(_request): Json<BroadcastMessageRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-    let _users = state.user_core.get_all_users().map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
-
     // Immediately return a success response
     Ok(Json(json!({
         "message": "Broadcast is currently disabled(create it for programmable messaging)",
         "status": "ok"
     })))
-
 }
 
 

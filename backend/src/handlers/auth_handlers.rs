@@ -21,17 +21,6 @@ use crate::{
     AppState
 };
 
-#[derive(Deserialize)]
-pub struct PasswordResetRequest {
-    email: String,
-}
-
-#[derive(Deserialize)]
-pub struct VerifyPasswordResetRequest {
-    email: String,
-    otp: String,
-    new_password: String,
-}
 
 #[derive(Deserialize)]
 pub struct CompletePasswordResetRequest {
@@ -207,8 +196,6 @@ pub async fn login(
 /// Password resets now require manual verification by admin.
 /// This endpoint just tells the user how to request a reset.
 pub async fn request_password_reset(
-    State(_state): State<Arc<AppState>>,
-    Json(_reset_req): Json<PasswordResetRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // No automated password reset - direct users to contact support
     Ok(Json(json!({
@@ -286,12 +273,12 @@ pub async fn request_phone_verify(
     );
     tracing::debug!("Stored OTP {} for phone {} with expiration {}", otp, reset_req.phone_number, expiration);
     let message = format!("Your Lightfriend verification code is: {}. Valid for 5 minutes.", otp);
-    if let Err(_) = crate::api::twilio_utils::send_conversation_message(
+    if crate::api::twilio_utils::send_conversation_message(
         &state,
         &message,
         None,
         &user
-    ).await {
+    ).await.is_err() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to send OTP"}))
@@ -907,7 +894,7 @@ pub async fn validate_reset_token(
 
     match token_data {
         Some(entry) => {
-            let (user_id, expiry) = *entry;
+            let (_, expiry) = *entry;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

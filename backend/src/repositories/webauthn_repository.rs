@@ -8,6 +8,17 @@ use crate::{
 use crate::utils::encryption::{encrypt, decrypt};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Parameters for creating a WebAuthn credential
+pub struct CreateCredentialParams {
+    pub user_id: i32,
+    pub credential_id: String,
+    pub public_key: String,
+    pub device_name: String,
+    pub counter: i32,
+    pub transports: Option<String>,
+    pub aaguid: Option<String>,
+}
+
 pub struct WebauthnRepository {
     pool: DbPool,
 }
@@ -18,22 +29,12 @@ impl WebauthnRepository {
     }
 
     /// Create a new WebAuthn credential for a user
-    pub fn create_credential(
-        &self,
-        user_id: i32,
-        credential_id: &str,
-        public_key: &str,
-        device_name: &str,
-        counter: i32,
-        transports: Option<String>,
-        aaguid: Option<String>,
-    ) -> Result<(), DieselError> {
+    pub fn create_credential(&self, params: CreateCredentialParams) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the public key before storing
-        let encrypted_public_key = encrypt(public_key)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+        let encrypted_public_key = encrypt(&params.public_key)
+            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
                 format!("Encryption error: {}", e)
             ))))?;
 
@@ -43,13 +44,13 @@ impl WebauthnRepository {
             .as_secs() as i32;
 
         let new_credential = NewWebauthnCredential {
-            user_id,
-            credential_id: credential_id.to_string(),
+            user_id: params.user_id,
+            credential_id: params.credential_id,
             encrypted_public_key,
-            device_name: device_name.to_string(),
-            counter,
-            transports,
-            aaguid,
+            device_name: params.device_name,
+            counter: params.counter,
+            transports: params.transports,
+            aaguid: params.aaguid,
             created_at: current_time,
             enabled: 1,
         };
@@ -68,39 +69,14 @@ impl WebauthnRepository {
         webauthn_credentials::table
             .filter(webauthn_credentials::user_id.eq(user_id))
             .filter(webauthn_credentials::enabled.eq(1))
+            .select(WebauthnCredential::as_select())
             .load::<WebauthnCredential>(&mut conn)
-    }
-
-    /// Get a credential by its ID
-    pub fn get_credential_by_id(&self, credential_id: &str) -> Result<Option<WebauthnCredential>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        webauthn_credentials::table
-            .filter(webauthn_credentials::credential_id.eq(credential_id))
-            .first::<WebauthnCredential>(&mut conn)
-            .optional()
-    }
-
-    /// Get a credential by ID and user ID (for security)
-    pub fn get_credential_by_id_and_user(
-        &self,
-        credential_id: &str,
-        user_id: i32,
-    ) -> Result<Option<WebauthnCredential>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        webauthn_credentials::table
-            .filter(webauthn_credentials::credential_id.eq(credential_id))
-            .filter(webauthn_credentials::user_id.eq(user_id))
-            .first::<WebauthnCredential>(&mut conn)
-            .optional()
     }
 
     /// Get decrypted public key for a credential
     pub fn get_decrypted_public_key(&self, credential: &WebauthnCredential) -> Result<String, DieselError> {
         decrypt(&credential.encrypted_public_key)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
                 format!("Decryption error: {}", e)
             ))))
     }
@@ -240,22 +216,9 @@ impl WebauthnRepository {
             .filter(webauthn_challenges::user_id.eq(user_id))
             .filter(webauthn_challenges::challenge_type.eq(challenge_type))
             .filter(webauthn_challenges::expires_at.gt(current_time))
+            .select(WebauthnChallenge::as_select())
             .first::<WebauthnChallenge>(&mut conn)
             .optional()
-    }
-
-    /// Delete a challenge after use
-    pub fn delete_challenge(&self, user_id: i32, challenge: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(
-            webauthn_challenges::table
-                .filter(webauthn_challenges::user_id.eq(user_id))
-                .filter(webauthn_challenges::challenge.eq(challenge))
-        )
-        .execute(&mut conn)?;
-
-        Ok(())
     }
 
     /// Delete all challenges for a user of a specific type
@@ -270,21 +233,5 @@ impl WebauthnRepository {
         .execute(&mut conn)?;
 
         Ok(())
-    }
-
-    /// Cleanup expired challenges
-    pub fn cleanup_expired_challenges(&self) -> Result<usize, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        diesel::delete(
-            webauthn_challenges::table
-                .filter(webauthn_challenges::expires_at.lt(current_time))
-        )
-        .execute(&mut conn)
     }
 }

@@ -28,7 +28,6 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use axum::http::HeaderValue;
 use tracing::Level;
 use std::sync::Arc;
-use sentry;
 mod handlers {
     pub mod auth_middleware;
     pub mod auth_dtos;
@@ -67,7 +66,6 @@ mod handlers {
     pub mod instagram_handlers;
     pub mod self_host_handlers;
     pub mod uber_auth;
-    pub mod uber;
     pub mod tesla_auth;
     pub mod google_maps;
     pub mod totp_handlers;
@@ -177,8 +175,6 @@ pub struct AppState {
     tesla_oauth_client: TeslaOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
@@ -186,7 +182,6 @@ pub struct AppState {
     // Track vehicles currently being woken to prevent parallel wake attempts
     // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
     tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,
-    password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
     phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     phone_verify_otps: DashMap<String, (String, u64)>,
@@ -210,7 +205,7 @@ pub fn validate_env() {
     ];
 
     for var in core_vars.iter() {
-        std::env::var(var).expect(&format!("{} must be set", var));
+        std::env::var(var).unwrap_or_else(|_| panic!("{} must be set", var));
     }
 
     // Production-only validation for live application features
@@ -250,7 +245,7 @@ pub fn validate_env() {
         ];
 
         for var in production_vars.iter() {
-            std::env::var(var).expect(&format!("{} must be set in production environment", var));
+            std::env::var(var).unwrap_or_else(|_| panic!("{} must be set in production environment", var));
         }
     }
 
@@ -322,7 +317,7 @@ async fn bootstrap_admin_if_needed(
         }
         Err(e) => {
             tracing::error!("Failed to create bootstrap admin: {}", e);
-            Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+            Err(Box::new(std::io::Error::other(e.to_string())))
         }
     }
 }
@@ -436,8 +431,6 @@ async fn main() {
         youtube_oauth_client,
         session_store: session_store.clone(),
         login_limiter: DashMap::new(),
-        password_reset_limiter: DashMap::new(),
-        password_reset_verify_limiter: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
         matrix_clients,
@@ -446,7 +439,6 @@ async fn main() {
         tesla_waking_vehicles: Arc::new(DashMap::new()),
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
-        password_reset_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,

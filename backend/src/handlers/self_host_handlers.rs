@@ -588,7 +588,7 @@ pub async fn update_server_ip(
             let setup_req = SetupSubdomainRequest {
                 ip_address: req.server_ip.clone(),
             };
-            match setup_subdomain(State(state.clone()), auth_user.clone(), Json(setup_req)).await {
+            match setup_subdomain(State(state.clone()), auth_user, Json(setup_req)).await {
                 Ok(_) => Ok(StatusCode::OK),
                 Err(e) => {
                     tracing::error!("Failed to setup subdomain: {:?}", e);

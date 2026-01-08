@@ -239,8 +239,8 @@ pub fn deduct_user_credits(
             "voice" => 0.0, // voice uses credits, not credits_left
             "web_call" => {
                 // Web call: 1 message credit per minute (round up)
-                let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-                minutes
+                
+                (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0)
             },
             "noti_msg" => 0.5,
             "noti_call" => 0.5,

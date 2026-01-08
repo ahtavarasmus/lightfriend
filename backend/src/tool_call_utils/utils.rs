@@ -83,7 +83,6 @@ pub fn create_openai_client(
             .with_endpoint("https://openrouter.ai/api/v1")
             .with_api_key(api_key)
             .build()
-            .map_err(|e| e.into())
     } else {
         // Cloud deployment uses OpenRouter for background tasks
         state.ai_config.create_client(crate::AiProvider::OpenRouter)
@@ -114,7 +113,7 @@ pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_disc
     }
 
     println!("❌ Tool {} requires tier 2 subscription", tool_name);
-    return true;
+    true
 }
 
 

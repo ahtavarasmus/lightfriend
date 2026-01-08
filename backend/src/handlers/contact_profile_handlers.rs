@@ -12,6 +12,7 @@ use crate::{
     AppState,
     models::user_models::{NewContactProfile, ContactProfile, ContactProfileException},
     handlers::auth_middleware::AuthUser,
+    repositories::user_repository::UpdateContactProfileParams,
 };
 
 // Request DTOs
@@ -293,18 +294,18 @@ pub async fn update_contact_profile(
         ));
     }
 
-    match state.user_repository.update_contact_profile(
-        auth_user.user_id,
+    match state.user_repository.update_contact_profile(UpdateContactProfileParams {
+        user_id: auth_user.user_id,
         profile_id,
-        &request.nickname,
-        request.whatsapp_chat,
-        request.telegram_chat,
-        request.signal_chat,
-        request.email_addresses,
-        &request.notification_mode,
-        &request.notification_type,
-        if request.notify_on_call { 1 } else { 0 },
-    ) {
+        nickname: request.nickname.clone(),
+        whatsapp_chat: request.whatsapp_chat,
+        telegram_chat: request.telegram_chat,
+        signal_chat: request.signal_chat,
+        email_addresses: request.email_addresses,
+        notification_mode: request.notification_mode.clone(),
+        notification_type: request.notification_type.clone(),
+        notify_on_call: if request.notify_on_call { 1 } else { 0 },
+    }) {
         Ok(()) => {
             // Handle exceptions if provided
             if let Some(exceptions) = request.exceptions {

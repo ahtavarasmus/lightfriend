@@ -95,11 +95,6 @@ pub struct Channel {
     pub is_subscribed: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ChannelSearchResponse {
-    pub channels: Vec<Channel>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SubscribeRequest {
     pub channel_id: String,
@@ -723,7 +718,6 @@ fn format_view_count(count: u64) -> String {
 /// Helper function to get the user's subscribed channel IDs
 async fn get_user_subscription_ids(client: &reqwest::Client, access_token: &str) -> Vec<String> {
     let mut channel_ids = Vec::new();
-    let mut page_token: Option<String> = None;
 
     // Fetch up to 50 subscriptions (one page)
     let response = client

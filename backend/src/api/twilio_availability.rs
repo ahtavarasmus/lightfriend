@@ -3,9 +3,6 @@ use crate::schema::country_availability;
 use crate::AppState;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::r2d2::ConnectionManager;
-use diesel::SqliteConnection;
-use diesel::r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -46,7 +43,6 @@ struct MessagingPricing {
 struct PhoneNumberPricing {
     #[serde(default)]
     phone_number_prices: Vec<PhoneNumberPrice>,
-    price_unit: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -57,7 +53,6 @@ struct PhoneNumberPrice {
 
 #[derive(Deserialize, Debug)]
 struct InboundSmsPrice {
-    number_type: String,
     #[serde(default)]
     prices: Vec<PriceItem>,
 }
@@ -102,13 +97,11 @@ struct OriginBasedVoicePricing {
 
 #[derive(Deserialize, Debug)]
 struct OriginatingCallPrice {
-    base_price: String,
     current_price: String,
 }
 
 #[derive(Deserialize, Debug)]
 struct TerminatingPrefixPrice {
-    base_price: String,
     current_price: String,
 }
 
@@ -474,6 +467,7 @@ pub async fn get_country_capability(
         country_availability::table
             .filter(country_availability::country_code.eq(&country_upper))
             .filter(country_availability::last_checked.gt(now - cache_duration))
+            .select(CountryAvailability::as_select())
             .first::<CountryAvailability>(&mut conn)
             .optional()
             .map_err(|e| format!("DB query error: {}", e))?
@@ -571,55 +565,4 @@ fn build_capability_info(
         outbound_voice_price_per_min: outbound_voice,
         inbound_voice_price_per_min: inbound_voice,
     }
-}
-
-/// Refresh all cached country availability data (for cron job)
-pub async fn refresh_all_country_availability(
-    db_pool: &Pool<ConnectionManager<SqliteConnection>>,
-) -> Result<(), String> {
-    let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
-        .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
-    let auth_token = std::env::var("TWILIO_AUTH_TOKEN")
-        .map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
-
-    // Get all cached countries
-    let countries: Vec<String> = {
-        let mut conn = db_pool.get().map_err(|e| format!("DB connection error: {}", e))?;
-        country_availability::table
-            .select(country_availability::country_code)
-            .load::<String>(&mut conn)
-            .map_err(|e| format!("Failed to load countries: {}", e))?
-    };
-
-    let now = Utc::now().timestamp() as i32;
-
-    for country in countries {
-        let (tier, outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
-            match check_country_capability(&country, &account_sid, &auth_token).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("Error checking {}: {}", country, e);
-                    continue;
-                }
-            };
-
-        let has_local = matches!(tier, CountryTier::UsCanada | CountryTier::FullService);
-
-        let mut conn = db_pool.get().map_err(|e| format!("DB connection error: {}", e))?;
-
-        diesel::update(country_availability::table)
-            .filter(country_availability::country_code.eq(&country))
-            .set((
-                country_availability::has_local_numbers.eq(has_local),
-                country_availability::outbound_sms_price.eq(outbound_sms),
-                country_availability::inbound_sms_price.eq(inbound_sms),
-                country_availability::outbound_voice_price_per_min.eq(outbound_voice),
-                country_availability::inbound_voice_price_per_min.eq(inbound_voice),
-                country_availability::last_checked.eq(now),
-            ))
-            .execute(&mut conn)
-            .map_err(|e| format!("Failed to update {}: {}", country, e))?;
-    }
-
-    Ok(())
 }

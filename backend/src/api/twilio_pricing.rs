@@ -6,7 +6,6 @@
 /// - Regular messages: Twilio price × 3 × 1.3 (3 segments, typical conversation)
 /// - Digests: Twilio price × 3 × 1.3 (3 segments avg, varies by content)
 /// - Voice: Twilio price × 1.3 (per minute)
-
 use crate::api::twilio_availability::get_country_capability;
 use crate::AppState;
 use std::sync::Arc;
@@ -22,10 +21,6 @@ const VAT_MARGIN_MULTIPLIER: f32 = 1.3;
 /// Pricing result for euro plan countries with segment-based pricing
 #[derive(Debug, Clone)]
 pub struct NotificationPricing {
-    /// Raw Twilio outbound SMS price (USD)
-    pub raw_sms_price: f32,
-    /// Raw Twilio outbound voice price per minute (USD)
-    pub raw_voice_price: f32,
     /// Price for notifications: raw × 1.5 × 1.3 (1.5 segments avg)
     pub notification_price: f32,
     /// Price for regular messages: raw × 3 × 1.3 (3 segments)
@@ -47,8 +42,6 @@ impl NotificationPricing {
         let voice = voice_price * VAT_MARGIN_MULTIPLIER;
 
         Self {
-            raw_sms_price: sms_price,
-            raw_voice_price: voice_price,
             notification_price: notification,
             regular_message_price: regular,
             digest_price: digest,
@@ -80,33 +73,6 @@ pub async fn get_notification_only_pricing(
     let raw_voice = capability.outbound_voice_price_per_min.unwrap_or(0.10);
 
     Ok(NotificationPricing::from_raw_prices(raw_sms, raw_voice))
-}
-
-/// Check if a country has cached pricing available (without fetching).
-pub fn has_cached_pricing(
-    state: &Arc<AppState>,
-    country_code: &str,
-) -> bool {
-    use crate::schema::country_availability;
-    use diesel::prelude::*;
-    use chrono::Utc;
-
-    let now = Utc::now().timestamp() as i32;
-    let cache_duration = 86400; // 24 hours
-
-    let mut conn = match state.db_pool.get() {
-        Ok(conn) => conn,
-        Err(_) => return false,
-    };
-
-    let result: Result<Option<i32>, _> = country_availability::table
-        .filter(country_availability::country_code.eq(country_code.to_uppercase()))
-        .filter(country_availability::last_checked.gt(now - cache_duration))
-        .select(country_availability::id)
-        .first(&mut conn)
-        .optional();
-
-    matches!(result, Ok(Some(_)))
 }
 
 /// Get pricing for any euro plan country (local-number or notification-only).
@@ -155,6 +121,7 @@ pub fn get_cached_notification_pricing_sync(
     let cached: CountryAvailability = country_availability::table
         .filter(country_availability::country_code.eq(country_code.to_uppercase()))
         .filter(country_availability::last_checked.gt(now - cache_duration))
+        .select(CountryAvailability::as_select())
         .first(&mut conn)
         .ok()?;
 

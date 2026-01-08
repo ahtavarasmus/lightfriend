@@ -169,7 +169,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         Box::pin(async move {
             
             // Process each subscribed user
-            for user in state.user_core.get_users_by_tier("tier 2").unwrap_or(Vec::new()){
+            for user in state.user_core.get_users_by_tier("tier 2").unwrap_or_default(){
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
@@ -222,8 +222,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     // Sort emails by date in descending order (most recent first)
                                     let mut sorted_emails = emails;
                                     sorted_emails.sort_by(|a, b| {
-                                        let a_date = a.date.unwrap_or_else(|| chrono::Utc::now());
-                                        let b_date = b.date.unwrap_or_else(|| chrono::Utc::now());
+                                        let a_date = a.date.unwrap_or_else(chrono::Utc::now);
+                                        let b_date = b.date.unwrap_or_else(chrono::Utc::now);
                                         b_date.cmp(&a_date)
                                     });
 
@@ -249,7 +249,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             tracing::info!("Fast check: Priority sender matched for user {}", user.id);
                                            
                                             // Determine suffix based on noti_type
-                                            let suffix = match matched_sender.noti_type.as_ref().map(|s| s.as_str()) {
+                                            let suffix = match matched_sender.noti_type.as_deref() {
                                                 Some("call") => "_call",
                                                 Some("call_sms") => "_call_sms",
                                                 _ => "_sms",
@@ -300,16 +300,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         };
                                         if !email_tasks.is_empty() {
                                             // Check if any tasks match the message
-                                            if let Ok((task_id_option, _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
+                                            if let Ok((Some(task_id), _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
                                                 &state,
                                                 user.id,
                                                 &email_content,
                                                 &email_tasks,
                                             ).await {
-                                                if let Some(task_id) = task_id_option {
-                                                    // Find the matched task to get its action and notification_type
-                                                    let matched_task = email_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
-                                                    if let Some(task) = matched_task {
+                                                // Find the matched task to get its action and notification_type
+                                                let matched_task = email_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
+                                                if let Some(task) = matched_task {
                                                         let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
                                                         let action_spec = task.action.clone();
 
@@ -350,7 +349,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         });
                                                         continue;
                                                     }
-                                                }
                                             }
                                         }
 
@@ -562,7 +560,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                     let state_clone = state.clone();
                                     let first_message = format!("Hello, you have a calendar event starting in {}.", reminder.minutes);
-                                    let user_id = user.id.clone();
+                                    let user_id = user.id;
                                     tokio::spawn(async move {
                                         crate::proactive::utils::send_notification(
                                             &state_clone,

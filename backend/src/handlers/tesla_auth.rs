@@ -867,7 +867,6 @@ pub async fn get_virtual_key_link(
 #[derive(Debug, Deserialize)]
 pub struct TeslaCommandRequest {
     pub command: String,
-    pub vehicle_id: Option<String>,
 }
 
 pub async fn tesla_command(
@@ -1241,7 +1240,7 @@ pub async fn tesla_list_vehicles(
             "vehicle_id": v.vehicle_id.to_string(),
             "name": v.display_name.as_ref().unwrap_or(&"Unknown".to_string()),
             "state": v.state,
-            "selected": selected_vin.as_ref().map_or(false, |s| s == &v.vin),
+            "selected": selected_vin.as_ref() == Some(&v.vin),
             "paired": is_paired  // Add pairing status
         })
     }).collect();

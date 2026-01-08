@@ -2,7 +2,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     Json,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -10,6 +10,7 @@ use webauthn_rs::prelude::*;
 
 use crate::AppState;
 use crate::handlers::auth_middleware::AuthUser;
+use crate::repositories::webauthn_repository::CreateCredentialParams;
 use crate::utils::webauthn_config::get_webauthn;
 use crate::handlers::auth_handlers::generate_tokens_and_response;
 
@@ -58,7 +59,6 @@ pub struct AuthStartResponse {
 #[derive(Deserialize)]
 pub struct AuthFinishRequest {
     pub response: PublicKeyCredential,
-    pub context: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -168,7 +168,7 @@ pub async fn register_start(
         .filter_map(|c| {
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &c.credential_id)
                 .ok()
-                .map(|bytes| CredentialID::from(bytes))
+                .map(CredentialID::from)
         })
         .collect();
 
@@ -270,15 +270,15 @@ pub async fn register_finish(
 
     // Store the credential
     state.webauthn_repository
-        .create_credential(
-            auth_user.user_id,
-            &credential_id,
-            &passkey_json,
-            &device_name,
-            0, // Initial counter
-            None, // Transports - could extract from passkey if needed
-            None, // AAGUID
-        )
+        .create_credential(CreateCredentialParams {
+            user_id: auth_user.user_id,
+            credential_id,
+            public_key: passkey_json,
+            device_name: device_name.clone(),
+            counter: 0, // Initial counter
+            transports: None, // Transports - could extract from passkey if needed
+            aaguid: None, // AAGUID
+        })
         .map_err(|e| {
             tracing::error!("Failed to store credential: {:?}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))

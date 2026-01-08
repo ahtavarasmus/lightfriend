@@ -645,7 +645,7 @@ async fn fetch_events_from_calendar(
     tracing::debug!("Time range: {} to {}", start_time, end_time);
 
     let response = client
-        .get(&format!(
+        .get(format!(
             "https://www.googleapis.com/calendar/v3/calendars/{}/events",
             encoded_calendar_id
         ))
@@ -925,7 +925,7 @@ pub async fn fetch_calendar_events(
                 &client,
                 state,
                 user_id,
-                &new_access_token,
+                new_access_token,
                 &refresh_token,
                 &start_time,
                 &end_time

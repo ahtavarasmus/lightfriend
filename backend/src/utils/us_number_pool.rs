@@ -21,8 +21,8 @@ async fn buy_us_number_for_pool(
     // Mock mode: Create fake subaccount
     if is_mock_mode() {
         use uuid::Uuid;
-        let mock_sid = format!("AC_pool_mock_{}", Uuid::new_v4().to_string().replace("-", "")[..16].to_string());
-        let mock_token = format!("mock_token_{}", Uuid::new_v4().to_string().replace("-", "")[..24].to_string());
+        let mock_sid = format!("AC_pool_mock_{}", &Uuid::new_v4().to_string().replace("-", "")[..16]);
+        let mock_token = format!("mock_token_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
         let mock_phone = format!("+1555POOL{:04}", rand::random::<u16>() % 10000);
 
         let created_at = Some(

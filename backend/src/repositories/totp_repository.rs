@@ -25,8 +25,7 @@ impl TotpRepository {
 
         // Encrypt the secret before storing
         let encrypted_secret = encrypt(secret)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
                 format!("Encryption error: {}", e)
             ))))?;
 
@@ -59,14 +58,14 @@ impl TotpRepository {
 
         let secret_opt = totp_secrets::table
             .filter(totp_secrets::user_id.eq(user_id))
+            .select(TotpSecret::as_select())
             .first::<TotpSecret>(&mut conn)
             .optional()?;
 
         match secret_opt {
             Some(secret) => {
                 let decrypted = decrypt(&secret.encrypted_secret)
-                    .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
                         format!("Decryption error: {}", e)
                     ))))?;
                 Ok(Some(decrypted))
@@ -114,16 +113,6 @@ impl TotpRepository {
         Ok(())
     }
 
-    /// Delete TOTP secret (used when user cancels setup)
-    pub fn delete_secret(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(totp_secrets::table.filter(totp_secrets::user_id.eq(user_id)))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
     /// Create backup codes for a user (hashed with bcrypt)
     /// Returns the plain text codes to show to the user once
     pub fn create_backup_codes(&self, user_id: i32) -> Result<Vec<String>, DieselError> {
@@ -152,8 +141,7 @@ impl TotpRepository {
 
             // Hash the code with bcrypt
             let code_hash = bcrypt::hash(&code, bcrypt::DEFAULT_COST)
-                .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
                     format!("Bcrypt error: {}", e)
                 ))))?;
 
@@ -182,6 +170,7 @@ impl TotpRepository {
         let backup_codes = totp_backup_codes::table
             .filter(totp_backup_codes::user_id.eq(user_id))
             .filter(totp_backup_codes::used.eq(0))
+            .select(TotpBackupCode::as_select())
             .load::<TotpBackupCode>(&mut conn)?;
 
         // Check each code

@@ -216,7 +216,7 @@ pub async fn handle_send_chat_message(
             })
         ));
     }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let rooms = match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
         Ok(rooms) => rooms,
         Err(e) => {
@@ -240,7 +240,7 @@ pub async fn handle_send_chat_message(
     };
 
     // First, try to resolve chat_name via contact profile nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
     let profile_chat = profiles.iter().find_map(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let chat_name_lower = args.chat_name.to_lowercase();
@@ -395,7 +395,7 @@ pub async fn handle_search_chat_contacts(
     };
 
     // First, try to resolve search_term via contact profile nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
     let profile_chat = profiles.iter().find_map(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let search_lower = args.search_term.to_lowercase();
@@ -477,7 +477,7 @@ pub async fn handle_fetch_chat_messages(
     };
 
     // First, try to find a matching contact profile by nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
     let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let chat_name_lower = args.chat_name.to_lowercase();
@@ -540,7 +540,7 @@ pub async fn handle_fetch_chat_messages(
 
     match crate::utils::bridge::fetch_bridge_room_messages(
         &platform,
-        &state,
+        state,
         user_id,
         &chat_name,
         args.limit,
