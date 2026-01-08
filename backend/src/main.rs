@@ -82,9 +82,7 @@ mod utils {
     pub mod matrix_auth;
     pub mod bridge;
     pub mod elevenlabs_prompts;
-    pub mod self_host_twilio;
     pub mod us_number_pool;
-    pub mod subaccount_lifecycle;
     pub mod notification_utils;
     pub mod tesla_keys;
     pub mod country;
@@ -515,7 +513,6 @@ async fn main() {
         .route("/api/pricing/notification-only", get(handlers::pricing_handlers::get_notification_only_countries_pricing))
         .route("/api/pricing/euro-countries", get(handlers::pricing_handlers::get_euro_countries_pricing))
         .route("/api/pricing/byot/{country_code}", get(handlers::pricing_handlers::get_byot_country_pricing))
-        .route("/api/tier3/check-availability", get(self_host_handlers::check_tier3_availability))
         .route("/api/totp/verify", post(handlers::totp_handlers::verify_login))
         // WebAuthn public routes (for login flow)
         .route("/api/webauthn/login/start", post(handlers::webauthn_handlers::login_start))
@@ -568,8 +565,6 @@ async fn main() {
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/sensitive-change-requirements", get(profile_handlers::check_sensitive_change_requirements))
         .route("/api/profile/field", patch(profile_handlers::patch_profile_field))
-        .route("/api/profile/server-ip", post(self_host_handlers::update_server_ip))
-        .route("/api/profile/magic-link", get(self_host_handlers::get_magic_link))
         .route("/api/profile/twilio-phone", post(self_host_handlers::update_twilio_phone))
         .route("/api/profile/twilio-creds", post(self_host_handlers::update_twilio_creds))
         .route("/api/profile/twilio-creds", delete(self_host_handlers::clear_twilio_creds))
@@ -729,10 +724,6 @@ async fn main() {
         .route("/api/call/web-end", post(elevenlabs::end_web_call))
         .route("/api/call/web-check-credits", get(elevenlabs::check_web_call_credits))
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
-    let self_hosted_public_router = Router::new()
-        .route("/verify-token", post(self_host_handlers::verify_token))
-        .route("/renew-tinfoil-key", post(self_host_handlers::renew_tinfoil_key))
-        .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::validate_tier3_self_hosted));
     let app = Router::new()
         .merge(public_routes)
         .merge(admin_routes)
@@ -746,7 +737,6 @@ async fn main() {
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
-        .nest("/api/self-hosted", self_hosted_public_router)
         // Serve static files (robots.txt, sitemap.xml) at the root
         .layer(session_layer)
         .layer(

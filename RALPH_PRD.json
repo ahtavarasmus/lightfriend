@@ -22,7 +22,7 @@
       "id": 2,
       "title": "Remove magic login system",
       "description": "Remove magic login handlers, temporary token generation for self-hosted setup, and magic login frontend pages/components",
-      "passes": false
+      "passes": true
     },
     {
       "id": 3,

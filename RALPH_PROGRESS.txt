@@ -48,3 +48,52 @@ Status: COMPLETE
 - /api/sms/server endpoints - For BYOT webhooks
 - Subaccount management (except provision_tier3_subaccount)
 
+## Iteration 2 - 2026-01-09
+### Task 2: Remove magic login system
+Status: COMPLETE (already done in previous work)
+
+#### Analysis:
+The tier 3-specific magic login system has already been removed from the codebase:
+
+1. **Removed from self_host_handlers.rs:**
+   - `get_magic_link()` - tier 3 specific handler - REMOVED
+   - `verify_token()` with Tier3SelfHostedUser extractor - REMOVED
+   - File reduced from 785+ lines to 165 lines (only BYOT functions remain)
+
+2. **Removed from auth_middleware.rs:**
+   - `Tier3SelfHostedUser` extractor - REMOVED
+   - No server_ip validation code remains
+
+3. **Removed from main.rs:**
+   - No tier 3-specific magic login routes found
+
+#### KEPT (NOT tier 3 - guest checkout magic links):
+- `auth_handlers.rs`: validate_magic_link, set_password_from_magic_link, get_token_from_session
+- `frontend/src/auth/set_password.rs` - for guest checkout password setup
+- `utils/email.rs`: send_magic_link_email - for guest checkout
+- Database fields (magic_login_token, magic_login_token_expiration_timestamp) - used by guest checkout
+
+The remaining magic login code is for **guest checkout** (users who buy without registering first),
+which is NOT tier 3 specific. This should be kept.
+
+#### Additional cleanup during Task 2:
+Found code was in broken state due to incomplete tier 3 removal. Fixed by:
+
+1. **Removed from stripe_handlers.rs:**
+   - `SubscriptionType::SelfHosting` enum variant
+   - Tier 3 credits calculation (credits = 0 for tier 3)
+   - Tier 3 price ID handling (STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID)
+   - Tier 3 subaccount provisioning on subscription created
+   - Tier 3 Tinfoil key regeneration on subscription renewal
+   - Tier 3 subaccount cleanup on subscription cancelled
+   - `extract_subscription_info` tier 3 check removed
+
+2. **Deleted files:**
+   - `backend/src/utils/self_host_twilio.rs` - entire tier 3 Twilio subaccount management
+   - `backend/src/utils/subaccount_lifecycle.rs` - entire tier 3 subaccount lifecycle
+
+3. **Removed from main.rs:**
+   - Module declarations for `self_host_twilio` and `subaccount_lifecycle`
+
+Code now compiles cleanly.
+

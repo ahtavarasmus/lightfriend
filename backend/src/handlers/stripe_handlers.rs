@@ -14,7 +14,6 @@ use stripe::{
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub enum SubscriptionType {
     Hosted,
-    SelfHosting,
 }
 use serde::{Deserialize, Serialize};
 use axum::{
@@ -149,9 +148,7 @@ async fn setup_user_subscription(
     }
 
     // Calculate credits based on tier and country
-    let credits: f32 = if sub_info.tier == "tier 3" {
-        0.0
-    } else if sub_info.tier == "tier 2" {
+    let credits: f32 = if sub_info.tier == "tier 2" {
         let country = match phone_country {
             Some(c) => c,
             None => {
@@ -375,10 +372,6 @@ pub async fn create_unified_subscription_checkout(
                     .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
             }
         },
-        SubscriptionType::SelfHosting => {
-            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
-                .expect("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID not set")
-        },
     };
     // Build line items
     let line_items = vec![
@@ -524,10 +517,6 @@ pub async fn create_guest_checkout(
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
                     .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
             }
-        },
-        SubscriptionType::SelfHosting => {
-            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
-                .expect("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID not set")
         },
     };
 
@@ -893,7 +882,7 @@ struct SubscriptionInfo {
 
 // Helper function to extract subscription info from price ID
 fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
-    // Default values - all subscriptions map to tier 2 (hosted) unless it's tier 3 (self-hosted)
+    // Default values - all subscriptions map to tier 2 (hosted)
     let mut info = SubscriptionInfo {
         country: None,
         tier: "tier 2",
@@ -908,12 +897,6 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
                 return info;
             }
         };
-    }
-
-    // Check if it's self-hosted (tier 3)
-    if price_id == std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID").unwrap_or_default() {
-        info.tier = "tier 3";
-        return info;
     }
 
     // Check for new Monitor and Digest plans (tier 2)
@@ -1245,13 +1228,6 @@ pub async fn stripe_webhook(
                     tracing::error!("Failed to setup subscription: {}", e);
                 }
 
-                // Reset monthly message count for tier 3 users
-                if sub_info.tier == "tier 3" {
-                    if let Err(e) = state.user_core.reset_monthly_message_count(user.id) {
-                        tracing::error!("Failed to reset monthly message count for tier 3 user {}: {}", user.id, e);
-                    }
-                }
-
                 // Clear BYOT credentials if switching to non-BYOT plan
                 if !crate::utils::country::is_byot_plan_price(&price_id) {
                     if state.user_core.has_twilio_credentials(user.id) {
@@ -1267,46 +1243,6 @@ pub async fn stripe_webhook(
                     }
                 }
 
-                // Tier 3: Provision subaccount or regenerate Tinfoil key
-                if sub_info.tier == "tier 3" {
-                    if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
-                        tracing::info!("New tier 3 subscription - provisioning subaccount for user {}", user.id);
-
-                        match state.user_core.find_subaccount_by_user_id(user.id) {
-                            Ok(Some(existing_sub)) => {
-                                tracing::warn!("User {} already has subaccount {}, skipping", user.id, existing_sub.subaccount_sid);
-                            }
-                            Ok(None) => {
-                                let state_clone = state.clone();
-                                let user_id_clone = user.id;
-                                tokio::spawn(async move {
-                                    match crate::utils::self_host_twilio::provision_tier3_subaccount(&state_clone, user_id_clone).await {
-                                        Ok(_) => {
-                                            tracing::info!("Successfully provisioned tier 3 subaccount for user {}", user_id_clone);
-                                            if let Ok(Some(u)) = state_clone.user_core.find_by_id(user_id_clone) {
-                                                if u.phone_number_country == Some("US".to_string()) {
-                                                    let _ = crate::utils::us_number_pool::maintain_us_buffer_pool(&state_clone).await;
-                                                }
-                                            }
-                                        }
-                                        Err(e) => tracing::error!("Failed to provision tier 3 subaccount for user {}: {}", user_id_clone, e),
-                                    }
-                                });
-                            }
-                            Err(e) => tracing::error!("Error checking for existing subaccount: {}", e),
-                        }
-                    } else if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
-                        tracing::info!("Tier 3 subscription renewal for user {} - regenerating Tinfoil key", user.id);
-                        let state_clone = state.clone();
-                        let user_id_clone = user.id;
-                        let new_expiry = subscription.current_period_end;
-                        tokio::spawn(async move {
-                            if let Err(e) = crate::utils::subaccount_lifecycle::regenerate_tinfoil_key(&state_clone, user_id_clone, new_expiry).await {
-                                tracing::error!("Failed to regenerate Tinfoil key for user {}: {}", user_id_clone, e);
-                            }
-                        });
-                    }
-                }
             }
         },
         stripe::EventType::CustomerSubscriptionDeleted => {
@@ -1344,32 +1280,6 @@ pub async fn stripe_webhook(
                     })?;
                     // Simplified deletion logic - just check if any active subscriptions remain
                     if active_subscriptions.data.is_empty() {
-                        // Get the deleted subscription's tier
-                        let deleted_tier = subscription.items.data.first()
-                            .and_then(|item| item.price.as_ref())
-                            .map(|price| extract_subscription_info(&price.id).tier);
-
-                        // If tier 3, handle subaccount cleanup
-                        if deleted_tier == Some("tier 3") {
-                            tracing::info!("Tier 3 subscription cancelled for user {}, handling subaccount cleanup", user.id);
-                            let state_clone = state.clone();
-                            let user_id_clone = user.id;
-
-                            tokio::spawn(async move {
-                                match crate::utils::subaccount_lifecycle::handle_tier3_cancellation(
-                                    &state_clone,
-                                    user_id_clone,
-                                ).await {
-                                    Ok(_) => {
-                                        tracing::info!("Successfully handled tier 3 cancellation for user {}", user_id_clone);
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Failed to handle tier 3 cancellation for user {}: {}", user_id_clone, e);
-                                    }
-                                }
-                            });
-                        }
-
                         // No active subscriptions left, clear subscription tier, country, plan_type, credits, and billing date
                         tracing::info!("No active subscriptions remaining, clearing subscription info");
                         if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
@@ -1392,7 +1302,6 @@ pub async fn stripe_webhook(
                         }
                     } else {
                         // User still has active subscriptions - update to the first one found
-                        // (since all tiers are either tier 2 or tier 3 now, this is simple)
                         if let Some(remaining_sub) = active_subscriptions.data.first() {
                             if let Some(tier_info) = remaining_sub.items.data.first()
                                 .and_then(|item| item.price.as_ref())
