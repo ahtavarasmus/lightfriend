@@ -235,3 +235,14 @@ Status: COMPLETE
 
 Both backend and frontend compile cleanly with no unused import warnings.
 
+## Iteration 7 - 2026-01-09
+### Task 7: Update CLAUDE.md documentation
+Status: COMPLETE
+
+#### Changes made:
+1. Updated subscription tiers list to remove tier 3 (self-hosted)
+2. Updated Twilio section to reference BYOT instead of self-hosted tier 3
+3. Renamed "Self-Hosted Architecture (Tier 3)" section to "BYOT (Bring Your Own Twilio)"
+4. Removed tier 3 specific details (IP validation, magic login)
+5. Updated to accurately describe BYOT functionality
+

@@ -133,7 +133,7 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
 - **Middleware**: `require_auth` (JWT validation), `require_admin` (admin check), `check_subscription_access` (tier validation)
 - **Password Security**: bcrypt hashing
 - **Rate Limiting**: Governor library with per-user DashMap
-- **Subscription Tiers**: tier 1 (basic), tier 1.5 (oracle), tier 2 (sentinel), tier 3 (self-hosted)
+- **Subscription Tiers**: tier 1 (basic), tier 1.5 (oracle), tier 2 (sentinel)
 
 ### External Integrations
 
@@ -145,8 +145,7 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
 
 **Twilio**:
 - SMS webhooks validated with signature (`TWILIO_AUTH_TOKEN`)
-- User-specific webhooks for self-hosted tier 3 (`/api/sms/server/{user_id}`)
-- Subaccount management for self-hosted users
+- User-specific webhooks for BYOT users (`/api/sms/server/{user_id}`)
 
 **ElevenLabs Voice AI**:
 - Real-time phone call integration
@@ -334,13 +333,11 @@ Backend URL is determined by build mode in `frontend/src/config.rs`:
 - Development: `http://localhost:3000`
 - Production: Empty string (same-origin requests)
 
-## Self-Hosted Architecture (Tier 3)
+## BYOT (Bring Your Own Twilio)
 
-Tier 3 users run their own backend instance:
-- **Authentication**: IP address validation (`server_ip` in `user_settings`)
-- **Magic Login**: Temporary tokens for initial setup (15-minute expiration)
-- **User-Specific Webhooks**: `/api/sms/server/{user_id}` routes to user's server
-- **Credentials**: Users provide their own Twilio, OpenRouter API keys (encrypted in DB)
+Users can provide their own Twilio credentials instead of using the hosted service:
+- **User-Specific Webhooks**: `/api/sms/server/{user_id}` routes to user's Twilio
+- **Credentials**: Users provide their own Twilio credentials (encrypted in DB)
 - **Textbee Alternative**: SMS provider without Twilio dependency
 
 ## Important File Locations

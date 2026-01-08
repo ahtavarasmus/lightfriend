@@ -52,7 +52,7 @@
       "id": 7,
       "title": "Update CLAUDE.md documentation",
       "description": "Remove tier 3 self-hosted references from CLAUDE.md and other documentation files. Keep BYOT documentation.",
-      "passes": false
+      "passes": true
     },
     {
       "id": 8,
