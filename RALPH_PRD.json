@@ -58,7 +58,7 @@
       "id": 8,
       "title": "Final verification",
       "description": "Run cargo build --release in backend, trunk build in frontend, verify no tier 3 self-hosted references remain except in migrations. Verify BYOT still works.",
-      "passes": false
+      "passes": true
     }
   ]
 }

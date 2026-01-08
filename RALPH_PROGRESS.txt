@@ -246,3 +246,36 @@ Status: COMPLETE
 4. Removed tier 3 specific details (IP validation, magic login)
 5. Updated to accurately describe BYOT functionality
 
+## Iteration 8 - 2026-01-09
+### Task 8: Final verification
+Status: COMPLETE
+
+#### Verification results:
+
+1. **Backend build:** `cargo build --release` - SUCCESS (with 62 warnings, no errors)
+2. **Frontend build:** `trunk build --release` - SUCCESS (with 95 warnings, no errors)
+
+#### Additional cleanup found during verification:
+1. **backend/src/utils/bridge.rs:**
+   - Removed `self_hosted` subscription tier check (was OR'd with tier 2)
+
+#### Remaining references (kept intentionally):
+1. **BYOT handlers (self_host_handlers.rs):**
+   - `update_twilio_phone`, `update_twilio_creds`, `clear_twilio_creds`, `update_textbee_creds`
+   - These are BYOT (Bring Your Own Twilio) functionality, NOT tier 3
+
+2. **Model comments (user_models.rs):**
+   - Field comments saying "for self hosted instance" refer to BYOT credentials
+   - These fields store user-provided Twilio/API keys
+
+3. **Informational/documentation text:**
+   - `pages/money.rs` - CSS class and GitHub self-hosting footnote
+   - `pages/setup_costs.rs` - Cost comparison text
+   - `pages/faq.rs` - FAQ about open source self-hosting
+   - `pages/change_log.rs` - Historical changelog tweets
+
+4. **Migrations:**
+   - Database migrations are NOT deleted per rules
+
+All tier 3-specific code has been removed. BYOT functionality preserved.
+
