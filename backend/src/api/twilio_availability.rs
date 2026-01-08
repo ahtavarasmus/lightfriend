@@ -500,7 +500,7 @@ pub async fn get_country_capability(
         check_country_capability(&country_upper, &account_sid, &auth_token).await?;
 
     if tier == CountryTier::NotSupported {
-        return Err("Country not supported for Lightfriend tier 3".to_string());
+        return Err("Country not supported for Lightfriend".to_string());
     }
 
     let has_local = matches!(tier, CountryTier::UsCanada | CountryTier::FullService);

@@ -34,7 +34,7 @@
       "id": 4,
       "title": "Remove tier 3 subscription tier option",
       "description": "Remove tier 3 from subscription tier enums/constants, remove tier == 3 conditionals that enable self-hosted features. Keep BYOT checks separate.",
-      "passes": false
+      "passes": true
     },
     {
       "id": 5,

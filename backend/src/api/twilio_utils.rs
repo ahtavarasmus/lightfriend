@@ -372,54 +372,33 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-    let auth_token: String;
-    let url: String;
-    if is_self_hosted {
-        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
-            Ok((_, Some(token), _, Some(server_url), _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
-                (token, server_url)
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            },
-            _ => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
+    // BYOT users with their own credentials always use their own account
+    let auth_token = if state.user_core.has_twilio_credentials(user.id) {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok((_, token)) => token,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+        }
+    } else if crate::utils::country::is_local_number_country(&user.phone_number)
+        || crate::utils::country::is_notification_only_country(&user.phone_number) {
+        std::env::var("TWILIO_AUTH_TOKEN")
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok((_, token)) => token,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+        }
+    };
 
-        // BYOT users with their own credentials always use their own account
-        auth_token = if state.user_core.has_twilio_credentials(user.id) {
-            match state.user_core.get_twilio_credentials(user.id) {
-                Ok((_, token)) => token,
-                Err(_) => return Err(StatusCode::UNAUTHORIZED)
-            }
-        } else if crate::utils::country::is_local_number_country(&user.phone_number)
-            || crate::utils::country::is_notification_only_country(&user.phone_number) {
-            std::env::var("TWILIO_AUTH_TOKEN")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        } else {
-            match state.user_core.get_twilio_credentials(user.id) {
-                Ok((_, token)) => token,
-                Err(_) => return Err(StatusCode::UNAUTHORIZED)
-            }
-        };
-
-        url = match std::env::var("SERVER_URL") {
-            Ok(url) => {
-                tracing::info!("✅ Successfully retrieved SERVER_URL");
-                url + "/api/sms/server"
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-    }
+    let url = match std::env::var("SERVER_URL") {
+        Ok(url) => {
+            tracing::info!("✅ Successfully retrieved SERVER_URL");
+            url + "/api/sms/server"
+        },
+        Err(e) => {
+            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     // Build the string to sign
     let mut string_to_sign = url;

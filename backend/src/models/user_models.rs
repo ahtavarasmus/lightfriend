@@ -50,7 +50,7 @@ pub struct User {
     pub stripe_checkout_session_id: Option<String>,
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
-    pub sub_tier: Option<String>, // tier 1(basic), tier 1.5(oracle), tier 2(sentinel), tier 3(self hosted)
+    pub sub_tier: Option<String>, // tier 1(basic), tier 1.5(oracle), tier 2(sentinel)
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
@@ -536,9 +536,9 @@ pub struct UserSettings {
     pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
     pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
     pub action_on_critical_message: Option<String>, // "notify_family" or None (notify all). Only applies to messaging platforms (WhatsApp, Telegram, Signal), not email.
-    pub magic_login_token: Option<String>, // self hosted instance magic link token
-    pub magic_login_token_expiration_timestamp: Option<i32>, // self hosted instance magic token expiration timestamp
-    pub monthly_message_count: i32, // for US/CA tier 3 monitoring (threshold at 1000 messages/month)
+    pub magic_login_token: Option<String>, // guest checkout magic link token
+    pub magic_login_token_expiration_timestamp: Option<i32>, // guest checkout magic token expiration timestamp
+    pub monthly_message_count: i32, // monthly message count tracking
     pub outbound_message_pricing: Option<f32>, // cached Twilio outbound SMS price for user's country
     pub last_instant_digest_time: Option<i32>, // timestamp of last on-demand digest fetch
     pub phone_service_active: bool, // whether phone service (SMS and calls) is active - can be disabled for security (e.g., stolen phone)

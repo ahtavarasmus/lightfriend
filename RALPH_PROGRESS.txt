@@ -118,3 +118,42 @@ Status: COMPLETE
 
 Code compiles cleanly.
 
+## Iteration 4 - 2026-01-09
+### Task 4: Remove tier 3 subscription tier option
+Status: COMPLETE
+
+#### Changes made:
+
+1. **tesla_auth.rs:**
+   - Remove tier 3 from subscription tier check
+
+2. **tool_call_utils/utils.rs:**
+   - Remove self-hosted API key handling in `create_openai_client_for_user()`
+   - Remove self-hosted API key handling in `create_openai_client()`
+
+3. **utils/tool_exec.rs:**
+   - Remove self-hosted weather API key handling
+
+4. **utils/usage.rs:**
+   - Remove tier 3 credit calculation path
+   - Remove tier 3 message monitoring
+   - Remove `send_tier3_usage_alert()` function
+
+5. **api/twilio_sms.rs:**
+   - Remove tier 3 notification-only plan check
+
+6. **models/user_models.rs:**
+   - Update comments to remove tier 3 references
+
+7. **repositories/user_core.rs:**
+   - Remove `get_settings_for_tier3()` function
+   - Update comments to remove tier 3 references
+
+8. **api/twilio_availability.rs:**
+   - Update error message to remove tier 3 reference
+
+9. **api/twilio_utils.rs:**
+   - Remove self-hosted Twilio credential handling
+
+Code compiles cleanly. All tier 3 references removed from backend.
+
