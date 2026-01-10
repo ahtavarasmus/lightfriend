@@ -29,6 +29,14 @@ pub struct AiConfig {
 }
 
 impl AiConfig {
+    /// Create a minimal AiConfig for tests (no actual API calls will be made)
+    pub fn default_for_tests() -> Self {
+        Self {
+            openrouter_api_key: "test_openrouter_key".to_string(),
+            tinfoil_api_key: None,
+        }
+    }
+
     pub fn from_env() -> Self {
         let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
             .expect("OPENROUTER_API_KEY required");

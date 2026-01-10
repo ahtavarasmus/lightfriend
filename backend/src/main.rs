@@ -4,13 +4,12 @@ use axum::{
     Router,
     middleware
 };
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::Mutex;
 use tower_sessions::{MemoryStore, SessionManagerLayer};
 use std::collections::HashMap;
-use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
+use diesel::SqliteConnection;
 use dashmap::DashMap;
-use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -18,8 +17,6 @@ use oauth2::{
     ClientSecret,
     RedirectUrl,
     TokenUrl,
-    EndpointSet,
-    EndpointNotSet,
 };
 use tower_http::cors::{CorsLayer, AllowOrigin};
 use tower_http::services::ServeDir;
@@ -29,112 +26,14 @@ use axum::http::HeaderValue;
 use tracing::Level;
 use std::sync::Arc;
 use sentry;
-mod handlers {
-    pub mod auth_middleware;
-    pub mod auth_dtos;
-    pub mod admin_handlers;
-    pub mod auth_handlers;
-    pub mod profile_handlers;
-    pub mod filter_handlers;
-    pub mod twilio_handlers;
-    pub mod billing_handlers;
-    pub mod stripe_handlers;
-    pub mod refund_handlers;
-    pub mod google_calendar;
-    pub mod google_calendar_auth;
-    pub mod youtube_auth;
-    pub mod youtube;
-    pub mod tiktok;
-    pub mod instagram_reels;
-    pub mod twitter;
-    pub mod reddit;
-    pub mod spotify;
-    pub mod rumble;
-    pub mod streamable;
-    pub mod bluesky;
-    pub mod imap_auth;
-    pub mod imap_handlers;
-    pub mod whatsapp_auth;
-    pub mod whatsapp_handlers;
-    pub mod bridge_auth_common;
-    pub mod signal_auth;
-    pub mod signal_handlers;
-    pub mod telegram_auth;
-    pub mod telegram_handlers;
-    pub mod messenger_auth;
-    pub mod messenger_handlers;
-    pub mod instagram_auth;
-    pub mod instagram_handlers;
-    pub mod self_host_handlers;
-    pub mod uber_auth;
-    pub mod uber;
-    pub mod tesla_auth;
-    pub mod google_maps;
-    pub mod totp_handlers;
-    pub mod pricing_handlers;
-    pub mod webauthn_handlers;
-    pub mod contact_profile_handlers;
-}
-mod utils {
-    pub mod encryption;
-    pub mod tool_exec;
-    pub mod usage;
-    pub mod matrix_auth;
-    pub mod bridge;
-    pub mod elevenlabs_prompts;
-    pub mod self_host_twilio;
-    pub mod us_number_pool;
-    pub mod subaccount_lifecycle;
-    pub mod notification_utils;
-    pub mod tesla_keys;
-    pub mod country;
-    pub mod webauthn_config;
-    pub mod email;
-    pub mod action_executor;
-}
-mod proactive {
-    pub mod utils;
-}
-mod tool_call_utils {
-    pub mod email;
-    pub mod calendar;
-    pub mod utils;
-    pub mod internet;
-    pub mod management;
-    pub mod bridge;
-    pub mod tesla;
-}
-mod api {
-    pub mod twilio_sms;
-    pub mod twilio_utils;
-    pub mod elevenlabs;
-    pub mod elevenlabs_webhook;
-    pub mod twilio_availability;
-    pub mod tesla;
-    pub mod twilio_pricing;
-}
-mod error;
-mod models {
-    pub mod user_models;
-}
-mod repositories {
-    pub mod user_core;
-    pub mod user_repository;
-    pub mod user_subscriptions;
-    pub mod connection_auth;
-    pub mod totp_repository;
-    pub mod webauthn_repository;
-}
-mod schema;
-mod jobs {
-    pub mod scheduler;
-}
-mod ai_config;
-pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
-use repositories::user_core::UserCore;
-use repositories::user_repository::UserRepository;
-use repositories::totp_repository::TotpRepository;
-use repositories::webauthn_repository::WebauthnRepository;
+
+// Import modules and types from library crate
+use backend::{
+    handlers, utils, api, jobs,
+    AiConfig,
+    UserCore, UserRepository, TotpRepository, WebauthnRepository,
+    AppState, SqliteConnectionCustomizer,
+};
 use handlers::{
     auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
     admin_handlers, stripe_handlers, refund_handlers, google_calendar_auth, google_calendar,
@@ -145,59 +44,9 @@ use handlers::{
     tesla_auth, youtube_auth, youtube, contact_profile_handlers, bridge_auth_common,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook};
-type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
-
-/// SQLite connection customizer that sets busy_timeout on each connection.
-/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
-#[derive(Debug)]
-struct SqliteConnectionCustomizer;
-
-impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnectionCustomizer {
-    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-        diesel::sql_query("PRAGMA busy_timeout = 5000;")
-            .execute(conn)
-            .map_err(diesel::r2d2::Error::QueryError)?;
-        Ok(())
-    }
-}
 
 async fn health_check() -> &'static str {
     "OK"
-}
-type GoogleOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
-type TeslaOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
-pub struct AppState {
-    db_pool: DbPool,
-    user_core: Arc<UserCore>,
-    user_repository: Arc<UserRepository>,
-    ai_config: AiConfig,
-    google_calendar_oauth_client: GoogleOAuthClient,
-    youtube_oauth_client: GoogleOAuthClient,
-    uber_oauth_client: GoogleOAuthClient,
-    tesla_oauth_client: TeslaOAuthClient,
-    session_store: MemoryStore,
-    login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
-    matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
-    tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
-    tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
-    // Track vehicles currently being woken to prevent parallel wake attempts
-    // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
-    tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,
-    password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
-    phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    phone_verify_otps: DashMap<String, (String, u64)>,
-    pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
-    totp_repository: Arc<TotpRepository>,
-    webauthn_repository: Arc<WebauthnRepository>,
-    pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
-    pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
-    session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
-    totp_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    webauthn_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
 pub fn validate_env() {
     // Core variables (always required regardless of environment)
@@ -270,7 +119,7 @@ pub fn validate_env() {
 async fn bootstrap_admin_if_needed(
     user_core: &Arc<UserCore>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use crate::handlers::auth_dtos::NewUser;
+    use backend::handlers::auth_dtos::NewUser;
 
     // Check if any users exist - if so, skip bootstrap entirely
     let users = user_core.get_all_users()?;
@@ -459,9 +308,6 @@ async fn main() {
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
         .layer(middleware::from_fn_with_state(state.clone(), api::twilio_utils::validate_twilio_signature));
-    let user_twilio_routes = Router::new()
-        .route("/api/sms/server/{user_id}", post(twilio_sms::handle_incoming_sms))
-        .route_layer(middleware::from_fn(api::twilio_utils::validate_user_twilio_signature));
     let textbee_routes = Router::new()
         .route("/api/sms/textbee-server", post(twilio_sms::handle_textbee_sms));
         // textbee requests are validated using device_id and phone number combo
@@ -538,8 +384,6 @@ async fn main() {
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
         .route("/api/admin/plan-type/{user_id}/{plan_type}", post(admin_handlers::update_plan_type))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
-        .route("/api/admin/test-sms", post(admin_handlers::test_sms))
-        .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
         .route("/api/admin/monthly-credits/{user_id}/{amount}", post(admin_handlers::update_monthly_credits))
         .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
         .route("/api/admin/send-password-reset/{user_id}", post(admin_handlers::send_password_reset_link))
@@ -739,9 +583,8 @@ async fn main() {
         .merge(protected_routes)
         .merge(auth_built_in_webhook_routes)
         .route("/.well-known/appspecific/com.tesla.3p.public-key.pem", get(tesla_auth::serve_tesla_public_key))
-        .merge(user_twilio_routes) // More specific routes first
         .merge(textbee_routes)
-        .merge(twilio_routes) // More general routes last
+        .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)

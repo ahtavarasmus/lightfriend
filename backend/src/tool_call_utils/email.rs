@@ -364,7 +364,7 @@ pub async fn handle_respond_to_email(
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: RespondToEmailArgs = serde_json::from_str(args)?;
     // Fetch the email details to get the subject
-    let email_details = match crate::imap_handlers::fetch_single_imap_email(
+    let email_details = match crate::handlers::imap_handlers::fetch_single_imap_email(
         State(state.clone()),
         AuthUser { user_id, is_admin: false },
         axum::extract::Path(args.email_id.clone()),
@@ -437,11 +437,11 @@ pub async fn handle_respond_to_email(
             _ = cancel_rx => "cancel",
         };
         if reason == "timeout" {
-            let request = crate::imap_handlers::EmailResponseRequest {
+            let request = crate::handlers::imap_handlers::EmailResponseRequest {
                 email_id: cloned_email_id,
                 response_text: cloned_response_text,
             };
-            match crate::imap_handlers::respond_to_email(
+            match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),
                 AuthUser { user_id: cloned_user_id, is_admin: false },
                 Json(request)

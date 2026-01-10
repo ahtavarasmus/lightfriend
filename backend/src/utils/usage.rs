@@ -27,6 +27,11 @@ pub async fn check_user_credits(
         return Err("Phone service is currently deactivated for this number.".to_string());
     }
 
+    // Check if user has an active subscription (tier 2 required)
+    if user.sub_tier.as_deref() != Some("tier 2") {
+        return Err("Active subscription required. Please subscribe to continue using the service.".to_string());
+    }
+
     // BYOT users with their own Twilio credentials pay Twilio directly - no credit check
     if state.user_core.has_twilio_credentials(user.id) {
         return Ok(());
