@@ -289,8 +289,8 @@ impl UserRepository {
 
     pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
 
-        let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
-            .expect("CHARGE_BACK_THRESHOLD not set")
+        let charge_back_threshold = std::env::var("CHARGE_BACK_THRESHOLD")
+            .unwrap_or_else(|_| "2.0".to_string())
             .parse::<f32>()
             .unwrap_or(2.00);
 
