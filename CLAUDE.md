@@ -1,0 +1,96 @@
+# CLAUDE.md
+
+Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum web framework) and frontend (Yew WebAssembly framework). Integrates with Matrix homeserver for multi-platform messaging, Twilio for SMS/voice, ElevenLabs for voice AI, Stripe for payments, and OAuth services.
+
+## Development Commands
+
+**Backend (Axum + Diesel):**
+```bash
+cd backend && cargo run          # Run server (port 3000)
+cd backend && cargo test          # Run tests
+cd backend && diesel migration run
+```
+
+**Frontend (Yew + Trunk):**
+```bash
+cd frontend && trunk serve        # Dev server (port 8080)
+```
+
+**Docker (Recommended):**
+```bash
+just build-native                 # Build for current platform
+just up                          # Start all services
+just logs-core                   # View logs
+```
+
+See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
+
+## Architecture
+
+**Backend Structure:**
+- Entry: `backend/src/main.rs` - Routing, AppState, middleware
+- Handlers: `backend/src/handlers/` - HTTP request handlers (30+ modules)
+- Repositories: `backend/src/repositories/` - Data access layer (UserCore, UserRepository, UserSubscriptions, ConnectionAuth)
+- Models: `backend/src/models/user_models.rs` - Diesel ORM models
+- Schema: `backend/src/schema.rs` - Auto-generated from migrations
+- API: `backend/src/api/` - External service integrations
+- Tool Calls: `backend/src/tool_call_utils/` - AI tool implementations
+- Jobs: `backend/src/jobs/scheduler.rs` - Background cron jobs
+
+**Frontend Structure:**
+- Entry: `frontend/src/main.rs` - Yew app root, routing
+- Pages: `frontend/src/pages/` - Page components
+- Auth: `frontend/src/auth/` - Authentication UI
+- Connections: `frontend/src/connections/` - Integration UIs
+- Config: `frontend/src/config.rs` - Backend URL configuration
+
+**Database:** SQLite + Diesel 2.1 with 129 migrations in `backend/migrations/`
+
+## Key Patterns
+
+**Repository Pattern:** Always use repositories for data access, never raw Diesel queries in handlers.
+
+**Authentication:** JWT tokens (access + refresh) with middleware:
+- `require_auth` - JWT validation
+- `require_admin` - Admin check
+- `check_subscription_access` - Tier validation
+
+**Security & Encryption:**
+- AES-256-GCM encryption for all sensitive data
+- Key from `ENCRYPTION_KEY` env var
+- HMAC/signature validation for all webhooks
+
+**Error Handling:**
+- Return `Result<T, E>` types throughout
+- Use `?` operator for error propagation
+- Map errors to appropriate HTTP status codes
+
+**Async:** All I/O operations are async (Tokio runtime). Use `async fn` and `.await` consistently.
+
+## Important File Locations
+
+**Backend:**
+- Routing & AppState: `backend/src/main.rs:30-492`
+- Auth middleware: `backend/src/handlers/auth_middleware.rs`
+- User operations: `backend/src/repositories/user_core.rs`
+- Matrix integration: `backend/src/utils/matrix_auth.rs`, `backend/src/utils/bridge.rs`
+- Encryption: `backend/src/utils/encryption.rs`
+
+**Frontend:**
+- Routing & Nav: `frontend/src/main.rs:104-245`
+- Main dashboard: `frontend/src/pages/home.rs`
+
+## Git Commits
+
+Do NOT add "Generated with Claude Code" or Co-Authored-By lines mentioning Claude/AI. Keep commit messages clean and focused on what changed.
+
+## Common Tasks
+
+For step-by-step guides, use skills in `.claude/skills/`:
+- `lightfriend-db-migration` - Database schema modifications using Diesel
+- `lightfriend-add-integration` - Adding new OAuth integrations
+- `lightfriend-add-frontend-page` - Adding new Yew frontend pages
+
+## License
+
+This project is licensed under GNU AGPLv3. The name "Lightfriend" and branding are owned by Rasmus Ähtävä and not included in the license.

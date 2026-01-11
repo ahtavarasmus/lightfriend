@@ -29,7 +29,7 @@ just create-admin adminuser YourPassword
 - Backend API: http://localhost:3000
 - Synapse: http://localhost:8008
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete setup guide.
+See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete setup guide.
 
 ---
 
@@ -150,7 +150,7 @@ After starting services:
    - Instagram: `@igbot:matrix.local`
 5. **Send `login`** to each bot and follow instructions
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for detailed bridge setup.
+See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for detailed bridge setup.
 
 ---
 
@@ -168,7 +168,7 @@ cd backend && cargo run
 cd frontend && trunk serve
 ```
 
-This requires manual Matrix server setup. See [MATRIX_SETUP_GUIDE.md](MATRIX_SETUP_GUIDE.md).
+This requires manual Matrix server setup. See [docs/MATRIX_SETUP_GUIDE.md](docs/MATRIX_SETUP_GUIDE.md).
 
 ### Modifying Code
 
@@ -226,7 +226,7 @@ just down-volumes
 just up
 ```
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete troubleshooting guide.
+See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete troubleshooting guide.
 
 ---
 
@@ -238,14 +238,14 @@ All data stored in Docker volumes:
 - `core_data` - Lightfriend SQLite database ← **BACKUP THIS**
 - `signald_data` - Signal device registration ← **BACKUP THIS**
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for backup commands and automated backup script.
+See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for backup commands and automated backup script.
 
 ---
 
 ## Documentation
 
-- **[DOCKER_SETUP.md](DOCKER_SETUP.md)** - Complete Docker setup, commands, troubleshooting
-- **[MATRIX_SETUP_GUIDE.md](MATRIX_SETUP_GUIDE.md)** - Manual Matrix setup (for local dev)
+- **[docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md)** - Complete Docker setup, commands, troubleshooting
+- **[docs/MATRIX_SETUP_GUIDE.md](docs/MATRIX_SETUP_GUIDE.md)** - Manual Matrix setup (for local dev)
 - **[CLAUDE.md](CLAUDE.md)** - Project architecture and development guide
 
 ---
