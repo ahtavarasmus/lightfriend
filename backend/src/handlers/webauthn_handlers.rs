@@ -2,7 +2,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     Json,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -88,7 +88,6 @@ pub struct ProfileResponse {
     location: Option<String>,
     nearby_places: Option<String>,
     phone_number_country: Option<String>,
-    server_ip: Option<String>,
     plan_type: Option<String>, // "monitor" or "digest"
     phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
@@ -261,7 +260,6 @@ pub async fn get_profile(
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
                 phone_number_country: phone_country,
-                server_ip: user_settings.server_ip,
                 plan_type: user.plan_type,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,

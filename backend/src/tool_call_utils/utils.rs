@@ -18,42 +18,15 @@ pub struct ChatMessage {
 
 /// Creates an OpenAI-compatible client for a specific user.
 /// Routes to the appropriate provider based on user's llm_provider preference setting.
-/// For self-hosted (tier 3) deployments, uses the user's own API key.
 pub fn create_openai_client_for_user(
     state: &Arc<AppState>,
     user_id: i32,
 ) -> Result<(OpenAIClient, crate::AiProvider), Box<dyn std::error::Error>> {
-    let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-
-    if is_self_hosted {
-        // Self-hosted tier 3 users provide their own OpenRouter API key
-        let api_key = match state.user_core.get_settings_for_tier3() {
-            Ok((_, _, Some(api_key), _, _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted API key");
-                api_key
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get self hosted API key: {}", e);
-                return Err("❌ Failed to get self hosted API key".into());
-            },
-            _ => {
-                tracing::error!("❌ Failed to get self hosted API key");
-                return Err("❌ Failed to get self hosted API key".into());
-            }
-        };
-        // Self-hosted always uses OpenRouter
-        let client = OpenAIClient::builder()
-            .with_endpoint("https://openrouter.ai/api/v1")
-            .with_api_key(api_key)
-            .build()?;
-        Ok((client, crate::AiProvider::OpenRouter))
-    } else {
-        // Cloud deployment uses user's LLM provider preference from settings
-        let llm_provider_preference = state.user_core.get_llm_provider(user_id).unwrap_or(None);
-        let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
-        let client = state.ai_config.create_client(provider)?;
-        Ok((client, provider))
-    }
+    // Use user's LLM provider preference from settings
+    let llm_provider_preference = state.user_core.get_llm_provider(user_id).unwrap_or(None);
+    let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
+    let client = state.ai_config.create_client(provider)?;
+    Ok((client, provider))
 }
 
 /// Creates an OpenAI-compatible client using OpenRouter (for background tasks without user context)
@@ -61,34 +34,9 @@ pub fn create_openai_client_for_user(
 pub fn create_openai_client(
     state: &Arc<AppState>,
 ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
-    let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-
-    if is_self_hosted {
-        // Self-hosted tier 3 users provide their own OpenRouter API key
-        let api_key = match state.user_core.get_settings_for_tier3() {
-            Ok((_, _, Some(api_key), _, _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted API key");
-                api_key
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get self hosted API key: {}", e);
-                return Err("❌ Failed to get self hosted API key".into());
-            },
-            _ => {
-                tracing::error!("❌ Failed to get self hosted API key");
-                return Err("❌ Failed to get self hosted API key".into());
-            }
-        };
-        OpenAIClient::builder()
-            .with_endpoint("https://openrouter.ai/api/v1")
-            .with_api_key(api_key)
-            .build()
-            .map_err(|e| e.into())
-    } else {
-        // Cloud deployment uses OpenRouter for background tasks
-        state.ai_config.create_client(crate::AiProvider::OpenRouter)
-            .map_err(|e| e as Box<dyn std::error::Error>)
-    }
+    // Use OpenRouter for background tasks
+    state.ai_config.create_client(crate::AiProvider::OpenRouter)
+        .map_err(|e| e as Box<dyn std::error::Error>)
 }
 
 pub async fn cancel_pending_message(

@@ -52,9 +52,7 @@ pub mod utils {
     pub mod matrix_auth;
     pub mod bridge;
     pub mod elevenlabs_prompts;
-    pub mod self_host_twilio;
     pub mod us_number_pool;
-    pub mod subaccount_lifecycle;
     pub mod notification_utils;
     pub mod tesla_keys;
     pub mod country;

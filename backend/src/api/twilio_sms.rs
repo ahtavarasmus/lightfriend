@@ -519,23 +519,6 @@ pub async fn process_sms(
         }
     };
 
-    // Check if user is on notification-only plan (tier 3) and block inbound SMS
-    if user.sub_tier.as_deref() == Some("tier 3") {
-        // Get subaccount to check if it's notification-only
-        if let Ok(Some(subaccount)) = state.user_core.find_subaccount_by_user_id(user.id) {
-            if subaccount.subaccount_type == "notification_only" {
-                tracing::warn!(
-                    "User {} on notification-only plan attempted to send inbound SMS - blocking",
-                    user.id
-                );
-                return SmsResult::UserError {
-                    message: "Your plan only supports outbound notifications. Inbound messaging is not available. Please upgrade to a full-service plan to send messages.".to_string(),
-                    status: StatusCode::FORBIDDEN,
-                }.into_response();
-            }
-        }
-    }
-
     // Check if user has sufficient credits before processing the message
     if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
         // Distinguish between different error types

@@ -430,10 +430,7 @@ pub fn admin_dashboard() -> Html {
                                                                 "user-row",
                                                                 is_selected.then(|| "selected"),
                                                                 match user.sub_tier.as_deref() {
-                                                                    Some("tier 3") => "blue-user",
                                                                     Some("tier 2") => "gold-user",
-                                                                    Some("tier 1.5") => "silver-user",
-                                                                    Some("tier 1") => "bronze-user",
                                                                     _ => ""
                                                                 }
                                                             )}>
@@ -443,17 +440,8 @@ pub fn admin_dashboard() -> Html {
                                                                         {&user.email}
                                                                         {
                                                                             match user.sub_tier.as_deref() {
-                                                                                Some("tier 3") => html! {
-                                                                                    <span class="blue-badge">{"★"}</span>
-                                                                                },
                                                                                 Some("tier 2") => html! {
                                                                                     <span class="gold-badge">{"★"}</span>
-                                                                                },
-                                                                                Some("tier 1.5") => html! {
-                                                                                    <span class="silver-badge">{"★"}</span>
-                                                                                },
-                                                                                Some("tier 1") => html! {
-                                                                                    <span class="bronze-badge">{"★"}</span>
                                                                                 },
                                                                                 _ => html! {}
                                                                             }
@@ -482,10 +470,7 @@ pub fn admin_dashboard() -> Html {
                                                                     <span class={classes!(
                                                                         "tier-badge",
                                                                         match user.sub_tier.as_deref() {
-                                                                            Some("tier 3") => "blue",
                                                                             Some("tier 2") => "gold",
-                                                                            Some("tier 1.5") => "silver",
-                                                                            Some("tier 1") => "bronze",
                                                                             _ => "none"
                                                                         }
                                                                     )}>
@@ -816,12 +801,8 @@ pub fn admin_dashboard() -> Html {
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
                                                                                 let new_tier = match current_tier.as_deref() {
-                                                                                    None => "tier 3",
-                                                                                    Some("tier 3") => "tier 2",
-                                                                                    Some("tier 2") => "tier 1.5",
-                                                                                    Some("tier 1.5") => "tier 1",
-                                                                                    Some("tier 1") => "tier 0",
-                                                                                    _ => "tier 0"
+                                                                                    None => "tier 2",
+                                                                                    Some("tier 2") | _ => "tier 0",
                                                                                 };
                                                                                     
                                                                                     wasm_bindgen_futures::spawn_local(async move {
@@ -855,12 +836,9 @@ pub fn admin_dashboard() -> Html {
                                                                             class="iq-button"
                                                                         >
                                                                             {match user.sub_tier.as_deref() {
-                                                                                None => "Set Tier 3",
-                                                                                Some("tier 3") => "Set Tier 2",
-                                                                                Some("tier 2") => "Set Tier 1.5",
-                                                                                Some("tier 1.5") => "Set Tier 1",
-                                                                                Some("tier 1") => "Remove Subscription",
-                                                                                _ => "Set Tier 3"
+                                                                                None => "Set Tier 2",
+                                                                                Some("tier 2") => "Remove Subscription",
+                                                                                _ => "Set Tier 2"
                                                                             }}
                                                                         </button>
                                                                         <button

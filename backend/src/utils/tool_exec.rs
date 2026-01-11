@@ -50,28 +50,11 @@ pub async fn get_weather(
 ) -> Result<String, Box<dyn Error>> {
 
     let client = reqwest::Client::new();
-    // Get API keys from environment or user settings
-    let is_self_hosted = std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-
-    let (geoapify_key, pirate_weather_key) = if is_self_hosted {
-        // Get keys from user settings for self-hosted environment
-        match state.user_core.get_settings_for_tier3() {
-            Ok((_, _, _, _, Some(geoapify), Some(pirate))) => {
-                tracing::info!("✅ Successfully retrieved weather API keys from user settings");
-                (geoapify, pirate)
-            },
-            _ => {
-                tracing::error!("❌ Failed to get weather API keys from user settings");
-                return Err("Failed to get weather API keys from user settings".into());
-            }
-        }
-    } else {
-        // Get keys from environment variables
-        (
-            std::env::var("GEOAPIFY_API_KEY").expect("GEOAPIFY_API_KEY must be set"),
-            std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set")
-        )
-    };
+    // Get API keys from environment variables
+    let (geoapify_key, pirate_weather_key) = (
+        std::env::var("GEOAPIFY_API_KEY").expect("GEOAPIFY_API_KEY must be set"),
+        std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set")
+    );
 
     // Get user info for timezone
     let user_info = state.user_core.get_user_info(user_id).map_err(|e| format!("Failed to get user info: {}", e))?;

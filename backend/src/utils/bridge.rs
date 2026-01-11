@@ -1179,8 +1179,7 @@ pub async fn handle_bridge_message(
         return;
     }
     // Check if user has valid subscription
-    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) ||
-        state.user_repository.has_valid_subscription_tier(user_id, "self_hosted").unwrap_or(false);
+    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false);
     if !has_valid_sub {
         tracing::debug!("User {} does not have valid subscription for WhatsApp monitoring", user_id);
         return;

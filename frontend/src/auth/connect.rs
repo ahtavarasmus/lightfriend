@@ -1,11 +1,9 @@
 use yew::prelude::*;
-use yew_router::prelude::*;
 use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen::JsValue;
 use web_sys::UrlSearchParams;
 use crate::utils::api::Api;
-use crate::Route;
 use crate::connections::whatsapp::WhatsappConnect;
 use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
