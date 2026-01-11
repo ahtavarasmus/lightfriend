@@ -50,7 +50,7 @@ pub struct User {
     pub stripe_checkout_session_id: Option<String>,
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
-    pub sub_tier: Option<String>, // tier 1(basic), tier 1.5(oracle), tier 2(sentinel)
+    pub sub_tier: Option<String>, // tier 2 only, differentiated by plan_type
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,

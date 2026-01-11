@@ -82,17 +82,6 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn find_free_subaccount_by_country(&self, country: &str) -> Result<Option<Subaccount>, DieselError> {
-        use crate::schema::subaccounts;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let subaccount = subaccounts::table
-            .filter(subaccounts::user_id.eq("-1"))
-            .filter(subaccounts::country.eq(country))
-            .first::<Subaccount>(&mut conn)
-            .optional()?;
-        Ok(subaccount)
-    }
-
     pub fn assign_subaccount_to_user(
         &self,
         sub_id: i32,
@@ -1355,18 +1344,6 @@ impl UserCore {
             .execute(&mut conn)?;
 
         Ok(())
-    }
-
-    // Find subaccount by user_id
-    pub fn find_subaccount_by_user_id(&self, user_id: i32) -> Result<Option<Subaccount>, DieselError> {
-        use crate::schema::subaccounts;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        subaccounts::table
-            .filter(subaccounts::user_id.eq(user_id.to_string()))
-            .filter(subaccounts::status.eq(Some("active".to_string())))
-            .first::<Subaccount>(&mut conn)
-            .optional()
     }
 
     // Count free US subaccounts in the pool
