@@ -96,22 +96,20 @@ struct SomeData {
 
 ### 2. Add Module Declaration
 
-In `frontend/src/pages/mod.rs`, add:
+**CRITICAL: This codebase does NOT use `mod.rs` files!**
+
+Instead, add the module declaration to the inline `mod pages { }` block in `frontend/src/main.rs`:
 
 ```rust
-pub mod {page_name};
-pub use {page_name}::PageName;
+mod pages {
+    pub mod home;
+    pub mod landing;
+    pub mod {page_name};  // Add your new page here
+    // ... other pages
+}
 ```
 
-If `mod.rs` doesn't exist, create it:
-
-```rust
-pub mod home;
-pub mod {page_name};
-
-pub use home::Home;
-pub use {page_name}::PageName;
-```
+**NEVER create a `mod.rs` file** - this is a common mistake. Lightfriend uses named module files (e.g., `home.rs`, `landing.rs`) and declares them in the inline module block in `main.rs`.
 
 ### 3. Add Route Variant
 
@@ -404,17 +402,45 @@ pub fn dashboard_page() -> Html {
 
 ## Styling
 
-Lightfriend uses inline Tailwind-style classes. Common patterns:
+**Lightfriend uses CSS style blocks within the `html!` macro, NOT inline Tailwind classes.**
+
+Common pattern:
 
 ```rust
 html! {
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold mb-4">{"Title"}</h1>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="bg-white rounded shadow p-4">
+    <div class="page-container">
+        <h1 class="page-title">{"Title"}</h1>
+        <div class="content-grid">
+            <div class="card">
                 {"Card content"}
             </div>
         </div>
+
+        <style>
+            {r#"
+            .page-container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 2rem;
+            }
+            .page-title {
+                font-size: 2rem;
+                font-weight: bold;
+                margin-bottom: 1rem;
+            }
+            .content-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 1rem;
+            }
+            .card {
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                padding: 1rem;
+            }
+            "#}
+        </style>
     </div>
 }
 ```

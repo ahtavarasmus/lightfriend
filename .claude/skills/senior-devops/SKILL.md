@@ -105,43 +105,19 @@ Technical reference guide in `references/deployment_strategies.md`:
 
 ## Tech Stack
 
-**Languages:** TypeScript, JavaScript, Python, Go, Swift, Kotlin
-**Frontend:** React, Next.js, React Native, Flutter
-**Backend:** Node.js, Express, GraphQL, REST APIs
-**Database:** PostgreSQL, Prisma, NeonDB, Supabase
-**DevOps:** Docker, Kubernetes, Terraform, GitHub Actions, CircleCI
-**Cloud:** AWS, GCP, Azure
+**Languages:** Rust
+**Frontend:** Yew (WebAssembly)
+**Backend:** Axum, REST APIs
+**Database:** SQLite, PostgreSQL
+**DevOps:** Docker, Terraform, GitHub Actions
+**Cloud:** AWS
 
 ## Development Workflow
 
-### 1. Setup and Configuration
-
-```bash
-# Install dependencies
-npm install
-# or
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-```
-
-### 2. Run Quality Checks
-
-```bash
-# Use the analyzer script
-python scripts/terraform_scaffolder.py .
-
-# Review recommendations
-# Apply fixes
-```
-
-### 3. Implement Best Practices
-
-Follow the patterns and practices documented in:
-- `references/cicd_pipeline_guide.md`
-- `references/infrastructure_as_code.md`
-- `references/deployment_strategies.md`
+Refer to the detailed reference documentation:
+- `references/cicd_pipeline_guide.md` - CI/CD pipeline patterns
+- `references/infrastructure_as_code.md` - Terraform and IaC workflows
+- `references/deployment_strategies.md` - Deployment best practices
 
 ## Best Practices Summary
 
@@ -172,20 +148,19 @@ Follow the patterns and practices documented in:
 ## Common Commands
 
 ```bash
-# Development
-npm run dev
-npm run build
-npm run test
-npm run lint
+# Development (Lightfriend)
+cargo build
+cargo test
+just up              # Docker Compose
+just logs-core       # View logs
 
-# Analysis
+# Infrastructure Analysis (if using helper scripts)
 python scripts/terraform_scaffolder.py .
 python scripts/deployment_manager.py --analyze
 
 # Deployment
 docker build -t app:latest .
 docker-compose up -d
-kubectl apply -f k8s/
 ```
 
 ## Troubleshooting

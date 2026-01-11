@@ -156,9 +156,16 @@ CREATE TABLE events (
 
 ### Adding Timestamps
 
+**Always use INTEGER for timestamps (Unix epoch seconds), never TEXT or datetime objects.**
+
+This keeps timestamps simple and ensures all dates are stored as UTC:
+
 ```sql
-ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'));
+-- Add timestamp as INTEGER (Unix epoch seconds in UTC)
+ALTER TABLE users ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'));
 ```
+
+In Rust, use `chrono::Utc::now().timestamp()` to get the current UTC timestamp as i64.
 
 ## Important Notes
 
@@ -167,6 +174,7 @@ ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'));
 - **Test migrations on copy of data** before production
 - **Migrations are sequential** - order matters
 - **SQLite limitations**: Some operations require table recreation (see Diesel docs)
+- **Avoid JSON fields**: Prefer simple TEXT fields and parse to JSON in application code after retrieving from the database. This keeps the schema simple and gives more control over serialization.
 
 ## Troubleshooting
 
