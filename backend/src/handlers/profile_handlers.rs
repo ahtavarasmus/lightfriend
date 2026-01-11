@@ -1750,11 +1750,11 @@ pub async fn web_chat(
         message_sid: "".to_string(),
     };
 
-    // Process using existing SMS handler with test mode (doesn't send actual SMS)
+    // Process using existing SMS handler (skip Twilio, credits handled above)
     let (status, _, response) = crate::api::twilio_sms::process_sms(
         &state,
         mock_payload,
-        true, // test mode - don't send actual SMS
+        crate::api::twilio_sms::ProcessSmsOptions::web_chat(),
     ).await;
 
     if status == StatusCode::OK {
@@ -2160,11 +2160,11 @@ pub async fn web_chat_with_image(
         message_sid: "".to_string(),
     };
 
-    // Process using existing SMS handler with test mode
+    // Process using existing SMS handler (skip Twilio, credits handled above)
     let (status, _, response) = crate::api::twilio_sms::process_sms(
         &state,
         mock_payload,
-        true,
+        crate::api::twilio_sms::ProcessSmsOptions::web_chat(),
     ).await;
 
     if status == StatusCode::OK {
