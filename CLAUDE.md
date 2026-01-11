@@ -23,7 +23,7 @@ just up                          # Start all services
 just logs-core                   # View logs
 ```
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
+See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
 ## Architecture
 
