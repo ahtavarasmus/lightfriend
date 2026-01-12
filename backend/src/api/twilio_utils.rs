@@ -615,34 +615,71 @@ pub async fn send_conversation_message(
     }
 
     // Determine From strategy
+    // IMPORTANT: For notification-only countries without BYOT credentials,
+    // we must ALWAYS use messaging service - never send from US number directly
     let preferred = user.preferred_number.as_ref().map(String::as_str).unwrap_or("");
-    let mut from_number = preferred.to_string();
+    let has_byot_credentials = state.user_core.has_twilio_credentials(user.id);
+    let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
+
+    let mut from_number = String::new();
     let mut use_messaging_service = false;
     let mut update_preferred = false;
 
-    if preferred.is_empty() {
-        update_preferred = true;
-        if let Some(c) = country.clone() {
-            match c.as_str() {
-                "US" => {
-                    use_messaging_service = true;
-                    update_preferred = false;
-                }
-                "CA" => from_number = env::var("CAN_PHONE").expect("CAN_PHONE not set"),
-                "FI" => from_number = env::var("FIN_PHONE").expect("FIN_PHONE not set"),
-                "NL" => from_number = env::var("NL_PHONE").expect("NL_PHONE not set"),
-                "GB" => from_number = env::var("GB_PHONE").expect("GB_PHONE not set"),
-                "AU" => from_number = env::var("AUS_PHONE").expect("AUS_PHONE not set"),
-                _ => {
-                    // Check if this is a notification-only country
-                    if crate::utils::country::is_notification_only_country(&user.phone_number) {
-                        // Use US messaging service for notification-only countries
-                        use_messaging_service = true;
-                        update_preferred = false;
-                        tracing::info!("Using US messaging service for notification-only country: {}", c);
-                    } else {
-                        tracing::info!("Using empty from_number for unsupported country: {}", c);
-                    }
+    // Notification-only countries without BYOT must always use messaging service
+    if is_notification_only && !has_byot_credentials {
+        use_messaging_service = true;
+        tracing::info!("Using US messaging service for notification-only country user {}", user.id);
+    } else if let Some(c) = country.clone() {
+        match c.as_str() {
+            "US" => {
+                use_messaging_service = true;
+            }
+            "CA" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("CAN_PHONE").expect("CAN_PHONE not set")
+                };
+            }
+            "FI" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("FIN_PHONE").expect("FIN_PHONE not set")
+                };
+            }
+            "NL" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("NL_PHONE").expect("NL_PHONE not set")
+                };
+            }
+            "GB" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("GB_PHONE").expect("GB_PHONE not set")
+                };
+            }
+            "AU" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("AUS_PHONE").expect("AUS_PHONE not set")
+                };
+            }
+            _ => {
+                // For other countries with BYOT credentials, use their preferred number
+                if has_byot_credentials && !preferred.is_empty() {
+                    from_number = preferred.to_string();
+                } else {
+                    tracing::info!("Using empty from_number for unsupported country: {}", c);
                 }
             }
         }

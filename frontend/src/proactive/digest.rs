@@ -629,6 +629,7 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
                         <li>{"Day Digest: Receive a midday update of possible unread important messages and about upcoming events"}</li>
                         <li>{"Evening Digest: Receive an evening update of unread important messages since midday and events you have scheduled for the next day."}</li>
                     </ul>
+                    <p style="margin-top: 1rem; font-style: italic;">{"Note: Digests are only sent when there are new unread messages or upcoming events to report. If you don't receive a digest at your scheduled time, it means there was nothing new to summarize."}</p>
                 </div>
             </div>
         </div>

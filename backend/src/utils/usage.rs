@@ -289,6 +289,7 @@ pub fn deduct_user_credits(
     }
 
     // Deduct credits: prefer credits_left, fall back to credits
+    // IMPORTANT: Must check balance before deducting to prevent negative credits
     if user.credits_left >= credits_left_deduction && credits_left_deduction > 0.0 {
         // Deduct from credits_left
         let new_credits_left = user.credits_left - credits_left_deduction;
@@ -296,14 +297,20 @@ pub fn deduct_user_credits(
             eprintln!("Failed to update user credits_left: {}", e);
             return Err("Failed to process credits".to_string());
         }
-    } else {
-        // Deduct from regular credits
+    } else if user.credits >= credits_deduction && credits_deduction > 0.0 {
+        // Deduct from regular credits only if we have enough
         let new_credits = user.credits - credits_deduction;
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());
         }
+    } else if credits_deduction > 0.0 {
+        // Not enough credits - should have been caught earlier but log and fail gracefully
+        eprintln!("Insufficient credits at deduction for user {}: credits={}, needed={}",
+            user_id, user.credits, credits_deduction);
+        return Err("Insufficient credits".to_string());
     }
+    // If both deductions are 0.0, nothing to deduct (free event)
 
     Ok(())
 }
