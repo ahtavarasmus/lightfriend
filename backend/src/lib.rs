@@ -37,7 +37,6 @@ pub mod handlers {
     pub mod instagram_handlers;
     pub mod self_host_handlers;
     pub mod uber_auth;
-    pub mod uber;
     pub mod tesla_auth;
     pub mod google_maps;
     pub mod totp_handlers;
