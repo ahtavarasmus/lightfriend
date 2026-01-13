@@ -138,7 +138,7 @@ pub async fn tesla_login(
             )
         })?;
 
-    if user.sub_tier != Some("tier 2".to_string()) && user.sub_tier != Some("tier 3".to_string()) {
+    if user.sub_tier != Some("tier 2".to_string()) {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "Tesla integration requires a paid subscription"}))

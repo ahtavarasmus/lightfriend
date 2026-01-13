@@ -27,6 +27,11 @@ pub async fn check_user_credits(
         return Err("Phone service is currently deactivated for this number.".to_string());
     }
 
+    // Check if user has an active subscription (tier 2 required)
+    if user.sub_tier.as_deref() != Some("tier 2") {
+        return Err("Active subscription required. Please subscribe to continue using the service.".to_string());
+    }
+
     // BYOT users with their own Twilio credentials pay Twilio directly - no credit check
     if state.user_core.has_twilio_credentials(user.id) {
         return Ok(());
@@ -195,20 +200,6 @@ pub fn deduct_user_credits(
         return Ok(());
     }
 
-    // For tier 3 self-hosted users, check if they have US/CA unlimited
-    let is_tier3 = user.sub_tier.as_deref() == Some("tier 3");
-    let user_settings = if is_tier3 {
-        match state.user_core.get_user_settings(user_id) {
-            Ok(settings) => Some(settings),
-            Err(e) => {
-                eprintln!("Failed to get user settings for tier 3 user {}: {}", user_id, e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
     // Check if the event type is free based on country
     // Local number countries and notification-only countries are charged through Lightfriend
     // Other countries pay Twilio directly (require their own credentials)
@@ -220,19 +211,7 @@ pub fn deduct_user_credits(
     }
 
     // Calculate deduction amounts based on region (dual interpretation)
-    let (credits_left_deduction, credits_deduction) = if is_tier3 {
-        // Tier 3: use outbound_message_pricing from user_settings
-        let pricing = user_settings.as_ref().and_then(|s| s.outbound_message_pricing).unwrap_or(0.075);
-        let cost = match event_type {
-            "message" => pricing,
-            "voice" => amount.unwrap_or(0) as f32 * 0.005,
-            "noti_msg" => pricing,
-            "noti_call" => pricing * 2.0,
-            "digest" => pricing,
-            _ => return Err("Invalid event type".to_string()),
-        };
-        (0.0, cost) // Tier 3 doesn't use credits_left
-    } else if is_us_or_ca(&user.phone_number) {
+    let (credits_left_deduction, credits_deduction) = if is_us_or_ca(&user.phone_number) {
         // US/CA: credits_left is message COUNT, credits is dollar value
         let credits_left_cost = match event_type {
             "message" => 1.0,
@@ -310,6 +289,7 @@ pub fn deduct_user_credits(
     }
 
     // Deduct credits: prefer credits_left, fall back to credits
+    // IMPORTANT: Must check balance before deducting to prevent negative credits
     if user.credits_left >= credits_left_deduction && credits_left_deduction > 0.0 {
         // Deduct from credits_left
         let new_credits_left = user.credits_left - credits_left_deduction;
@@ -317,95 +297,20 @@ pub fn deduct_user_credits(
             eprintln!("Failed to update user credits_left: {}", e);
             return Err("Failed to process credits".to_string());
         }
-    } else {
-        // Deduct from regular credits
+    } else if user.credits >= credits_deduction && credits_deduction > 0.0 {
+        // Deduct from regular credits only if we have enough
         let new_credits = user.credits - credits_deduction;
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());
         }
+    } else if credits_deduction > 0.0 {
+        // Not enough credits - should have been caught earlier but log and fail gracefully
+        eprintln!("Insufficient credits at deduction for user {}: credits={}, needed={}",
+            user_id, user.credits, credits_deduction);
+        return Err("Insufficient credits".to_string());
     }
-
-    // For tier 3 US/CA users: Increment monthly message count and monitor for 1000 limit
-    if is_tier3 && event_type == "message" {
-        if let Some(ref settings) = user_settings {
-            // Check if this is a US/CA subaccount (unlimited messaging with monitoring)
-            // US/CA users have outbound_message_pricing of None or very low (we monitor all tier 3 messages)
-            if let Err(e) = state.user_core.increment_monthly_message_count(user_id) {
-                eprintln!("Failed to increment monthly message count for user {}: {}", user_id, e);
-            }
-
-            // Get updated settings to check current count
-            if let Ok(updated_settings) = state.user_core.get_user_settings(user_id) {
-                let count = updated_settings.monthly_message_count;
-
-                // Send email alert when hitting 1000 messages (only send once when crossing threshold)
-                if count >= 1000 && settings.monthly_message_count < 1000 {
-                    tracing::warn!("Tier 3 user {} has reached {} messages this month", user_id, count);
-
-                    // Send email notification to admin
-                    let state_clone = state.clone();
-                    let user_email = user.email.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = send_tier3_usage_alert(&state_clone, user_id, &user_email, count).await {
-                            tracing::error!("Failed to send tier 3 usage alert: {}", e);
-                        }
-                    });
-                }
-            }
-        }
-    }
+    // If both deductions are 0.0, nothing to deduct (free event)
 
     Ok(())
-}
-
-/// Sends an email alert when a tier 3 user exceeds 1000 messages per month
-async fn send_tier3_usage_alert(
-    state: &Arc<AppState>,
-    user_id: i32,
-    user_email: &str,
-    message_count: i32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use axum::extract::{Json, State as AxumState};
-
-    let body = format!(
-        "Tier 3 Usage Alert - 1000 Messages Reached\n\
-        ==========================================\n\n\
-        User ID: {}\n\
-        User Email: {}\n\
-        Monthly Message Count: {}\n\n\
-        This tier 3 self-hosted user has reached 1000 outbound messages this month.\n\
-        This is a monitoring alert to track usage patterns.\n\
-        ",
-        user_id,
-        user_email,
-        message_count
-    );
-
-    let email_request = crate::handlers::imap_handlers::SendEmailRequest {
-        to: "rasmus@ahtava.com".to_string(),
-        subject: format!("Tier 3 Usage Alert - User {} - 1000 Messages", user_id),
-        body: body.replace("\n", "\r\n"),
-    };
-
-    let auth_user = crate::handlers::auth_middleware::AuthUser {
-        user_id: 1,
-        is_admin: true,
-    };
-
-    match crate::handlers::imap_handlers::send_email(
-        AxumState(state.clone()),
-        auth_user,
-        Json(email_request),
-    ).await {
-        Ok(_) => {
-            tracing::info!("Successfully sent tier 3 usage alert for user {}", user_id);
-            Ok(())
-        }
-        Err((status, err)) => {
-            let error_msg = format!("Failed to send tier 3 usage alert: {:?} - {:?}", status, err);
-            tracing::error!("{}", error_msg);
-            Err(error_msg.into())
-        }
-    }
 }

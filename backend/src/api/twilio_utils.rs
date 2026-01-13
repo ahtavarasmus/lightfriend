@@ -374,54 +374,33 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-    let auth_token: String;
-    let url: String;
-    if is_self_hosted {
-        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
-            Ok((_, Some(token), _, Some(server_url), _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
-                (token, server_url)
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            },
-            _ => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
+    // BYOT users with their own credentials always use their own account
+    let auth_token = if state.user_core.is_byot_user(user.id) {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok((_, token)) => token,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+        }
+    } else if crate::utils::country::is_local_number_country(&user.phone_number)
+        || crate::utils::country::is_notification_only_country(&user.phone_number) {
+        std::env::var("TWILIO_AUTH_TOKEN")
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok((_, token)) => token,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+        }
+    };
 
-        // BYOT users with their own credentials always use their own account
-        auth_token = if state.user_core.has_twilio_credentials(user.id) {
-            match state.user_core.get_twilio_credentials(user.id) {
-                Ok((_, token)) => token,
-                Err(_) => return Err(StatusCode::UNAUTHORIZED)
-            }
-        } else if crate::utils::country::is_local_number_country(&user.phone_number)
-            || crate::utils::country::is_notification_only_country(&user.phone_number) {
-            std::env::var("TWILIO_AUTH_TOKEN")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        } else {
-            match state.user_core.get_twilio_credentials(user.id) {
-                Ok((_, token)) => token,
-                Err(_) => return Err(StatusCode::UNAUTHORIZED)
-            }
-        };
-
-        url = match std::env::var("SERVER_URL") {
-            Ok(url) => {
-                tracing::info!("✅ Successfully retrieved SERVER_URL");
-                url + "/api/sms/server"
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-    }
+    let url = match std::env::var("SERVER_URL") {
+        Ok(url) => {
+            tracing::info!("✅ Successfully retrieved SERVER_URL");
+            url + "/api/sms/server"
+        },
+        Err(e) => {
+            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     // Build the string to sign
     let mut string_to_sign = url;
@@ -465,7 +444,7 @@ pub async fn delete_twilio_message_media(
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // BYOT users with their own credentials always use their own account
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
         || crate::utils::country::is_notification_only_country(&user.phone_number) {
@@ -507,7 +486,7 @@ pub async fn delete_twilio_message(
     tracing::debug!("deleting incoming message");
 
     // BYOT users with their own credentials always use their own account
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
         || crate::utils::country::is_notification_only_country(&user.phone_number) {
@@ -574,14 +553,14 @@ pub async fn send_conversation_message(
     let running_environment= env::var("ENVIRONMENT")
             .map_err(|_| "ENVIRONMENT not set")?;
     if running_environment == "development" {
-        println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
+        tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
     }
 
     // Twilio send logic
     // BYOT users with their own credentials always use their own account
     // Otherwise, use global credentials for local-number and notification-only countries
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         // BYOT user - use their own Twilio account
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
@@ -611,34 +590,79 @@ pub async fn send_conversation_message(
     }
 
     // Determine From strategy
+    // IMPORTANT: For notification-only countries without BYOT credentials,
+    // we must ALWAYS use messaging service - never send from US number directly
     let preferred = user.preferred_number.as_deref().unwrap_or("");
-    let mut from_number = preferred.to_string();
+    let has_byot_credentials = state.user_core.is_byot_user(user.id);
+    let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
+
+    let mut from_number = String::new();
     let mut use_messaging_service = false;
     let mut update_preferred = false;
 
-    if preferred.is_empty() {
-        update_preferred = true;
-        if let Some(c) = country.clone() {
-            match c.as_str() {
-                "US" => {
-                    use_messaging_service = true;
-                    update_preferred = false;
-                }
-                "CA" => from_number = env::var("CAN_PHONE").expect("CAN_PHONE not set"),
-                "FI" => from_number = env::var("FIN_PHONE").expect("FIN_PHONE not set"),
-                "NL" => from_number = env::var("NL_PHONE").expect("NL_PHONE not set"),
-                "GB" => from_number = env::var("GB_PHONE").expect("GB_PHONE not set"),
-                "AU" => from_number = env::var("AUS_PHONE").expect("AUS_PHONE not set"),
-                _ => {
-                    // Check if this is a notification-only country
-                    if crate::utils::country::is_notification_only_country(&user.phone_number) {
-                        // Use US messaging service for notification-only countries
-                        use_messaging_service = true;
-                        update_preferred = false;
-                        tracing::info!("Using US messaging service for notification-only country: {}", c);
-                    } else {
-                        tracing::info!("Using empty from_number for unsupported country: {}", c);
-                    }
+    // Notification-only countries without BYOT: check if user selected US or local number
+    if is_notification_only && !has_byot_credentials {
+        let us_phone = env::var("USA_PHONE").ok();
+        // If preferred is US number or empty, use messaging service. Otherwise use selected local number.
+        if preferred.is_empty() || us_phone.as_deref() == Some(preferred) {
+            use_messaging_service = true;
+            tracing::info!("Using US messaging service for notification-only country user {}", user.id);
+        } else {
+            // User selected a non-US local number (FI, NL, GB, AU)
+            from_number = preferred.to_string();
+            tracing::info!("Using selected local number {} for notification-only user {}", from_number, user.id);
+        }
+    } else if let Some(c) = country.clone() {
+        match c.as_str() {
+            "US" => {
+                use_messaging_service = true;
+            }
+            "CA" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("CAN_PHONE").expect("CAN_PHONE not set")
+                };
+            }
+            "FI" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("FIN_PHONE").expect("FIN_PHONE not set")
+                };
+            }
+            "NL" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("NL_PHONE").expect("NL_PHONE not set")
+                };
+            }
+            "GB" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("GB_PHONE").expect("GB_PHONE not set")
+                };
+            }
+            "AU" => {
+                from_number = if !preferred.is_empty() {
+                    preferred.to_string()
+                } else {
+                    update_preferred = true;
+                    env::var("AUS_PHONE").expect("AUS_PHONE not set")
+                };
+            }
+            _ => {
+                // For other countries with BYOT credentials, use their preferred number
+                if has_byot_credentials && !preferred.is_empty() {
+                    from_number = preferred.to_string();
+                } else {
+                    tracing::info!("Using empty from_number for unsupported country: {}", c);
                 }
             }
         }

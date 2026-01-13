@@ -12,9 +12,6 @@ use diesel::dsl::sql;
 use diesel::sql_types::BigInt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::{thread_rng, Rng};
-use hex;
-
 define_sql_function! {
     fn lower(x: Text) -> Text;
 }
@@ -90,25 +87,6 @@ impl UserCore {
         Ok(user)
     }
 
-    pub fn find_by_server_ip(&self, server_ip: &str) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user_id_opt: Option<i32> = user_settings::table
-            .filter(user_settings::server_ip.eq(Some(server_ip)))
-            .select(user_settings::user_id)
-            .first::<i32>(&mut conn)
-            .optional()?;
-        match user_id_opt {
-            Some(user_id) => {
-                let user = users::table
-                    .find(user_id)
-                    .first::<User>(&mut conn)
-                    .optional()?;
-                Ok(user)
-            }
-            None => Ok(None),
-        }
-    }
-
     pub fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
@@ -124,87 +102,6 @@ impl UserCore {
             .set(users::magic_token.eq(Some(token)))
             .execute(&mut conn)?;
         Ok(())
-    }
-
-    pub fn get_or_generate_magic_login_token(&self, user_id: i32) -> Result<String, DieselError> {
-        use crate::schema::user_settings;
-        self.ensure_user_settings_exist(user_id)?;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .first::<UserSettings>(&mut conn)?;
-
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        if let (Some(token), Some(exp)) = (&settings.magic_login_token, settings.magic_login_token_expiration_timestamp) {
-            if exp > current_time {
-                return Ok(token.clone());
-            }
-        }
-
-        // Expired or missing: generate new
-        self.generate_magic_login_token(user_id)
-    }
-    pub fn generate_magic_login_token(&self, user_id: i32) -> Result<String, DieselError> {
-        use crate::schema::user_settings;
-        self.ensure_user_settings_exist(user_id)?;
-        let mut rng = thread_rng();
-        let token_bytes: [u8; 32] = rng.gen(); // 256-bit secure random
-        let token = hex::encode(token_bytes); // 64-char hex string
-        let expiration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32 + 900; // 15 minutes
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set((
-                user_settings::magic_login_token.eq(Some(token.clone())),
-                user_settings::magic_login_token_expiration_timestamp.eq(Some(expiration)),
-            ))
-            .execute(&mut conn)?;
-        Ok(token)
-    }
-
-    pub fn verify_and_invalidate_magic_login_token(&self, user_id: i32, token: &str) -> Result<UserSettings, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        conn.transaction(|conn| {
-            // Get current settings
-            let settings = user_settings::table
-                .filter(user_settings::user_id.eq(user_id))
-                .first::<UserSettings>(conn)?;
-            // Verify
-            let current_time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-            if settings.magic_login_token.as_ref() != Some(&token.to_string()) ||
-               settings.magic_login_token_expiration_timestamp.is_none_or(|exp| exp <= current_time) {
-                return Err(DieselError::NotFound); // Or custom error
-            }
-            // Invalidate
-            diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-                .set((
-                    user_settings::magic_login_token.eq::<Option<String>>(None),
-                    user_settings::magic_login_token_expiration_timestamp.eq::<Option<i32>>(None),
-                ))
-                .execute(conn)?;
-            Ok(settings)
-        })
-    }
-
-    pub fn find_free_subaccount_by_country(&self, country: &str) -> Result<Option<Subaccount>, DieselError> {
-        use crate::schema::subaccounts;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let subaccount = subaccounts::table
-            .filter(subaccounts::user_id.eq("-1"))
-            .filter(subaccounts::country.eq(country))
-            .first::<Subaccount>(&mut conn)
-            .optional()?;
-        Ok(subaccount)
     }
 
     pub fn assign_subaccount_to_user(
@@ -1181,16 +1078,12 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn update_server_ip(&self, user_id: i32, server_ip: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
+    pub fn update_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
 
-        // Update the last ping timestamp
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::server_ip.eq(server_ip))
+        diesel::update(users::table.find(user_id))
+            .set(users::sub_tier.eq(tier))
             .execute(&mut conn)?;
 
         Ok(())
@@ -1276,6 +1169,21 @@ impl UserCore {
         matches!(settings, Ok((Some(_), Some(_))))
     }
 
+    /// Check if user is on BYOT (Bring Your Own Twilio) plan by checking plan_type
+    pub fn is_byot_user(&self, user_id: i32) -> bool {
+        use crate::schema::users;
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        users::table
+            .filter(users::id.eq(user_id))
+            .select(users::plan_type)
+            .first::<Option<String>>(&mut conn)
+            .map(|pt| pt.as_deref() == Some("byot"))
+            .unwrap_or(false)
+    }
 
     pub fn update_twilio_credentials(&self, user_id: i32, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
         use crate::schema::user_settings;
@@ -1382,7 +1290,7 @@ impl UserCore {
     pub fn set_elevenlabs_phone_number_id(&self, user_id: i32, phone_number_id: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+
         // Ensure user settings exist
         self.ensure_user_settings_exist(user_id)?;
 
@@ -1392,54 +1300,6 @@ impl UserCore {
             .execute(&mut conn)?;
 
         Ok(())
-    }
-
-    // for self hosted instance
-    pub fn get_settings_for_tier3(
-        &self,
-    ) -> Result<Tier3Settings, Box<dyn std::error::Error>> {
-        use crate::schema::{users, user_settings};
-        use crate::utils::encryption::decrypt;
-        
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Find the first user(should be only one)
-        let tier3_user = users::table
-            .first::<User>(&mut conn)?;
-            
-        // Get their settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(tier3_user.id))
-            .select((
-                user_settings::encrypted_twilio_account_sid,
-                user_settings::encrypted_twilio_auth_token,
-                user_settings::encrypted_openrouter_api_key,
-                user_settings::server_url,
-                user_settings::encrypted_geoapify_key,
-                user_settings::encrypted_pirate_weather_key,
-            ))
-            .first::<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(&mut conn)?;
-            
-        match settings {
-            (Some(encrypted_account_sid), Some(encrypted_auth_token), openrouter_api_key, server_url, geoapify_key, pirate_key) => {
-                let account_sid = decrypt(&encrypted_account_sid).ok();
-                let auth_token = decrypt(&encrypted_auth_token).ok();
-                Ok((account_sid, auth_token, openrouter_api_key, server_url, geoapify_key, pirate_key))
-            },
-            _ => Ok((None, None, None, None, None, None))
-        }
-    }
-
-    // Find subaccount by user_id
-    pub fn find_subaccount_by_user_id(&self, user_id: i32) -> Result<Option<Subaccount>, DieselError> {
-        use crate::schema::subaccounts;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        subaccounts::table
-            .filter(subaccounts::user_id.eq(user_id.to_string()))
-            .filter(subaccounts::status.eq(Some("active".to_string())))
-            .first::<Subaccount>(&mut conn)
-            .optional()
     }
 
     // Count free US subaccounts in the pool
@@ -1497,7 +1357,7 @@ impl UserCore {
         Ok(())
     }
 
-    // Increment monthly message count for US/CA tier 3 monitoring
+    // Increment monthly message count
     pub fn increment_monthly_message_count(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

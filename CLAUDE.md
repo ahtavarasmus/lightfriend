@@ -1,371 +1,95 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum web framework) and frontend (Yew WebAssembly framework). The system integrates with Matrix homeserver for multi-platform messaging (WhatsApp, Signal, Messenger, Instagram), Twilio for SMS/voice, ElevenLabs for voice AI, Stripe for payments, and various OAuth services (Google Calendar/Tasks, Uber, IMAP).
+Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum web framework) and frontend (Yew WebAssembly framework). Integrates with Matrix homeserver for multi-platform messaging, Twilio for SMS/voice, ElevenLabs for voice AI, Stripe for payments, and OAuth services.
 
 ## Development Commands
 
-### Backend (Axum + Diesel)
+**Backend (Axum + Diesel):**
 ```bash
-# Run the backend server
-cd backend && cargo run
-
-# Run tests
-cd backend && cargo test
-
-# Build for production
-cd backend && cargo build --release
-
-# Database migrations
+cd backend && cargo run          # Run server (port 3000)
+cd backend && cargo test          # Run tests
 cd backend && diesel migration run
-cd backend && diesel migration revert
-cd backend && diesel migration generate <name>
-
-# Update schema after migrations
-cd backend && diesel print-schema > src/schema.rs
 ```
 
-### Frontend (Yew + Trunk)
+**Frontend (Yew + Trunk):**
 ```bash
-# Run development server (localhost:8080)
-cd frontend && trunk serve
-
-# Build for production
-cd frontend && trunk build --release
-
-# Build with specific features
-cd frontend && trunk serve --features dev
+cd frontend && trunk serve        # Dev server (port 8080)
 ```
 
-### Running Both Services
-Start backend first (port 3000), then frontend (port 8080). Frontend expects backend at `http://localhost:3000` in development.
-
-### Docker Deployment (Recommended)
-
-The project includes Docker containerization for running the entire stack:
-
+**Docker (Recommended):**
 ```bash
-# Quick start (use build-native for local development - fastest)
-just build-native   # Build for current platform only (15-20 min first build)
-just up             # Start all services (auto-creates .env with secrets if missing)
-just create-admin adminuser password  # Create Matrix admin
-
-# Alternative build commands
-just build          # Build multi-platform (amd64 + arm64) for distribution
-just build-fast     # Fast build with fewer optimizations (10-15 min)
-
-# Common operations
-just logs           # View all logs
-just logs-core      # View core service logs
-just restart        # Restart all services
-just down           # Stop all services
+just build-native                 # Build for current platform
+just up                          # Start all services
+just logs-core                   # View logs
 ```
 
-**Build optimizations:** The Docker build now includes sccache (Rust compilation cache), mold linker (2-3x faster), and optimized Cargo profiles for significantly faster builds.
+See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
+## Architecture
 
-**Docker Architecture (Phase 1):**
-- **core**: Rust backend only (port 3000) - Frontend runs separately via `trunk serve`
-- **synapse**: Matrix homeserver (port 8008)
-- **postgres**: Shared database for Synapse and bridges
-- **mautrix-whatsapp**: WhatsApp bridge (official image from dock.mau.dev)
-- **mautrix-signal**: Signal bridge with signald (official image)
-- **mautrix-messenger**: Messenger bridge via mautrix-meta (official image)
-- **mautrix-instagram**: Instagram bridge via mautrix-meta (official image)
+**Backend Structure:**
+- Entry: `backend/src/main.rs` - Routing, AppState, middleware
+- Handlers: `backend/src/handlers/` - HTTP request handlers (30+ modules)
+- Repositories: `backend/src/repositories/` - Data access layer (UserCore, UserRepository, UserSubscriptions, ConnectionAuth)
+- Models: `backend/src/models/user_models.rs` - Diesel ORM models
+- Schema: `backend/src/schema.rs` - Auto-generated from migrations
+- API: `backend/src/api/` - External service integrations
+- Tool Calls: `backend/src/tool_call_utils/` - AI tool implementations
+- Jobs: `backend/src/jobs/scheduler.rs` - Background cron jobs
 
-**Key Files:**
-- `docker/core/Dockerfile` - Core service container definition
-- `docker/docker-compose.yml` - Service orchestration
-- `docker/setup-configs.sh` - Auto-generates configs and registration files
-- `docker/synapse/homeserver.yaml.template` - Matrix homeserver config template
-- `docker/bridges/*/config.yaml.template` - Bridge config templates (minimal, ~40 lines each)
-- `docker/postgres-init/init-databases.sh.template` - Database init template
-- `justfile` - Common Docker commands
-- `.env.example` - Environment variable template (auto-copied to .env with generated secrets)
+**Frontend Structure:**
+- Entry: `frontend/src/main.rs` - Yew app root, routing
+- Pages: `frontend/src/pages/` - Page components
+- Auth: `frontend/src/auth/` - Authentication UI
+- Connections: `frontend/src/connections/` - Integration UIs
+- Config: `frontend/src/config.rs` - Backend URL configuration
 
-**Bridge Configuration (Auto-Generated):**
-- Registration files (`*-registration.yaml`) are AUTO-GENERATED using mautrix bridges' `-g` flag
-- No manual token management needed - bridges create random tokens automatically
-- Only 4 environment variables required (down from 12):
-  - `MATRIX_HOMESERVER_SHARED_SECRET`
-  - `SYNAPSE_DB_PASSWORD`
-  - `POSTGRES_PASSWORD`
-  - `DOUBLE_PUPPET_SECRET`
-- Bridge tokens (as_token, hs_token) are generated by `setup-configs.sh` when you run `just up`
-- Config templates are minimal (~40 lines) with only essential settings
-- Generated files are git-ignored, can be regenerated anytime
+**Database:** SQLite + Diesel 2.1 with 129 migrations in `backend/migrations/`
 
-## Architecture Overview
+## Key Patterns
 
-### Backend Structure
-- **Entry**: `backend/src/main.rs` - Axum routing, AppState initialization, middleware
-- **Handlers**: `backend/src/handlers/` - HTTP request handlers organized by feature (30+ modules)
-- **Repositories**: `backend/src/repositories/` - Data access layer (UserCore, UserRepository, UserSubscriptions, ConnectionAuth)
-- **Models**: `backend/src/models/user_models.rs` - Diesel ORM models
-- **Schema**: `backend/src/schema.rs` - Auto-generated from migrations
-- **API**: `backend/src/api/` - External service integrations (Twilio, ElevenLabs, Shazam)
-- **Tool Calls**: `backend/src/tool_call_utils/` - AI tool implementations (email, calendar, tasks)
-- **Jobs**: `backend/src/jobs/scheduler.rs` - Background cron jobs (email monitoring, Matrix sync)
+**Repository Pattern:** Always use repositories for data access, never raw Diesel queries in handlers.
 
-### Frontend Structure
-- **Entry**: `frontend/src/main.rs` - Yew app root, routing, navigation
-- **Pages**: `frontend/src/pages/` - Page components (home, landing, settings, etc.)
-- **Auth**: `frontend/src/auth/` - Authentication UI (signup, verify, OAuth)
-- **Connections**: `frontend/src/connections/` - Integration UIs (email, calendar, bridges)
-- **Profile**: `frontend/src/profile/` - User profile, billing, settings
-- **Admin**: `frontend/src/admin/` - Admin dashboard
-- **Config**: `frontend/src/config.rs` - Backend URL configuration
+**Authentication:** JWT tokens (access + refresh) with middleware:
+- `require_auth` - JWT validation
+- `require_admin` - Admin check
+- `check_subscription_access` - Tier validation
 
-### Database (SQLite + Diesel)
-- **ORM**: Diesel 2.1 with r2d2 connection pooling
-- **Migrations**: 129 migrations in `backend/migrations/`
-- **Core Tables**: users, user_settings, user_info, bridges, message_history, usage_logs
-- **Integration Tables**: google_calendar, google_tasks, uber, imap_connection
-- **Proactive Tables**: waiting_checks, priority_senders, keywords, email_judgments
-- **Billing Tables**: subaccounts, conversations
+**Security & Encryption:**
+- AES-256-GCM encryption for all sensitive data
+- Key from `ENCRYPTION_KEY` env var
+- HMAC/signature validation for all webhooks
 
-### Authentication & Authorization
-- **JWT Tokens**: Access + refresh tokens (HS256 algorithm)
-- **Middleware**: `require_auth` (JWT validation), `require_admin` (admin check), `check_subscription_access` (tier validation)
-- **Password Security**: bcrypt hashing
-- **Rate Limiting**: Governor library with per-user DashMap
-- **Subscription Tiers**: tier 1 (basic), tier 1.5 (oracle), tier 2 (sentinel), tier 3 (self-hosted)
-
-### External Integrations
-
-**Matrix Protocol** (`matrix-sdk` crate):
-- Synapse homeserver bridge to WhatsApp, Telegram, Signal, Messenger, Instagram
-- Per-user Matrix accounts with background sync tasks
-- Event handlers process incoming messages from bridge bots
-- Bridge detection via room metadata and bot user IDs
-
-**Twilio**:
-- SMS webhooks validated with signature (`TWILIO_AUTH_TOKEN`)
-- User-specific webhooks for self-hosted tier 3 (`/api/sms/server/{user_id}`)
-- Subaccount management for self-hosted users
-
-**ElevenLabs Voice AI**:
-- Real-time phone call integration
-- Tool calls during conversations (validated with shared secret)
-- HMAC webhook signature validation
-
-**Stripe**:
-- Credit packs and subscription management
-- Webhooks for payment events (signature validated)
-- Customer portal for subscription changes
-
-**Google OAuth2**:
-- Calendar and Tasks integration
-- Encrypted access/refresh tokens stored in database
-- Token refresh handled automatically
-
-**IMAP**:
-- Email monitoring with cron job (every 10 minutes for tier 2 users)
-- AI judges email importance, sends notifications for critical emails
-- Encrypted credentials (server, port, password)
-
-### Security & Encryption
-- **Encryption**: AES-256-GCM (via `aes-gcm` crate)
-- **Key**: 32-byte base64-encoded key from `ENCRYPTION_KEY` env var
-- **Encrypted Fields**: All OAuth tokens, passwords, Matrix credentials, Twilio credentials, message content
-- **Format**: `base64(12-byte-nonce || ciphertext)`
-- **Webhook Validation**: HMAC/signature validation for all external webhooks (Twilio, Stripe, ElevenLabs)
-
-### Background Jobs
-Located in `backend/src/jobs/scheduler.rs` (tokio-cron-scheduler):
-- **Email Monitor**: Every 10 minutes, checks IMAP for tier 2 users
-- **Matrix Sync**: Per-user background tasks, syncs every 30 seconds
-- **Digest Notifications**: Morning/day/evening summaries (user timezone aware)
-- **Calendar/Task Reminders**: Periodic checks for scheduled notifications
-
-### Credit System
-- **credits**: One-time purchased (never expire)
-- **credits_left**: Monthly subscription allowance (resets per billing cycle)
-- **Consumption Order**: `credits_left` first, then `credits`
-- **Tracking**: `usage_logs` table records all credit consumption
-- **Auto Top-Up**: Configurable via `charge_when_under` and `charge_back_to` fields
-
-## Key Patterns & Conventions
-
-### Repository Pattern
-Always use repositories for data access, never raw Diesel queries in handlers:
-- **UserCore** (`repositories/user_core.rs`): User CRUD, authentication
-- **UserRepository** (`repositories/user_repository.rs`): Message history, integrations, usage logs
-- **UserSubscriptions** (`repositories/user_subscriptions.rs`): Billing operations
-- **ConnectionAuth** (`repositories/connection_auth.rs`): OAuth token management
-
-### Error Handling
+**Error Handling:**
 - Return `Result<T, E>` types throughout
 - Use `?` operator for error propagation
-- Map errors to appropriate HTTP status codes in handlers
-- Sentry integration captures production errors
+- Map errors to appropriate HTTP status codes
 
-### Middleware Composition
-Handlers are wrapped with Tower middleware layers:
-1. Session layer (tower-sessions)
-2. CORS layer (configured for `FRONTEND_URL`)
-3. Trace layer (request logging)
-4. Custom auth/validation middleware
-
-### API Communication (Frontend)
-```rust
-// Pattern for authenticated API calls
-use gloo_net::http::Request;
-use crate::config;
-
-let response = Request::post(&format!("{}/api/endpoint", config::get_backend_url()))
-    .header("Authorization", &format!("Bearer {}", token))
-    .json(&request_data)?
-    .send()
-    .await?;
-```
-
-### Async Everywhere
-- All I/O operations are async (Tokio runtime)
-- Long-running tasks spawned with `tokio::spawn`
-- Use `async fn` and `.await` consistently
-
-## Git Commits
-
-When making commits:
-- Do NOT add "Generated with Claude Code" or any Claude/AI attribution to commit messages
-- Do NOT add Co-Authored-By lines mentioning Claude or AI
-- Keep commit messages clean and focused on what changed
-
-## Common Development Tasks
-
-### Adding a New Integration
-1. Create handler module: `backend/src/handlers/{service}_handlers.rs`
-2. Add OAuth handler: `backend/src/handlers/{service}_auth.rs`
-3. Add routes in `backend/src/main.rs` (protected + callback)
-4. Create repository methods in `repositories/connection_auth.rs`
-5. Create migration for credentials table: `diesel migration generate add_{service}`
-6. Add encrypted token fields to migration
-7. Create frontend component: `frontend/src/connections/{service}.rs`
-8. Add route to frontend router in `frontend/src/main.rs`
-
-### Adding a New ElevenLabs Tool Call
-1. Add endpoint in `backend/src/api/elevenlabs.rs` or tool_call_utils
-2. Implement logic using existing patterns (check subscription tier if needed)
-3. Add route to main.rs under `elevenlabs_routes` with middleware
-4. Update ElevenLabs AI assistant configuration with new tool definition
-
-### Modifying Database Schema
-1. Generate migration: `cd backend && diesel migration generate <descriptive_name>`
-2. Edit `up.sql` (apply changes) and `down.sql` (revert changes)
-3. Run migration: `diesel migration run`
-4. Update models in `backend/src/models/user_models.rs` if needed
-5. Regenerate schema: `diesel print-schema > src/schema.rs`
-
-### Adding a New Frontend Page
-1. Create component: `frontend/src/pages/{page}.rs`
-2. Add route variant to `Route` enum in `frontend/src/main.rs`
-3. Add route handler in `switch()` function
-4. Add navigation link in `Nav` component if needed
-
-## Environment Configuration
-
-### Required Backend Environment Variables
-Create `.env` in `backend/` directory:
-```bash
-# Database
-DATABASE_URL=database.db
-
-# JWT
-JWT_SECRET_KEY=<your-secret>
-JWT_REFRESH_KEY=<your-refresh-secret>
-
-# Encryption
-ENCRYPTION_KEY=<base64-encoded-32-byte-key>
-
-# Twilio
-TWILIO_ACCOUNT_SID=<sid>
-TWILIO_AUTH_TOKEN=<token>
-TWILIO_PHONE_NUMBER=<number>
-
-# Stripe
-STRIPE_SECRET_KEY=<sk_test_...>
-STRIPE_PUBLISHABLE_KEY=<pk_test_...>
-STRIPE_WEBHOOK_SECRET=<whsec_...>
-
-# Matrix
-MATRIX_HOMESERVER=https://your-synapse-server.com
-MATRIX_HOMESERVER_SHARED_SECRET=<secret>
-MATRIX_HOMESERVER_PERSISTENT_STORE_PATH=./matrix_store
-
-# Bridge Bot IDs
-WHATSAPP_BRIDGE_BOT=@whatsappbot:server.com
-SIGNAL_BRIDGE_BOT=@signalbot:server.com
-# ... (other bridge bots)
-
-# Google OAuth
-GOOGLE_CALENDAR_CLIENT_ID=<id>
-GOOGLE_CALENDAR_CLIENT_SECRET=<secret>
-GOOGLE_TASKS_CLIENT_ID=<id>
-GOOGLE_TASKS_CLIENT_SECRET=<secret>
-
-# ElevenLabs
-ELEVENLABS_SERVER_URL_SECRET=<secret>
-ELEVENLABS_WEBHOOK_SECRET=<secret>
-
-# OpenRouter & Perplexity
-OPENROUTER_API_KEY=<key>
-PERPLEXITY_API_KEY=<key>
-
-# CORS
-FRONTEND_URL=http://localhost:8080
-
-# Port
-PORT=3000
-
-# Sentry (optional)
-SENTRY_DSN=<dsn>
-
-# Environment
-ENVIRONMENT=development
-```
-
-### Frontend Configuration
-Backend URL is determined by build mode in `frontend/src/config.rs`:
-- Development: `http://localhost:3000`
-- Production: Empty string (same-origin requests)
-
-## Self-Hosted Architecture (Tier 3)
-
-Tier 3 users run their own backend instance:
-- **Authentication**: IP address validation (`server_ip` in `user_settings`)
-- **Magic Login**: Temporary tokens for initial setup (15-minute expiration)
-- **User-Specific Webhooks**: `/api/sms/server/{user_id}` routes to user's server
-- **Credentials**: Users provide their own Twilio, OpenRouter API keys (encrypted in DB)
-- **Textbee Alternative**: SMS provider without Twilio dependency
+**Async:** All I/O operations are async (Tokio runtime). Use `async fn` and `.await` consistently.
 
 ## Important File Locations
 
-### Backend
+**Backend:**
 - Routing & AppState: `backend/src/main.rs:30-492`
 - Auth middleware: `backend/src/handlers/auth_middleware.rs`
 - User operations: `backend/src/repositories/user_core.rs`
-- Database schema: `backend/src/schema.rs` (auto-generated)
 - Matrix integration: `backend/src/utils/matrix_auth.rs`, `backend/src/utils/bridge.rs`
-- Tool execution: `backend/src/utils/tool_exec.rs`
-- Encryption utils: `backend/src/utils/encryption.rs`
+- Encryption: `backend/src/utils/encryption.rs`
 
-### Frontend
+**Frontend:**
 - Routing & Nav: `frontend/src/main.rs:104-245`
-- API config: `frontend/src/config.rs`
 - Main dashboard: `frontend/src/pages/home.rs`
-- Profile & billing: `frontend/src/profile/profile.rs`
 
-## Testing Considerations
+## Git Commits
 
-- Backend tests run with `cargo test` in `backend/`
-- Frontend tests run with `cargo test` in `frontend/` (requires wasm-pack for integration tests)
-- Integration tests should mock external services (Twilio, Stripe, Matrix)
-- Use `mockall` crate for repository mocking in backend tests
+Do NOT add "Generated with Claude Code" or Co-Authored-By lines mentioning Claude/AI. Keep commit messages clean and focused on what changed.
+
+## Common Tasks
+
+For step-by-step guides, use skills in `.claude/skills/`:
+- `lightfriend-db-migration` - Database schema modifications using Diesel
+- `lightfriend-add-integration` - Adding new OAuth integrations
+- `lightfriend-add-frontend-page` - Adding new Yew frontend pages
 
 ## License
 

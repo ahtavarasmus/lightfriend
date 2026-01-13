@@ -286,12 +286,12 @@ pub async fn fetch_assistant(
                 .join("\n");
             dynamic_variables.insert("recent_conversation".to_string(), json!(history_string));
             //dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
-            let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
-                .expect("CHARGE_BACK_THRESHOLD not set")
+            let charge_back_threshold = std::env::var("CHARGE_BACK_THRESHOLD")
+                .unwrap_or_else(|_| "2.0".to_string())
                 .parse::<f32>()
                 .unwrap_or(2.00);
             let voice_second_cost = std::env::var("VOICE_SECOND_COST")
-                .expect("VOICE_SECOND_COST not set")
+                .unwrap_or_else(|_| "0.0033".to_string())
                 .parse::<f32>()
                 .unwrap_or(0.0033);
             let user_current_credits_to_threshold = user.credits - charge_back_threshold;
@@ -1604,7 +1604,7 @@ pub async fn handle_respond_to_email(
         }
     };
     // Fetch the email details to get the subject
-    let email_details = match crate::imap_handlers::fetch_single_imap_email(
+    let email_details = match crate::handlers::imap_handlers::fetch_single_imap_email(
         State(state.clone()),
         crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false },
         axum::extract::Path(payload.email_id.clone()),
@@ -1644,11 +1644,11 @@ pub async fn handle_respond_to_email(
             _ = cancel_rx => "cancel",
         };
         if reason == "timeout" {
-            let request = crate::imap_handlers::EmailResponseRequest {
+            let request = crate::handlers::imap_handlers::EmailResponseRequest {
                 email_id: cloned_email_id,
                 response_text: cloned_response_text,
             };
-            match crate::imap_handlers::respond_to_email(
+            match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),
                 crate::handlers::auth_middleware::AuthUser { user_id: cloned_user_id, is_admin: false },
                 Json(request)

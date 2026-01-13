@@ -241,6 +241,10 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let llm_provider = use_state(|| (*user_profile).llm_provider.clone().unwrap_or_else(|| "openai".to_string()));
     let feature_updates = use_state(|| (*user_profile).notify);
+    // Sending number selector state (for notification-only countries)
+    let show_sending_number_selector = use_state(|| false);
+    let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
+    let preferred_sending_number = use_state(|| (*user_profile).preferred_number.clone().unwrap_or_default());
     let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let location_original = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
@@ -259,6 +263,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let save_context_save_state = use_state(|| FieldSaveState::Idle);
     let llm_provider_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
+    let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
     let show_email_confirm = use_state(|| false);
@@ -317,6 +322,39 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             user_profile_state.set(props_profile.clone());
             || ()
         }, props.user_profile.clone());
+    }
+
+    // Fetch available sending numbers for notification-only country users
+    {
+        let show_sending_number_selector = show_sending_number_selector.clone();
+        let available_sending_numbers = available_sending_numbers.clone();
+        let preferred_sending_number = preferred_sending_number.clone();
+        use_effect_with_deps(move |_| {
+            spawn_local(async move {
+                match Api::get("/api/profile/available-sending-numbers")
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(show) = data.get("show_selector").and_then(|v| v.as_bool()) {
+                                show_sending_number_selector.set(show);
+                            }
+                            if let Some(numbers) = data.get("available_numbers").and_then(|v| v.as_array()) {
+                                available_sending_numbers.set(numbers.clone());
+                            }
+                            if let Some(current) = data.get("current_preferred").and_then(|v| v.as_str()) {
+                                preferred_sending_number.set(current.to_string());
+                            }
+                        }
+                    }
+                    _ => {
+                        info!("Failed to fetch available sending numbers");
+                    }
+                }
+            });
+            || ()
+        }, ());
     }
 
     // Helper to save a field via PATCH
@@ -1022,6 +1060,53 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
                         profile.llm_provider = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    // Sending number change handler (for notification-only countries)
+    let on_sending_number_change = {
+        let preferred_sending_number = preferred_sending_number.clone();
+        let save_state = sending_number_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let select: HtmlInputElement = e.target_unchecked_into();
+            let new_val = select.value();
+            preferred_sending_number.set(new_val.clone());
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "preferred_number".to_string(),
+                    value: serde_json::Value::String(new_val.clone())
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.preferred_number = Some(new_val);
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -1762,11 +1847,10 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 }
             }
 
-            // Email field (hidden for self-hosted)
+            // Email field
             {
-                if (*user_profile).sub_tier != Some("self_hosted".to_string()) {
-                    html! {
-                        <div class="profile-field">
+                html! {
+                    <div class="profile-field">
                             <span class="field-label">{"Email"}</span>
                             <div class="field-input-container">
                                 <input
@@ -1784,9 +1868,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 {render_save_indicator(&*email_save_state)}
                             </div>
                         </div>
-                    }
-                } else {
-                    html! {}
                 }
             }
 
@@ -2050,9 +2131,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 </div>
             </div>
 
-            // LLM Provider field (only show to subscribers, not self-hosted)
+            // LLM Provider field (only show to subscribers)
             {
-                if (*user_profile).sub_tier.is_some() && (*user_profile).sub_tier != Some("self_hosted".to_string()) {
+                if (*user_profile).sub_tier.is_some() {
                     html! {
                         <div class="profile-field">
                             <div class="field-label-group">
@@ -2112,6 +2193,50 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*notification_type_save_state)}
                 </div>
             </div>
+
+            // Sending Number field (only for notification-only countries)
+            {
+                if *show_sending_number_selector {
+                    let numbers = (*available_sending_numbers).clone();
+                    let current = (*preferred_sending_number).clone();
+                    html! {
+                        <div class="profile-field">
+                            <div class="field-label-group">
+                                <span class="field-label">{"Sending Number"}</span>
+                                <div class="tooltip">
+                                    <span class="tooltip-icon">{"?"}</span>
+                                    <span class="tooltip-text">
+                                        {"Choose which country's number Lightfriend uses to send you SMS. If messages from the US aren't reaching you, try a European number."}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="field-input-container">
+                                <select
+                                    class="profile-input"
+                                    value={current.clone()}
+                                    onchange={on_sending_number_change.clone()}
+                                >
+                                    {
+                                        numbers.iter().map(|num| {
+                                            let number = num.get("number").and_then(|v| v.as_str()).unwrap_or("");
+                                            let label = num.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                            let is_selected = current == number;
+                                            html! {
+                                                <option value={number.to_string()} selected={is_selected}>
+                                                    {label}
+                                                </option>
+                                            }
+                                        }).collect::<Html>()
+                                    }
+                                </select>
+                                {render_save_indicator(&*sending_number_save_state)}
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
 
             // Conversation History field
             <div class="profile-field">

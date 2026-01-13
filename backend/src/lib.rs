@@ -1,8 +1,186 @@
+// Module declarations - moved from main.rs for library access
+pub mod handlers {
+    pub mod auth_middleware;
+    pub mod auth_dtos;
+    pub mod admin_handlers;
+    pub mod auth_handlers;
+    pub mod profile_handlers;
+    pub mod filter_handlers;
+    pub mod twilio_handlers;
+    pub mod billing_handlers;
+    pub mod stripe_handlers;
+    pub mod refund_handlers;
+    pub mod google_calendar;
+    pub mod google_calendar_auth;
+    pub mod youtube_auth;
+    pub mod youtube;
+    pub mod tiktok;
+    pub mod instagram_reels;
+    pub mod twitter;
+    pub mod reddit;
+    pub mod spotify;
+    pub mod rumble;
+    pub mod streamable;
+    pub mod bluesky;
+    pub mod imap_auth;
+    pub mod imap_handlers;
+    pub mod whatsapp_auth;
+    pub mod whatsapp_handlers;
+    pub mod bridge_auth_common;
+    pub mod signal_auth;
+    pub mod signal_handlers;
+    pub mod telegram_auth;
+    pub mod telegram_handlers;
+    pub mod messenger_auth;
+    pub mod messenger_handlers;
+    pub mod instagram_auth;
+    pub mod instagram_handlers;
+    pub mod self_host_handlers;
+    pub mod uber_auth;
+    pub mod uber;
+    pub mod tesla_auth;
+    pub mod google_maps;
+    pub mod totp_handlers;
+    pub mod pricing_handlers;
+    pub mod webauthn_handlers;
+    pub mod contact_profile_handlers;
+}
+pub mod utils {
+    pub mod encryption;
+    pub mod tool_exec;
+    pub mod usage;
+    pub mod matrix_auth;
+    pub mod bridge;
+    pub mod elevenlabs_prompts;
+    pub mod us_number_pool;
+    pub mod notification_utils;
+    pub mod tesla_keys;
+    pub mod country;
+    pub mod webauthn_config;
+    pub mod email;
+    pub mod action_executor;
+}
+pub mod proactive {
+    pub mod utils;
+}
+pub mod tool_call_utils {
+    pub mod email;
+    pub mod calendar;
+    pub mod utils;
+    pub mod internet;
+    pub mod management;
+    pub mod bridge;
+    pub mod tesla;
+}
+pub mod api {
+    pub mod twilio_sms;
+    pub mod twilio_utils;
+    pub mod elevenlabs;
+    pub mod elevenlabs_webhook;
+    pub mod twilio_availability;
+    pub mod tesla;
+    pub mod twilio_pricing;
+}
+pub mod error;
+pub mod models {
+    pub mod user_models;
+}
+pub mod repositories {
+    pub mod user_core;
+    pub mod user_repository;
+    pub mod user_subscriptions;
+    pub mod connection_auth;
+    pub mod totp_repository;
+    pub mod webauthn_repository;
+}
+pub mod schema;
+pub mod jobs {
+    pub mod scheduler;
+}
+pub mod ai_config;
+pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
+
+// Test utilities for integration tests
+pub mod test_utils;
+
+// Re-export key types for external use
+pub use repositories::user_core::UserCore;
+pub use repositories::user_repository::UserRepository;
+pub use repositories::totp_repository::TotpRepository;
+pub use repositories::webauthn_repository::WebauthnRepository;
 
 use rand::Rng;
 use reqwest::Client;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::json;
+
+// AppState and related types - needed by all handler modules
+use std::collections::HashMap;
+use std::sync::Arc;
+use diesel::prelude::*;
+use diesel::r2d2::{self, ConnectionManager};
+use dashmap::DashMap;
+use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
+use oauth2::{
+    basic::BasicClient,
+    EndpointSet,
+    EndpointNotSet,
+};
+use tokio::sync::{Mutex, oneshot};
+use tower_sessions::MemoryStore;
+
+pub type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
+
+/// SQLite connection customizer that sets busy_timeout on each connection.
+/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
+#[derive(Debug)]
+pub struct SqliteConnectionCustomizer;
+
+impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnectionCustomizer {
+    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
+        diesel::sql_query("PRAGMA busy_timeout = 5000;")
+            .execute(conn)
+            .map_err(diesel::r2d2::Error::QueryError)?;
+        Ok(())
+    }
+}
+
+pub type GoogleOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+pub type TeslaOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
+pub struct AppState {
+    pub db_pool: DbPool,
+    pub user_core: Arc<UserCore>,
+    pub user_repository: Arc<UserRepository>,
+    pub ai_config: AiConfig,
+    pub google_calendar_oauth_client: GoogleOAuthClient,
+    pub youtube_oauth_client: GoogleOAuthClient,
+    pub uber_oauth_client: GoogleOAuthClient,
+    pub tesla_oauth_client: TeslaOAuthClient,
+    pub session_store: MemoryStore,
+    pub login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
+    pub matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
+    pub tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
+    pub tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
+    // Track vehicles currently being woken to prevent parallel wake attempts
+    // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
+    pub tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,
+    pub password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
+    pub phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub phone_verify_otps: DashMap<String, (String, u64)>,
+    pub pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
+    pub totp_repository: Arc<TotpRepository>,
+    pub webauthn_repository: Arc<WebauthnRepository>,
+    pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
+    pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
+    pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
+    pub totp_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub webauthn_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+}
 
 pub struct TwilioConfig {
     pub account_sid: String,
