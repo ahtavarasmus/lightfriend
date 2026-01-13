@@ -27,6 +27,7 @@ use serde_json::json;
 
 use crate::AppState;
 use crate::repositories::user_core::UpdateProfileParams;
+use crate::repositories::user_repository::LogUsageParams;
 use crate::utils::country::get_country_code_from_phone;
 
 #[derive(Deserialize)]
@@ -1847,18 +1848,18 @@ pub async fn web_chat(
     };
 
     // Log the usage
-    let _ = state.user_repository.log_usage(
-        auth_user.user_id,
-        None, // sid
-        "web_chat".to_string(), // activity_type
-        Some(charged_amount), // credits
-        None, // time_consumed
-        Some(true), // success
-        None, // reason - don't log user message content
-        None, // status
-        None, // recharge_threshold_timestamp
-        None, // zero_credits_timestamp
-    );
+    let _ = state.user_repository.log_usage(LogUsageParams {
+        user_id: auth_user.user_id,
+        sid: None,
+        activity_type: "web_chat".to_string(),
+        credits: Some(charged_amount),
+        time_consumed: None,
+        success: Some(true),
+        reason: None,
+        status: None,
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    });
 
     // Create a mock Twilio payload to reuse existing SMS processing logic
     let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
@@ -1969,18 +1970,18 @@ pub async fn get_instant_digest(
     };
 
     // Log usage
-    let _ = state.user_repository.log_usage(
-        auth_user.user_id,
-        None,
-        "instant_digest".to_string(),
-        Some(charged_amount),
-        None,
-        Some(true),
-        Some("On-demand digest request".to_string()),
-        None,
-        None,
-        None,
-    );
+    let _ = state.user_repository.log_usage(LogUsageParams {
+        user_id: auth_user.user_id,
+        sid: None,
+        activity_type: "instant_digest".to_string(),
+        credits: Some(charged_amount),
+        time_consumed: None,
+        success: Some(true),
+        reason: Some("On-demand digest request".to_string()),
+        status: None,
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    });
 
     // Calculate cutoff time - use last instant digest time or 12 hours ago
     let now = Utc::now();
@@ -2245,18 +2246,18 @@ pub async fn web_chat_with_image(
     };
 
     // Log the usage
-    let _ = state.user_repository.log_usage(
-        auth_user.user_id,
-        None,
-        "web_chat".to_string(),
-        Some(charged_amount),
-        None,
-        Some(true),
-        if image_data_url.is_some() { Some("Web chat with image".to_string()) } else { None },
-        None,
-        None,
-        None,
-    );
+    let _ = state.user_repository.log_usage(LogUsageParams {
+        user_id: auth_user.user_id,
+        sid: None,
+        activity_type: "web_chat".to_string(),
+        credits: Some(charged_amount),
+        time_consumed: None,
+        success: Some(true),
+        reason: if image_data_url.is_some() { Some("Web chat with image".to_string()) } else { None },
+        status: None,
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    });
 
     // Create mock Twilio payload with image support
     // If there's an image but no text, provide a default prompt

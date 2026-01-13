@@ -12,6 +12,7 @@ use axum::{
 use crate::tool_call_utils::utils::{
     ChatMessage, create_openai_client_for_user,
 };
+use crate::repositories::user_repository::LogUsageParams;
 use crate::{ModelPurpose, AiProvider};
 use chrono::Utc;
 
@@ -563,18 +564,18 @@ pub async fn process_sms(
                             Ok(message_sid) => {
                                 // Log usage (similar to regular message)
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
-                                if let Err(e) = state_clone.user_repository.log_usage(
-                                    user_clone.id,
-                                    Some(message_sid.clone()),
-                                    "sms".to_string(),
-                                    None,
-                                    Some(processing_time_secs as i32),
-                                    Some(true), // Assume success for cancel
-                                    Some("cancel handling".to_string()),
-                                    None,
-                                    None,
-                                    None,
-                                ) {
+                                if let Err(e) = state_clone.user_repository.log_usage(LogUsageParams {
+                                    user_id: user_clone.id,
+                                    sid: Some(message_sid.clone()),
+                                    activity_type: "sms".to_string(),
+                                    credits: None,
+                                    time_consumed: Some(processing_time_secs as i32),
+                                    success: Some(true),
+                                    reason: Some("cancel handling".to_string()),
+                                    status: None,
+                                    recharge_threshold_timestamp: None,
+                                    zero_credits_timestamp: None,
+                                }) {
                                     tracing::error!("Failed to log SMS usage for cancel: {}", e);
                                 }
                                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
@@ -586,18 +587,18 @@ pub async fn process_sms(
                                 // Log the failed attempt
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
                                 let error_status = format!("failed to send: {}", e);
-                                if let Err(log_err) = state_clone.user_repository.log_usage(
-                                    user_clone.id,
-                                    None,
-                                    "sms".to_string(),
-                                    None,
-                                    Some(processing_time_secs as i32),
-                                    Some(false), // Mark as unsuccessful
-                                    Some("cancel handling".to_string()),
-                                    Some(error_status),
-                                    None,
-                                    None,
-                                ) {
+                                if let Err(log_err) = state_clone.user_repository.log_usage(LogUsageParams {
+                                    user_id: user_clone.id,
+                                    sid: None,
+                                    activity_type: "sms".to_string(),
+                                    credits: None,
+                                    time_consumed: Some(processing_time_secs as i32),
+                                    success: Some(false),
+                                    reason: Some("cancel handling".to_string()),
+                                    status: Some(error_status),
+                                    recharge_threshold_timestamp: None,
+                                    zero_credits_timestamp: None,
+                                }) {
                                     tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
                                 }
                             }
@@ -1838,18 +1839,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // If skipping Twilio send (test mode), still deduct credits but skip actual send
     if options.skip_twilio_send {
         // Log the usage without sending the message
-        if let Err(e) = state.user_repository.log_usage(
-            user.id,
-            None,  // No message SID in test mode
-            "sms_test".to_string(),
-            None,
-            Some(processing_time_secs as i32),
-            None,
-            None,
-            None,
-            None,
-            None
-        ) {
+        if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+            user_id: user.id,
+            sid: None,
+            activity_type: "sms_test".to_string(),
+            credits: None,
+            time_consumed: Some(processing_time_secs as i32),
+            success: None,
+            reason: None,
+            status: None,
+            recharge_threshold_timestamp: None,
+            zero_credits_timestamp: None,
+        }) {
             tracing::error!("Failed to log test SMS usage: {}", e);
         }
 
@@ -1915,18 +1916,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Log the SMS usage metadata and store message history
 
             // Log usage
-            if let Err(e) = state.user_repository.log_usage(
-                user.id,
-                Some(message_sid.clone()),
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ) {
+            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: Some(message_sid.clone()),
+                activity_type: "sms".to_string(),
+                credits: None,
+                time_consumed: Some(processing_time_secs as i32),
+                success: None,
+                reason: None,
+                status: None,
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            }) {
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
@@ -1974,18 +1975,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             tracing::error!("Failed to send conversation message: {}", e);
             // Log the failed attempt with error message in status
             let error_status = format!("failed to send: {}", e);
-            if let Err(log_err) = state.user_repository.log_usage(
-                user.id,
-                None,
-                "sms".to_string(),
-                None,
-                Some(processing_time_secs as i32),
-                Some(false),  // Mark as unsuccessful
-                None,
-                Some(error_status),
-                None,
-                None,
-            ) {
+            if let Err(log_err) = state.user_repository.log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: None,
+                activity_type: "sms".to_string(),
+                credits: None,
+                time_consumed: Some(processing_time_secs as i32),
+                success: Some(false),
+                reason: None,
+                status: Some(error_status),
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            }) {
                 tracing::error!("Failed to log SMS usage after send error: {}", log_err);
             }
             (
