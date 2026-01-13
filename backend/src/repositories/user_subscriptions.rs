@@ -41,21 +41,6 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    pub fn decrease_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-
-        // Prevent negative balance
-        let new_credits = (user.credits - amount).max(0.0);
-
-        diesel::update(users::table.find(user_id))
-            .set(users::credits.eq(new_credits))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
     pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
@@ -121,15 +106,6 @@ impl crate::repositories::user_repository::UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
-    
-    pub fn get_stripe_checkout_session_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let session_id = users::table
-            .find(user_id)
-            .select(users::stripe_checkout_session_id)
-            .first::<Option<String>>(&mut conn)?;
-        Ok(session_id)
-    }
 
     pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -159,11 +135,11 @@ impl crate::repositories::user_repository::UserRepository {
         // If user has msg discount tier, they always have messages available
         if user.1.as_deref() == Some("msg") {
 
-            return Ok(user.0.map_or(false, |t| t == tier));
+            return Ok(user.0.is_some_and(|t| t == tier));
         }
 
         // Check both subscription tier and remaining messages
-        Ok(user.0.map_or(false, |t| t == tier))
+        Ok(user.0.is_some_and(|t| t == tier))
     }
 
     // Refund info methods
@@ -171,6 +147,7 @@ impl crate::repositories::user_repository::UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         refund_info::table
             .filter(refund_info::user_id.eq(user_id))
+            .select(RefundInfo::as_select())
             .first::<RefundInfo>(&mut conn)
             .optional()
     }
@@ -181,6 +158,7 @@ impl crate::repositories::user_repository::UserRepository {
         // Try to get existing
         if let Some(info) = refund_info::table
             .filter(refund_info::user_id.eq(user_id))
+            .select(RefundInfo::as_select())
             .first::<RefundInfo>(&mut conn)
             .optional()?
         {
@@ -199,6 +177,7 @@ impl crate::repositories::user_repository::UserRepository {
         // Return the created row
         refund_info::table
             .filter(refund_info::user_id.eq(user_id))
+            .select(RefundInfo::as_select())
             .first::<RefundInfo>(&mut conn)
     }
 

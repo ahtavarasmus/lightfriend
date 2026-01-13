@@ -1,8 +1,8 @@
-/// Country detection and whitelist for notification-only service.
-///
-/// This module handles:
-/// 1. Detection of country from phone number prefix
-/// 2. Distinction between local-number countries (full service) and notification-only countries
+//! Country detection and whitelist for notification-only service.
+//!
+//! This module handles:
+//! 1. Detection of country from phone number prefix
+//! 2. Distinction between local-number countries (full service) and notification-only countries
 
 /// Countries with local Twilio numbers (existing, hardcoded pricing)
 pub const LOCAL_NUMBER_COUNTRIES: &[(&str, &str)] = &[
@@ -59,7 +59,7 @@ pub fn get_country_code_from_phone(phone: &str) -> Option<String> {
 /// These countries use hardcoded pricing
 pub fn is_local_number_country(phone: &str) -> bool {
     // Sort by prefix length descending for accurate matching
-    let mut sorted: Vec<_> = LOCAL_NUMBER_COUNTRIES.iter().copied().collect();
+    let mut sorted: Vec<_> = LOCAL_NUMBER_COUNTRIES.to_vec();
     sorted.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
     sorted.iter().any(|(prefix, _)| phone.starts_with(prefix))
@@ -69,15 +69,10 @@ pub fn is_local_number_country(phone: &str) -> bool {
 /// These countries use dynamic Twilio API pricing
 pub fn is_notification_only_country(phone: &str) -> bool {
     // Sort by prefix length descending for accurate matching
-    let mut sorted: Vec<_> = NOTIFICATION_ONLY_COUNTRIES.iter().copied().collect();
+    let mut sorted: Vec<_> = NOTIFICATION_ONLY_COUNTRIES.to_vec();
     sorted.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
     sorted.iter().any(|(prefix, _)| phone.starts_with(prefix))
-}
-
-/// Check if a phone number is from any supported country
-pub fn is_supported_country(phone: &str) -> bool {
-    is_local_number_country(phone) || is_notification_only_country(phone)
 }
 
 /// Check if a country code is a notification-only country

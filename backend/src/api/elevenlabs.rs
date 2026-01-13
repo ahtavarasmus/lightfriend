@@ -9,6 +9,7 @@ use tracing::error;
 use axum::middleware;
 use std::sync::Arc;
 use crate::AppState;
+use crate::repositories::user_repository::LogUsageParams;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -38,9 +39,7 @@ pub struct NotificationCallPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct AssistantPayload {
-    agent_id: String,
     call_sid: String,
-    called_number: String,
     caller_id: String,
 }
 
@@ -194,19 +193,17 @@ pub async fn fetch_assistant(
                 if let Err(e) = state.user_core.verify_user(user.id) {
                     tracing::error!("Error verifying user: {}", e);
                     // Continue even if verification fails
+                } else if user_settings.agent_language == "fi" {
+                    conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string();
+                    conversation_config_override.tts.voice_id = fi_voice_id.clone();
+                } else if user_settings.agent_language == "de" {
+                    conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string();
+                    conversation_config_override.tts.voice_id = de_voice_id.clone();
                 } else {
-                    if user_settings.agent_language == "fi" {
-                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string();
-                        conversation_config_override.tts.voice_id = fi_voice_id.clone();
-                    } else if user_settings.agent_language == "de" {
-                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string();
-                        conversation_config_override.tts.voice_id = de_voice_id.clone();
-                    } else {
-                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string();
-                        conversation_config_override.tts.voice_id = us_voice_id.clone();
-                    }
+                    conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string();
+                    conversation_config_override.tts.voice_id = us_voice_id.clone();
                 }
-            } else if let Err(_) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
+            } else if crate::utils::usage::check_user_credits(&state, &user, "voice", None).await.is_err() {
                 // Send insufficient credits message
                 let error_message = "Insufficient credits to make a voice call".to_string();
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
@@ -304,18 +301,18 @@ pub async fn fetch_assistant(
             let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
             let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
             // log usage and start call
-            if let Err(e) = state.user_repository.log_usage(
-                user.id,
-                Some(call_sid),
-                "call".to_string(),
-                None,
-                None,
-                None,
-                None,
-                Some("ongoing".to_string()),
-                Some(recharge_threshold_timestamp),
-                Some(zero_credits_timestamp),
-            ) {
+            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: Some(call_sid),
+                activity_type: "call".to_string(),
+                credits: None,
+                time_consumed: None,
+                success: None,
+                reason: None,
+                status: Some("ongoing".to_string()),
+                recharge_threshold_timestamp: Some(recharge_threshold_timestamp),
+                zero_credits_timestamp: Some(zero_credits_timestamp),
+            }) {
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
@@ -618,7 +615,7 @@ pub async fn handle_email_fetch_tool_call(
                 // Truncate body if too long and clean it up
                 let body = email.body.as_ref()
                     .map(|b| {
-                        let cleaned = b.replace('\n', " ").replace('\r', " ");
+                        let cleaned = b.replace(['\n', '\r'], " ");
                         let chars: Vec<char> = cleaned.chars().collect();
                         if chars.len() > 150 {
                             let truncated: String = chars.into_iter().take(150).collect();
@@ -1723,7 +1720,7 @@ pub async fn handle_calendar_event_creation(
         summary: payload.summary.clone(),
         description: payload.description.clone(),
         start_time,
-        duration_minutes: payload.duration_minutes.clone(),
+        duration_minutes: payload.duration_minutes,
         add_notification: payload.add_notification.unwrap_or(false),
     };
     // Create the event directly
@@ -2116,7 +2113,7 @@ pub async fn make_notification_call(
     let country = match user.phone_number_country {
         Some(c) => c,
         None => {
-            match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+            match crate::handlers::profile_handlers::set_user_phone_country(state, user.id, &user.phone_number).await {
                 Ok(Some(c)) => c,
                 Ok(None) => {
                     error!("Failed to determine country for user {} after lookup", user.id);
@@ -2505,7 +2502,7 @@ pub async fn get_web_signed_url(
     // Request signed URL from ElevenLabs
     let client = reqwest::Client::new();
     let response = client
-        .get(&format!(
+        .get(format!(
             "https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id={}",
             agent_id
         ))
@@ -2612,18 +2609,18 @@ pub async fn end_web_call(
     }
 
     // Log the usage
-    if let Err(e) = state.user_repository.log_usage(
+    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
         user_id,
-        None, // no call_sid for web calls
-        "web_call".to_string(),
-        None,
-        Some(duration_secs),
-        None,
-        None,
-        Some("done".to_string()),
-        None,
-        None,
-    ) {
+        sid: None, // no call_sid for web calls
+        activity_type: "web_call".to_string(),
+        credits: None,
+        time_consumed: Some(duration_secs),
+        success: None,
+        reason: None,
+        status: Some("done".to_string()),
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    }) {
         error!("Failed to log web call usage: {}", e);
     }
 

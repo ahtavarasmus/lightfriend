@@ -761,7 +761,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(&state, &media_sid, &user).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(state, media_sid, &user).await {
                     Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                     Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -875,7 +875,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             if needs_two_step {
                 tracing::info!("Using two-step vision for {:?} provider (user {})", provider, user.id);
 
-                match state.ai_config.describe_image(provider, &media_url, &processed_body).await {
+                match state.ai_config.describe_image(provider, media_url, &processed_body).await {
                     Ok(description) => {
                         tracing::info!("Got vision description: {}", &description[..description.len().min(100)]);
 
@@ -993,7 +993,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     ];
 
     // Create client for the user's provider
-    let client = match create_openai_client_for_user(&state, user.id) {
+    let client = match create_openai_client_for_user(state, user.id) {
         Ok((client, _)) => client,
         Err(e) => {
             tracing::error!("Failed to create AI client: {}", e);
@@ -1028,7 +1028,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // Get the model for this provider
     // For two-step vision providers, images were already converted to text,
     // so we always use the Default (tool-calling) model
-    let model = get_model(&state, provider, ModelPurpose::Default);
+    let model = get_model(state, provider, ModelPurpose::Default);
 
     // Use mock response if provided (for testing), otherwise call real LLM
     let result = if let Some(mock_response) = options.mock_llm_response {
@@ -1058,8 +1058,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         None | Some(chat_completion::FinishReason::stop) => {
             tracing::debug!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
-            let resp = result.choices[0].message.content.clone().unwrap_or_default();
-            resp
+            
+            result.choices[0].message.content.clone().unwrap_or_default()
         }
         Some(chat_completion::FinishReason::tool_calls) => {
             tracing::debug!("Model requested tool calls - beginning tool execution phase");
@@ -1145,7 +1145,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     let query = format!("User info: {}. Query: {}", user_given_info, c.query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_given_info);
-                    match crate::utils::tool_exec::ask_perplexity(&state, &query, &sys_prompt).await {
+                    match crate::utils::tool_exec::ask_perplexity(state, &query, &sys_prompt).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received Perplexity answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1188,7 +1188,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     let units = c.units;
                     let forecast_type = c.forecast_type.unwrap_or_else(|| "current".to_string());
 
-                    match crate::utils::tool_exec::get_weather(&state, &location, &units, &forecast_type, user.id).await {
+                    match crate::utils::tool_exec::get_weather(state, &location, &units, &forecast_type, user.id).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1288,7 +1288,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     };
                 } else if name == "fetch_emails" {
                     tracing::debug!("Executing fetch_emails tool call");
-                    let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
+                    let response = crate::tool_call_utils::email::handle_fetch_emails(state, user.id).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_specific_email" {
                     tracing::debug!("Executing fetch_specific_email tool call");
@@ -1313,7 +1313,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     };
 
                     // First get the email ID
-                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
+                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(state, user.id, &query.query).await;
                     let auth_user = crate::handlers::auth_middleware::AuthUser {
                         user_id: user.id,
                         is_admin: false,
@@ -1341,7 +1341,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "send_email" {
                     tracing::debug!("Executing send_email tool call");
                     match crate::tool_call_utils::email::handle_send_email(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1404,7 +1404,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "respond_to_email" {
                     tracing::debug!("Executing respond_to_email tool call");
                     match crate::tool_call_utils::email::handle_respond_to_email(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1467,7 +1467,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     }
                 } else if name == "create_task" {
                     tracing::debug!("Executing create_task tool call");
-                    match crate::tool_call_utils::management::handle_create_task(&state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_create_task(state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
@@ -1478,7 +1478,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     }
                 } else if name == "update_monitoring_status" {
                     tracing::debug!("Executing update_monitoring_status tool call");
-                    match crate::tool_call_utils::management::handle_set_proactive_agent(&state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_set_proactive_agent(state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
@@ -1490,7 +1490,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "create_calendar_event" {
                     tracing::debug!("Executing create_calendar_event tool call");
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1556,7 +1556,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "search_chat_contacts" {
                     tracing::debug!("Executing search_chat_contacts tool call");
                     let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1564,7 +1564,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_recent_messages" {
                     tracing::debug!("Executing fetch_recent_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_recent_messages(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1572,7 +1572,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_chat_messages" {
                     tracing::debug!("Executing fetch_chat_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_chat_messages(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1580,7 +1580,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "send_chat_message" {
                     tracing::debug!("Executing send_chat_message tool call");
                     match crate::tool_call_utils::bridge::handle_send_chat_message(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         &user,
@@ -1649,7 +1649,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "fetch_calendar_events" {
                     tracing::debug!("Executing fetch_calendar_events tool call");
                     let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                     ).await;
@@ -1657,7 +1657,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "control_tesla" {
                     tracing::debug!("Executing control_tesla tool call");
                     let response = crate::tool_call_utils::tesla::handle_tesla_command(
-                        &state,
+                        state,
                         user.id,
                         arguments,
                         false, // send notification for SMS-initiated commands
@@ -1666,7 +1666,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "switch_selected_tesla_vehicle" {
                     tracing::debug!("Executing switch_selected_tesla_vehicle tool call");
                     let response = crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(
-                        &state,
+                        state,
                         user.id,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
@@ -1906,14 +1906,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(
-        &state,
+        state,
         &clean_response,
         media_sid,
         &user
     ).await {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history
-            
+
             // Log usage
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
@@ -1930,7 +1930,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user.id, "message", None) {
                 tracing::error!("Failed to deduct user credits: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -1948,7 +1948,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         // Get user information
                         if user.charge_when_under {
                             use axum::extract::{State, Path};
-                            let state_clone = Arc::clone(&state);
+                            let state_clone = Arc::clone(state);
                             tokio::spawn(async move {
                                 let _ = crate::handlers::stripe_handlers::automatic_charge(
                                     State(state_clone),

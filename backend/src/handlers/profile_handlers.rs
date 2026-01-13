@@ -26,6 +26,7 @@ use axum::extract::Path;
 use serde_json::json;
 
 use crate::AppState;
+use crate::repositories::user_core::UpdateProfileParams;
 use crate::utils::country::get_country_code_from_phone;
 
 #[derive(Deserialize)]
@@ -250,12 +251,12 @@ pub async fn get_profile(
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
                 save_context: user_settings.save_context,
-                days_until_billing: days_until_billing,
-                twilio_sid: twilio_sid,
-                twilio_token: twilio_token,
-                openrouter_api_key: openrouter_api_key,
-                textbee_device_id: textbee_device_id,
-                textbee_api_key: textbee_api_key,
+                days_until_billing,
+                twilio_sid,
+                twilio_token,
+                openrouter_api_key,
+                textbee_device_id,
+                textbee_api_key,
                 estimated_monitoring_cost,
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
@@ -501,7 +502,7 @@ pub async fn patch_profile_field(
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "agent_language must be a string"}))
             ))?;
-            let allowed_languages = vec!["en", "fi", "de"];
+            let allowed_languages = ["en", "fi", "de"];
             if !allowed_languages.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -518,7 +519,7 @@ pub async fn patch_profile_field(
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "notification_type must be a string"}))
             ))?;
-            let allowed_types = vec!["sms", "call", "call_sms"];
+            let allowed_types = ["sms", "call", "call_sms"];
             if !allowed_types.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -1274,7 +1275,7 @@ pub async fn update_profile(
         ));
     }
     // Validate agent language
-    let allowed_languages = vec!["en", "fi", "de"];
+    let allowed_languages = ["en", "fi", "de"];
     if !allowed_languages.contains(&update_req.agent_language.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1396,20 +1397,20 @@ pub async fn update_profile(
     let old_country = current_user.phone_number_country.clone();
     let old_credits_left = current_user.credits_left;
 
-    match state.user_core.update_profile(
-        auth_user.user_id,
-        &update_req.email,
-        &update_req.phone_number,
-        &update_req.nickname,
-        &update_req.info,
-        &update_req.timezone,
-        &update_req.timezone_auto,
-        update_req.notification_type.as_deref(),
-        update_req.save_context,
-        &update_req.location,
-        &update_req.nearby_places,
-        update_req.preferred_number.as_deref(),
-    ) {
+    match state.user_core.update_profile(UpdateProfileParams {
+        user_id: auth_user.user_id,
+        email: &update_req.email,
+        phone_number: &update_req.phone_number,
+        nickname: &update_req.nickname,
+        info: &update_req.info,
+        timezone: &update_req.timezone,
+        timezone_auto: &update_req.timezone_auto,
+        notification_type: update_req.notification_type.as_deref(),
+        save_context: update_req.save_context,
+        location: &update_req.location,
+        nearby_places: &update_req.nearby_places,
+        preferred_number: update_req.preferred_number.as_deref(),
+    }) {
         Ok(_) => {
             if let Err(e) = state.user_core.update_agent_language(auth_user.user_id, &update_req.agent_language) {
                 return Err((
@@ -2082,8 +2083,8 @@ pub async fn get_instant_digest(
     messages.sort_by(|a, b| {
         let plat_cmp = a.platform.cmp(&b.platform);
         if plat_cmp == std::cmp::Ordering::Equal {
-            let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
-            let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+            let a_pri = priority_map.get(&a.platform).is_some_and(|set| set.contains(&a.sender));
+            let b_pri = priority_map.get(&b.platform).is_some_and(|set| set.contains(&b.sender));
             b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
         } else {
             plat_cmp

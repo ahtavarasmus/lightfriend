@@ -62,7 +62,7 @@ pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_disc
     }
 
     println!("❌ Tool {} requires tier 2 subscription", tool_name);
-    return true;
+    true
 }
 
 

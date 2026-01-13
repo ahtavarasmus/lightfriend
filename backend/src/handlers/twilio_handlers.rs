@@ -416,7 +416,7 @@ pub async fn get_country_info(
     let price_unit = value["price_unit"].as_str().unwrap_or("USD").to_string();
     let inbound_sms_prices = value["inbound_sms_prices"].as_array().unwrap_or(&vec![]).iter().map(|item| {
         let number_type = item["number_type"].as_str().unwrap_or("").to_string();
-        let current_price = item["prices"].as_array().and_then(|arr| arr.get(0)).and_then(|p| p["current_price"].as_str()).unwrap_or("0.00").to_string();
+        let current_price = item["prices"].as_array().and_then(|arr| arr.first()).and_then(|p| p["current_price"].as_str()).unwrap_or("0.00").to_string();
         InboundSmsPrice { number_type, current_price }
     }).collect::<Vec<_>>();
     let outbound_sms_prices: Vec<OutboundSmsPrice> = match serde_json::from_value(value["outbound_sms_prices"].clone()) {

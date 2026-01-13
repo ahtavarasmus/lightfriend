@@ -157,7 +157,7 @@ pub async fn handle_send_email(
         args.to.clone()
     } else {
         // Try to find a matching contact profile
-        let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+        let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
         let matching_profile = profiles.iter().find(|p| {
             let nickname_lower = p.nickname.to_lowercase();
             let to_lower = args.to.to_lowercase();
@@ -482,7 +482,7 @@ pub async fn handle_respond_to_email(
 
 pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, query: &str) -> String {
     // Create OpenAI client for email selection (user-based routing)
-    let (client, provider) = match crate::tool_call_utils::utils::create_openai_client_for_user(&state, user_id) {
+    let (client, provider) = match crate::tool_call_utils::utils::create_openai_client_for_user(state, user_id) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("Failed to create OpenAI client: {}", e);
@@ -491,7 +491,7 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
     };
 
     // Check if query matches a contact profile nickname and get their email addresses
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or(Vec::new());
+    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
     let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let query_lower = query.to_lowercase();

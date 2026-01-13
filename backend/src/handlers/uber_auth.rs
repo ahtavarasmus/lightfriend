@@ -183,7 +183,7 @@ pub async fn uber_callback(
     if let Err(e) = state.user_repository.create_uber_connection(
         user_id,
         &access_token,
-        refresh_token.as_ref().map(|s| s.as_str()),
+        refresh_token.as_deref(),
         expires_in,
     ) {
         tracing::error!("Failed to store Uber connection: {}", e);
@@ -278,106 +278,6 @@ pub async fn uber_disconnect(
 
     tracing::info!("Successfully disconnected Uber for user {}", auth_user.user_id);
     Ok(StatusCode::OK)
-}
-
-
-// Utility function to get valid access token, refreshing if necessary
-pub async fn get_valid_uber_access_token(
-    state: &Arc<AppState>,
-    user_id: i32,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    let token_info = state.user_repository.get_uber_token_info(user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to fetch Uber token info: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to fetch Uber connection"})),
-            )
-        })?;
-
-    let (access_token, refresh_token, expires_in_val, last_update_val) = match token_info {
-        Some(info) => info,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "No active Uber connection found"})),
-            ));
-        }
-    };
-
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    // Check if token is expired or about to expire (buffer 5 minutes)
-    if current_time < last_update_val + expires_in_val - 300 {
-        // Token is valid
-        return Ok(access_token);
-    }
-
-    // Need to refresh
-    if refresh_token.is_empty() {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Refresh token not found"})),
-        ));
-    }
-
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("Client should build");
-
-    tracing::info!("Refreshing Uber access token for user {}", user_id);
-
-    let token_result = state
-        .uber_oauth_client
-        .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
-        .request_async(&http_client)
-        .await
-        .map_err(|e| {
-            tracing::error!("Token refresh failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Token refresh failed: {}", e)})),
-            )
-        })?;
-
-    let new_access_token = token_result.access_token().secret().clone();
-    let new_expires_in = token_result.expires_in().unwrap_or_default().as_secs() as i32;
-
-    // Update access token
-    state.user_repository.update_uber_access_token(
-        user_id,
-        &new_access_token,
-        new_expires_in,
-    )
-    .map_err(|e| {
-        tracing::error!("Failed to update Uber access token: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to update Uber access token"})),
-        )
-    })?;
-
-    // If new refresh token provided, update it
-    if let Some(rt) = token_result.refresh_token() {
-        let new_refresh_token = rt.secret().clone();
-        state.user_repository.update_uber_refresh_token(
-            user_id,
-            &new_refresh_token,
-        )
-        .map_err(|e| {
-            tracing::error!("Failed to update Uber refresh token: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update Uber refresh token"})),
-            )
-        })?;
-    }
-
-    Ok(new_access_token)
 }
 
 pub async fn uber_status(

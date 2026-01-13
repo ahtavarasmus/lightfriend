@@ -1,4 +1,3 @@
-use futures::Future;
 use axum::{
     extract::{FromRequestParts, State},
     http::{Request, request::Parts, StatusCode},
@@ -211,78 +210,76 @@ impl IntoResponse for AuthError {
 impl FromRequestParts<Arc<AppState>> for AuthUser {
     type Rejection = AuthError;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut Parts,
         state: &Arc<AppState>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move {
-        // Extract the token from cookies
-        // Note: header names are case-insensitive in HTTP
-        let cookie_header = parts
-            .headers
-            .get(axum::http::header::COOKIE)
-            .and_then(|header| header.to_str().ok())
-            .ok_or_else(|| {
-                tracing::debug!("No cookie header found");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
+    ) -> Result<Self, Self::Rejection> {
+    // Extract the token from cookies
+    // Note: header names are case-insensitive in HTTP
+    let cookie_header = parts
+        .headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|header| header.to_str().ok())
+        .ok_or_else(|| {
+            tracing::debug!("No cookie header found");
+            AuthError {
+                status: StatusCode::UNAUTHORIZED,
+                message: "No authorization token provided".to_string(),
+            }
+        })?;
 
-        tracing::debug!("Cookie header: {}", cookie_header);
+    tracing::debug!("Cookie header: {}", cookie_header);
 
-        // Parse cookies to find access_token
-        let token = cookie_header
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                tracing::debug!("No access_token found in cookies");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
-
-        // Decode the token
-        let claims = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(
-                std::env::var("JWT_SECRET_KEY")
-                    .expect("JWT_SECRET_KEY must be set in environment")
-                    .as_bytes(),
-            ),
-            &Validation::new(Algorithm::HS256),
-        )
-        .map_err(|_| AuthError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Invalid token".to_string(),
-        })?
-        .claims;
-
-        // Check if user is admin
-        let is_admin = state
-            .user_core
-            .is_admin(claims.sub)
-            .map_err(|_| AuthError {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Failed to check admin status".to_string(),
-            })?;
-
-        Ok(AuthUser {
-            user_id: claims.sub,
-            is_admin,
+    // Parse cookies to find access_token
+    let token = cookie_header
+        .split(';')
+        .map(|s| s.trim())
+        .find_map(|cookie| {
+            let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
+            tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
+            if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
+                Some(cookie_parts[1])
+            } else {
+                None
+            }
         })
-        }
+        .ok_or_else(|| {
+            tracing::debug!("No access_token found in cookies");
+            AuthError {
+                status: StatusCode::UNAUTHORIZED,
+                message: "No authorization token provided".to_string(),
+            }
+        })?;
+
+    // Decode the token
+    let claims = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(
+            std::env::var("JWT_SECRET_KEY")
+                .expect("JWT_SECRET_KEY must be set in environment")
+                .as_bytes(),
+        ),
+        &Validation::new(Algorithm::HS256),
+    )
+    .map_err(|_| AuthError {
+        status: StatusCode::UNAUTHORIZED,
+        message: "Invalid token".to_string(),
+    })?
+    .claims;
+
+    // Check if user is admin
+    let is_admin = state
+        .user_core
+        .is_admin(claims.sub)
+        .map_err(|_| AuthError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "Failed to check admin status".to_string(),
+        })?;
+
+    Ok(AuthUser {
+        user_id: claims.sub,
+        is_admin,
+    })
     }
 }
 

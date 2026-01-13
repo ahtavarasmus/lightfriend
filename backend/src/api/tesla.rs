@@ -3,14 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::time::Duration;
 
-// Get Tesla API base URL from env or default to EU region
-fn get_tesla_api_base() -> String {
-    std::env::var("TESLA_API_BASE").unwrap_or_else(|_| {
-        // Default to EU region for development
-        "https://fleet-api.prd.eu.vn.cloud.tesla.com".to_string()
-    })
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TeslaVehicle {
     pub id: i64,
@@ -65,7 +57,6 @@ pub struct VehicleState {
 #[derive(Debug, Deserialize)]
 pub struct VehiclesResponse {
     pub response: Vec<TeslaVehicle>,
-    pub count: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,7 +84,6 @@ pub struct NearbySitesResponse {
 #[derive(Debug, Deserialize)]
 pub struct NearbySitesData {
     pub superchargers: Vec<ChargingSite>,
-    pub destination_charging: Vec<ChargingSite>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,10 +91,6 @@ pub struct ChargingSite {
     pub location: ChargingLocation,
     pub name: String,
     pub distance_miles: f64,
-    #[serde(default)]
-    pub available_stalls: Option<i32>,
-    #[serde(default)]
-    pub total_stalls: Option<i32>,
     #[serde(default)]
     pub id: Option<i64>,  // Supercharger ID for navigation_sc_request
 }
@@ -123,18 +109,6 @@ pub struct TeslaClient {
 }
 
 impl TeslaClient {
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(60))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
-            base_url: get_tesla_api_base(),
-            proxy_url: None,
-            proxy_client: None,
-        }
-    }
-
     pub fn new_with_region(region: &str) -> Self {
         Self {
             client: reqwest::Client::builder()
@@ -389,18 +363,6 @@ impl TeslaClient {
 
         let sites_response: NearbySitesResponse = response.json().await?;
         Ok(sites_response.response)
-    }
-
-    // Navigate to GPS coordinates (triggers battery preconditioning if destination is a Supercharger)
-    // Note: Navigation commands must bypass the proxy as it doesn't support them
-    pub async fn navigate_to_gps(&self, access_token: &str, vehicle_id: &str, lat: f64, lon: f64) -> Result<bool, Box<dyn Error>> {
-        let body = serde_json::json!({
-            "lat": lat,
-            "lon": lon,
-            "order": 1
-        });
-        // Use direct API - proxy returns "invalid_command" for navigation
-        self.send_command_direct_api(access_token, vehicle_id, "navigation_gps_request", &body).await
     }
 
     // Share a destination to start navigation immediately (uses the share endpoint)

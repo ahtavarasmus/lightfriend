@@ -23,9 +23,3 @@ pub fn get_webauthn() -> &'static Webauthn {
         builder.build().expect("Failed to build WebAuthn")
     })
 }
-
-/// Get the relying party ID
-pub fn get_rp_id() -> String {
-    std::env::var("WEBAUTHN_RP_ID")
-        .unwrap_or_else(|_| "localhost".to_string())
-}

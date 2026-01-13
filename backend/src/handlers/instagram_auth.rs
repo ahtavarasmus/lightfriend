@@ -90,7 +90,7 @@ async fn connect_instagram_with_retry(
                  
                     // Reinitialize client (bypass cache since we're recovering from an error)
                     tracing::debug!("Reinitializing client for user {}", user_id);
-                    match matrix_auth::get_client(user_id, &state).await {
+                    match matrix_auth::get_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -101,12 +101,10 @@ async fn connect_instagram_with_retry(
                             return Err(init_err);
                         }
                     }
+                } else if is_one_time_key_conflict(&e) {
+                    return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
                 } else {
-                    if is_one_time_key_conflict(&e) {
-                        return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
-                    } else {
-                        return Err(e);
-                    }
+                    return Err(e);
                 }
             }
         }
@@ -129,7 +127,7 @@ async fn connect_instagram(
     let room_id = response.room_id();
     tracing::debug!("🏠 Created room with ID: {}", room_id);
  
-    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
  
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;

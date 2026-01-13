@@ -470,8 +470,6 @@ pub struct NewContactProfile {
 #[diesel(table_name = contact_profile_exceptions)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContactProfileException {
-    pub id: Option<i32>,
-    pub profile_id: i32,
     pub platform: String,           // "whatsapp", "telegram", "signal", "email"
     pub notification_mode: String,  // "all", "critical", "digest"
     pub notification_type: String,  // "sms", "call"
@@ -633,15 +631,11 @@ pub struct NewMessageHistory {
 #[diesel(table_name = country_availability)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct CountryAvailability {
-    pub id: i32,
-    pub country_code: String,
     pub has_local_numbers: bool,
     pub outbound_sms_price: Option<f32>,
     pub inbound_sms_price: Option<f32>,
     pub outbound_voice_price_per_min: Option<f32>,
     pub inbound_voice_price_per_min: Option<f32>,
-    pub last_checked: i32,
-    pub created_at: i32,
 }
 
 #[derive(Insertable, Debug)]
@@ -696,11 +690,7 @@ pub struct NewTesla {
 #[diesel(table_name = totp_secrets)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct TotpSecret {
-    pub id: Option<i32>,
-    pub user_id: i32,
     pub encrypted_secret: String,
-    pub enabled: i32,  // 0 = disabled, 1 = enabled
-    pub created_at: i32,
 }
 
 #[derive(Insertable, Debug)]
@@ -717,9 +707,7 @@ pub struct NewTotpSecret {
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct TotpBackupCode {
     pub id: Option<i32>,
-    pub user_id: i32,
     pub code_hash: String,
-    pub used: i32,  // 0 = unused, 1 = used
 }
 
 #[derive(Insertable, Debug)]
@@ -735,17 +723,11 @@ pub struct NewTotpBackupCode {
 #[diesel(table_name = webauthn_credentials)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct WebauthnCredential {
-    pub id: Option<i32>,
-    pub user_id: i32,
     pub credential_id: String,
     pub encrypted_public_key: String,
     pub device_name: String,
-    pub counter: i32,
-    pub transports: Option<String>,
-    pub aaguid: Option<String>,
     pub created_at: i32,
     pub last_used_at: Option<i32>,
-    pub enabled: i32,  // 0 = disabled, 1 = enabled
 }
 
 #[derive(Insertable, Debug)]
@@ -766,13 +748,8 @@ pub struct NewWebauthnCredential {
 #[diesel(table_name = webauthn_challenges)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct WebauthnChallenge {
-    pub id: Option<i32>,
-    pub user_id: i32,
     pub challenge: String,
-    pub challenge_type: String,  // "registration" or "authentication"
     pub context: Option<String>,  // e.g., "login", "tesla_unlock"
-    pub created_at: i32,
-    pub expires_at: i32,
 }
 
 #[derive(Insertable, Debug)]
@@ -791,9 +768,7 @@ pub struct NewWebauthnChallenge {
 #[diesel(table_name = waitlist)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct WaitlistEntry {
-    pub id: Option<i32>,
     pub email: String,
-    pub created_at: i32,
 }
 
 #[derive(Insertable, Debug)]
@@ -808,12 +783,7 @@ pub struct NewWaitlistEntry {
 #[diesel(table_name = crate::schema::refund_info)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct RefundInfo {
-    pub id: Option<i32>,
-    pub user_id: i32,
     pub has_refunded: i32,  // 0 = no, 1 = yes (SQLite doesn't have bool)
-    pub last_credit_pack_amount: Option<f32>,
-    pub last_credit_pack_purchase_timestamp: Option<i32>,
-    pub refunded_at: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]

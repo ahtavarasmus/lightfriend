@@ -223,7 +223,7 @@ pub async fn ask_perplexity(
 ) -> Result<String, Box<dyn Error>> {
 
     // Always use OpenRouter for Perplexity since it's an OpenRouter-specific model
-    let client = create_openai_client(&state)?;
+    let client = create_openai_client(state)?;
 
     let messages = vec![
         ChatCompletionMessage {

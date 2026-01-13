@@ -14,7 +14,7 @@ pub enum EncryptionError {
     #[error("Failed to create cipher: {0}")]
     CipherError(String),
     #[error("Encryption failed: {0}")]
-    EncryptionError(String),
+    EncryptFailed(String),
     #[error("Decryption failed: {0}")]
     DecryptionError(String),
     #[error("Invalid UTF-8: {0}")]
@@ -48,7 +48,7 @@ pub fn encrypt(value: &str) -> Result<String, EncryptionError> {
     
     let ciphertext = cipher
         .encrypt(nonce, value.as_bytes())
-        .map_err(|e| EncryptionError::EncryptionError(e.to_string()))?;
+        .map_err(|e| EncryptionError::EncryptFailed(e.to_string()))?;
     
     let mut combined = nonce_bytes.to_vec();
     combined.extend(ciphertext);

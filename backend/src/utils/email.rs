@@ -1,6 +1,7 @@
 use std::error::Error;
 use resend_rs::{Resend, types::CreateEmailBaseOptions};
 
+
 /// Lightfriend brand colors
 const PRIMARY_BLUE: &str = "#1E90FF";
 const LIGHT_BLUE: &str = "#7EB2FF";
@@ -78,6 +79,7 @@ pub async fn send_magic_link_email(
             return Ok(());
         }
     };
+    let _ = reply_to; // Used in other email functions
 
     let content = format!(
         r#"<p>You've successfully subscribed. Click the button below to set your password and access your account:</p>
@@ -139,6 +141,7 @@ pub async fn send_password_reset_email(
             return Ok(());
         }
     };
+    let _ = reply_to; // Used in other email functions
 
     let content = format!(
         r#"<p>You requested a password reset for your Lightfriend account.</p>
@@ -193,6 +196,7 @@ pub async fn send_subscription_activated_email(
             return Ok(());
         }
     };
+    let _ = reply_to; // Used in other email functions
 
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
     let login_url = format!("{}/login", frontend_url);
@@ -231,6 +235,7 @@ pub async fn send_subscription_activated_email(
 
     Ok(())
 }
+
 
 /// Send a broadcast email (admin feature updates, announcements, etc.)
 ///
@@ -275,3 +280,4 @@ pub async fn send_broadcast_email(
 pub fn is_resend_configured() -> bool {
     get_resend_config().is_some()
 }
+

@@ -1,5 +1,7 @@
 use reqwest::Client;
+use serde_json::json;
 use std::sync::Arc;
+use tokio::spawn;
 use crate::AppState;
 use serde::Deserialize;
 use std::env;
@@ -173,7 +175,7 @@ pub async fn validate_user_twilio_signature(
 
     // Extract user_id from the request path
     let path = request.uri().path();
-    let user_id = match path.split('/').last() {
+    let user_id = match path.split('/').next_back() {
         Some(id) => match id.parse::<i32>() {
             Ok(id) => {
                 tracing::info!("✅ Successfully extracted user_id: {}", id);
@@ -473,33 +475,6 @@ pub async fn delete_twilio_message_media(
     Ok(())
 }
 
-use serde_json::json;
-use tokio::spawn;
-
-async fn send_textbee_sms(device_id: String, api_key: String, recipient: String, body: String) -> Result<(), Box<dyn Error>> {
-    let url = format!("https://api.textbee.dev/api/v1/gateway/devices/{}/send-sms", device_id);
-
-    let client = Client::new();
-
-    let data = json!({
-        "recipients": [recipient],
-        "message": body
-    });
-
-    client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .header("x-api-key", api_key)
-        .json(&data)
-        .send()
-        .await?
-        .error_for_status()?;
-
-    tracing::debug!("Successfully sent conversation message via TextBee to: {}", recipient);
-
-    Ok(())
-}
-
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -577,7 +552,7 @@ pub async fn send_conversation_message(
 
     let running_environment= env::var("ENVIRONMENT")
             .map_err(|_| "ENVIRONMENT not set")?;
-    if running_environment == "development".to_string() {
+    if running_environment == "development" {
         tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
     }
@@ -604,7 +579,7 @@ pub async fn send_conversation_message(
     // Get or set country
     let mut country = user.phone_number_country.clone();
     if country.is_none() {
-        match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+        match crate::handlers::profile_handlers::set_user_phone_country(state, user.id, &user.phone_number).await {
             Ok(c) => country = c,
             Err(e) => {
                 tracing::error!("Failed to set phone country: {}", e);
@@ -617,7 +592,7 @@ pub async fn send_conversation_message(
     // Determine From strategy
     // IMPORTANT: For notification-only countries without BYOT credentials,
     // we must ALWAYS use messaging service - never send from US number directly
-    let preferred = user.preferred_number.as_ref().map(String::as_str).unwrap_or("");
+    let preferred = user.preferred_number.as_deref().unwrap_or("");
     let has_byot_credentials = state.user_core.is_byot_user(user.id);
     let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
 

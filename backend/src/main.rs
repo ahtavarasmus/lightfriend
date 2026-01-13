@@ -59,7 +59,7 @@ pub fn validate_env() {
     ];
 
     for var in core_vars.iter() {
-        std::env::var(var).expect(&format!("{} must be set", var));
+        std::env::var(var).unwrap_or_else(|_| panic!("{} must be set", var));
     }
 
     // Production-only validation for live application features
@@ -99,7 +99,7 @@ pub fn validate_env() {
         ];
 
         for var in production_vars.iter() {
-            std::env::var(var).expect(&format!("{} must be set in production environment", var));
+            std::env::var(var).unwrap_or_else(|_| panic!("{} must be set in production environment", var));
         }
     }
 
@@ -171,7 +171,7 @@ async fn bootstrap_admin_if_needed(
         }
         Err(e) => {
             tracing::error!("Failed to create bootstrap admin: {}", e);
-            Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+            Err(Box::new(std::io::Error::other(e.to_string())))
         }
     }
 }
@@ -285,8 +285,6 @@ async fn main() {
         youtube_oauth_client,
         session_store: session_store.clone(),
         login_limiter: DashMap::new(),
-        password_reset_limiter: DashMap::new(),
-        password_reset_verify_limiter: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
         matrix_clients,
@@ -295,7 +293,6 @@ async fn main() {
         tesla_waking_vehicles: Arc::new(DashMap::new()),
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
-        password_reset_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,
@@ -352,7 +349,6 @@ async fn main() {
         .route("/api/register", post(auth_handlers::register))
         .route("/api/logout", post(auth_handlers::logout))
         .route("/api/auth/refresh", post(auth_handlers::refresh_token))
-        .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/validate/{token}", get(auth_handlers::validate_reset_token))
         .route("/api/password-reset/complete", post(auth_handlers::complete_password_reset))
         .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
@@ -377,7 +373,6 @@ async fn main() {
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
-        .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
         .route("/api/admin/broadcast-email", post(admin_handlers::broadcast_email))
         .route("/api/admin/usage-logs", get(admin_handlers::get_usage_logs))
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))

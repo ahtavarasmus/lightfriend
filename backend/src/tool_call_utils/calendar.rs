@@ -125,7 +125,7 @@ pub async fn handle_fetch_calendar_events(
         }
     };
 
-    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, &c.start, &c.end).await {
+    match crate::handlers::google_calendar::handle_calendar_fetching(state, user_id, &c.start, &c.end).await {
         Ok(Json(response)) => {
             if let Some(events) = response.get("events") {
                 let empty_vec = Vec::new();
@@ -267,38 +267,38 @@ pub async fn handle_create_calendar_event(
         Ok(_) => {
             let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                &state,
+                state,
                 &success_msg,
                 None,
                 user,
             ).await {
                 eprintln!("Failed to send success message: {}", e);
             }
-            return Ok((
+            Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: success_msg,
                 })
-            ));
+            ))
         }
         Err((_, error_json)) => {
             let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                &state,
+                state,
                 &error_msg,
                 None,
                 user,
             ).await {
                 eprintln!("Failed to send error message: {}", e);
             }
-            return Ok((
+            Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: error_msg,
                 })
-            ));
+            ))
         }
     }
 }
