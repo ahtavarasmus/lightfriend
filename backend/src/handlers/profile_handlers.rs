@@ -273,6 +273,81 @@ pub async fn get_profile(
     }
 }
 
+/// Returns available sending numbers for notification-only country users
+/// Allows them to choose between US messaging service and local numbers (FI, NL, GB, AU)
+pub async fn get_available_sending_numbers(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))?.ok_or_else(|| (
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": "User not found"}))
+    ))?;
+
+    let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
+    let has_byot = state.user_core.has_twilio_credentials(auth_user.user_id);
+
+    // Only show selector for notification-only users without BYOT
+    let show_selector = is_notification_only && !has_byot;
+
+    if !show_selector {
+        return Ok(Json(json!({
+            "show_selector": false,
+            "available_numbers": [],
+            "current_preferred": user.preferred_number,
+            "is_notification_only": is_notification_only
+        })));
+    }
+
+    // Build list of available numbers
+    let mut available_numbers = Vec::new();
+
+    if let Ok(num) = std::env::var("USA_PHONE") {
+        available_numbers.push(json!({
+            "code": "US",
+            "number": num,
+            "label": "United States (Default)"
+        }));
+    }
+    if let Ok(num) = std::env::var("FIN_PHONE") {
+        available_numbers.push(json!({
+            "code": "FI",
+            "number": num,
+            "label": "Finland"
+        }));
+    }
+    if let Ok(num) = std::env::var("NL_PHONE") {
+        available_numbers.push(json!({
+            "code": "NL",
+            "number": num,
+            "label": "Netherlands"
+        }));
+    }
+    if let Ok(num) = std::env::var("GB_PHONE") {
+        available_numbers.push(json!({
+            "code": "GB",
+            "number": num,
+            "label": "United Kingdom"
+        }));
+    }
+    if let Ok(num) = std::env::var("AUS_PHONE") {
+        available_numbers.push(json!({
+            "code": "AU",
+            "number": num,
+            "label": "Australia"
+        }));
+    }
+
+    Ok(Json(json!({
+        "show_selector": true,
+        "available_numbers": available_numbers,
+        "current_preferred": user.preferred_number,
+        "is_notification_only": true
+    })))
+}
 
 #[derive(Deserialize)]
 pub struct NotifyCreditsRequest {
@@ -494,6 +569,51 @@ pub async fn patch_profile_field(
                 ));
             }
             state.user_core.update_llm_provider(user_id, value).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
+        }
+        "preferred_number" => {
+            let value = request.value.as_str().ok_or_else(|| (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "preferred_number must be a string"}))
+            ))?;
+
+            // Get user to check if they're in a notification-only country
+            let user = state.user_core.find_by_id(user_id).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?.ok_or_else(|| (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ))?;
+
+            // Only allow notification-only country users to change this setting
+            if !crate::utils::country::is_notification_only_country(&user.phone_number) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "This setting is only available for notification-only countries"}))
+                ));
+            }
+
+            // Validate the number is one of the allowed local numbers
+            let allowed_numbers = vec![
+                std::env::var("USA_PHONE").ok(),
+                std::env::var("FIN_PHONE").ok(),
+                std::env::var("NL_PHONE").ok(),
+                std::env::var("GB_PHONE").ok(),
+                std::env::var("AUS_PHONE").ok(),
+            ];
+            let allowed_numbers: Vec<String> = allowed_numbers.into_iter().flatten().collect();
+
+            if !allowed_numbers.contains(&value.to_string()) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid preferred number. Must be one of the available local numbers."}))
+                ));
+            }
+
+            state.user_core.update_preferred_number(user_id, value).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
@@ -1733,7 +1853,7 @@ pub async fn web_chat(
         Some(charged_amount), // credits
         None, // time_consumed
         Some(true), // success
-        Some(format!("Web chat message: {}", request.message.chars().take(50).collect::<String>())), // reason
+        None, // reason - don't log user message content
         None, // status
         None, // recharge_threshold_timestamp
         None, // zero_credits_timestamp
@@ -2131,10 +2251,7 @@ pub async fn web_chat_with_image(
         Some(charged_amount),
         None,
         Some(true),
-        Some(format!("Web chat{}: {}",
-            if image_data_url.is_some() { " with image" } else { "" },
-            message.chars().take(50).collect::<String>()
-        )),
+        if image_data_url.is_some() { Some("Web chat with image".to_string()) } else { None },
         None,
         None,
         None,

@@ -417,6 +417,7 @@ async fn main() {
         .route("/api/profile/textbee-creds", post(self_host_handlers::update_textbee_creds))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile", get(profile_handlers::get_profile))
+        .route("/api/profile/available-sending-numbers", get(profile_handlers::get_available_sending_numbers))
         .route("/api/pricing/dashboard-credits", get(handlers::pricing_handlers::get_dashboard_credits))
         .route("/api/pricing/usage-projection", get(handlers::pricing_handlers::get_usage_projection))
         .route("/api/pricing/byot-usage", get(handlers::pricing_handlers::get_byot_usage))
