@@ -578,7 +578,7 @@ pub async fn send_conversation_message(
     let running_environment= env::var("ENVIRONMENT")
             .map_err(|_| "ENVIRONMENT not set")?;
     if running_environment == "development".to_string() {
-        println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
+        tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
     }
 
@@ -625,10 +625,18 @@ pub async fn send_conversation_message(
     let mut use_messaging_service = false;
     let mut update_preferred = false;
 
-    // Notification-only countries without BYOT must always use messaging service
+    // Notification-only countries without BYOT: check if user selected US or local number
     if is_notification_only && !has_byot_credentials {
-        use_messaging_service = true;
-        tracing::info!("Using US messaging service for notification-only country user {}", user.id);
+        let us_phone = env::var("USA_PHONE").ok();
+        // If preferred is US number or empty, use messaging service. Otherwise use selected local number.
+        if preferred.is_empty() || us_phone.as_deref() == Some(preferred) {
+            use_messaging_service = true;
+            tracing::info!("Using US messaging service for notification-only country user {}", user.id);
+        } else {
+            // User selected a non-US local number (FI, NL, GB, AU)
+            from_number = preferred.to_string();
+            tracing::info!("Using selected local number {} for notification-only user {}", from_number, user.id);
+        }
     } else if let Some(c) = country.clone() {
         match c.as_str() {
             "US" => {
