@@ -1,6 +1,43 @@
 use std::error::Error;
 use resend_rs::{Resend, types::CreateEmailBaseOptions};
 
+
+/// Lightfriend brand colors
+const PRIMARY_BLUE: &str = "#1E90FF";
+const LIGHT_BLUE: &str = "#7EB2FF";
+
+/// Generate branded email HTML wrapper with header and footer
+fn wrap_email_body(title: &str, content: &str, signature: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #fafafa;">
+    <!-- Main Content -->
+    <div style="background-color: white; border-radius: 8px; padding: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <h2 style="color: #333; margin-top: 0;">{title}</h2>
+        {content}
+        <p style="margin-top: 20px;">{signature}</p>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; padding: 20px 0; margin-top: 20px;">
+        <p style="font-size: 12px; color: #888; margin: 0;">
+            <a href="https://lightfriend.ai" style="color: {light_blue}; text-decoration: none;">lightfriend.ai</a>
+        </p>
+    </div>
+</body>
+</html>"#,
+        light_blue = LIGHT_BLUE,
+        title = title,
+        content = content,
+        signature = signature
+    )
+}
+
 /// Get Resend client, from email, and reply-to email from environment.
 /// Returns None if RESEND_API_KEY is not set (email sending is optional).
 fn get_resend_config() -> Option<(Resend, String, String)> {
@@ -44,37 +81,35 @@ pub async fn send_magic_link_email(
     };
     let _ = reply_to; // Used in other email functions
 
-    let email_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <h2 style="color: #333;">Welcome to Lightfriend!</h2>
+    let content = format!(
+        r#"<p>You've successfully subscribed. Click the button below to set your password and access your account:</p>
 
-    <p>You've successfully subscribed. Click the button below to set your password and access your account:</p>
+        <p style="margin: 30px 0; text-align: center;">
+            <a href="{link}" style="display: inline-block; background-color: {blue}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Set Your Password</a>
+        </p>
 
-    <p style="margin: 30px 0;">
-        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Set Your Password</a>
-    </p>
+        <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+        <p style="font-size: 14px; word-break: break-all;"><a href="{link}" style="color: {blue};">{link}</a></p>
 
-    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">This link doesn't expire, but can only be used once to set your password.</p>
 
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">This link doesn't expire, but can only be used once to set your password.</p>
+        <p style="font-size: 14px; color: #666;">If you didn't sign up for Lightfriend, you can ignore this email.</p>
 
-    <p style="font-size: 14px; color: #666;">If you didn't sign up for Lightfriend, you can ignore this email.</p>
-
-    <p style="margin-top: 30px;">-Rasmus</p>
-</body>
-</html>"#,
-        magic_link, magic_link, magic_link
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
+        link = magic_link,
+        blue = PRIMARY_BLUE
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Set your Lightfriend password")
-        .with_html(&email_body);
+    let email_body = wrap_email_body(
+        "Welcome to Lightfriend!",
+        &content,
+        "-Rasmus from Lightfriend"
+    );
+
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Set your Lightfriend password")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -108,39 +143,37 @@ pub async fn send_password_reset_email(
     };
     let _ = reply_to; // Used in other email functions
 
-    let email_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <h2 style="color: #333;">Password Reset Request</h2>
+    let content = format!(
+        r#"<p>You requested a password reset for your Lightfriend account.</p>
 
-    <p>You requested a password reset for your Lightfriend account.</p>
+        <p>Click the button below to set a new password:</p>
 
-    <p>Click the button below to set a new password:</p>
+        <p style="margin: 30px 0; text-align: center;">
+            <a href="{link}" style="display: inline-block; background-color: {blue}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Reset Password</a>
+        </p>
 
-    <p style="margin: 30px 0;">
-        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Reset Password</a>
-    </p>
+        <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+        <p style="font-size: 14px; word-break: break-all;"><a href="{link}" style="color: {blue};">{link}</a></p>
 
-    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">This link is valid for 24 hours and can only be used once.</p>
 
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">This link is valid for 24 hours and can only be used once.</p>
+        <p style="font-size: 14px; color: #666;">If you didn't request a password reset, you can safely ignore this email.</p>
 
-    <p style="font-size: 14px; color: #666;">If you didn't request a password reset, you can safely ignore this email.</p>
-
-    <p style="margin-top: 30px;">-Rasmus</p>
-</body>
-</html>"#,
-        reset_link, reset_link, reset_link
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
+        link = reset_link,
+        blue = PRIMARY_BLUE
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Lightfriend Password Reset")
-        .with_html(&email_body);
+    let email_body = wrap_email_body(
+        "Password Reset Request",
+        &content,
+        "-Rasmus from Lightfriend"
+    );
+
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Lightfriend Password Reset")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -168,37 +201,33 @@ pub async fn send_subscription_activated_email(
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
     let login_url = format!("{}/login", frontend_url);
 
-    let email_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <h2 style="color: #333;">Your Lightfriend subscription is now active!</h2>
+    let content = format!(
+        r#"<p>We noticed you already have an account with this email. Your subscription has been linked to your existing account.</p>
 
-    <p>We noticed you already have an account with this email. Your subscription has been linked to your existing account.</p>
+        <p>Log in to get started:</p>
 
-    <p>Log in to get started:</p>
+        <p style="margin: 30px 0; text-align: center;">
+            <a href="{link}" style="display: inline-block; background-color: {blue}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Log In</a>
+        </p>
 
-    <p style="margin: 30px 0;">
-        <a href="{}" style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Log In</a>
-    </p>
+        <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+        <p style="font-size: 14px; word-break: break-all;"><a href="{link}" style="color: {blue};">{link}</a></p>
 
-    <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 14px; word-break: break-all;"><a href="{}">{}</a></p>
-
-    <p style="margin-top: 30px; font-size: 14px; color: #666;">If you have any questions, just reply to this email.</p>
-
-    <p style="margin-top: 30px;">-Rasmus</p>
-</body>
-</html>"#,
-        login_url, login_url, login_url
+        <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
+        link = login_url,
+        blue = PRIMARY_BLUE
     );
 
-    let email = CreateEmailBaseOptions::new(from_email, [to_email], "Your Lightfriend subscription is active")
-        .with_html(&email_body);
+    let email_body = wrap_email_body(
+        "Your Lightfriend subscription is now active!",
+        &content,
+        "-Rasmus from Lightfriend"
+    );
+
+    let from_with_name = format!("Lightfriend <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Your Lightfriend subscription is active")
+        .with_html(&email_body)
+        .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -207,11 +236,11 @@ pub async fn send_subscription_activated_email(
     Ok(())
 }
 
-/// Send a broadcast email (for admin feature updates, announcements, etc.)
+
+/// Send a broadcast email (admin feature updates, announcements, etc.)
 ///
 /// Uses Resend API for reliable email delivery.
-/// Unlike other email functions, this returns an error if Resend is not configured,
-/// since broadcast emails are intentional admin actions.
+/// Unlike other email functions, this returns an error if Resend is not configured.
 ///
 /// # Arguments
 /// * `to_email` - Recipient email address
@@ -246,3 +275,9 @@ pub async fn send_broadcast_email(
 
     Ok(())
 }
+
+/// Check if Resend is configured
+pub fn is_resend_configured() -> bool {
+    get_resend_config().is_some()
+}
+

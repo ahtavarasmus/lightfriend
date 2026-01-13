@@ -201,7 +201,7 @@ pub fn validate_env() {
         "JWT_REFRESH_KEY",
         "DATABASE_URL",
         "ENCRYPTION_KEY",
-        "MATRIX_HOMESERVER_SHARED_SECRET",
+        "MATRIX_SHARED_SECRET",
     ];
 
     for var in core_vars.iter() {
@@ -535,6 +535,7 @@ async fn main() {
         .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
         .route("/api/admin/send-password-reset/{user_id}", post(admin_handlers::send_password_reset_link))
         .route("/api/admin/change-password", post(admin_handlers::change_admin_password))
+        .route("/api/admin/set-twilio-creds", post(admin_handlers::set_user_twilio_credentials))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
     // Protected routes that need user authentication
     let protected_routes = Router::new()

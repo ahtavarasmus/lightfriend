@@ -596,9 +596,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(bridge_health_job).await.expect("Failed to add bridge health check job to scheduler");
 
-    // Time-triggered tasks - runs every 10 minutes to execute due "once_*" tasks
+    // Time-triggered tasks - runs every 5 minutes to execute due "once_*" tasks
     let state_clone = Arc::clone(&state);
-    let once_tasks_job = Job::new_async("0 */10 * * * *", move |_, _| {
+    let once_tasks_job = Job::new_async("0 */5 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             debug!("Checking for due scheduled tasks...");
