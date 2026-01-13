@@ -32,10 +32,6 @@ mod tool_error_messages {
     pub const WEATHER_UNAVAILABLE: &str = "Sorry, I couldn't get the weather information right now.";
     pub const FIRECRAWL_UNAVAILABLE: &str = "Sorry, I couldn't search the web right now.";
     pub const DIRECTIONS_UNAVAILABLE: &str = "Sorry, I couldn't get directions right now.";
-    pub const EMAIL_UNAVAILABLE: &str = "Sorry, I couldn't access your email right now.";
-    pub const CALENDAR_UNAVAILABLE: &str = "Sorry, I couldn't access your calendar right now.";
-    pub const CHAT_UNAVAILABLE: &str = "Sorry, I couldn't send the chat message right now.";
-    pub const TESLA_UNAVAILABLE: &str = "Sorry, I couldn't control your Tesla right now.";
 }
 
 /// Log a tool call error without exposing user content (privacy-safe)
