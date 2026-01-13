@@ -191,20 +191,6 @@ pub async fn login(
 }
 
 
-/// Returns contact instructions for password reset.
-///
-/// Password resets now require manual verification by admin.
-/// This endpoint just tells the user how to request a reset.
-pub async fn request_password_reset(
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // No automated password reset - direct users to contact support
-    Ok(Json(json!({
-        "contact_required": true,
-        "message": "To reset your password, please contact rasmus@ahtava.com. We'll verify your identity and send you a secure reset link.",
-        "support_email": "rasmus@ahtava.com"
-    })))
-}
-
 
 #[derive(serde::Deserialize)]
 pub struct SendOtpRequest {

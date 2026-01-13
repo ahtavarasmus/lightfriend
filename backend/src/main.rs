@@ -349,7 +349,6 @@ async fn main() {
         .route("/api/register", post(auth_handlers::register))
         .route("/api/logout", post(auth_handlers::logout))
         .route("/api/auth/refresh", post(auth_handlers::refresh_token))
-        .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/validate/{token}", get(auth_handlers::validate_reset_token))
         .route("/api/password-reset/complete", post(auth_handlers::complete_password_reset))
         .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
