@@ -373,7 +373,7 @@ pub async fn validate_twilio_signature(
     };
 
     // BYOT users with their own credentials always use their own account
-    let auth_token = if state.user_core.has_twilio_credentials(user.id) {
+    let auth_token = if state.user_core.is_byot_user(user.id) {
         match state.user_core.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED)
@@ -442,7 +442,7 @@ pub async fn delete_twilio_message_media(
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // BYOT users with their own credentials always use their own account
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
         || crate::utils::country::is_notification_only_country(&user.phone_number) {
@@ -511,7 +511,7 @@ pub async fn delete_twilio_message(
     tracing::debug!("deleting incoming message");
 
     // BYOT users with their own credentials always use their own account
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
         || crate::utils::country::is_notification_only_country(&user.phone_number) {
@@ -585,7 +585,7 @@ pub async fn send_conversation_message(
     // Twilio send logic
     // BYOT users with their own credentials always use their own account
     // Otherwise, use global credentials for local-number and notification-only countries
-    let (account_sid, auth_token) = if state.user_core.has_twilio_credentials(user.id) {
+    let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         // BYOT user - use their own Twilio account
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
@@ -618,7 +618,7 @@ pub async fn send_conversation_message(
     // IMPORTANT: For notification-only countries without BYOT credentials,
     // we must ALWAYS use messaging service - never send from US number directly
     let preferred = user.preferred_number.as_ref().map(String::as_str).unwrap_or("");
-    let has_byot_credentials = state.user_core.has_twilio_credentials(user.id);
+    let has_byot_credentials = state.user_core.is_byot_user(user.id);
     let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
 
     let mut from_number = String::new();

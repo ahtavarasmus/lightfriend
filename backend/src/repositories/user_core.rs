@@ -1228,6 +1228,21 @@ impl UserCore {
         matches!(settings, Ok((Some(_), Some(_))))
     }
 
+    /// Check if user is on BYOT (Bring Your Own Twilio) plan by checking plan_type
+    pub fn is_byot_user(&self, user_id: i32) -> bool {
+        use crate::schema::users;
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        users::table
+            .filter(users::id.eq(user_id))
+            .select(users::plan_type)
+            .first::<Option<String>>(&mut conn)
+            .map(|pt| pt.as_deref() == Some("byot"))
+            .unwrap_or(false)
+    }
 
     pub fn update_twilio_credentials(&self, user_id: i32, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
         use crate::schema::user_settings;

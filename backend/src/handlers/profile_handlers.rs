@@ -288,7 +288,7 @@ pub async fn get_available_sending_numbers(
     ))?;
 
     let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
-    let has_byot = state.user_core.has_twilio_credentials(auth_user.user_id);
+    let has_byot = state.user_core.is_byot_user(auth_user.user_id);
 
     // Only show selector for notification-only users without BYOT
     let show_selector = is_notification_only && !has_byot;
@@ -1430,7 +1430,7 @@ pub async fn update_profile(
             if old_country != new_country {
                 if let Some(ref country) = new_country {
                     // Only update if user doesn't have BYOT (bring your own Twilio)
-                    if !state.user_core.has_twilio_credentials(auth_user.user_id) {
+                    if !state.user_core.is_byot_user(auth_user.user_id) {
                         if let Err(e) = state.user_core.set_preferred_number_for_country(auth_user.user_id, country) {
                             tracing::error!("Failed to update preferred number for country {}: {}", country, e);
                         }
