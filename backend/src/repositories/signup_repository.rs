@@ -39,6 +39,9 @@ pub trait SignupRepository: Send + Sync {
     /// Find user by email (case-insensitive)
     fn find_by_email(&self, email: &str) -> Result<Option<User>, SignupRepositoryError>;
 
+    /// Find user by phone number
+    fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, SignupRepositoryError>;
+
     // === Create/Update operations ===
 
     /// Create a new user record

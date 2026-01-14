@@ -45,6 +45,9 @@ pub enum SignupResult {
         magic_token: String,
         /// User's email for sending the magic link.
         email: String,
+        /// Whether the phone number was skipped because it's already in use by another account.
+        /// If true, the user should be prompted to enter a different phone number.
+        phone_skipped_duplicate: bool,
     },
 }
 
@@ -138,11 +141,26 @@ impl<R: SignupRepository> SignupService<R> {
         // Calculate joined_at timestamp
         let joined_at = chrono::Utc::now().timestamp() as i32;
 
+        // Check if phone number is already in use by another account
+        let phone_is_duplicate = if !phone.is_empty() {
+            self.repository.find_by_phone_number(phone)?.is_some()
+        } else {
+            false
+        };
+
+        // If phone is duplicate, create user without phone number
+        // User will need to set their phone number later
+        let phone_to_use = if phone_is_duplicate {
+            String::new()
+        } else {
+            phone.to_string()
+        };
+
         // Create user with placeholder password
         let new_user = NewUser {
             email: email.to_string(),
             password_hash: "NOT_SET".to_string(),
-            phone_number: phone.to_string(),
+            phone_number: phone_to_use.clone(),
             time_to_live: joined_at,
             verified: true, // No phone verification needed
             credits: 0.0,
@@ -165,9 +183,9 @@ impl<R: SignupRepository> SignupService<R> {
         self.repository
             .set_stripe_customer_id(created_user.id, stripe_customer_id)?;
 
-        // Set phone country and preferred number
-        if !phone.is_empty() {
-            self.setup_phone_country(created_user.id, phone)?;
+        // Set phone country and preferred number (only if we used the phone)
+        if !phone_to_use.is_empty() {
+            self.setup_phone_country(created_user.id, &phone_to_use)?;
         }
 
         // Ensure settings and info records exist
@@ -182,6 +200,7 @@ impl<R: SignupRepository> SignupService<R> {
             user_id: created_user.id,
             magic_token,
             email: email.to_string(),
+            phone_skipped_duplicate: phone_is_duplicate,
         })
     }
 
@@ -236,9 +255,11 @@ mod tests {
                 user_id,
                 magic_token,
                 email,
+                phone_skipped_duplicate,
             } => {
                 assert_eq!(email, "test@example.com");
                 assert_eq!(magic_token.len(), 64);
+                assert!(!phone_skipped_duplicate);
                 assert!(repo.has_user_with_email("test@example.com"));
                 assert!(repo.get_magic_token(user_id).is_some());
             }
@@ -420,6 +441,43 @@ mod tests {
 
         if let SignupResult::NewUserCreated { user_id, .. } = result {
             assert_eq!(repo.get_phone_country(user_id), Some("FI".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_duplicate_phone_skipped() {
+        let repo = Arc::new(MockSignupRepository::new());
+        let service = SignupService::new(repo.clone());
+
+        // First user with phone number
+        let result1 = service
+            .handle_new_subscription("user1@example.com", "+14155551234", "cus_123")
+            .unwrap();
+
+        // Verify first user was created with phone
+        if let SignupResult::NewUserCreated { phone_skipped_duplicate, .. } = result1 {
+            assert!(!phone_skipped_duplicate);
+        } else {
+            panic!("Expected NewUserCreated for first user");
+        }
+
+        // Second user with same phone number but different email
+        let result2 = service
+            .handle_new_subscription("user2@example.com", "+14155551234", "cus_456")
+            .unwrap();
+
+        // Verify second user was created but phone was skipped
+        match result2 {
+            SignupResult::NewUserCreated {
+                phone_skipped_duplicate,
+                user_id,
+                ..
+            } => {
+                assert!(phone_skipped_duplicate);
+                // Phone country should not be set since phone was skipped
+                assert_eq!(repo.get_phone_country(user_id), None);
+            }
+            _ => panic!("Expected NewUserCreated for second user"),
         }
     }
 }

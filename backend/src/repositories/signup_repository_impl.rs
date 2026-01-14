@@ -46,6 +46,12 @@ impl SignupRepository for CompositeSignupRepository {
             .map_err(SignupRepositoryError::Database)
     }
 
+    fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, SignupRepositoryError> {
+        self.user_core
+            .find_by_phone_number(phone)
+            .map_err(SignupRepositoryError::Database)
+    }
+
     fn create_user(&self, new_user: NewUser) -> Result<(), SignupRepositoryError> {
         self.user_core
             .create_user(new_user)

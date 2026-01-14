@@ -1108,14 +1108,14 @@ pub async fn stripe_webhook(
 
                                 user_id
                             }
-                            Ok(SignupResult::NewUserCreated { user_id, magic_token, email }) => {
-                                tracing::info!("Created new user {} from guest checkout", user_id);
+                            Ok(SignupResult::NewUserCreated { user_id, magic_token, email, phone_skipped_duplicate }) => {
+                                tracing::info!("Created new user {} from guest checkout (phone_skipped: {})", user_id, phone_skipped_duplicate);
 
                                 let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
                                 let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_magic_link_email(&email, &magic_link).await {
+                                    if let Err(e) = crate::utils::email::send_magic_link_email_with_options(&email, &magic_link, phone_skipped_duplicate).await {
                                         tracing::error!("Failed to send magic link email: {}", e);
                                     }
                                 });

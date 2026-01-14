@@ -67,6 +67,7 @@ impl MockUser {
 pub struct MockSignupRepository {
     users: Mutex<HashMap<i32, MockUser>>,
     email_to_id: Mutex<HashMap<String, i32>>,
+    phone_to_id: Mutex<HashMap<String, i32>>,
     stripe_to_id: Mutex<HashMap<String, i32>>,
     next_id: Mutex<i32>,
     // Configurable failure modes
@@ -87,6 +88,7 @@ impl MockSignupRepository {
         Self {
             users: Mutex::new(HashMap::new()),
             email_to_id: Mutex::new(HashMap::new()),
+            phone_to_id: Mutex::new(HashMap::new()),
             stripe_to_id: Mutex::new(HashMap::new()),
             next_id: Mutex::new(1),
             fail_on_create: Mutex::new(false),
@@ -210,6 +212,22 @@ impl SignupRepository for MockSignupRepository {
             .map(|u| u.to_user()))
     }
 
+    fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, SignupRepositoryError> {
+        let phone_to_id = self.phone_to_id.lock().unwrap();
+        let users = self.users.lock().unwrap();
+
+        // Clean phone number like the real implementation does
+        let cleaned_phone: String = phone
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '+')
+            .collect();
+
+        Ok(phone_to_id
+            .get(&cleaned_phone)
+            .and_then(|id| users.get(id))
+            .map(|u| u.to_user()))
+    }
+
     fn create_user(&self, new_user: NewUser) -> Result<(), SignupRepositoryError> {
         if *self.fail_on_create.lock().unwrap() {
             return Err(Self::simulate_db_error());
@@ -217,16 +235,18 @@ impl SignupRepository for MockSignupRepository {
 
         let mut users = self.users.lock().unwrap();
         let mut email_to_id = self.email_to_id.lock().unwrap();
+        let mut phone_to_id = self.phone_to_id.lock().unwrap();
         let mut next_id = self.next_id.lock().unwrap();
 
         let id = *next_id;
         *next_id += 1;
 
+        let phone_number = new_user.phone_number.clone();
         let mock_user = MockUser {
             id,
             email: new_user.email.clone(),
             password_hash: new_user.password_hash,
-            phone_number: new_user.phone_number,
+            phone_number: phone_number.clone(),
             phone_number_country: None,
             preferred_number: None,
             stripe_customer_id: None,
@@ -236,6 +256,14 @@ impl SignupRepository for MockSignupRepository {
         };
 
         email_to_id.insert(new_user.email.to_lowercase(), id);
+        // Only index non-empty phone numbers
+        if !phone_number.is_empty() {
+            let cleaned_phone: String = phone_number
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '+')
+                .collect();
+            phone_to_id.insert(cleaned_phone, id);
+        }
         users.insert(id, mock_user);
 
         Ok(())
