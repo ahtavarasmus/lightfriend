@@ -91,6 +91,13 @@ pub mod repositories {
     pub mod connection_auth;
     pub mod totp_repository;
     pub mod webauthn_repository;
+    pub mod signup_repository;
+    pub mod signup_repository_impl;
+    pub mod mock_signup_repository;
+}
+pub mod services {
+    pub mod country_service;
+    pub mod signup_service;
 }
 pub mod schema;
 pub mod jobs {
