@@ -118,7 +118,7 @@ pub async fn send_tinfoil_renewal_notification(
 /// * `Err(Box<dyn Error>)` - Error sending email
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// send_admin_alert(
 ///     &state,
 ///     "Bridge Connection Failed - WhatsApp",

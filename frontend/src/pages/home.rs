@@ -261,6 +261,9 @@ pub fn Home() -> Html {
     // First-time subscriber onboarding overlay
     let show_onboarding = use_state(|| false);
 
+    // Trigger to force profile refresh (incremented when subscription changes)
+    let refresh_trigger = use_state(|| 0u32);
+
     // Usage status data - lifted to Home to prevent re-fetching on tab change
     let usage_data = use_state(|| None::<UsageProjectionResponse>);
     let usage_loading = use_state(|| true);
@@ -476,6 +479,7 @@ pub fn Home() -> Html {
     {
         let success = success.clone();
         let active_tab = active_tab.clone();
+        let refresh_trigger = refresh_trigger.clone();
         use_effect_with_deps(move |_| {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
@@ -483,6 +487,25 @@ pub fn Home() -> Html {
                 if params.get("subscription").as_deref() == Some("success") {
                     success.set(Some("Subscription activated successfully!".to_string()));
                     active_tab.set(DashboardTab::Billing);
+                    // Trigger profile refresh to get updated subscription status
+                    refresh_trigger.set(*refresh_trigger + 1);
+
+                    // Clean up the URL
+                    if let Some(window) = window() {
+                        if let Ok(history) = window.history() {
+                            let _ = history.replace_state_with_url(
+                                &wasm_bindgen::JsValue::NULL,
+                                "",
+                                Some("/")
+                            );
+                        }
+                    }
+                } else if params.get("subscription").as_deref() == Some("changed") {
+                    // Handle subscription plan change
+                    success.set(Some("Subscription updated successfully!".to_string()));
+                    active_tab.set(DashboardTab::Billing);
+                    // Trigger profile refresh to get updated subscription status
+                    refresh_trigger.set(*refresh_trigger + 1);
 
                     // Clean up the URL
                     if let Some(window) = window() {
@@ -556,13 +579,14 @@ pub fn Home() -> Html {
         }, ());
     }
 
-    // Single profile fetch effect
+    // Single profile fetch effect - re-runs when refresh_trigger changes
     {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
         let auth_status = auth_status.clone();
         let show_onboarding = show_onboarding.clone();
+        let refresh_trigger_dep = *refresh_trigger;
         use_effect_with_deps(move |_| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
@@ -602,7 +626,7 @@ pub fn Home() -> Html {
             });
 
             || ()
-        }, ());
+        }, refresh_trigger_dep);
     }
     // Fetch TOTP status when authenticated
     {

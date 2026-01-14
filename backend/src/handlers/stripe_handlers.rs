@@ -1083,107 +1083,52 @@ pub async fn stripe_webhook(
                         let email = customer.email.clone().unwrap_or_default();
                         let phone = customer.phone.clone().unwrap_or_default();
 
-                        if email.is_empty() {
-                            tracing::error!("No email found for Stripe customer {}", customer_id);
-                            return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Customer has no email"}))));
-                        }
+                        // Use SignupService to handle user creation/linking
+                        use crate::repositories::signup_repository_impl::CompositeSignupRepository;
+                        use crate::services::signup_service::{SignupService, SignupResult, SignupError};
 
-                        // Check if user with this email already exists
-                        match state.user_core.find_by_email(&email) {
-                            Ok(Some(existing_user)) => {
-                                // Link existing user to Stripe customer
-                                tracing::info!("Found existing user {} with email {}, linking to Stripe customer", existing_user.id, email);
-                                let _ = state.user_repository.set_stripe_customer_id(existing_user.id, customer_id.as_ref());
+                        let signup_repo = std::sync::Arc::new(CompositeSignupRepository::new(
+                            state.user_core.clone(),
+                            state.user_repository.clone(),
+                        ));
+                        let signup_service = SignupService::new(signup_repo);
 
-                                // Update phone if they provided one and don't have one set
-                                if !phone.is_empty() && existing_user.phone_number.is_empty() {
-                                    let _ = state.user_core.update_phone_number(existing_user.id, &phone);
-                                    // Also set phone country
-                                    if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(&state, existing_user.id, &phone).await {
-                                        let _ = state.user_core.set_preferred_number_for_country(existing_user.id, &country);
-                                    }
+                        match signup_service.handle_new_subscription(&email, &phone, customer_id.as_ref()) {
+                            Ok(SignupResult::ExistingUserLinked { user_id, send_welcome_email, .. }) => {
+                                tracing::info!("Linked existing user {} to Stripe customer {}", user_id, customer_id);
+
+                                if send_welcome_email {
+                                    let email_clone = email.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = crate::utils::email::send_subscription_activated_email(&email_clone).await {
+                                            tracing::error!("Failed to send subscription activated email: {}", e);
+                                        }
+                                    });
                                 }
 
-                                // Send welcome back email to let them know subscription is active
-                                let email_clone = email.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_subscription_activated_email(&email_clone).await {
-                                        tracing::error!("Failed to send subscription activated email: {}", e);
-                                    }
-                                });
-
-                                existing_user.id
+                                user_id
                             }
-                            Ok(None) => {
-                                // Create new user
-                                use crate::handlers::auth_dtos::NewUser;
-                                use rand::Rng;
-
-                                let magic_token: String = rand::thread_rng()
-                                    .sample_iter(&rand::distributions::Alphanumeric)
-                                    .take(64)
-                                    .map(char::from)
-                                    .collect();
-
-                                let joined_at = chrono::Utc::now().timestamp() as i32;
-
-                                let new_user = NewUser {
-                                    email: email.clone(),
-                                    password_hash: "NOT_SET".to_string(),
-                                    phone_number: phone.clone(),
-                                    time_to_live: joined_at,
-                                    verified: true,
-                                    credits: 0.0,
-                                    credits_left: 0.0,
-                                    charge_when_under: false,
-                                    waiting_checks_count: 0,
-                                    discount: false,
-                                    sub_tier: None,
-                                };
-
-                                state.user_core.create_user(new_user).map_err(|e| {
-                                    tracing::error!("Failed to create user: {}", e);
-                                    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"})))
-                                })?;
-
-                                let created_user = state.user_core.find_by_email(&email)
-                                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("DB error: {}", e)}))))?
-                                    .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "User not found after creation"}))))?;
-
-                                tracing::info!("Created new user {} from guest checkout", created_user.id);
-
-                                // Link to Stripe customer
-                                let _ = state.user_repository.set_stripe_customer_id(created_user.id, customer_id.as_ref());
-
-                                // Set phone country and preferred number
-                                if !phone.is_empty() {
-                                    if let Ok(Some(country)) = crate::handlers::profile_handlers::set_user_phone_country(&state, created_user.id, &phone).await {
-                                        let _ = state.user_core.set_preferred_number_for_country(created_user.id, &country);
-                                    }
-                                }
-
-                                // Ensure settings exist
-                                let _ = state.user_core.ensure_user_settings_exist(created_user.id);
-                                let _ = state.user_core.ensure_user_info_exists(created_user.id);
-
-                                // Set magic token and send email
-                                let _ = state.user_core.set_magic_token(created_user.id, &magic_token);
+                            Ok(SignupResult::NewUserCreated { user_id, magic_token, email, phone_skipped_duplicate }) => {
+                                tracing::info!("Created new user {} from guest checkout (phone_skipped: {})", user_id, phone_skipped_duplicate);
 
                                 let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
                                 let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
-                                let email_clone = email.clone();
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_magic_link_email(&email_clone, &magic_link).await {
+                                    if let Err(e) = crate::utils::email::send_magic_link_email_with_options(&email, &magic_link, phone_skipped_duplicate).await {
                                         tracing::error!("Failed to send magic link email: {}", e);
                                     }
                                 });
 
-                                created_user.id
+                                user_id
+                            }
+                            Err(SignupError::EmptyEmail) => {
+                                tracing::error!("No email found for Stripe customer {}", customer_id);
+                                return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Customer has no email"}))));
                             }
                             Err(e) => {
-                                tracing::error!("Error checking if email exists: {}", e);
-                                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"}))));
+                                tracing::error!("Signup error: {}", e);
+                                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"}))));
                             }
                         }
                     }

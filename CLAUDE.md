@@ -30,6 +30,7 @@ See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 **Backend Structure:**
 - Entry: `backend/src/main.rs` - Routing, AppState, middleware
 - Handlers: `backend/src/handlers/` - HTTP request handlers (30+ modules)
+- Services: `backend/src/services/` - Business logic layer (SignupService, CountryService)
 - Repositories: `backend/src/repositories/` - Data access layer (UserCore, UserRepository, UserSubscriptions, ConnectionAuth)
 - Models: `backend/src/models/user_models.rs` - Diesel ORM models
 - Schema: `backend/src/schema.rs` - Auto-generated from migrations

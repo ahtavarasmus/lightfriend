@@ -72,6 +72,23 @@ pub async fn send_magic_link_email(
     to_email: &str,
     magic_link: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    send_magic_link_email_with_options(to_email, magic_link, false).await
+}
+
+/// Send a magic link email for new subscribers, with option to include phone number warning
+///
+/// Uses Resend API for reliable email delivery.
+/// If Resend is not configured, logs a warning and returns Ok (graceful fallback).
+///
+/// # Arguments
+/// * `to_email` - Recipient email address
+/// * `magic_link` - The full URL with token for password setup
+/// * `phone_skipped_duplicate` - If true, includes a message that the phone number was already in use
+pub async fn send_magic_link_email_with_options(
+    to_email: &str,
+    magic_link: &str,
+    phone_skipped_duplicate: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
@@ -81,8 +98,20 @@ pub async fn send_magic_link_email(
     };
     let _ = reply_to; // Used in other email functions
 
+    let phone_warning = if phone_skipped_duplicate {
+        r#"<p style="margin: 20px 0; padding: 15px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; color: #856404;">
+            <strong>Note:</strong> The phone number you entered is already associated with another account.
+            Please update your phone number in your account settings after logging in.
+            Your phone number is needed to use Lightfriend via SMS.
+        </p>"#
+    } else {
+        ""
+    };
+
     let content = format!(
         r#"<p>You've successfully subscribed. Click the button below to set your password and access your account:</p>
+
+        {phone_warning}
 
         <p style="margin: 30px 0; text-align: center;">
             <a href="{link}" style="display: inline-block; background-color: {blue}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Set Your Password</a>
@@ -97,7 +126,8 @@ pub async fn send_magic_link_email(
 
         <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
         link = magic_link,
-        blue = PRIMARY_BLUE
+        blue = PRIMARY_BLUE,
+        phone_warning = phone_warning
     );
 
     let email_body = wrap_email_body(
@@ -202,7 +232,7 @@ pub async fn send_subscription_activated_email(
     let login_url = format!("{}/login", frontend_url);
 
     let content = format!(
-        r#"<p>We noticed you already have an account with this email. Your subscription has been linked to your existing account.</p>
+        r#"<p>Your subscription has been activated and linked to your existing Lightfriend account.</p>
 
         <p>Log in to get started:</p>
 
@@ -212,6 +242,11 @@ pub async fn send_subscription_activated_email(
 
         <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
         <p style="font-size: 14px; word-break: break-all;"><a href="{link}" style="color: {blue};">{link}</a></p>
+
+        <p style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px; color: #495057;">
+            <strong>Didn't mean to subscribe with this email?</strong><br>
+            If you entered the wrong email address during checkout, please reply to this email so we can help sort it out.
+        </p>
 
         <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
         link = login_url,
