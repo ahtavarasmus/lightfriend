@@ -17,7 +17,7 @@ pub fn TimezoneDetector(props: &TimezoneDetectorProps) -> Html {
         let timezone = timezone.clone();
         use_effect_with_deps(
             move |_| {
-                if let Some(window) = window() {
+                if let Some(_window) = window() {
                     let locales = js_sys::Array::new();
                     let options = js_sys::Object::new();
 
