@@ -357,43 +357,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         }, ());
     }
 
-    // Helper to save a field via PATCH
-    fn save_field(
-        field: &str,
-        value: serde_json::Value,
-        save_state: UseStateHandle<FieldSaveState>,
-    ) {
-        let field = field.to_string();
-        save_state.set(FieldSaveState::Saving);
-        spawn_local(async move {
-            let request = PatchFieldRequest { field: field.clone(), value };
-            match Api::patch("/api/profile/field")
-                .json(&request)
-                .unwrap()
-                .send()
-                .await
-            {
-                Ok(response) if response.ok() => {
-                    save_state.set(FieldSaveState::Success);
-                    let save_state_clone = save_state.clone();
-                    spawn_local(async move {
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
-                        save_state_clone.set(FieldSaveState::Idle);
-                    });
-                }
-                Ok(response) => {
-                    let error_msg = response.text().await.unwrap_or_else(|_| "Failed to save".to_string());
-                    info!("Failed to save {}: {}", field, error_msg);
-                    save_state.set(FieldSaveState::Error(error_msg));
-                }
-                Err(e) => {
-                    info!("Network error saving {}: {:?}", field, e);
-                    save_state.set(FieldSaveState::Error("Network error".to_string()));
-                }
-            }
-        });
-    }
-
     // Helper function to save nickname
     fn save_nickname(
         nickname: UseStateHandle<String>,

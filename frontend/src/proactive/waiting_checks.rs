@@ -941,7 +941,3 @@ pub fn task_recurrence_settings(props: &TaskRecurrenceSettingsProps) -> Html {
         </div>
     }
 }
-
-// Re-export old names for backwards compatibility during transition
-pub type WaitingCheck = Task;
-pub type WaitingChecksProps = TasksSectionProps;

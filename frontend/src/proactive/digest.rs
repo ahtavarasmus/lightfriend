@@ -218,20 +218,6 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
             });
         })
     };
-    let phone_number = props.phone_number.clone();
-    let country = if phone_number.starts_with("+1") {
-        "US"
-    } else if phone_number.starts_with("+358") {
-        "FI"
-    } else if phone_number.starts_with("+31") {
-        "NL"
-    } else if phone_number.starts_with("+44") {
-        "UK"
-    } else if phone_number.starts_with("+61") {
-        "AU"
-    } else {
-        "Other"
-    };
     let digest_extra: Html = html! {};
     html! {
         <>

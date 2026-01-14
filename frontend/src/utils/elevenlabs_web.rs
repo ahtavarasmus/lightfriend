@@ -25,9 +25,3 @@ extern "C" {
     #[wasm_bindgen(js_name = getElevenLabsCallStatus)]
     pub fn get_elevenlabs_call_status() -> String;
 }
-
-/// Helper to check if ElevenLabs SDK is loaded
-pub fn is_sdk_available() -> bool {
-    let window = web_sys::window().expect("no window");
-    window.get("startElevenLabsCall").is_some()
-}

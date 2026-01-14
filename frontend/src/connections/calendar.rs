@@ -275,7 +275,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 Callback::from(move |_: MouseEvent| {
                                     let error = error.clone();
                                     // Get today's start and end times in RFC3339 format
-                                    let now = web_sys::js_sys::Date::new_0();
                                     let today_start = web_sys::js_sys::Date::new_0();
                                     let today_end = web_sys::js_sys::Date::new_0();
                                     today_start.set_hours(0);

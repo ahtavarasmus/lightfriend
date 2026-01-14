@@ -8,31 +8,22 @@ use crate::profile::billing_models::UserProfile;
 use crate::profile::billing_credits::BillingPage;
 use web_sys::UrlSearchParams;
 
-#[derive(Clone, PartialEq)]
-enum BillingTab {
-    Billing,
-}
-
 #[function_component]
 pub fn Billing() -> Html {
     let profile = use_state(|| None::<UserProfile>);
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
-    let active_tab = use_state(|| BillingTab::Billing);
-    let _navigator = use_navigator().unwrap();
     let location = use_location().unwrap();
 
     // Check for subscription success parameter
     {
         let success = success.clone();
-        let active_tab = active_tab.clone();
         use_effect_with_deps(move |_| {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
                 if params.has("subscription") && params.get("subscription").unwrap_or_default() == "success" {
                     success.set(Some("Subscription activated successfully!".to_string()));
-                    active_tab.set(BillingTab::Billing);
-                    
+
                     // Clean up the URL after showing the message
                     if let Some(window) = window() {
                         if let Ok(history) = window.history() {
@@ -46,8 +37,7 @@ pub fn Billing() -> Html {
                 }
                 if params.has("subscription") && params.get("subscription").unwrap_or_default() == "canceled" {
                     success.set(Some("Subscription canceled successfully.".to_string()));
-                    active_tab.set(BillingTab::Billing);
-                    
+
                     // Clean up the URL after showing the message
                     if let Some(window) = window() {
                         if let Ok(history) = window.history() {
@@ -262,19 +252,6 @@ pub fn Billing() -> Html {
                             {"Back to Home"}
                         </Link<Route>>
                     </div>
-                    /* if we want to add tabs in the future
-                    <div class="profile-tabs">
-                        <button 
-                            class={classes!("tab-button", (*active_tab == BillingTab::Billing).then(|| "active"))}
-                            onclick={{
-                                let active_tab = active_tab.clone();
-                                Callback::from(move |_| active_tab.set(BillingTab::Billing))
-                            }}
-                        >
-                            {"Billing"}
-                        </button>
-                    </div>
-                    */
                     {
                         if let Some(error_msg) = (*error).as_ref() {
                             html! {
@@ -298,10 +275,8 @@ pub fn Billing() -> Html {
 
                     {
                         if let Some(user_profile) = profile_data {
-                            match *active_tab {
-                                BillingTab::Billing => html! {
-                                    <BillingPage user_profile={user_profile.clone()} />
-                                }
+                            html! {
+                                <BillingPage user_profile={user_profile.clone()} />
                             }
                         } else {
                             html! {

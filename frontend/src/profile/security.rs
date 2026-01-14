@@ -20,7 +20,6 @@ pub enum PasskeyState {
     Loading,
     Ready,
     Registering { device_name: String },
-    Error(String),
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -42,7 +41,6 @@ pub struct TotpVerifyRequest {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct TotpVerifyResponse {
-    pub success: bool,
     pub backup_codes: Vec<String>,
 }
 
@@ -58,12 +56,6 @@ pub struct Passkey {
     pub device_name: String,
     pub created_at: i32,
     pub last_used_at: Option<i32>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct PasskeyStatusResponse {
-    pub has_passkeys: bool,
-    pub count: i32,
 }
 
 #[derive(Serialize)]
@@ -1151,14 +1143,6 @@ pub fn SecuritySettings() -> Html {
                                         </p>
                                     </div>
                                 }
-                            },
-                            PasskeyState::Error(msg) => html! {
-                                <div class="security-error-state">
-                                    <p>{msg}</p>
-                                    <button class="security-btn primary" onclick={on_add_passkey_click}>
-                                        {"Try Again"}
-                                    </button>
-                                </div>
                             },
                         }
                     }
