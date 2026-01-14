@@ -11,11 +11,25 @@ env:
   IMAGE_NAME: eddiepease1/lightfriend-core
 
 jobs:
-  build-and-push:
-    name: Build and Push Multi-Platform Image
+  check-secrets:
     runs-on: ubuntu-latest
-    # Only run if Docker Hub credentials are configured
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    outputs:
+      has-secrets: ${{ steps.check.outputs.has-secrets }}
+    steps:
+      - id: check
+        env:
+          HAS_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          HAS_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$HAS_USERNAME" ] && [ -n "$HAS_TOKEN" ]; then
+            echo "has-secrets=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-secrets=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-secrets == 'true'
     permissions:
       contents: read
       packages: write
