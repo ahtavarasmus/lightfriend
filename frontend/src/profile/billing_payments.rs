@@ -13,7 +13,7 @@ pub struct ApiResponse {
 }
 
 #[function_component]
-pub fn PaymentMethodButton(props: &PaymentMethodButtonProps) -> Html {
+pub fn PaymentMethodButton(_props: &PaymentMethodButtonProps) -> Html {
     html! {
         <div class="payment-method-container">
                 {"placeholder"}
