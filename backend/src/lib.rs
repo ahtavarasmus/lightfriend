@@ -86,15 +86,15 @@ pub mod models {
 }
 pub mod repositories {
     pub mod connection_auth;
+    #[cfg(test)]
+    pub mod mock_signup_repository;
+    pub mod signup_repository;
+    pub mod signup_repository_impl;
     pub mod totp_repository;
     pub mod user_core;
     pub mod user_repository;
     pub mod user_subscriptions;
     pub mod webauthn_repository;
-    pub mod signup_repository;
-    pub mod signup_repository_impl;
-    #[cfg(test)]
-    pub mod mock_signup_repository;
 }
 pub mod services {
     pub mod country_service;
