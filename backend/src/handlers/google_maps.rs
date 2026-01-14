@@ -1,10 +1,7 @@
-use axum::{
-    http::StatusCode,
-    response::Json as AxumJson,
-};
+use axum::{http::StatusCode, response::Json as AxumJson};
+use reqwest;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use reqwest;
 
 #[derive(Debug, Deserialize)]
 pub struct DirectionsRequest {
@@ -16,23 +13,31 @@ pub struct DirectionsRequest {
 pub async fn handle_get_directions(
     request: DirectionsRequest,
 ) -> Result<AxumJson<Value>, (StatusCode, AxumJson<Value>)> {
-    let geoapify_api_key = std::env::var("GEOAPIFY_API_KEY")
-        .map_err(|_| (
+    let geoapify_api_key = std::env::var("GEOAPIFY_API_KEY").map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Missing GEOAPIFY_API_KEY environment variable"})),
-        ))?;
+        )
+    })?;
 
-    let google_maps_api_key = std::env::var("GOOGLE_API_KEY")
-        .map_err(|_| (
+    let google_maps_api_key = std::env::var("GOOGLE_API_KEY").map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Missing GOOGLE_API_KEY environment variable"})),
-        ))?;
+        )
+    })?;
 
     let client = reqwest::Client::new();
     println!("haha");
 
     // Get starting coordinates
-    let (start_lat, start_lon, _start_formatted) = match crate::utils::tool_exec::get_coordinates(&client, &request.start_address, &geoapify_api_key).await {
+    let (start_lat, start_lon, _start_formatted) = match crate::utils::tool_exec::get_coordinates(
+        &client,
+        &request.start_address,
+        &geoapify_api_key,
+    )
+    .await
+    {
         Ok(coords) => coords,
         Err(e) => {
             return Err((
@@ -44,7 +49,13 @@ pub async fn handle_get_directions(
 
     println!("haha");
     // Get ending coordinates
-    let (end_lat, end_lon, _end_formatted) = match crate::utils::tool_exec::get_coordinates(&client, &request.end_address, &geoapify_api_key).await {
+    let (end_lat, end_lon, _end_formatted) = match crate::utils::tool_exec::get_coordinates(
+        &client,
+        &request.end_address,
+        &geoapify_api_key,
+    )
+    .await
+    {
         Ok(coords) => coords,
         Err(e) => {
             return Err((
@@ -65,7 +76,9 @@ pub async fn handle_get_directions(
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                AxumJson(json!({"error": "Invalid mode. Supported: driving, walking, public transport (or transit), bicycling"})),
+                AxumJson(
+                    json!({"error": "Invalid mode. Supported: driving, walking, public transport (or transit), bicycling"}),
+                ),
             ));
         }
     };
@@ -82,7 +95,9 @@ pub async fn handle_get_directions(
             if !status.is_success() {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": format!("Google Maps API returned status code: {}", status)})),
+                    AxumJson(
+                        json!({"error": format!("Google Maps API returned status code: {}", status)}),
+                    ),
                 ));
             }
             match res.json().await {
@@ -94,8 +109,8 @@ pub async fn handle_get_directions(
                         AxumJson(json!({"error": "Failed to parse Google Maps API response"})),
                     ));
                 }
-}
-        },
+            }
+        }
         Err(e) => {
             println!("Request error: {}", e);
             return Err((
@@ -107,7 +122,9 @@ pub async fn handle_get_directions(
     println!("haha");
     // Check for API errors
     if directions_response["status"].as_str() != Some("OK") {
-        let error_message = directions_response["error_message"].as_str().unwrap_or("Unknown error");
+        let error_message = directions_response["error_message"]
+            .as_str()
+            .unwrap_or("Unknown error");
         return Err((
             StatusCode::BAD_REQUEST,
             AxumJson(json!({"error": format!("Directions API error: {}", error_message)})),
@@ -140,11 +157,10 @@ pub async fn handle_get_directions(
                         ))?
                         .to_string();
 
-                    let steps = first_leg["steps"].as_array()
-                        .ok_or((
-                            StatusCode::BAD_REQUEST,
-                            AxumJson(json!({"error": "Failed to extract journey steps"})),
-                        ))?;
+                    let steps = first_leg["steps"].as_array().ok_or((
+                        StatusCode::BAD_REQUEST,
+                        AxumJson(json!({"error": "Failed to extract journey steps"})),
+                    ))?;
 
                     for (i, step) in steps.iter().enumerate() {
                         let html_instr = step["html_instructions"]

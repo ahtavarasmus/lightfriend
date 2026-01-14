@@ -1,9 +1,5 @@
 use anyhow::{anyhow, Result};
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json as AxumJson,
-};
+use axum::{extract::State, http::StatusCode, response::Json as AxumJson};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -37,18 +33,26 @@ pub async fn reset_matrix_connection(
         .find_by_id(user_id)
         .map_err(|e| {
             tracing::error!("Failed to get user {}: {}", user_id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get user".to_string())
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to get user".to_string(),
+            )
         })?
         .and_then(|u| u.matrix_username);
 
     // Clear the Matrix credentials from the database
     let user_repo = UserRepository::new(state.db_pool.clone());
-    user_repo
-        .clear_matrix_credentials(user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to clear Matrix credentials for user {}: {}", user_id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to clear Matrix credentials".to_string())
-        })?;
+    user_repo.clear_matrix_credentials(user_id).map_err(|e| {
+        tracing::error!(
+            "Failed to clear Matrix credentials for user {}: {}",
+            user_id,
+            e
+        );
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to clear Matrix credentials".to_string(),
+        )
+    })?;
 
     // Also clear the local store directory if it exists
     if let Some(ref username) = matrix_username {

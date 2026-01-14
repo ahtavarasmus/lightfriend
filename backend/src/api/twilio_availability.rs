@@ -8,16 +8,16 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CountryTier {
-    UsCanada,          // Full service, unlimited usage with monitoring
-    FullService,       // Local number available in country
-    NotificationOnly,  // No local number, but can send from US number
-    NotSupported,      // Cannot send messages to this country at all
+    UsCanada,         // Full service, unlimited usage with monitoring
+    FullService,      // Local number available in country
+    NotificationOnly, // No local number, but can send from US number
+    NotSupported,     // Cannot send messages to this country at all
 }
 
 #[derive(Debug, Serialize)]
 pub struct CountryCapabilityInfo {
     pub available: bool,
-    pub plan_type: String,  // "us_ca", "full_service", "notification_only"
+    pub plan_type: String, // "us_ca", "full_service", "notification_only"
     pub can_receive_sms: bool,
     pub outbound_sms_price: Option<f32>,
     pub inbound_sms_price: Option<f32>,
@@ -109,27 +109,24 @@ struct TerminatingPrefixPrice {
 /// Based on Twilio's A2P 10DLC coverage and practical experience
 const NOTIFICATION_SUPPORTED_COUNTRIES: &[&str] = &[
     // Americas
-    "CA", "MX", "BR", "AR", "CL", "CO", "PE", "VE", "EC", "GT", "CU", "BO", "HT", "DO",
-    "HN", "PY", "NI", "SV", "CR", "PA", "UY", "PR", "JM", "TT", "GY", "SR", "GF", "BZ",
-    "BS", "BB", "GD", "LC", "VC", "AG", "DM", "KN", "AW", "CW", "SX", "BQ", "TC", "VG",
-    "KY", "BM", "AI", "MS", "FK", "GS", "PM",
-    // Europe
-    "GB", "DE", "FR", "IT", "ES", "NL", "BE", "SE", "NO", "DK", "FI", "PL", "GR", "PT",
-    "CZ", "RO", "HU", "AT", "CH", "IE", "SK", "BG", "HR", "LT", "SI", "LV", "EE", "CY",
-    "LU", "MT", "IS", "AL", "RS", "BA", "MK", "ME", "XK", "MD", "BY", "UA", "GE", "AM",
-    "AZ", "LI", "MC", "SM", "VA", "AD", "GI", "JE", "GG", "IM", "FO", "AX",
-    // Asia-Pacific
-    "AU", "NZ", "JP", "KR", "SG", "HK", "MY", "TH", "PH", "ID", "VN", "TW", "IN", "PK",
-    "BD", "LK", "NP", "MM", "KH", "LA", "BN", "MO", "MV", "BT", "TL", "MN", "FJ", "PG",
-    "NC", "PF", "GU", "MP", "AS", "WS", "PW", "FM", "MH", "KI", "NR", "TV", "TO", "VU",
-    "SB", "CK", "NU", "TK", "WF",
+    "CA", "MX", "BR", "AR", "CL", "CO", "PE", "VE", "EC", "GT", "CU", "BO", "HT", "DO", "HN", "PY",
+    "NI", "SV", "CR", "PA", "UY", "PR", "JM", "TT", "GY", "SR", "GF", "BZ", "BS", "BB", "GD", "LC",
+    "VC", "AG", "DM", "KN", "AW", "CW", "SX", "BQ", "TC", "VG", "KY", "BM", "AI", "MS", "FK", "GS",
+    "PM", // Europe
+    "GB", "DE", "FR", "IT", "ES", "NL", "BE", "SE", "NO", "DK", "FI", "PL", "GR", "PT", "CZ", "RO",
+    "HU", "AT", "CH", "IE", "SK", "BG", "HR", "LT", "SI", "LV", "EE", "CY", "LU", "MT", "IS", "AL",
+    "RS", "BA", "MK", "ME", "XK", "MD", "BY", "UA", "GE", "AM", "AZ", "LI", "MC", "SM", "VA", "AD",
+    "GI", "JE", "GG", "IM", "FO", "AX", // Asia-Pacific
+    "AU", "NZ", "JP", "KR", "SG", "HK", "MY", "TH", "PH", "ID", "VN", "TW", "IN", "PK", "BD", "LK",
+    "NP", "MM", "KH", "LA", "BN", "MO", "MV", "BT", "TL", "MN", "FJ", "PG", "NC", "PF", "GU", "MP",
+    "AS", "WS", "PW", "FM", "MH", "KI", "NR", "TV", "TO", "VU", "SB", "CK", "NU", "TK", "WF",
     // Middle East
     "IL", "TR", "SA", "QA", "KW", "BH", "OM", "JO", "LB", "PS", "YE", "IQ", "SY", "CY",
     // Africa
-    "ZA", "NG", "EG", "KE", "GH", "TZ", "UG", "ZW", "MU", "RW", "ET", "MA", "TN", "DZ",
-    "SN", "CI", "CM", "MG", "BW", "NA", "MW", "ZM", "MZ", "AO", "SD", "SL", "LR", "BJ",
-    "TG", "BF", "ML", "NE", "TD", "SS", "CF", "CG", "GA", "GQ", "ST", "CV", "GM", "GW",
-    "GN", "BI", "DJ", "ER", "SO", "SC", "KM", "YT", "RE", "MU", "LS", "SZ",
+    "ZA", "NG", "EG", "KE", "GH", "TZ", "UG", "ZW", "MU", "RW", "ET", "MA", "TN", "DZ", "SN", "CI",
+    "CM", "MG", "BW", "NA", "MW", "ZM", "MZ", "AO", "SD", "SL", "LR", "BJ", "TG", "BF", "ML", "NE",
+    "TD", "SS", "CF", "CG", "GA", "GQ", "ST", "CV", "GM", "GW", "GN", "BI", "DJ", "ER", "SO", "SC",
+    "KM", "YT", "RE", "MU", "LS", "SZ",
 ];
 
 /// Check if a country supports local phone numbers by querying Twilio API
@@ -197,26 +194,24 @@ async fn fetch_pricing(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<MessagingPricing>().await {
-                Ok(pricing) => {
-                    let outbound = pricing
-                        .outbound_sms_prices
-                        .first()
-                        .and_then(|p| p.prices.first())
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
+        Ok(resp) if resp.status().is_success() => match resp.json::<MessagingPricing>().await {
+            Ok(pricing) => {
+                let outbound = pricing
+                    .outbound_sms_prices
+                    .first()
+                    .and_then(|p| p.prices.first())
+                    .and_then(|p| p.current_price.parse::<f32>().ok());
 
-                    let inbound = pricing
-                        .inbound_sms_prices
-                        .first()
-                        .and_then(|p| p.prices.first())
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
+                let inbound = pricing
+                    .inbound_sms_prices
+                    .first()
+                    .and_then(|p| p.prices.first())
+                    .and_then(|p| p.current_price.parse::<f32>().ok());
 
-                    (outbound, inbound)
-                }
-                Err(_) => (None, None),
+                (outbound, inbound)
             }
-        }
+            Err(_) => (None, None),
+        },
         _ => (None, None),
     };
 
@@ -232,28 +227,31 @@ async fn fetch_pricing(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<VoicePricing>().await {
-                Ok(pricing) => {
-                    let outbound = pricing
-                        .outbound_prefix_prices
-                        .first()
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
+        Ok(resp) if resp.status().is_success() => match resp.json::<VoicePricing>().await {
+            Ok(pricing) => {
+                let outbound = pricing
+                    .outbound_prefix_prices
+                    .first()
+                    .and_then(|p| p.current_price.parse::<f32>().ok());
 
-                    let inbound = pricing
-                        .inbound_call_prices
-                        .first()
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
+                let inbound = pricing
+                    .inbound_call_prices
+                    .first()
+                    .and_then(|p| p.current_price.parse::<f32>().ok());
 
-                    (outbound, inbound)
-                }
-                Err(_) => (None, None),
+                (outbound, inbound)
             }
-        }
+            Err(_) => (None, None),
+        },
         _ => (None, None),
     };
 
-    Ok((outbound_sms_price, inbound_sms_price, outbound_voice_price, inbound_voice_price))
+    Ok((
+        outbound_sms_price,
+        inbound_sms_price,
+        outbound_voice_price,
+        inbound_voice_price,
+    ))
 }
 
 /// Fetch domestic (same-country) voice pricing using Twilio v2 API
@@ -300,17 +298,29 @@ async fn fetch_domestic_voice_pricing(
                     Ok((outbound, inbound))
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to parse v2 voice pricing for {}: {}", country_upper, e);
+                    tracing::warn!(
+                        "Failed to parse v2 voice pricing for {}: {}",
+                        country_upper,
+                        e
+                    );
                     Ok((None, None))
                 }
             }
         }
         Ok(resp) => {
-            tracing::warn!("v2 voice pricing API returned {} for {}", resp.status(), country_upper);
+            tracing::warn!(
+                "v2 voice pricing API returned {} for {}",
+                resp.status(),
+                country_upper
+            );
             Ok((None, None))
         }
         Err(e) => {
-            tracing::warn!("Failed to fetch v2 voice pricing for {}: {}", country_upper, e);
+            tracing::warn!(
+                "Failed to fetch v2 voice pricing for {}: {}",
+                country_upper,
+                e
+            );
             Ok((None, None))
         }
     }
@@ -336,26 +346,24 @@ pub async fn fetch_phone_number_pricing(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<PhoneNumberPricing>().await {
-                Ok(pricing) => {
-                    let mut local_price = None;
-                    let mut mobile_price = None;
+        Ok(resp) if resp.status().is_success() => match resp.json::<PhoneNumberPricing>().await {
+            Ok(pricing) => {
+                let mut local_price = None;
+                let mut mobile_price = None;
 
-                    for price in pricing.phone_number_prices {
-                        let p = price.current_price.parse::<f32>().ok();
-                        match price.number_type.to_lowercase().as_str() {
-                            "local" => local_price = p,
-                            "mobile" => mobile_price = p,
-                            _ => {}
-                        }
+                for price in pricing.phone_number_prices {
+                    let p = price.current_price.parse::<f32>().ok();
+                    match price.number_type.to_lowercase().as_str() {
+                        "local" => local_price = p,
+                        "mobile" => mobile_price = p,
+                        _ => {}
                     }
-
-                    Ok((local_price, mobile_price))
                 }
-                Err(_) => Ok((None, None)),
+
+                Ok((local_price, mobile_price))
             }
-        }
+            Err(_) => Ok((None, None)),
+        },
         _ => Ok((None, None)),
     }
 }
@@ -393,11 +401,12 @@ pub async fn get_byot_pricing(
 
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
         .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
-    let auth_token = std::env::var("TWILIO_AUTH_TOKEN")
-        .map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
+    let auth_token =
+        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
 
     // Fetch phone number pricing
-    let (local_price, mobile_price) = fetch_phone_number_pricing(&country_upper, &account_sid, &auth_token).await?;
+    let (local_price, mobile_price) =
+        fetch_phone_number_pricing(&country_upper, &account_sid, &auth_token).await?;
 
     // Fetch DOMESTIC voice pricing using v2 API
     // This is crucial for BYOT - users call FROM their country TO their country
@@ -414,7 +423,8 @@ pub async fn get_byot_pricing(
         voice_price_per_minute: domestic_outbound_voice.or(capability.outbound_voice_price_per_min),
         inbound_sms_price: capability.inbound_sms_price,
         // Use domestic inbound voice rates for BYOT
-        inbound_voice_price_per_minute: domestic_inbound_voice.or(capability.inbound_voice_price_per_min),
+        inbound_voice_price_per_minute: domestic_inbound_voice
+            .or(capability.inbound_voice_price_per_min),
     })
 }
 
@@ -423,14 +433,29 @@ pub async fn check_country_capability(
     country_code: &str,
     account_sid: &str,
     auth_token: &str,
-) -> Result<(CountryTier, Option<f32>, Option<f32>, Option<f32>, Option<f32>), String> {
+) -> Result<
+    (
+        CountryTier,
+        Option<f32>,
+        Option<f32>,
+        Option<f32>,
+        Option<f32>,
+    ),
+    String,
+> {
     let country_upper = country_code.to_uppercase();
 
     // Check if US/CA
     if country_upper == "US" || country_upper == "CA" {
         let (outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
             fetch_pricing(&country_upper, account_sid, auth_token).await?;
-        return Ok((CountryTier::UsCanada, outbound_sms, inbound_sms, outbound_voice, inbound_voice));
+        return Ok((
+            CountryTier::UsCanada,
+            outbound_sms,
+            inbound_sms,
+            outbound_voice,
+            inbound_voice,
+        ));
     }
 
     // Check if local numbers are available
@@ -439,12 +464,24 @@ pub async fn check_country_capability(
         fetch_pricing(&country_upper, account_sid, auth_token).await?;
 
     if has_local {
-        return Ok((CountryTier::FullService, outbound_sms, inbound_sms, outbound_voice, inbound_voice));
+        return Ok((
+            CountryTier::FullService,
+            outbound_sms,
+            inbound_sms,
+            outbound_voice,
+            inbound_voice,
+        ));
     }
 
     // Check if country is in the notification-supported whitelist
     if NOTIFICATION_SUPPORTED_COUNTRIES.contains(&country_upper.as_str()) {
-        return Ok((CountryTier::NotificationOnly, outbound_sms, inbound_sms, outbound_voice, inbound_voice));
+        return Ok((
+            CountryTier::NotificationOnly,
+            outbound_sms,
+            inbound_sms,
+            outbound_voice,
+            inbound_voice,
+        ));
     }
 
     // Not supported at all
@@ -462,7 +499,10 @@ pub async fn get_country_capability(
 
     // Try to get from cache first
     let cached: Option<CountryAvailability> = {
-        let mut conn = state.db_pool.get().map_err(|e| format!("DB connection error: {}", e))?;
+        let mut conn = state
+            .db_pool
+            .get()
+            .map_err(|e| format!("DB connection error: {}", e))?;
 
         country_availability::table
             .filter(country_availability::country_code.eq(&country_upper))
@@ -487,8 +527,8 @@ pub async fn get_country_capability(
     // Not in cache or expired, fetch from Twilio
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
         .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
-    let auth_token = std::env::var("TWILIO_AUTH_TOKEN")
-        .map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
+    let auth_token =
+        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
 
     let (tier, outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
         check_country_capability(&country_upper, &account_sid, &auth_token).await?;
@@ -511,7 +551,10 @@ pub async fn get_country_capability(
         created_at: now,
     };
 
-    let mut conn = state.db_pool.get().map_err(|e| format!("DB connection error: {}", e))?;
+    let mut conn = state
+        .db_pool
+        .get()
+        .map_err(|e| format!("DB connection error: {}", e))?;
 
     diesel::insert_into(country_availability::table)
         .values(&new_availability)

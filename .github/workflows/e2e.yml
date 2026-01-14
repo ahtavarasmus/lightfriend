@@ -1,0 +1,46 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: ["*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run E2E tests
+        working-directory: backend
+        run: cargo test --test sms_e2e
+
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/core/Dockerfile
+          push: false
+          tags: lightfriend-core:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,6 +1,5 @@
+use resend_rs::{types::CreateEmailBaseOptions, Resend};
 use std::error::Error;
-use resend_rs::{Resend, types::CreateEmailBaseOptions};
-
 
 /// Lightfriend brand colors
 const PRIMARY_BLUE: &str = "#1E90FF";
@@ -75,7 +74,10 @@ pub async fn send_magic_link_email(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!("Magic link email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            tracing::warn!(
+                "Magic link email NOT sent to {} (RESEND_API_KEY not configured)",
+                to_email
+            );
             return Ok(());
         }
     };
@@ -103,13 +105,14 @@ pub async fn send_magic_link_email(
     let email_body = wrap_email_body(
         "Welcome to Lightfriend!",
         &content,
-        "-Rasmus from Lightfriend"
+        "-Rasmus from Lightfriend",
     );
 
     let from_with_name = format!("Lightfriend <{}>", from_email);
-    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Set your Lightfriend password")
-        .with_html(&email_body)
-        .with_reply(&reply_to);
+    let email =
+        CreateEmailBaseOptions::new(from_with_name, [to_email], "Set your Lightfriend password")
+            .with_html(&email_body)
+            .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -137,7 +140,10 @@ pub async fn send_password_reset_email(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!("Password reset email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            tracing::warn!(
+                "Password reset email NOT sent to {} (RESEND_API_KEY not configured)",
+                to_email
+            );
             return Ok(());
         }
     };
@@ -167,13 +173,14 @@ pub async fn send_password_reset_email(
     let email_body = wrap_email_body(
         "Password Reset Request",
         &content,
-        "-Rasmus from Lightfriend"
+        "-Rasmus from Lightfriend",
     );
 
     let from_with_name = format!("Lightfriend <{}>", from_email);
-    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Lightfriend Password Reset")
-        .with_html(&email_body)
-        .with_reply(&reply_to);
+    let email =
+        CreateEmailBaseOptions::new(from_with_name, [to_email], "Lightfriend Password Reset")
+            .with_html(&email_body)
+            .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -192,13 +199,17 @@ pub async fn send_subscription_activated_email(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!("Subscription activated email NOT sent to {} (RESEND_API_KEY not configured)", to_email);
+            tracing::warn!(
+                "Subscription activated email NOT sent to {} (RESEND_API_KEY not configured)",
+                to_email
+            );
             return Ok(());
         }
     };
     let _ = reply_to; // Used in other email functions
 
-    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.io".to_string());
     let login_url = format!("{}/login", frontend_url);
 
     let content = format!(
@@ -221,13 +232,17 @@ pub async fn send_subscription_activated_email(
     let email_body = wrap_email_body(
         "Your Lightfriend subscription is now active!",
         &content,
-        "-Rasmus from Lightfriend"
+        "-Rasmus from Lightfriend",
     );
 
     let from_with_name = format!("Lightfriend <{}>", from_email);
-    let email = CreateEmailBaseOptions::new(from_with_name, [to_email], "Your Lightfriend subscription is active")
-        .with_html(&email_body)
-        .with_reply(&reply_to);
+    let email = CreateEmailBaseOptions::new(
+        from_with_name,
+        [to_email],
+        "Your Lightfriend subscription is active",
+    )
+    .with_html(&email_body)
+    .with_reply(&reply_to);
 
     resend.emails.send(email).await?;
 
@@ -235,7 +250,6 @@ pub async fn send_subscription_activated_email(
 
     Ok(())
 }
-
 
 /// Send a broadcast email (admin feature updates, announcements, etc.)
 ///
@@ -280,4 +294,3 @@ pub async fn send_broadcast_email(
 pub fn is_resend_configured() -> bool {
     get_resend_config().is_some()
 }
-

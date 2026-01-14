@@ -12,15 +12,14 @@
 //! - UK (+44): credits_left = EURO value with segment pricing
 //! - Germany (+49): notification-only, dynamic Twilio pricing
 
-use backend::test_utils::{
-    MockLlmResponse, TestUserParams, create_test_state, create_test_user,
-    deactivate_phone_service, set_byot_credentials,
-    assert_sms_deliverable, assert_charged, assert_not_charged, assert_no_content_leak,
-    get_total_credits,
-};
-use backend::api::twilio_sms::{ProcessSmsOptions, TwilioWebhookPayload, process_sms};
-use backend::utils::usage::deduct_user_credits;
 use axum::http::StatusCode;
+use backend::api::twilio_sms::{process_sms, ProcessSmsOptions, TwilioWebhookPayload};
+use backend::test_utils::{
+    assert_charged, assert_no_content_leak, assert_not_charged, assert_sms_deliverable,
+    create_test_state, create_test_user, deactivate_phone_service, get_total_credits,
+    set_byot_credentials, MockLlmResponse, TestUserParams,
+};
+use backend::utils::usage::deduct_user_credits;
 
 #[test]
 fn test_mock_llm_response_creates_valid_response() {
@@ -32,13 +31,19 @@ fn test_mock_llm_response_creates_valid_response() {
 
     let tool_calls = response.choices[0].message.tool_calls.as_ref().unwrap();
     assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].function.name, Some("direct_response".to_string()));
+    assert_eq!(
+        tool_calls[0].function.name,
+        Some("direct_response".to_string())
+    );
 }
 
 #[test]
 fn test_us_user_params_has_correct_phone_format() {
     let params = TestUserParams::us_user(10.0, 5.0);
-    assert!(params.phone_number.starts_with("+1"), "US phone should start with +1");
+    assert!(
+        params.phone_number.starts_with("+1"),
+        "US phone should start with +1"
+    );
     assert_eq!(params.credits_left, 10.0);
     assert_eq!(params.credits, 5.0);
     assert_eq!(params.sub_tier, Some("tier 2".to_string()));
@@ -47,19 +52,28 @@ fn test_us_user_params_has_correct_phone_format() {
 #[test]
 fn test_finland_user_params_has_correct_phone_format() {
     let params = TestUserParams::finland_user(5.0, 2.5);
-    assert!(params.phone_number.starts_with("+358"), "Finland phone should start with +358");
+    assert!(
+        params.phone_number.starts_with("+358"),
+        "Finland phone should start with +358"
+    );
 }
 
 #[test]
 fn test_uk_user_params_has_correct_phone_format() {
     let params = TestUserParams::uk_user(5.0, 2.5);
-    assert!(params.phone_number.starts_with("+44"), "UK phone should start with +44");
+    assert!(
+        params.phone_number.starts_with("+44"),
+        "UK phone should start with +44"
+    );
 }
 
 #[test]
 fn test_germany_user_params_has_correct_phone_format() {
     let params = TestUserParams::germany_user(5.0, 2.5);
-    assert!(params.phone_number.starts_with("+49"), "Germany phone should start with +49");
+    assert!(
+        params.phone_number.starts_with("+49"),
+        "Germany phone should start with +49"
+    );
 }
 
 #[test]
@@ -106,8 +120,8 @@ fn test_us_user_message_deducts_one_credit_left() {
 
     // Verify: US user loses 1 from credits_left (message count)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0);  // Deducted 1
-    assert_eq!(updated.credits, 5.0);       // Unchanged
+    assert_eq!(updated.credits_left, 9.0); // Deducted 1
+    assert_eq!(updated.credits, 5.0); // Unchanged
 }
 
 #[test]
@@ -126,8 +140,8 @@ fn test_credits_fallback_when_credits_left_exhausted() {
 
     // Verify: Falls back to credits (deducts $0.075 for US)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 0.0);           // Still 0
-    assert!(updated.credits < 5.0, "credits should be deducted");  // Should have deducted
+    assert_eq!(updated.credits_left, 0.0); // Still 0
+    assert!(updated.credits < 5.0, "credits should be deducted"); // Should have deducted
 }
 
 #[test]
@@ -145,8 +159,11 @@ fn test_finland_user_message_deducts_euro_amount() {
 
     // Verify: Finland user loses euro amount from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted for Finland user");
-    assert_eq!(updated.credits, 2.5);  // credits unchanged (credits_left used first)
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for Finland user"
+    );
+    assert_eq!(updated.credits, 2.5); // credits unchanged (credits_left used first)
 }
 
 #[test]
@@ -160,8 +177,11 @@ fn test_uk_user_message_deducts_euro_amount() {
 
     // Verify: UK user loses euro amount from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted for UK user");
-    assert_eq!(updated.credits, 2.5);  // credits unchanged
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for UK user"
+    );
+    assert_eq!(updated.credits, 2.5); // credits unchanged
 }
 
 #[test]
@@ -175,8 +195,11 @@ fn test_germany_user_message_deducts_euro_amount() {
 
     // Verify: Germany user loses euro amount (notification-only country)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted for Germany user");
-    assert_eq!(updated.credits, 2.5);  // credits unchanged
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for Germany user"
+    );
+    assert_eq!(updated.credits, 2.5); // credits unchanged
 }
 
 // ============================================================
@@ -216,8 +239,8 @@ async fn test_process_sms_us_user_full_flow() {
 
     // Verify credit deduction: US user loses 1 from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0);  // Deducted 1
-    assert_eq!(updated.credits, 5.0);       // Unchanged
+    assert_eq!(updated.credits_left, 9.0); // Deducted 1
+    assert_eq!(updated.credits, 5.0); // Unchanged
 }
 
 #[tokio::test]
@@ -245,8 +268,11 @@ async fn test_process_sms_finland_user_full_flow() {
 
     // Verify: Finland user loses euro amount from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted");
-    assert_eq!(updated.credits, 2.5);  // credits unchanged
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted"
+    );
+    assert_eq!(updated.credits, 2.5); // credits unchanged
 }
 
 #[tokio::test]
@@ -273,7 +299,10 @@ async fn test_process_sms_uk_user_full_flow() {
     assert_eq!(status, StatusCode::OK);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted");
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted"
+    );
     assert_eq!(updated.credits, 2.5);
 }
 
@@ -301,7 +330,10 @@ async fn test_process_sms_germany_user_full_flow() {
     assert_eq!(status, StatusCode::OK);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(updated.credits_left < 5.0, "credits_left should be deducted");
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted"
+    );
     assert_eq!(updated.credits, 2.5);
 }
 
@@ -331,7 +363,7 @@ async fn test_process_sms_credits_fallback_full_flow() {
 
     // Verify: Falls back to credits
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 0.0);  // Still 0
+    assert_eq!(updated.credits_left, 0.0); // Still 0
     assert!(updated.credits < 5.0, "credits should be deducted");
 }
 
@@ -380,7 +412,7 @@ async fn test_process_sms_unknown_phone_returns_not_found() {
     // Don't create any user - phone number won't exist
 
     let payload = TwilioWebhookPayload {
-        from: "+19995551234".to_string(),  // Unknown number
+        from: "+19995551234".to_string(), // Unknown number
         to: "+18005551234".to_string(),
         body: "Hello".to_string(),
         message_sid: "SM_test_unknown".to_string(),
@@ -423,7 +455,11 @@ async fn test_process_sms_phone_service_deactivated() {
 
     // Should reject with FORBIDDEN - phone service is deactivated
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert!(response.message.contains("deactivated"), "Response should mention deactivation: {}", response.message);
+    assert!(
+        response.message.contains("deactivated"),
+        "Response should mention deactivation: {}",
+        response.message
+    );
 
     // Credits should be unchanged
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -440,7 +476,7 @@ async fn test_process_sms_cancel_message() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "c".to_string(),  // Cancel command
+        body: "c".to_string(), // Cancel command
         message_sid: "SM_test_cancel".to_string(),
         num_media: None,
         media_url0: None,
@@ -456,8 +492,8 @@ async fn test_process_sms_cancel_message() {
 
     // Credits should NOT be deducted for cancel command
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 10.0);  // Unchanged
-    assert_eq!(updated.credits, 5.0);        // Unchanged
+    assert_eq!(updated.credits_left, 10.0); // Unchanged
+    assert_eq!(updated.credits, 5.0); // Unchanged
 }
 
 #[tokio::test]
@@ -507,7 +543,7 @@ async fn test_process_sms_empty_message_body() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "".to_string(),  // Empty message
+        body: "".to_string(), // Empty message
         message_sid: "SM_test_empty".to_string(),
         num_media: None,
         media_url0: None,
@@ -536,7 +572,7 @@ async fn test_process_sms_whitespace_only_message() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "   ".to_string(),  // Whitespace only
+        body: "   ".to_string(), // Whitespace only
         message_sid: "SM_test_whitespace".to_string(),
         num_media: None,
         media_url0: None,
@@ -560,7 +596,7 @@ async fn test_process_sms_very_long_message() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "a".repeat(10000),  // 10,000 character message
+        body: "a".repeat(10000), // 10,000 character message
         message_sid: "SM_test_long_input".to_string(),
         num_media: None,
         media_url0: None,
@@ -584,7 +620,7 @@ async fn test_process_sms_unicode_emoji_message() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "Hello 👋 世界 🌍 Привет".to_string(),  // Unicode and emoji
+        body: "Hello 👋 世界 🌍 Привет".to_string(), // Unicode and emoji
         message_sid: "SM_test_unicode".to_string(),
         num_media: None,
         media_url0: None,
@@ -608,7 +644,7 @@ async fn test_process_sms_uppercase_cancel() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "C".to_string(),  // Uppercase cancel
+        body: "C".to_string(), // Uppercase cancel
         message_sid: "SM_test_uppercase_cancel".to_string(),
         num_media: None,
         media_url0: None,
@@ -948,8 +984,11 @@ async fn test_process_sms_missing_function_name_returns_internal_error() {
 
     // Should return INTERNAL_SERVER_ERROR for LLM malformed response
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(response.message.contains("encountered an issue"),
-        "Response should contain error message: {}", response.message);
+    assert!(
+        response.message.contains("encountered an issue"),
+        "Response should contain error message: {}",
+        response.message
+    );
 
     // Credits should NOT be deducted for internal errors
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -980,8 +1019,11 @@ async fn test_process_sms_missing_arguments_returns_internal_error() {
 
     // Should return INTERNAL_SERVER_ERROR for LLM malformed response
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(response.message.contains("encountered an issue"),
-        "Response should contain error message: {}", response.message);
+    assert!(
+        response.message.contains("encountered an issue"),
+        "Response should contain error message: {}",
+        response.message
+    );
 }
 
 #[tokio::test]
@@ -1010,8 +1052,11 @@ async fn test_process_sms_malformed_json_continues_gracefully() {
     // The error message gets inserted to tool_answers and processing continues
     assert_eq!(status, StatusCode::OK);
     // The response should contain the error message since it was inserted to tool_answers
-    assert!(response.message.contains("encountered an issue") || response.message.contains("couldn't"),
-        "Response should contain error indicator: {}", response.message);
+    assert!(
+        response.message.contains("encountered an issue") || response.message.contains("couldn't"),
+        "Response should contain error indicator: {}",
+        response.message
+    );
 }
 
 #[tokio::test]
@@ -1023,7 +1068,7 @@ async fn test_process_sms_error_message_does_not_leak_content() {
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
         to: "+18005551234".to_string(),
-        body: "My secret password is hunter2".to_string(),  // Sensitive content
+        body: "My secret password is hunter2".to_string(), // Sensitive content
         message_sid: "SM_test_privacy".to_string(),
         num_media: None,
         media_url0: None,
@@ -1038,12 +1083,18 @@ async fn test_process_sms_error_message_does_not_leak_content() {
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     // Error message should NOT contain user's message content
-    assert!(!response.message.contains("hunter2"),
-        "Error message should not contain user content");
-    assert!(!response.message.contains("password"),
-        "Error message should not contain user content");
-    assert!(!response.message.contains("secret"),
-        "Error message should not contain user content");
+    assert!(
+        !response.message.contains("hunter2"),
+        "Error message should not contain user content"
+    );
+    assert!(
+        !response.message.contains("password"),
+        "Error message should not contain user content"
+    );
+    assert!(
+        !response.message.contains("secret"),
+        "Error message should not contain user content"
+    );
 }
 
 // ============================================================

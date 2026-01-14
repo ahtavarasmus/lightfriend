@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use crate::schema::users;  
+use crate::schema::users;
 use diesel::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Insertable)]
@@ -55,4 +55,3 @@ pub struct UserResponse {
 pub struct Claims {
     pub sub: i32,
 }
-

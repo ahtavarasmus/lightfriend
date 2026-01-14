@@ -1,17 +1,13 @@
+use axum::{extract::State, http::StatusCode, Json};
+use diesel::prelude::*;
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-};
-use serde_json::json;
-use serde::{Deserialize, Serialize};
-use rand::Rng;
-use diesel::prelude::*;
 
-use crate::schema::waitlist;
 use crate::models::user_models::WaitlistEntry;
+use crate::schema::waitlist;
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -42,50 +38,54 @@ pub struct UsageLogResponse {
 
 use crate::AppState;
 
-
 pub async fn verify_user(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
     // Verify the user
-    state.user_core.verify_user(user_id).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state.user_core.verify_user(user_id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
 
     Ok(Json(json!({
         "message": "User verified successfully"
     })))
 }
 
-
-
 pub async fn update_preferred_number_admin(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
     Json(preferred_number): Json<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
     // Get allowed numbers from environment
-    let allowed_numbers = [std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
+    let allowed_numbers = [
+        std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
         std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
-        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment")];
+        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
+    ];
 
     // Validate that the preferred number is in the allowed list
     if !allowed_numbers.contains(&preferred_number) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid preferred number"}))
+            Json(json!({"error": "Invalid preferred number"})),
         ));
     }
 
     // Update the user's preferred number
-    state.user_core.update_preferred_number(user_id, &preferred_number).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state
+        .user_core
+        .update_preferred_number(user_id, &preferred_number)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     Ok(Json(json!({
         "message": "Preferred number updated successfully"
@@ -104,7 +104,10 @@ pub async fn unsubscribe(
     State(state): State<Arc<AppState>>,
     Query(params): Query<UnsubscribeParams>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    tracing::info!("Unsubscribe request received for raw email param: {}", params.email);
+    tracing::info!(
+        "Unsubscribe request received for raw email param: {}",
+        params.email
+    );
 
     // First try to find a registered user
     match state.user_core.find_by_email(&params.email) {
@@ -119,39 +122,49 @@ pub async fn unsubscribe(
                     tracing::error!("Failed to update notify for user {}: {}", user.id, e);
                     Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to unsubscribe. Sorry about this, send email to rasmus@ahtava.com".to_string(),
+                        "Failed to unsubscribe. Sorry about this, send email to rasmus@ahtava.com"
+                            .to_string(),
                     ))
                 }
             }
         }
         Ok(None) => {
             // No registered user found, check waitlist
-            tracing::info!("No registered user found for email: {}, checking waitlist", params.email);
+            tracing::info!(
+                "No registered user found for email: {}, checking waitlist",
+                params.email
+            );
 
             let mut conn = state.db_pool.get().map_err(|e| {
                 tracing::error!("Failed to get DB connection: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
             })?;
 
             // Try to delete from waitlist
             let deleted = diesel::delete(
-                waitlist::table.filter(waitlist::email.eq(&params.email.to_lowercase()))
+                waitlist::table.filter(waitlist::email.eq(&params.email.to_lowercase())),
             )
             .execute(&mut conn)
             .map_err(|e| {
                 tracing::error!("Failed to delete from waitlist: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process request.".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to process request.".to_string(),
+                )
             })?;
 
             if deleted > 0 {
                 tracing::info!("Removed {} from waitlist", params.email);
                 Ok(Html("<h1>You have been unsubscribed!</h1>".to_string()))
             } else {
-                tracing::warn!("No user or waitlist entry found for email: {}", params.email);
-                Err((
-                    StatusCode::BAD_REQUEST,
-                    "Invalid email.".to_string(),
-                ))
+                tracing::warn!(
+                    "No user or waitlist entry found for email: {}",
+                    params.email
+                );
+                Err((StatusCode::BAD_REQUEST, "Invalid email.".to_string()))
             }
         }
         Err(e) => {
@@ -172,7 +185,7 @@ pub async fn broadcast_email(
     if request.subject.is_empty() || request.message.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Subject and message cannot be empty"}))
+            Json(json!({"error": "Subject and message cannot be empty"})),
         ));
     }
 
@@ -181,7 +194,7 @@ pub async fn broadcast_email(
         tracing::error!("Database error when fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
+            Json(json!({"error": format!("Database error: {}", e)})),
         )
     })?;
 
@@ -191,7 +204,7 @@ pub async fn broadcast_email(
             tracing::error!("Failed to get DB connection for waitlist: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                Json(json!({"error": "Database error"})),
             )
         })?;
         waitlist::table
@@ -201,7 +214,7 @@ pub async fn broadcast_email(
                 tracing::error!("Failed to fetch waitlist entries: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Database error: {}", e)}))
+                    Json(json!({"error": format!("Database error: {}", e)})),
                 )
             })?
     };
@@ -250,10 +263,12 @@ pub async fn broadcast_email(
             // Prepare the unsubscribe link
             let encoded_email = urlencoding::encode(&user.email);
             let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
-            let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+            let unsubscribe_link =
+                format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
 
             // Convert message newlines to HTML paragraphs
-            let html_message = request_clone.message
+            let html_message = request_clone
+                .message
                 .split("\n\n")
                 .map(|p| format!("<p>{}</p>", p.replace('\n', "<br>")))
                 .collect::<Vec<_>>()
@@ -296,7 +311,9 @@ pub async fn broadcast_email(
                 &user.email,
                 &request_clone.subject,
                 &html_body,
-            ).await {
+            )
+            .await
+            {
                 Ok(_) => {
                     success_count += 1;
                     tracing::info!("Successfully sent email to {}", user.email);
@@ -317,7 +334,10 @@ pub async fn broadcast_email(
         for entry in waitlist_entries {
             // Skip if already sent to this email (user is both registered and on waitlist)
             if sent_emails.contains(&entry.email.to_lowercase()) {
-                tracing::info!("Skipping waitlist entry {} - already sent as registered user", entry.email);
+                tracing::info!(
+                    "Skipping waitlist entry {} - already sent as registered user",
+                    entry.email
+                );
                 continue;
             }
 
@@ -330,10 +350,12 @@ pub async fn broadcast_email(
             // Prepare the unsubscribe link
             let encoded_email = urlencoding::encode(&entry.email);
             let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
-            let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+            let unsubscribe_link =
+                format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
 
             // Convert message newlines to HTML paragraphs
-            let html_message = request_clone.message
+            let html_message = request_clone
+                .message
                 .split("\n\n")
                 .map(|p| format!("<p>{}</p>", p.replace('\n', "<br>")))
                 .collect::<Vec<_>>()
@@ -376,7 +398,9 @@ pub async fn broadcast_email(
                 &entry.email,
                 &request_clone.subject,
                 &html_body,
-            ).await {
+            )
+            .await
+            {
                 Ok(_) => {
                     success_count += 1;
                     tracing::info!("Successfully sent email to waitlist entry {}", entry.email);
@@ -407,7 +431,6 @@ pub async fn broadcast_email(
     })))
 }
 
-
 pub async fn update_discount_tier(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((user_id, tier)): axum::extract::Path<(i32, String)>,
@@ -416,17 +439,24 @@ pub async fn update_discount_tier(
     let tier = match tier.to_lowercase().as_str() {
         "" | "none" | "null" => None,
         _ if ["msg", "voice", "full"].contains(&tier.as_str()) => Some(tier.as_str()),
-        _ => return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid tier. Must be 'msg', 'voice', 'full', or 'none'"}))
-        )),
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid tier. Must be 'msg', 'voice', 'full', or 'none'"})),
+            ))
+        }
     };
 
     // Update the discount tier
-    state.user_core.update_discount_tier(user_id, tier).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state
+        .user_core
+        .update_discount_tier(user_id, tier)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     Ok(Json(json!({
         "message": "Discount tier updated successfully",
@@ -439,25 +469,35 @@ pub async fn update_monthly_credits(
     axum::extract::Path((user_id, amount)): axum::extract::Path<(f32, f32)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get current user
-    let user = state.user_core.find_by_id(user_id as i32)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_id(user_id as i32)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Calculate new credits count, ensuring it doesn't go below 0
     let new_credits = (user.credits_left + amount).max(0.0);
 
     // Update credits count
-    state.user_repository.update_user_credits_left(user.id, new_credits)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update monthly credits: {}", e)}))
-        ))?;
+    state
+        .user_repository
+        .update_user_credits_left(user.id, new_credits)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update monthly credits: {}", e)})),
+            )
+        })?;
 
     Ok(Json(json!({
         "message": "Monthly credits updated successfully",
@@ -465,18 +505,26 @@ pub async fn update_monthly_credits(
     })))
 }
 
-
 pub async fn update_subscription_tier(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((user_id, tier)): axum::extract::Path<(i32, String)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let tier = if tier == "tier 0" { None } else { Some(tier.as_str()) };
+    let tier = if tier == "tier 0" {
+        None
+    } else {
+        Some(tier.as_str())
+    };
 
     // Update the subscription tier
-    state.user_repository.set_subscription_tier(user_id, tier).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state
+        .user_repository
+        .set_subscription_tier(user_id, tier)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
     tracing::info!("subscription tier set successfully");
 
     Ok(Json(json!({
@@ -495,10 +543,15 @@ pub async fn update_plan_type(
     };
 
     // Update the plan type
-    state.user_repository.update_plan_type(user_id, plan_type).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state
+        .user_repository
+        .update_plan_type(user_id, plan_type)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
     tracing::info!("plan type updated to {:?} for user {}", plan_type, user_id);
 
     Ok(Json(json!({
@@ -511,30 +564,29 @@ pub async fn get_usage_logs(
 ) -> Result<Json<Vec<UsageLogResponse>>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("getting usage logs");
     // Get all usage logs from the database
-    let logs = state.user_repository.get_all_usage_logs()
-        .map_err(|e| (
+    let logs = state.user_repository.get_all_usage_logs().map_err(|e| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?;
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
 
     // Transform the logs into the response format
-    let response_logs: Vec<UsageLogResponse> = logs.into_iter()
-        .map(|log| {
-
-            UsageLogResponse {
-                id: log.id.unwrap_or(0),
-                user_id: log.user_id,
-                activity_type: log.activity_type,
-                timestamp: log.created_at,
-                sid: log.sid,
-                status: log.status,
-                success: log.success,
-                credits: log.credits,
-                time_consumed: log.time_consumed,
-                reason: log.reason,
-                recharge_threshold_timestamp: log.recharge_threshold_timestamp,
-                zero_credits_timestamp: log.zero_credits_timestamp,
-            }
+    let response_logs: Vec<UsageLogResponse> = logs
+        .into_iter()
+        .map(|log| UsageLogResponse {
+            id: log.id.unwrap_or(0),
+            user_id: log.user_id,
+            activity_type: log.activity_type,
+            timestamp: log.created_at,
+            sid: log.sid,
+            status: log.status,
+            success: log.success,
+            credits: log.credits,
+            time_consumed: log.time_consumed,
+            reason: log.reason,
+            recharge_threshold_timestamp: log.recharge_threshold_timestamp,
+            zero_credits_timestamp: log.zero_credits_timestamp,
         })
         .collect();
 
@@ -551,15 +603,21 @@ pub async fn send_password_reset_link(
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Look up user by ID to get their email
-    let user = state.user_core.find_by_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Generate cryptographically secure token (32 alphanumeric chars)
     let token: String = rand::thread_rng()
@@ -572,29 +630,37 @@ pub async fn send_password_reset_link(
     let expiry = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64 + (24 * 60 * 60); // 24 hours
+        .as_secs() as i64
+        + (24 * 60 * 60); // 24 hours
 
     // Store the token with user_id and expiry
-    state.pending_password_resets.insert(token.clone(), (user_id, expiry));
+    state
+        .pending_password_resets
+        .insert(token.clone(), (user_id, expiry));
 
     // Build reset URL
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let reset_link = format!("{}/password-reset/{}", frontend_url, token);
 
     // Send email with reset link
-    if let Err(e) = crate::utils::email::send_password_reset_email(
-        &user.email,
-        &reset_link,
-    ).await {
-        tracing::error!("Failed to send password reset email to {}: {}", user.email, e);
+    if let Err(e) = crate::utils::email::send_password_reset_email(&user.email, &reset_link).await {
+        tracing::error!(
+            "Failed to send password reset email to {}: {}",
+            user.email,
+            e
+        );
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to send reset email. Please try again."}))
+            Json(json!({"error": "Failed to send reset email. Please try again."})),
         ));
     }
 
-    tracing::info!("Password reset link sent to user {} ({})", user_id, user.email);
+    tracing::info!(
+        "Password reset link sent to user {} ({})",
+        user_id,
+        user.email
+    );
 
     Ok(Json(json!({
         "message": format!("Password reset link sent to {}", user.email),
@@ -618,22 +684,33 @@ pub async fn change_admin_password(
     if req.new_password.len() < 6 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Password must be at least 6 characters"}))
+            Json(json!({"error": "Password must be at least 6 characters"})),
         ));
     }
 
     // Hash the new password
-    let password_hash = bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST)
-        .map_err(|e| {
-            tracing::error!("Failed to hash password: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to hash password"})))
-        })?;
+    let password_hash = bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST).map_err(|e| {
+        tracing::error!("Failed to hash password: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to hash password"})),
+        )
+    })?;
 
     // Update the password
-    state.user_core.update_password(auth_user.user_id, &password_hash)
+    state
+        .user_core
+        .update_password(auth_user.user_id, &password_hash)
         .map_err(|e| {
-            tracing::error!("Failed to update password for admin {}: {}", auth_user.user_id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to update password"})))
+            tracing::error!(
+                "Failed to update password for admin {}: {}",
+                auth_user.user_id,
+                e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update password"})),
+            )
         })?;
 
     tracing::info!("Admin {} changed their password", auth_user.user_id);
@@ -654,10 +731,15 @@ pub async fn set_user_twilio_credentials(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SetTwilioCredsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    state.user_core.update_twilio_credentials(req.user_id, &req.account_sid, &req.auth_token)
+    state
+        .user_core
+        .update_twilio_credentials(req.user_id, &req.account_sid, &req.auth_token)
         .map_err(|e| {
             tracing::error!("Failed to set twilio creds: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
         })?;
 
     tracing::info!("Set Twilio credentials for user {}", req.user_id);

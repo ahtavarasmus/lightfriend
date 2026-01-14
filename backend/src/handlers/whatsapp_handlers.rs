@@ -1,11 +1,12 @@
-use axum::{
-    extract::{State, Json},
-};
-use serde::Deserialize;
-use crate::{AppState, utils::bridge::{fetch_bridge_messages, BridgeMessage}};
-use serde::Serialize;
-use chrono::Utc;
 use crate::handlers::auth_middleware::AuthUser;
+use crate::{
+    utils::bridge::{fetch_bridge_messages, BridgeMessage},
+    AppState,
+};
+use axum::extract::{Json, State};
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct WhatsAppMessagesResponse {
@@ -40,11 +41,17 @@ pub async fn send_message(
     Json(request): Json<SendWhatsAppMessageRequest>,
 ) -> Result<Json<SendWhatsAppMessageResponse>, String> {
     // Get bridge info first to verify WhatsApp is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "WhatsApp bridge not found".to_string())?;
 
-    tracing::info!("Found WhatsApp bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
+    tracing::info!(
+        "Found WhatsApp bridge: status={}, room_id={:?}",
+        bridge.status,
+        bridge.room_id
+    );
 
     if bridge.status != "connected" {
         return Err("WhatsApp is not connected".to_string());
@@ -58,9 +65,14 @@ pub async fn send_message(
         &request.chat_name,
         &request.message,
         request.image_url,
-    ).await {
+    )
+    .await
+    {
         Ok(message) => {
-            tracing::info!("Successfully sent WhatsApp message to {}", request.chat_name);
+            tracing::info!(
+                "Successfully sent WhatsApp message to {}",
+                request.chat_name
+            );
             Ok(Json(SendWhatsAppMessageResponse { message }))
         }
         Err(e) => {
@@ -74,13 +86,18 @@ pub async fn test_fetch_messages(
     State(state): State<std::sync::Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<WhatsAppMessagesResponse>, String> {
-
     // Get bridge info first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "WhatsApp bridge not found".to_string())?;
 
-    tracing::info!("Found WhatsApp bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
+    tracing::info!(
+        "Found WhatsApp bridge: status={}, room_id={:?}",
+        bridge.status,
+        bridge.room_id
+    );
 
     if bridge.status != "connected" {
         return Err("WhatsApp is not connected".to_string());
@@ -90,17 +107,25 @@ pub async fn test_fetch_messages(
     let now = Utc::now();
     let start_time = (now - chrono::Duration::hours(24)).timestamp();
 
-    match crate::utils::bridge::fetch_bridge_messages("whatsapp", &state, auth_user.user_id, start_time, false).await {
+    match crate::utils::bridge::fetch_bridge_messages(
+        "whatsapp",
+        &state,
+        auth_user.user_id,
+        start_time,
+        false,
+    )
+    .await
+    {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
-            
+
             // Print message details in a readable format for testing
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            
+
             for msg in messages.iter() {
                 let message_type_icon = match msg.message_type.as_str() {
                     "text" => "💬",
-                    "notice" => "📢", 
+                    "notice" => "📢",
                     "image" => "🖼️",
                     "video" => "🎥",
                     "file" => "📎",
@@ -109,16 +134,16 @@ pub async fn test_fetch_messages(
                     "emote" => "🎭",
                     _ => "📝",
                 };
-                
+
                 println!("\n{} Room: {}", message_type_icon, msg.room_name);
                 println!("👤 {}", msg.sender_display_name);
                 println!("🕒 {}", msg.formatted_timestamp);
                 println!("📄 {}", msg.content);
                 println!("─────────────────────────────────────");
             }
-            
+
             println!("\nTotal messages: {}\n", messages.len());
-            
+
             // Also keep the debug logging for the first 5 messages
             for (i, msg) in messages.iter().enumerate().take(5) {
                 tracing::info!(
@@ -126,35 +151,44 @@ pub async fn test_fetch_messages(
                     i,
                     msg.room_name,
                     msg.sender,
-                    if msg.content.len() > 30 { 
-                        format!("{}...", &msg.content[..30]) 
-                    } else { 
-                        msg.content.clone() 
+                    if msg.content.len() > 30 {
+                        format!("{}...", &msg.content[..30])
+                    } else {
+                        msg.content.clone()
                     }
                 );
             }
-            
+
             Ok(Json(WhatsAppMessagesResponse { messages }))
         }
         Err(e) => {
             tracing::error!("Error fetching messages: {}", e);
-            
+
             tracing::info!("Attempting fallback to fetch_bridge_messages method");
-            match fetch_bridge_messages("whatsapp", &state, auth_user.user_id, start_time,false).await {
+            match fetch_bridge_messages("whatsapp", &state, auth_user.user_id, start_time, false)
+                .await
+            {
                 Ok(fallback_messages) => {
-                    tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
-                    Ok(Json(WhatsAppMessagesResponse { messages: fallback_messages }))
-                },
+                    tracing::info!(
+                        "Fallback successful, found {} messages",
+                        fallback_messages.len()
+                    );
+                    Ok(Json(WhatsAppMessagesResponse {
+                        messages: fallback_messages,
+                    }))
+                }
                 Err(fallback_err) => {
                     tracing::error!("Fallback also failed: {}", fallback_err);
                     // Return a proper error response with status code
-                    Err(format!("Failed to fetch messages: {}. Fallback also failed: {}", e, fallback_err))
+                    Err(format!(
+                        "Failed to fetch messages: {}. Fallback also failed: {}",
+                        e, fallback_err
+                    ))
                 }
             }
         }
     }
 }
-
 
 /// Handler that specifically fetches only WhatsApp rooms for the user
 pub async fn search_whatsapp_rooms_handler(
@@ -163,7 +197,9 @@ pub async fn search_whatsapp_rooms_handler(
     Json(request): Json<SearchWhatsAppRoomsRequest>,
 ) -> Result<Json<SearchWhatsAppRoomsResponse>, String> {
     // Get bridge info first to verify WhatsApp is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "WhatsApp bridge not found".to_string())?;
 
@@ -172,14 +208,16 @@ pub async fn search_whatsapp_rooms_handler(
     }
 
     match crate::utils::bridge::search_bridge_rooms(
-        "whatsapp", 
+        "whatsapp",
         &state,
         auth_user.user_id,
         &request.search_term,
-    ).await {
+    )
+    .await
+    {
         Ok(rooms) => {
             println!("Found {} matching WhatsApp rooms", rooms.len());
-            
+
             // Print detailed information about each matching room
             for (i, room) in rooms.iter().enumerate() {
                 println!(
@@ -191,7 +229,10 @@ pub async fn search_whatsapp_rooms_handler(
             }
 
             if rooms.is_empty() {
-                tracing::error!("No rooms found matching search term: '{}'", request.search_term);
+                tracing::error!(
+                    "No rooms found matching search term: '{}'",
+                    request.search_term
+                );
             }
 
             Ok(Json(SearchWhatsAppRoomsResponse { rooms }))
@@ -203,14 +244,8 @@ pub async fn search_whatsapp_rooms_handler(
     }
 }
 
-
-use axum::{
-    extract::Query,
-    http::StatusCode,
-};
-use crate::{
-    utils::bridge::{search_bridge_rooms, BridgeRoom},
-};
+use crate::utils::bridge::{search_bridge_rooms, BridgeRoom};
+use axum::{extract::Query, http::StatusCode};
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
@@ -225,9 +260,12 @@ pub async fn search_rooms_handler(
     match search_bridge_rooms("whatsapp", &state, auth_user.user_id, &params.search).await {
         Ok(rooms) => Ok(Json(rooms)),
         Err(e) => {
-            tracing::error!("Failed to search WhatsApp rooms for user {}: {}", auth_user.user_id, e);
+            tracing::error!(
+                "Failed to search WhatsApp rooms for user {}: {}",
+                auth_user.user_id,
+                e
+            );
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
-

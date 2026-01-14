@@ -1,33 +1,26 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json as AxumJson,
+use crate::{
+    handlers::auth_middleware::AuthUser, models::user_models::NewBridge, utils::matrix_auth,
+    AppState,
 };
+use anyhow::{anyhow, Result};
+use axum::{extract::State, http::StatusCode, response::Json as AxumJson};
 use matrix_sdk::{
-    Client as MatrixClient,
     config::SyncSettings as MatrixSyncSettings,
     ruma::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
-        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
+        events::room::message::{MessageType, RoomMessageEventContent, SyncRoomMessageEvent},
         events::AnySyncTimelineEvent,
-        OwnedRoomId, OwnedUserId, 
+        OwnedRoomId, OwnedUserId,
     },
+    Client as MatrixClient,
 };
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
-use anyhow::{anyhow, Result};
 use tokio::time::{sleep, Duration};
-use crate::{
-    AppState,
-    handlers::auth_middleware::AuthUser,
-    models::user_models::{NewBridge},
-    utils::matrix_auth,
-};
 
-use tokio::fs;
 use std::path::Path;
-
+use tokio::fs;
 
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
@@ -72,8 +65,9 @@ async fn connect_telegram_with_retry(
 ) -> Result<(OwnedRoomId, String)> {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY: Duration = Duration::from_secs(2);
-    
-    let username = client.user_id()
+
+    let username = client
+        .user_id()
         .ok_or_else(|| anyhow!("User ID not available"))?
         .localpart()
         .to_string();
@@ -84,12 +78,12 @@ async fn connect_telegram_with_retry(
             Err(e) => {
                 if retry_count < MAX_RETRIES - 1 && is_one_time_key_conflict(&e) {
                     tracing::warn!(
-                        "One-time key conflict detected for user {} (attempt {}/{}), resetting client store", 
-                        user_id, 
-                        retry_count + 1, 
+                        "One-time key conflict detected for user {} (attempt {}/{}), resetting client store",
+                        user_id,
+                        retry_count + 1,
                         MAX_RETRIES
                     );
-                    
+
                     // Clear the store
                     let store_path = get_store_path(&username)?;
                     if Path::new(&store_path).exists() {
@@ -98,65 +92,71 @@ async fn connect_telegram_with_retry(
                         fs::create_dir_all(&store_path).await?;
                         tracing::info!("Cleared store directory: {}", store_path);
                     }
-                    
+
                     // Add delay before retry
                     sleep(RETRY_DELAY).await;
-                    
-                   // Reinitialize client (bypass cache since we're recovering from an error)
+
+                    // Reinitialize client (bypass cache since we're recovering from an error)
                     match matrix_auth::get_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
                             continue;
-                        },
+                        }
                         Err(init_err) => {
                             tracing::error!("Failed to reinitialize client: {}", init_err);
                             return Err(init_err);
                         }
                     }
                 } else if is_one_time_key_conflict(&e) {
-                    return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
+                    return Err(anyhow!(
+                        "Failed after {} attempts to resolve one-time key conflict: {}",
+                        MAX_RETRIES,
+                        e
+                    ));
                 } else {
                     return Err(e);
                 }
             }
         }
     }
-    
+
     Err(anyhow!("Exceeded maximum retry attempts ({})", MAX_RETRIES))
 }
 
 #[derive(Serialize)]
 pub struct TelegramConnectionResponse {
-    login_url: String, 
+    login_url: String,
 }
-
 
 async fn connect_telegram(
     client: &MatrixClient,
     bridge_bot: &str,
 ) -> Result<(OwnedRoomId, String)> {
     tracing::debug!("🚀 Starting Telegram connection process");
-    
+
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
-    
+
     let request = CreateRoomRequest::new();
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
 
     tracing::debug!("🏠 Created room with ID: {}", room_id);
-    
+
     let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
-    
+
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
-    
+
     // Single sync to get the invitation processed
-    client.sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5))).await?;
-    
+    client
+        .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
+        .await?;
+
     // Reduced wait time and more frequent checks
     let mut attempt = 0;
-    for _ in 0..15 { // Reduced from 30 to 15
+    for _ in 0..15 {
+        // Reduced from 30 to 15
         attempt += 1;
         println!("🔍 Check attempt {}/15 for bot join status", attempt);
         let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
@@ -166,7 +166,7 @@ async fn connect_telegram(
         }
         sleep(Duration::from_millis(500)).await; // Reduced from 1 second to 500ms
     }
-    
+
     // Quick membership check
     let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
     if !members.iter().any(|m| m.user_id() == bot_user_id) {
@@ -175,59 +175,60 @@ async fn connect_telegram(
     }
     // Send cancel command to get rid of the previous login
     let cancel_command = "!tg cancel".to_string();
-    room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
-
+    room.send(RoomMessageEventContent::text_plain(&cancel_command))
+        .await?;
 
     // Send login command
     let login_command = "!tg login".to_string();
     tracing::debug!("📤 Sending Telegram login command: {}", login_command);
-    room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
+    room.send(RoomMessageEventContent::text_plain(&login_command))
+        .await?;
 
     // Optimized login url detection with event handler
     let mut login_url = None;
     tracing::debug!("⏳ Starting login url monitoring");
-    
+
     // Use shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
 
-    for attempt in 1..=60 { // Increased to 60 attempts for longer user input time
+    for attempt in 1..=60 {
+        // Increased to 60 attempts for longer user input time
         println!("📡 Sync attempt #{}/60", attempt);
         tracing::debug!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
 
-
         if let Some(room) = client.get_room(room_id) {
             // Get only the most recent messages to reduce processing time
-            let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let mut options =
+                matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from 10 to 5
             let messages = room.messages(options).await?;
-            
+
             for msg in messages.chunk.iter() {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
                         if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
-                        ) = event.clone() {
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                sync_event,
+                            ),
+                        ) = event.clone()
+                        {
                             let event_content: RoomMessageEventContent = match sync_event {
                                 SyncRoomMessageEvent::Original(original_event) => {
                                     original_event.content
-                                },
+                                }
                                 SyncRoomMessageEvent::Redacted(_) => {
                                     continue;
-                                },
+                                }
                             };
 
                             let message_body = match event_content.msgtype {
-                                MessageType::Notice(text_content) => {
-                                    text_content.body
-                                },
-                                MessageType::Text(text_content) => {
-                                    text_content.body
-                                },
+                                MessageType::Notice(text_content) => text_content.body,
+                                MessageType::Text(text_content) => text_content.body,
                                 _ => {
                                     continue;
-                                },
+                                }
                             };
 
                             // More efficient login url extraction
@@ -245,12 +246,14 @@ async fn connect_telegram(
         if login_url.is_some() {
             break;
         }
-        
+
         // Balanced delay - fast enough for responsiveness, long enough for user input
         sleep(Duration::from_millis(500)).await; // 500ms gives good balance
     }
 
-    let login_url = login_url.ok_or(anyhow!("Telegram login url not received within 30 seconds. Please try again."))?;
+    let login_url = login_url.ok_or(anyhow!(
+        "Telegram login url not received within 30 seconds. Please try again."
+    ))?;
     Ok((room_id.into(), login_url))
 }
 
@@ -258,23 +261,25 @@ async fn connect_telegram(
 fn extract_login_url(message: &str) -> Option<String> {
     // Remove backticks and other formatting that might interfere
     let clean_message = message.replace('`', "").replace("*", "");
-    
+
     // Regex to match the full URL within Markdown [text](url) format
     let re = regex::Regex::new(r"\((https?://[^\)]+)\)").ok()?;
-    
+
     if let Some(captures) = re.captures(&clean_message) {
         return Some(captures[1].to_string()); // Capture the URL inside the parentheses
     }
-    
+
     None
 }
-
 
 pub async fn start_telegram_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<TelegramConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🚀 Starting Telegram connection process for user {}", auth_user.user_id);
+    tracing::debug!(
+        "🚀 Starting Telegram connection process for user {}",
+        auth_user.user_id
+    );
 
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
@@ -287,31 +292,29 @@ pub async fn start_telegram_connection(
                 AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
-    tracing::debug!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
+    tracing::debug!(
+        "✅ Matrix client obtained for user: {}",
+        client.user_id().unwrap()
+    );
 
     // Get bridge bot from environment
-    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT")
-        .expect("TELEGRAM_BRIDGE_BOT not set");
-
+    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT").expect("TELEGRAM_BRIDGE_BOT not set");
 
     tracing::debug!("🔗 Connecting to Telegram bridge...");
     // Connect to Telegram bridge
     let mut client_clone = Arc::clone(&client);
-    let (room_id, login_url) = connect_telegram_with_retry(
-        &mut client_clone,
-        &bridge_bot,
-        auth_user.user_id,
-        &state,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to connect to Telegram bridge: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": format!("Failed to connect to Telegram bridge: {}", e)})),
-        )
-    })?;
-
+    let (room_id, login_url) =
+        connect_telegram_with_retry(&mut client_clone, &bridge_bot, auth_user.user_id, &state)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to connect to Telegram bridge: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(
+                        json!({"error": format!("Failed to connect to Telegram bridge: {}", e)}),
+                    ),
+                )
+            })?;
 
     // Debug: Log the login url
     tracing::info!("Generated login url");
@@ -332,7 +335,9 @@ pub async fn start_telegram_connection(
     };
 
     // Store bridge information
-    state.user_repository.create_bridge(new_bridge)
+    state
+        .user_repository
+        .create_bridge(new_bridge)
         .map_err(|e| {
             tracing::error!("Failed to store bridge information: {}", e);
             (
@@ -346,7 +351,7 @@ pub async fn start_telegram_connection(
     let room_id_clone = room_id.clone();
     let bridge_bot_clone = bridge_bot.to_string();
     let client_clone = client.clone();
-    
+
     tokio::spawn(async move {
         match monitor_telegram_connection(
             &client_clone,
@@ -354,12 +359,21 @@ pub async fn start_telegram_connection(
             &bridge_bot_clone,
             auth_user.user_id,
             state_clone,
-        ).await {
+        )
+        .await
+        {
             Ok(_) => {
-                tracing::info!("Telegram connection monitoring completed successfully for user {}", auth_user.user_id);
-            },
+                tracing::info!(
+                    "Telegram connection monitoring completed successfully for user {}",
+                    auth_user.user_id
+                );
+            }
             Err(e) => {
-                tracing::error!("Telegram connection monitoring failed for user {}: {}", auth_user.user_id, e);
+                tracing::error!(
+                    "Telegram connection monitoring failed for user {}: {}",
+                    auth_user.user_id,
+                    e
+                );
             }
         }
     });
@@ -367,13 +381,14 @@ pub async fn start_telegram_connection(
     Ok(AxumJson(TelegramConnectionResponse { login_url }))
 }
 
-
 pub async fn get_telegram_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking Telegram status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge status: {}", e);
             (
@@ -398,7 +413,6 @@ pub async fn get_telegram_status(
     }
 }
 
-
 async fn monitor_telegram_connection(
     client: &MatrixClient,
     room_id: &OwnedRoomId,
@@ -406,25 +420,31 @@ async fn monitor_telegram_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    tracing::info!("👀 Starting Telegram connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::info!(
+        "👀 Starting Telegram connection monitoring for user {} in room {}",
+        user_id,
+        room_id
+    );
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
 
-
-    for attempt in 1..=120 { // Increase to 10 minutes (120 * 5 seconds)
+    for attempt in 1..=120 {
+        // Increase to 10 minutes (120 * 5 seconds)
         tracing::info!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
 
         // Send login command to trigger a response
         if let Some(room) = client.get_room(room_id) {
             tracing::debug!("📤 Sending login command to verify connection");
-            room.send(RoomMessageEventContent::text_plain("login")).await?;
+            room.send(RoomMessageEventContent::text_plain("login"))
+                .await?;
         }
 
         let _ = client.sync_once(sync_settings.clone()).await?;
 
         if let Some(room) = client.get_room(room_id) {
-            let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let mut options =
+                matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             options.limit = matrix_sdk::ruma::UInt::new(20).unwrap(); // Increase to 20 messages
             let messages = room.messages(options).await?;
 
@@ -433,10 +453,15 @@ async fn monitor_telegram_connection(
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
                         if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
-                        ) = event {
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                sync_event,
+                            ),
+                        ) = event
+                        {
                             let event_content = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                                SyncRoomMessageEvent::Original(original_event) => {
+                                    original_event.content
+                                }
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
@@ -447,8 +472,13 @@ async fn monitor_telegram_connection(
                             };
 
                             // Check for successful login or already logged in
-                            if content.contains("Logged in") || content.contains("You are already logged in") {
-                                tracing::debug!("🎉 Telegram successfully connected for user {}", user_id);
+                            if content.contains("Logged in")
+                                || content.contains("You are already logged in")
+                            {
+                                tracing::debug!(
+                                    "🎉 Telegram successfully connected for user {}",
+                                    user_id
+                                );
 
                                 // Extract the connected account (username or phone)
                                 let connected_account = extract_connected_account(&content);
@@ -459,7 +489,8 @@ async fn monitor_telegram_connection(
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
-                                    .as_secs() as i32;
+                                    .as_secs()
+                                    as i32;
                                 let new_bridge = NewBridge {
                                     user_id,
                                     bridge_type: "telegram".to_string(),
@@ -495,11 +526,18 @@ async fn monitor_telegram_connection(
                                     loop {
                                         match client_arc.sync(sync_settings.clone()).await {
                                             Ok(_) => {
-                                                tracing::debug!("Sync completed normally for user {}", user_id);
+                                                tracing::debug!(
+                                                    "Sync completed normally for user {}",
+                                                    user_id
+                                                );
                                                 tokio::time::sleep(Duration::from_secs(1)).await;
                                             }
                                             Err(e) => {
-                                                tracing::error!("Matrix sync error for user {}: {}", user_id, e);
+                                                tracing::error!(
+                                                    "Matrix sync error for user {}: {}",
+                                                    user_id,
+                                                    e
+                                                );
                                                 tokio::time::sleep(Duration::from_secs(30)).await;
                                             }
                                         }
@@ -509,10 +547,15 @@ async fn monitor_telegram_connection(
                                 sync_tasks.insert(user_id, handle);
 
                                 if let Some(room) = client.get_room(room_id) {
-                                    room.send(RoomMessageEventContent::text_plain("sync contacts")).await?;
-                                    tracing::debug!("Sent contacts sync command for user {}", user_id);
+                                    room.send(RoomMessageEventContent::text_plain("sync contacts"))
+                                        .await?;
+                                    tracing::debug!(
+                                        "Sent contacts sync command for user {}",
+                                        user_id
+                                    );
                                     sleep(Duration::from_millis(500)).await;
-                                    room.send(RoomMessageEventContent::text_plain("sync chats")).await?;
+                                    room.send(RoomMessageEventContent::text_plain("sync chats"))
+                                        .await?;
                                     tracing::debug!("Sent chats sync command for user {}", user_id);
                                 } else {
                                     tracing::error!("Telegram room not found for sync commands");
@@ -522,11 +565,24 @@ async fn monitor_telegram_connection(
                             }
 
                             let error_patterns = [
-                                "error", "failed", "timeout", "disconnected", "invalid code",
-                                "connection lost", "authentication failed", "login failed",
+                                "error",
+                                "failed",
+                                "timeout",
+                                "disconnected",
+                                "invalid code",
+                                "connection lost",
+                                "authentication failed",
+                                "login failed",
                             ];
-                            if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
-                                tracing::error!("❌ Telegram connection failed for user {}: {}", user_id, content);
+                            if error_patterns
+                                .iter()
+                                .any(|&pattern| content.to_lowercase().contains(pattern))
+                            {
+                                tracing::error!(
+                                    "❌ Telegram connection failed for user {}: {}",
+                                    user_id,
+                                    content
+                                );
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 return Err(anyhow!("Telegram connection failed: {}", content));
                             }
@@ -547,10 +603,15 @@ pub async fn resync_telegram(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🔄 Starting Telegram resync process for user {}", auth_user.user_id);
+    println!(
+        "🔄 Starting Telegram resync process for user {}",
+        auth_user.user_id
+    );
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge: {}", e);
             (
@@ -578,21 +639,22 @@ pub async fn resync_telegram(
         })?;
 
     // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default()).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
+        )
+    })?;
 
     if let Some(room) = client.get_room(&room_id) {
         println!("📱 Setting up Matrix event handler");
-        
+
         // Set up event handler for the Matrix client
         client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
             match ev {
                 SyncRoomMessageEvent::Original(_msg) => {
                     // Add more specific message handling logic here if needed
-                },
+                }
                 SyncRoomMessageEvent::Redacted(_) => {
                     println!("🗑️ Received redacted message event");
                 }
@@ -606,7 +668,7 @@ pub async fn resync_telegram(
             let sync_settings = MatrixSyncSettings::default()
                 .timeout(Duration::from_secs(30))
                 .full_state(true);
-            
+
             if let Err(e) = sync_client.sync(sync_settings).await {
                 tracing::error!("❌ Matrix sync error: {}", e);
             }
@@ -617,9 +679,12 @@ pub async fn resync_telegram(
         sleep(Duration::from_secs(2)).await;
 
         tracing::debug!("📱 Sending Telegram sync commands");
-        
+
         // First sync all contacts
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("sync contacts")).await {
+        if let Err(e) = room
+            .send(RoomMessageEventContent::text_plain("sync contacts"))
+            .await
+        {
             tracing::error!("Failed to send contacts sync command: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -627,12 +692,15 @@ pub async fn resync_telegram(
             ));
         }
         tracing::debug!("✅ Sent contacts sync command");
-        
+
         // Wait a bit for contacts to sync
         sleep(Duration::from_secs(2)).await;
-        
+
         // Then sync all chats
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("sync chats")).await {
+        if let Err(e) = room
+            .send(RoomMessageEventContent::text_plain("sync chats"))
+            .await
+        {
             tracing::error!("Failed to send chats sync command: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -641,7 +709,10 @@ pub async fn resync_telegram(
         }
         tracing::debug!("✅ Sent chats sync command");
 
-        tracing::debug!("✅ Telegram resync process completed for user {}", auth_user.user_id);
+        tracing::debug!(
+            "✅ Telegram resync process completed for user {}",
+            auth_user.user_id
+        );
         Ok(AxumJson(json!({
             "message": "Telegram resync initiated successfully"
         })))
@@ -657,10 +728,15 @@ pub async fn disconnect_telegram(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::info!("🔌 Starting Telegram disconnection process for user {}", auth_user.user_id);
+    tracing::info!(
+        "🔌 Starting Telegram disconnection process for user {}",
+        auth_user.user_id
+    );
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge info: {}", e);
             (
@@ -678,7 +754,9 @@ pub async fn disconnect_telegram(
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
     // Delete the bridge record IMMEDIATELY - user sees instant response
-    state.user_repository.delete_bridge(auth_user.user_id, "telegram")
+    state
+        .user_repository
+        .delete_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to delete Telegram bridge: {}", e);
             (
@@ -687,13 +765,19 @@ pub async fn disconnect_telegram(
             )
         })?;
 
-    tracing::info!("✅ Telegram bridge record deleted for user {}", auth_user.user_id);
+    tracing::info!(
+        "✅ Telegram bridge record deleted for user {}",
+        auth_user.user_id
+    );
 
     // Spawn background task for cleanup - don't block the response
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     tokio::spawn(async move {
-        tracing::info!("🧹 Starting background cleanup for Telegram user {}", user_id);
+        tracing::info!(
+            "🧹 Starting background cleanup for Telegram user {}",
+            user_id
+        );
 
         // Get Matrix client for cleanup
         let client = match matrix_auth::get_cached_client(user_id, &state_clone).await {
@@ -708,21 +792,32 @@ pub async fn disconnect_telegram(
         if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
             if let Some(room) = client.get_room(&room_id) {
                 // Send logout command
-                if let Err(e) = room.send(RoomMessageEventContent::text_plain("logout")).await {
+                if let Err(e) = room
+                    .send(RoomMessageEventContent::text_plain("logout"))
+                    .await
+                {
                     tracing::error!("Background cleanup: Failed to send logout command: {}", e);
                 }
                 sleep(Duration::from_secs(2)).await;
 
                 // Send command to clean rooms
-                if let Err(e) = room.send(RoomMessageEventContent::text_plain("clean-rooms")).await {
-                    tracing::error!("Background cleanup: Failed to send clean-rooms command: {}", e);
+                if let Err(e) = room
+                    .send(RoomMessageEventContent::text_plain("clean-rooms"))
+                    .await
+                {
+                    tracing::error!(
+                        "Background cleanup: Failed to send clean-rooms command: {}",
+                        e
+                    );
                 }
                 sleep(Duration::from_secs(2)).await;
             }
         }
 
         // Check for remaining active bridges and cleanup if none left
-        let has_active_bridges = state_clone.user_repository.has_active_bridges(user_id)
+        let has_active_bridges = state_clone
+            .user_repository
+            .has_active_bridges(user_id)
             .unwrap_or(false);
 
         if !has_active_bridges {
@@ -740,7 +835,10 @@ pub async fn disconnect_telegram(
                     if let Err(e) = fs::remove_dir_all(&store_path).await {
                         tracing::error!("Background cleanup: Failed to clear user store: {}", e);
                     } else {
-                        tracing::info!("Background cleanup: Cleared Matrix store for user {}", user_id);
+                        tracing::info!(
+                            "Background cleanup: Cleared Matrix store for user {}",
+                            user_id
+                        );
                     }
                 }
             }
@@ -754,11 +852,17 @@ pub async fn disconnect_telegram(
                 tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
             }
             if matrix_clients.remove(&user_id).is_some() {
-                tracing::debug!("Background cleanup: Removed Matrix client for user {}", user_id);
+                tracing::debug!(
+                    "Background cleanup: Removed Matrix client for user {}",
+                    user_id
+                );
             }
         }
 
-        tracing::info!("🧹 Background cleanup completed for Telegram user {}", user_id);
+        tracing::info!(
+            "🧹 Background cleanup completed for Telegram user {}",
+            user_id
+        );
     });
 
     Ok(AxumJson(json!({
@@ -775,7 +879,9 @@ pub async fn check_telegram_health(
     tracing::info!("🏥 Checking Telegram health for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| {
             tracing::error!("Failed to get Telegram bridge: {}", e);
             (
@@ -803,20 +909,27 @@ pub async fn check_telegram_health(
         })?;
 
     // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default()).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
+        )
+    })?;
 
-    let room = client.get_room(&room_id).ok_or_else(|| (
-        StatusCode::NOT_FOUND,
-        AxumJson(json!({"error": "Telegram bridge room not found"})),
-    ))?;
+    let room = client.get_room(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            AxumJson(json!({"error": "Telegram bridge room not found"})),
+        )
+    })?;
 
     // Send login command to check status - if already logged in, bridge will respond with status
-    tracing::info!("📤 Sending login command for health check for user {}", auth_user.user_id);
-    room.send(RoomMessageEventContent::text_plain("login")).await
+    tracing::info!(
+        "📤 Sending login command for health check for user {}",
+        auth_user.user_id
+    );
+    room.send(RoomMessageEventContent::text_plain("login"))
+        .await
         .map_err(|e| {
             tracing::error!("Failed to send ping command: {}", e);
             (
@@ -826,17 +939,18 @@ pub async fn check_telegram_health(
         })?;
 
     // Wait for response with timeout
-    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT")
-        .expect("TELEGRAM_BRIDGE_BOT not set");
-    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str())
-        .map_err(|_| (
+    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT").expect("TELEGRAM_BRIDGE_BOT not set");
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Invalid bridge bot user ID"})),
-        ))?;
+        )
+    })?;
 
     // Simple approach: check the MOST RECENT message from the bot
     // Get recent messages from the room
-    let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+    let mut options =
+        matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
     options.limit = matrix_sdk::ruma::UInt::new(50).unwrap();
 
     let messages = match room.messages(options).await {
@@ -850,7 +964,10 @@ pub async fn check_telegram_health(
         }
     };
 
-    tracing::info!("📨 Got {} messages from room for health check", messages.chunk.len());
+    tracing::info!(
+        "📨 Got {} messages from room for health check",
+        messages.chunk.len()
+    );
 
     // Find the most recent message from the bridge bot
     for msg in messages.chunk {
@@ -858,8 +975,9 @@ pub async fn check_telegram_health(
         if let Ok(event) = raw_event.deserialize() {
             if event.sender() == bot_user_id {
                 if let AnySyncTimelineEvent::MessageLike(
-                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
-                ) = event {
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
+                ) = event
+                {
                     let event_content: RoomMessageEventContent = match sync_event {
                         SyncRoomMessageEvent::Original(original_event) => original_event.content,
                         SyncRoomMessageEvent::Redacted(_) => continue,
@@ -875,25 +993,37 @@ pub async fn check_telegram_health(
                     tracing::info!("🔍 Most recent bot message: {}", content);
 
                     // Skip non-status messages
-                    if content_lower.contains("queued sync") ||
-                       content_lower.contains("unknown command") ||
-                       content_lower.contains("login url") {
+                    if content_lower.contains("queued sync")
+                        || content_lower.contains("unknown command")
+                        || content_lower.contains("login url")
+                    {
                         continue;
                     }
 
                     // Unhealthy patterns
-                    if content_lower.contains("not logged in") ||
-                       content_lower.contains("not connected") ||
-                       content_lower.contains("disconnected") ||
-                       content_lower.contains("logged out") ||
-                       content_lower.contains("no session") {
-                        tracing::warn!("❌ Telegram health check failed for user {}: {}", auth_user.user_id, content);
+                    if content_lower.contains("not logged in")
+                        || content_lower.contains("not connected")
+                        || content_lower.contains("disconnected")
+                        || content_lower.contains("logged out")
+                        || content_lower.contains("no session")
+                    {
+                        tracing::warn!(
+                            "❌ Telegram health check failed for user {}: {}",
+                            auth_user.user_id,
+                            content
+                        );
 
                         // Auto-delete the stale bridge record
-                        if let Err(e) = state.user_repository.delete_bridge(auth_user.user_id, "telegram") {
+                        if let Err(e) = state
+                            .user_repository
+                            .delete_bridge(auth_user.user_id, "telegram")
+                        {
                             tracing::error!("Failed to delete stale bridge: {}", e);
                         } else {
-                            tracing::info!("🧹 Deleted stale Telegram bridge for user {}", auth_user.user_id);
+                            tracing::info!(
+                                "🧹 Deleted stale Telegram bridge for user {}",
+                                auth_user.user_id
+                            );
                         }
 
                         return Ok(AxumJson(json!({
@@ -903,15 +1033,24 @@ pub async fn check_telegram_health(
                     }
 
                     // Healthy patterns
-                    if content_lower.contains("successfully logged in") ||
-                       content_lower.contains("logged in as") ||
-                       content_lower.contains("already logged in") {
-                        tracing::info!("✅ Telegram health check passed for user {}: {}", auth_user.user_id, content);
+                    if content_lower.contains("successfully logged in")
+                        || content_lower.contains("logged in as")
+                        || content_lower.contains("already logged in")
+                    {
+                        tracing::info!(
+                            "✅ Telegram health check passed for user {}: {}",
+                            auth_user.user_id,
+                            content
+                        );
 
                         // Extract and save the connected account
                         if let Some(account) = extract_connected_account(&content) {
                             tracing::info!("📱 Extracted connected account: {}", account);
-                            if let Err(e) = state.user_repository.update_bridge_data(auth_user.user_id, "telegram", &account) {
+                            if let Err(e) = state.user_repository.update_bridge_data(
+                                auth_user.user_id,
+                                "telegram",
+                                &account,
+                            ) {
                                 tracing::warn!("Failed to save connected account: {}", e);
                             }
                         }

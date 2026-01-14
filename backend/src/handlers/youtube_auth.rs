@@ -1,23 +1,21 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{Query, State},
-    response::{Json, Redirect},
     http::StatusCode,
+    response::{Json, Redirect},
 };
-use tower_sessions::{session_store::SessionStore, session::{Id, Record}};
 use oauth2::{
-    PkceCodeVerifier,
-    AuthorizationCode,
-    CsrfToken,
-    PkceCodeChallenge,
-    Scope,
-    TokenResponse,
+    AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
 use serde::Deserialize;
 use serde_json::json;
-use uuid::Uuid;
+use std::sync::Arc;
 use time::OffsetDateTime;
+use tower_sessions::{
+    session::{Id, Record},
+    session_store::SessionStore,
+};
+use uuid::Uuid;
 
 use crate::AppState;
 
@@ -38,13 +36,15 @@ pub async fn youtube_status(
             tracing::error!("Failed to check YouTube connection status: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to check connection status"}))
+                Json(json!({"error": "Failed to check connection status"})),
             ));
         }
     };
 
     if !connected {
-        return Ok(Json(json!({ "connected": false, "scope": null, "available": true })));
+        return Ok(Json(
+            json!({ "connected": false, "scope": null, "available": true }),
+        ));
     }
 
     // Get the scope
@@ -85,17 +85,29 @@ pub async fn youtube_login(
         data: Default::default(),
         expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
     };
-    record.data.insert("session_key".to_string(), json!(session_key.clone()));
-    record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
-    record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
-    record.data.insert("oauth_type".to_string(), json!("youtube"));
+    record
+        .data
+        .insert("session_key".to_string(), json!(session_key.clone()));
+    record.data.insert(
+        "pkce_verifier".to_string(),
+        json!(pkce_verifier.secret().to_string()),
+    );
+    record.data.insert(
+        "csrf_token".to_string(),
+        json!(csrf_token.secret().to_string()),
+    );
+    record
+        .data
+        .insert("user_id".to_string(), json!(auth_user.user_id));
+    record
+        .data
+        .insert("oauth_type".to_string(), json!("youtube"));
 
     if let Err(e) = state.session_store.create(&mut record).await {
         tracing::error!("Failed to store session record: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to store session record: {}", e)}))
+            Json(json!({"error": format!("Failed to store session record: {}", e)})),
         ));
     }
 
@@ -106,7 +118,9 @@ pub async fn youtube_login(
     let (auth_url, _) = state
         .youtube_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/youtube.readonly".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/youtube.readonly".to_string(),
+        ))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent")
         .set_pkce_challenge(pkce_challenge)
@@ -124,7 +138,10 @@ pub async fn youtube_upgrade_scope(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to upgrade YouTube scope for user {}", auth_user.user_id);
+    tracing::info!(
+        "Received request to upgrade YouTube scope for user {}",
+        auth_user.user_id
+    );
 
     let session_key = Uuid::new_v4().to_string();
 
@@ -136,17 +153,29 @@ pub async fn youtube_upgrade_scope(
         data: Default::default(),
         expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
     };
-    record.data.insert("session_key".to_string(), json!(session_key.clone()));
-    record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
-    record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
-    record.data.insert("oauth_type".to_string(), json!("youtube_upgrade"));
+    record
+        .data
+        .insert("session_key".to_string(), json!(session_key.clone()));
+    record.data.insert(
+        "pkce_verifier".to_string(),
+        json!(pkce_verifier.secret().to_string()),
+    );
+    record.data.insert(
+        "csrf_token".to_string(),
+        json!(csrf_token.secret().to_string()),
+    );
+    record
+        .data
+        .insert("user_id".to_string(), json!(auth_user.user_id));
+    record
+        .data
+        .insert("oauth_type".to_string(), json!("youtube_upgrade"));
 
     if let Err(e) = state.session_store.create(&mut record).await {
         tracing::error!("Failed to store session record: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to store session record: {}", e)}))
+            Json(json!({"error": format!("Failed to store session record: {}", e)})),
         ));
     }
 
@@ -156,7 +185,9 @@ pub async fn youtube_upgrade_scope(
     let (auth_url, _) = state
         .youtube_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/youtube.force-ssl".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/youtube.force-ssl".to_string(),
+        ))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent")
         .set_pkce_challenge(pkce_challenge)
@@ -174,7 +205,10 @@ pub async fn youtube_downgrade_scope(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to downgrade YouTube scope for user {}", auth_user.user_id);
+    tracing::info!(
+        "Received request to downgrade YouTube scope for user {}",
+        auth_user.user_id
+    );
 
     let session_key = Uuid::new_v4().to_string();
 
@@ -186,17 +220,29 @@ pub async fn youtube_downgrade_scope(
         data: Default::default(),
         expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
     };
-    record.data.insert("session_key".to_string(), json!(session_key.clone()));
-    record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
-    record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
-    record.data.insert("oauth_type".to_string(), json!("youtube_downgrade"));
+    record
+        .data
+        .insert("session_key".to_string(), json!(session_key.clone()));
+    record.data.insert(
+        "pkce_verifier".to_string(),
+        json!(pkce_verifier.secret().to_string()),
+    );
+    record.data.insert(
+        "csrf_token".to_string(),
+        json!(csrf_token.secret().to_string()),
+    );
+    record
+        .data
+        .insert("user_id".to_string(), json!(auth_user.user_id));
+    record
+        .data
+        .insert("oauth_type".to_string(), json!("youtube_downgrade"));
 
     if let Err(e) = state.session_store.create(&mut record).await {
         tracing::error!("Failed to store session record: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to store session record: {}", e)}))
+            Json(json!({"error": format!("Failed to store session record: {}", e)})),
         ));
     }
 
@@ -206,7 +252,9 @@ pub async fn youtube_downgrade_scope(
     let (auth_url, _) = state
         .youtube_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/youtube.readonly".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/youtube.readonly".to_string(),
+        ))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent")
         .set_pkce_challenge(pkce_challenge)
@@ -231,30 +279,28 @@ pub async fn youtube_callback(
         tracing::error!("Invalid state format: {}", query.state);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid state format"}))
+            Json(json!({"error": "Invalid state format"})),
         ));
     }
     let session_id_str = state_parts[0];
     let state_csrf = state_parts[1];
 
-    let session_id = session_id_str.parse::<i128>()
-        .map_err(|e| {
-            tracing::error!("Invalid session ID format: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid session ID format"}))
-            )
-        })?;
+    let session_id = session_id_str.parse::<i128>().map_err(|e| {
+        tracing::error!("Invalid session ID format: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid session ID format"})),
+        )
+    })?;
     let session_id = Id(session_id);
 
-    let record = state.session_store.load(&session_id).await
-        .map_err(|e| {
-            tracing::error!("Session store error loading record: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Session store error: {}", e)}))
-            )
-        })?;
+    let record = state.session_store.load(&session_id).await.map_err(|e| {
+        tracing::error!("Session store error loading record: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Session store error: {}", e)})),
+        )
+    })?;
 
     let record = match record {
         Some(r) => r,
@@ -262,18 +308,20 @@ pub async fn youtube_callback(
             tracing::error!("Session record missing");
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Session record not found"}))
+                Json(json!({"error": "Session record not found"})),
             ));
-        },
+        }
     };
 
-    let stored_csrf_token = record.data.get("csrf_token")
+    let stored_csrf_token = record
+        .data
+        .get("csrf_token")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
             tracing::error!("CSRF token missing from session record");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "CSRF token missing from session"}))
+                Json(json!({"error": "CSRF token missing from session"})),
             )
         })?;
 
@@ -281,17 +329,19 @@ pub async fn youtube_callback(
         tracing::error!("CSRF token mismatch");
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "CSRF token mismatch"}))
+            Json(json!({"error": "CSRF token mismatch"})),
         ));
     }
 
-    let pkce_verifier = record.data.get("pkce_verifier")
+    let pkce_verifier = record
+        .data
+        .get("pkce_verifier")
         .and_then(|v| v.as_str().map(|s| PkceCodeVerifier::new(s.to_string())))
         .ok_or_else(|| {
             tracing::error!("PKCE verifier missing from session record");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "PKCE verifier missing from session"}))
+                Json(json!({"error": "PKCE verifier missing from session"})),
             )
         })?;
 
@@ -311,28 +361,30 @@ pub async fn youtube_callback(
             tracing::error!("Token exchange failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Token exchange failed: {}", e)}))
+                Json(json!({"error": format!("Token exchange failed: {}", e)})),
             )
         })?;
 
     let access_token = token_result.access_token().secret();
     let refresh_token = token_result.refresh_token().map(|rt| rt.secret());
-    let expires_in = token_result.expires_in()
-        .unwrap_or_default()
-        .as_secs() as i32;
+    let expires_in = token_result.expires_in().unwrap_or_default().as_secs() as i32;
 
-    let user_id = record.data.get("user_id")
+    let user_id = record
+        .data
+        .get("user_id")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| {
             tracing::error!("User ID not found in session");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "User ID not found in session"}))
+                Json(json!({"error": "User ID not found in session"})),
             )
         })? as i32;
 
     // Check if this is a scope upgrade or downgrade
-    let oauth_type = record.data.get("oauth_type")
+    let oauth_type = record
+        .data
+        .get("oauth_type")
         .and_then(|v| v.as_str())
         .unwrap_or("youtube");
     let scope = match oauth_type {
@@ -357,14 +409,17 @@ pub async fn youtube_callback(
         tracing::error!("Failed to store YouTube connection: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to store YouTube connection"}))
+            Json(json!({"error": "Failed to store YouTube connection"})),
         ));
     }
 
-    tracing::info!("Successfully stored YouTube connection for user {} with scope {}", user_id, scope);
+    tracing::info!(
+        "Successfully stored YouTube connection for user {} with scope {}",
+        user_id,
+        scope
+    );
 
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .expect("FRONTEND_URL must be set");
+    let frontend_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL must be set");
 
     // Redirect with appropriate success message
     let redirect_param = match oauth_type {
@@ -372,7 +427,10 @@ pub async fn youtube_callback(
         "youtube_downgrade" => "youtube_downgraded",
         _ => "youtube",
     };
-    Ok(Redirect::to(&format!("{}/?{}=success", frontend_url, redirect_param)))
+    Ok(Redirect::to(&format!(
+        "{}/?{}=success",
+        frontend_url, redirect_param
+    )))
 }
 
 /// Deletes the YouTube connection and revokes tokens
@@ -390,12 +448,12 @@ pub async fn delete_youtube_connection(
             return Ok(Json(json!({
                 "message": "No YouTube connection found to delete"
             })));
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to fetch tokens for revocation: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to fetch tokens"}))
+                Json(json!({"error": "Failed to fetch tokens"})),
             ));
         }
     };
@@ -435,18 +493,24 @@ pub async fn delete_youtube_connection(
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_youtube_connection(auth_user.user_id) {
+    match state
+        .user_repository
+        .delete_youtube_connection(auth_user.user_id)
+    {
         Ok(_) => {
-            tracing::info!("Successfully deleted YouTube connection for user {}", auth_user.user_id);
+            tracing::info!(
+                "Successfully deleted YouTube connection for user {}",
+                auth_user.user_id
+            );
             Ok(Json(json!({
                 "message": "YouTube connection deleted and permissions revoked successfully"
             })))
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to delete YouTube connection: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to delete YouTube connection"}))
+                Json(json!({"error": "Failed to delete YouTube connection"})),
             ))
         }
     }

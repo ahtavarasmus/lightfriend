@@ -1,31 +1,29 @@
+use crate::{
+    handlers::auth_middleware::AuthUser, models::user_models::NewBridge, utils::matrix_auth,
+    AppState,
+};
+use anyhow::{anyhow, Result};
 use axum::{
-    extract::{State, Json as AxumJson},
+    extract::{Json as AxumJson, State},
     http::StatusCode,
 };
 use matrix_sdk::{
-    Client as MatrixClient,
     config::SyncSettings as MatrixSyncSettings,
     ruma::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
-        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
+        events::room::message::{MessageType, RoomMessageEventContent, SyncRoomMessageEvent},
         events::AnySyncTimelineEvent,
         OwnedRoomId, OwnedUserId,
     },
+    Client as MatrixClient,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use anyhow::{anyhow, Result};
 use tokio::time::{sleep, Duration};
-use crate::{
-    AppState,
-    handlers::auth_middleware::AuthUser,
-    models::user_models::{NewBridge},
-    utils::matrix_auth,
-};
 
-use tokio::fs;
 use std::path::Path;
+use tokio::fs;
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     if let Some(http_err) = error.downcast_ref::<matrix_sdk::HttpError>() {
@@ -51,8 +49,9 @@ async fn connect_messenger_with_retry(
 ) -> Result<OwnedRoomId> {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY: Duration = Duration::from_secs(2);
-  
-    let username = client.user_id()
+
+    let username = client
+        .user_id()
         .ok_or_else(|| anyhow!("User ID not available"))?
         .localpart()
         .to_string();
@@ -67,7 +66,7 @@ async fn connect_messenger_with_retry(
                         retry_count + 1,
                         MAX_RETRIES
                     );
-                  
+
                     // Clear the store
                     let store_path = get_store_path(&username)?;
                     if Path::new(&store_path).exists() {
@@ -76,31 +75,35 @@ async fn connect_messenger_with_retry(
                         fs::create_dir_all(&store_path).await?;
                         tracing::info!("Cleared store directory: {}", store_path);
                     }
-                  
+
                     // Add delay before retry
                     sleep(RETRY_DELAY).await;
-                  
+
                     // Reinitialize client (bypass cache since we're recovering from an error)
                     match matrix_auth::get_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client.into(); // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
                             continue;
-                        },
+                        }
                         Err(init_err) => {
                             tracing::error!("Failed to reinitialize client: {}", init_err);
                             return Err(init_err);
                         }
                     }
                 } else if is_one_time_key_conflict(&e) {
-                    return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
+                    return Err(anyhow!(
+                        "Failed after {} attempts to resolve one-time key conflict: {}",
+                        MAX_RETRIES,
+                        e
+                    ));
                 } else {
                     return Err(e);
                 }
             }
         }
     }
-  
+
     Err(anyhow!("Exceeded maximum retry attempts ({})", MAX_RETRIES))
 }
 
@@ -110,25 +113,28 @@ async fn connect_messenger(
     curl_paste: &str,
 ) -> Result<OwnedRoomId> {
     tracing::debug!("🚀 Starting Messenger connection process");
-  
+
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
-  
+
     let request = CreateRoomRequest::new();
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
     tracing::debug!("🏠 Created room with ID: {}", room_id);
-  
+
     let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
-  
+
     tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
-  
+
     // Single sync to get the invitation processed
-    client.sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5))).await?;
-  
+    client
+        .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
+        .await?;
+
     // Reduced wait time and more frequent checks
     let mut attempt = 0;
-    for _ in 0..15 { // Reduced from 30 to 15
+    for _ in 0..15 {
+        // Reduced from 30 to 15
         attempt += 1;
         println!("🔍 Check attempt {}/15 for bot join status", attempt);
         let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
@@ -138,7 +144,7 @@ async fn connect_messenger(
         }
         sleep(Duration::from_millis(500)).await; // Reduced from 1 second to 500ms
     }
-  
+
     // Quick membership check
     let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
     if !members.iter().any(|m| m.user_id() == bot_user_id) {
@@ -148,15 +154,17 @@ async fn connect_messenger(
     // Send login command
     let login_command = "login messenger".to_string();
     tracing::info!("📤 Sending Messenger login command: {}", login_command);
-    room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
-  
+    room.send(RoomMessageEventContent::text_plain(&login_command))
+        .await?;
+
     // Small delay to ensure the bot processes the login command
     sleep(Duration::from_secs(1)).await;
-  
+
     // Send the cURL paste
     tracing::info!("📤 Sending cURL paste for authentication");
-    room.send(RoomMessageEventContent::text_plain(curl_paste)).await?;
-  
+    room.send(RoomMessageEventContent::text_plain(curl_paste))
+        .await?;
+
     Ok(room_id.into())
 }
 
@@ -175,7 +183,10 @@ pub async fn start_messenger_connection(
     auth_user: AuthUser,
     AxumJson(req): AxumJson<MessengerLoginRequest>,
 ) -> Result<AxumJson<MessengerConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🚀 Starting Messenger connection process for user {}", auth_user.user_id);
+    tracing::debug!(
+        "🚀 Starting Messenger connection process for user {}",
+        auth_user.user_id
+    );
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
@@ -187,10 +198,12 @@ pub async fn start_messenger_connection(
                 AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
-    tracing::debug!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
+    tracing::debug!(
+        "✅ Matrix client obtained for user: {}",
+        client.user_id().unwrap()
+    );
     // Get bridge bot from environment
-    let bridge_bot = std::env::var("MESSENGER_BRIDGE_BOT")
-        .expect("MESSENGER_BRIDGE_BOT not set");
+    let bridge_bot = std::env::var("MESSENGER_BRIDGE_BOT").expect("MESSENGER_BRIDGE_BOT not set");
     tracing::debug!("🔗 Connecting to Messenger bridge...");
     // Connect to Messenger bridge
     let mut client_clone = Arc::clone(&client);
@@ -223,7 +236,9 @@ pub async fn start_messenger_connection(
         created_at: Some(current_time),
     };
     // Store bridge information
-    state.user_repository.create_bridge(new_bridge)
+    state
+        .user_repository
+        .create_bridge(new_bridge)
         .map_err(|e| {
             tracing::error!("Failed to store bridge information: {}", e);
             (
@@ -236,7 +251,7 @@ pub async fn start_messenger_connection(
     let room_id_clone = room_id.clone();
     let bridge_bot_clone = bridge_bot.to_string();
     let client_clone = client.clone();
-  
+
     tokio::spawn(async move {
         match monitor_messenger_connection(
             &client_clone,
@@ -244,24 +259,40 @@ pub async fn start_messenger_connection(
             &bridge_bot_clone,
             auth_user.user_id,
             state_clone,
-        ).await {
+        )
+        .await
+        {
             Ok(_) => {
-                tracing::info!("Messenger connection monitoring completed successfully for user {}", auth_user.user_id);
-            },
+                tracing::info!(
+                    "Messenger connection monitoring completed successfully for user {}",
+                    auth_user.user_id
+                );
+            }
             Err(e) => {
-                tracing::error!("Messenger connection monitoring failed for user {}: {}", auth_user.user_id, e);
+                tracing::error!(
+                    "Messenger connection monitoring failed for user {}: {}",
+                    auth_user.user_id,
+                    e
+                );
             }
         }
     });
-    Ok(AxumJson(MessengerConnectionResponse { message: "Login process started, awaiting confirmation".to_string() }))
+    Ok(AxumJson(MessengerConnectionResponse {
+        message: "Login process started, awaiting confirmation".to_string(),
+    }))
 }
 
 pub async fn get_messenger_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("📊 Checking Messenger status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    tracing::debug!(
+        "📊 Checking Messenger status for user {}",
+        auth_user.user_id
+    );
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge status: {}", e);
             (
@@ -290,30 +321,41 @@ async fn monitor_messenger_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    tracing::debug!("👀 Starting optimized Messenger connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::debug!(
+        "👀 Starting optimized Messenger connection monitoring for user {} in room {}",
+        user_id,
+        room_id
+    );
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
     // Shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
     // Reduced monitoring duration but more frequent checks
-    for attempt in 1..60 { // Try for about 5 minutes (60 * 5 seconds)
+    for attempt in 1..60 {
+        // Try for about 5 minutes (60 * 5 seconds)
         tracing::debug!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
         let _ = client.sync_once(sync_settings.clone()).await?;
-      
+
         if let Some(room) = client.get_room(room_id) {
             // Get only recent messages to reduce processing time
-            let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let mut options =
+                matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from default to 5
             let messages = room.messages(options).await?;
-          
+
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
                         if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
-                        ) = event {
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                sync_event,
+                            ),
+                        ) = event
+                        {
                             let event_content: RoomMessageEventContent = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                                SyncRoomMessageEvent::Original(original_event) => {
+                                    original_event.content
+                                }
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
                             let content = match event_content.msgtype {
@@ -323,13 +365,17 @@ async fn monitor_messenger_connection(
                             };
                             // Check for successful login message first
                             if content.to_lowercase().contains("successful login") {
-                                tracing::info!("🎉 Messenger successfully connected for user {}", user_id);
-                              
+                                tracing::info!(
+                                    "🎉 Messenger successfully connected for user {}",
+                                    user_id
+                                );
+
                                 // Update bridge status to connected
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
-                                    .as_secs() as i32;
+                                    .as_secs()
+                                    as i32;
                                 let new_bridge = NewBridge {
                                     user_id,
                                     bridge_type: "messenger".to_string(),
@@ -344,17 +390,26 @@ async fn monitor_messenger_connection(
                                 let mut matrix_clients = state.matrix_clients.lock().await;
                                 let mut sync_tasks = state.matrix_sync_tasks.lock().await;
                                 // Add event handlers before storing/cloning the client
-                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
                                 use matrix_sdk::room::Room;
-                              
+                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+
                                 let state_for_handler = Arc::clone(&state);
-                                client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                                    let state = Arc::clone(&state_for_handler);
-                                    async move {
-                                        tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                        crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
-                                    }
-                                });
+                                client.add_event_handler(
+                                    move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                        let state = Arc::clone(&state_for_handler);
+                                        async move {
+                                            tracing::debug!(
+                                                "📨 Received message in room {}: {:?}",
+                                                room.room_id(),
+                                                ev
+                                            );
+                                            crate::utils::bridge::handle_bridge_message(
+                                                ev, room, client, state,
+                                            )
+                                            .await;
+                                        }
+                                    },
+                                );
                                 // Store the client
                                 let client_arc = Arc::new(client.clone());
                                 matrix_clients.insert(user_id, client_arc.clone());
@@ -366,12 +421,25 @@ async fn monitor_messenger_connection(
                                     loop {
                                         match client_arc.sync(sync_settings.clone()).await {
                                             Ok(_) => {
-                                                tracing::debug!("Sync completed normally for user {}", user_id);
-                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                            },
+                                                tracing::debug!(
+                                                    "Sync completed normally for user {}",
+                                                    user_id
+                                                );
+                                                tokio::time::sleep(
+                                                    tokio::time::Duration::from_secs(1),
+                                                )
+                                                .await;
+                                            }
                                             Err(e) => {
-                                                tracing::error!("Matrix sync error for user {}: {}", user_id, e);
-                                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                                tracing::error!(
+                                                    "Matrix sync error for user {}: {}",
+                                                    user_id,
+                                                    e
+                                                );
+                                                tokio::time::sleep(
+                                                    tokio::time::Duration::from_secs(30),
+                                                )
+                                                .await;
                                             }
                                         }
                                     }
@@ -389,10 +457,17 @@ async fn monitor_messenger_connection(
                                 "invalid",
                                 "connection lost",
                                 "authentication failed",
-                                "login failed"
+                                "login failed",
                             ];
-                            if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
-                                tracing::error!("❌ Messenger connection failed for user {}: {}", user_id, content);
+                            if error_patterns
+                                .iter()
+                                .any(|&pattern| content.to_lowercase().contains(pattern))
+                            {
+                                tracing::error!(
+                                    "❌ Messenger connection failed for user {}: {}",
+                                    user_id,
+                                    content
+                                );
                                 state.user_repository.delete_bridge(user_id, "messenger")?;
                                 return Err(anyhow!("Messenger connection failed: {}", content));
                             }
@@ -413,9 +488,14 @@ pub async fn resync_messenger(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🔄 Starting Messenger resync process for user {}", auth_user.user_id);
+    println!(
+        "🔄 Starting Messenger resync process for user {}",
+        auth_user.user_id
+    );
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge: {}", e);
             (
@@ -440,11 +520,12 @@ pub async fn resync_messenger(
             )
         })?;
     // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default()).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
+        )
+    })?;
     if client.get_room(&room_id).is_some() {
         println!("📱 Setting up Matrix event handler");
 
@@ -453,7 +534,7 @@ pub async fn resync_messenger(
             match ev {
                 SyncRoomMessageEvent::Original(_msg) => {
                     // Add more specific message handling logic here if needed
-                },
+                }
                 SyncRoomMessageEvent::Redacted(_) => {
                     println!("🗑️ Received redacted message event");
                 }
@@ -466,7 +547,7 @@ pub async fn resync_messenger(
             let sync_settings = MatrixSyncSettings::default()
                 .timeout(Duration::from_secs(30))
                 .full_state(true);
-          
+
             if let Err(e) = sync_client.sync(sync_settings).await {
                 tracing::error!("❌ Matrix sync error: {}", e);
             }
@@ -474,9 +555,14 @@ pub async fn resync_messenger(
         });
         // Give the sync a moment to start up
         sleep(Duration::from_secs(2)).await;
-        tracing::debug!("📱 No specific resync commands for Messenger, as portals are created dynamically");
-      
-        tracing::debug!("✅ Messenger resync process completed for user {}", auth_user.user_id);
+        tracing::debug!(
+            "📱 No specific resync commands for Messenger, as portals are created dynamically"
+        );
+
+        tracing::debug!(
+            "✅ Messenger resync process completed for user {}",
+            auth_user.user_id
+        );
         Ok(AxumJson(json!({
             "message": "Messenger resync initiated successfully (no-op)"
         })))
@@ -492,9 +578,14 @@ pub async fn disconnect_messenger(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🔌 Starting Messenger disconnection process for user {}", auth_user.user_id);
+    tracing::debug!(
+        "🔌 Starting Messenger disconnection process for user {}",
+        auth_user.user_id
+    );
     // Get the bridge information first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| {
             tracing::error!("Failed to get Messenger bridge: {}", e);
             (
@@ -518,34 +609,52 @@ pub async fn disconnect_messenger(
             )
         })?;
     // Get the room
-    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
-        .map_err(|_| (
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default()).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Invalid room ID format"})),
-        ))?;
+        )
+    })?;
     if let Some(room) = client.get_room(&room_id) {
         tracing::debug!("📤 Sending Messenger logout command");
         // Send logout command
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("logout")).await {
+        if let Err(e) = room
+            .send(RoomMessageEventContent::text_plain("logout"))
+            .await
+        {
             tracing::error!("Failed to send logout command: {}", e);
         }
         // Wait a moment for the logout to process
         sleep(Duration::from_secs(5)).await;
         // Attempt delete-all-portals if applicable
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("delete-all-portals")).await {
-            tracing::error!("Failed to send delete-portals command (may not exist): {}", e);
+        if let Err(e) = room
+            .send(RoomMessageEventContent::text_plain("delete-all-portals"))
+            .await
+        {
+            tracing::error!(
+                "Failed to send delete-portals command (may not exist): {}",
+                e
+            );
         }
         // Wait a moment for the cleanup to process
         sleep(Duration::from_secs(5)).await;
         tracing::debug!("🗑️ Sending delete-session command");
         // Send delete-session command as a final cleanup
-        if let Err(e) = room.send(RoomMessageEventContent::text_plain("delete-session")).await {
-            tracing::error!("Failed to send delete-session command (may not exist): {}", e);
+        if let Err(e) = room
+            .send(RoomMessageEventContent::text_plain("delete-session"))
+            .await
+        {
+            tracing::error!(
+                "Failed to send delete-session command (may not exist): {}",
+                e
+            );
         }
         sleep(Duration::from_secs(5)).await;
     }
     // Delete the bridge record
-    state.user_repository.delete_bridge(auth_user.user_id, "messenger")
+    state
+        .user_repository
+        .delete_bridge(auth_user.user_id, "messenger")
         .map_err(|e| {
             tracing::error!("Failed to delete Messenger bridge: {}", e);
             (
@@ -554,7 +663,9 @@ pub async fn disconnect_messenger(
             )
         })?;
     // Check if there are any remaining active bridges
-    let has_active_bridges = state.user_repository.has_active_bridges(auth_user.user_id)
+    let has_active_bridges = state
+        .user_repository
+        .has_active_bridges(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to check active bridges: {}", e);
             (
@@ -576,9 +687,15 @@ pub async fn disconnect_messenger(
             tracing::debug!("Removed Matrix client for user {}", auth_user.user_id);
         }
     } else {
-        tracing::debug!("Other active bridges exist for user {}, keeping Matrix client", auth_user.user_id);
+        tracing::debug!(
+            "Other active bridges exist for user {}, keeping Matrix client",
+            auth_user.user_id
+        );
     }
-    tracing::debug!("✅ Messenger disconnection completed for user {}", auth_user.user_id);
+    tracing::debug!(
+        "✅ Messenger disconnection completed for user {}",
+        auth_user.user_id
+    );
     Ok(AxumJson(json!({
         "message": "Messenger disconnected successfully"
     })))

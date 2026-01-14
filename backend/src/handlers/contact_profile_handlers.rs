@@ -1,26 +1,26 @@
-use std::sync::Arc;
 use axum::{
-    extract::{State, Path, Query},
-    Json,
+    extract::{Path, Query, State},
     http::StatusCode,
+    Json,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use chrono::Utc;
+use std::sync::Arc;
 
 use crate::{
-    AppState,
-    models::user_models::{NewContactProfile, ContactProfile, ContactProfileException},
     handlers::auth_middleware::AuthUser,
+    models::user_models::{ContactProfile, ContactProfileException, NewContactProfile},
     repositories::user_repository::UpdateContactProfileParams,
+    AppState,
 };
 
 // Request DTOs
 #[derive(Deserialize)]
 pub struct ExceptionRequest {
-    pub platform: String,               // "whatsapp", "telegram", "signal", "email"
-    pub notification_mode: String,      // "all", "critical", "digest"
-    pub notification_type: String,      // "sms", "call", "call_sms"
+    pub platform: String,          // "whatsapp", "telegram", "signal", "email"
+    pub notification_mode: String, // "all", "critical", "digest"
+    pub notification_type: String, // "sms", "call", "call_sms"
     pub notify_on_call: bool,
 }
 
@@ -31,8 +31,8 @@ pub struct CreateContactProfileRequest {
     pub telegram_chat: Option<String>,
     pub signal_chat: Option<String>,
     pub email_addresses: Option<String>,
-    pub notification_mode: String,      // "all", "critical", "digest"
-    pub notification_type: String,      // "sms", "call", "call_sms"
+    pub notification_mode: String, // "all", "critical", "digest"
+    pub notification_type: String, // "sms", "call", "call_sms"
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
 }
@@ -52,8 +52,8 @@ pub struct UpdateContactProfileRequest {
 
 #[derive(Deserialize)]
 pub struct UpdateDefaultModeRequest {
-    pub mode: Option<String>,       // "critical", "digest", "ignore"
-    pub noti_type: Option<String>,  // "sms", "call", "call_sms"
+    pub mode: Option<String>,      // "critical", "digest", "ignore"
+    pub noti_type: Option<String>, // "sms", "call", "call_sms"
     pub notify_on_call: Option<bool>,
 }
 
@@ -97,7 +97,10 @@ pub struct ContactProfileResponse {
 }
 
 impl ContactProfileResponse {
-    pub fn from_profile_with_exceptions(p: ContactProfile, exceptions: Vec<ContactProfileException>) -> Self {
+    pub fn from_profile_with_exceptions(
+        p: ContactProfile,
+        exceptions: Vec<ContactProfileException>,
+    ) -> Self {
         ContactProfileResponse {
             id: p.id.unwrap_or(0),
             nickname: p.nickname,
@@ -108,7 +111,10 @@ impl ContactProfileResponse {
             notification_mode: p.notification_mode,
             notification_type: p.notification_type,
             notify_on_call: p.notify_on_call != 0,
-            exceptions: exceptions.into_iter().map(ExceptionResponse::from).collect(),
+            exceptions: exceptions
+                .into_iter()
+                .map(ExceptionResponse::from)
+                .collect(),
         }
     }
 }
@@ -120,25 +126,37 @@ pub async fn get_contact_profiles(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_contact_profiles(auth_user.user_id) {
+    match state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
         Ok(profiles) => {
             let mut responses: Vec<ContactProfileResponse> = Vec::new();
 
             for profile in profiles {
                 let profile_id = profile.id.unwrap_or(0);
-                let exceptions = state.user_repository
+                let exceptions = state
+                    .user_repository
                     .get_profile_exceptions(profile_id)
                     .unwrap_or_default();
-                responses.push(ContactProfileResponse::from_profile_with_exceptions(profile, exceptions));
+                responses.push(ContactProfileResponse::from_profile_with_exceptions(
+                    profile, exceptions,
+                ));
             }
 
-            let default_mode = state.user_core.get_default_notification_mode(auth_user.user_id)
+            let default_mode = state
+                .user_core
+                .get_default_notification_mode(auth_user.user_id)
                 .unwrap_or_else(|_| "critical".to_string());
 
-            let default_noti_type = state.user_core.get_default_notification_type(auth_user.user_id)
+            let default_noti_type = state
+                .user_core
+                .get_default_notification_type(auth_user.user_id)
                 .unwrap_or_else(|_| "sms".to_string());
 
-            let default_notify_on_call = state.user_core.get_default_notify_on_call(auth_user.user_id)
+            let default_notify_on_call = state
+                .user_core
+                .get_default_notify_on_call(auth_user.user_id)
                 .unwrap_or(true);
 
             Ok(Json(json!({
@@ -152,7 +170,7 @@ pub async fn get_contact_profiles(
             tracing::error!("Failed to get contact profiles: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to get contact profiles" }))
+                Json(json!({ "error": "Failed to get contact profiles" })),
             ))
         }
     }
@@ -168,7 +186,9 @@ pub async fn create_contact_profile(
     if request.nickname.contains('@') {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }))
+            Json(
+                json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }),
+            ),
         ));
     }
 
@@ -176,7 +196,9 @@ pub async fn create_contact_profile(
     if !["all", "critical", "digest"].contains(&request.notification_mode.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid notification_mode. Must be 'all', 'critical', or 'digest'" }))
+            Json(
+                json!({ "error": "Invalid notification_mode. Must be 'all', 'critical', or 'digest'" }),
+            ),
         ));
     }
 
@@ -184,7 +206,9 @@ pub async fn create_contact_profile(
     if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid notification_type. Must be 'sms', 'call', or 'call_sms'" }))
+            Json(
+                json!({ "error": "Invalid notification_type. Must be 'sms', 'call', or 'call_sms'" }),
+            ),
         ));
     }
 
@@ -196,7 +220,7 @@ pub async fn create_contact_profile(
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "At least one platform must be connected" }))
+            Json(json!({ "error": "At least one platform must be connected" })),
         ));
     }
 
@@ -221,10 +245,13 @@ pub async fn create_contact_profile(
             if let Some(exceptions) = request.exceptions {
                 for exc in &exceptions {
                     // Validate exception fields
-                    if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str()) {
+                    if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str())
+                    {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"].contains(&exc.notification_mode.as_str()) {
+                    if !["all", "critical", "digest", "ignore"]
+                        .contains(&exc.notification_mode.as_str())
+                    {
                         continue;
                     }
                     if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {
@@ -244,7 +271,8 @@ pub async fn create_contact_profile(
             }
 
             // Fetch exceptions to return in response
-            let saved_exceptions = state.user_repository
+            let saved_exceptions = state
+                .user_repository
                 .get_profile_exceptions(profile_id)
                 .unwrap_or_default();
 
@@ -257,7 +285,7 @@ pub async fn create_contact_profile(
             tracing::error!("Failed to create contact profile: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to create contact profile" }))
+                Json(json!({ "error": "Failed to create contact profile" })),
             ))
         }
     }
@@ -274,7 +302,9 @@ pub async fn update_contact_profile(
     if request.nickname.contains('@') {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }))
+            Json(
+                json!({ "error": "Nickname cannot contain '@'. Use only names like 'Mom' or 'Boss'." }),
+            ),
         ));
     }
 
@@ -282,7 +312,7 @@ pub async fn update_contact_profile(
     if !["all", "critical", "digest"].contains(&request.notification_mode.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid notification_mode" }))
+            Json(json!({ "error": "Invalid notification_mode" })),
         ));
     }
 
@@ -290,36 +320,44 @@ pub async fn update_contact_profile(
     if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid notification_type" }))
+            Json(json!({ "error": "Invalid notification_type" })),
         ));
     }
 
-    match state.user_repository.update_contact_profile(UpdateContactProfileParams {
-        user_id: auth_user.user_id,
-        profile_id,
-        nickname: request.nickname.clone(),
-        whatsapp_chat: request.whatsapp_chat,
-        telegram_chat: request.telegram_chat,
-        signal_chat: request.signal_chat,
-        email_addresses: request.email_addresses,
-        notification_mode: request.notification_mode.clone(),
-        notification_type: request.notification_type.clone(),
-        notify_on_call: if request.notify_on_call { 1 } else { 0 },
-    }) {
+    match state
+        .user_repository
+        .update_contact_profile(UpdateContactProfileParams {
+            user_id: auth_user.user_id,
+            profile_id,
+            nickname: request.nickname.clone(),
+            whatsapp_chat: request.whatsapp_chat,
+            telegram_chat: request.telegram_chat,
+            signal_chat: request.signal_chat,
+            email_addresses: request.email_addresses,
+            notification_mode: request.notification_mode.clone(),
+            notification_type: request.notification_type.clone(),
+            notify_on_call: if request.notify_on_call { 1 } else { 0 },
+        }) {
         Ok(()) => {
             // Handle exceptions if provided
             if let Some(exceptions) = request.exceptions {
                 // Delete existing exceptions first, then add new ones
-                if let Err(e) = state.user_repository.delete_all_profile_exceptions(profile_id) {
+                if let Err(e) = state
+                    .user_repository
+                    .delete_all_profile_exceptions(profile_id)
+                {
                     tracing::warn!("Failed to clear old exceptions: {:?}", e);
                 }
 
                 for exc in &exceptions {
                     // Validate exception fields
-                    if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str()) {
+                    if !["whatsapp", "telegram", "signal", "email"].contains(&exc.platform.as_str())
+                    {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"].contains(&exc.notification_mode.as_str()) {
+                    if !["all", "critical", "digest", "ignore"]
+                        .contains(&exc.notification_mode.as_str())
+                    {
                         continue;
                     }
                     if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {
@@ -344,7 +382,7 @@ pub async fn update_contact_profile(
             tracing::error!("Failed to update contact profile: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to update contact profile" }))
+                Json(json!({ "error": "Failed to update contact profile" })),
             ))
         }
     }
@@ -356,15 +394,16 @@ pub async fn delete_contact_profile(
     auth_user: AuthUser,
     Path(profile_id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.delete_contact_profile(auth_user.user_id, profile_id) {
-        Ok(()) => {
-            Ok(Json(json!({ "success": true })))
-        }
+    match state
+        .user_repository
+        .delete_contact_profile(auth_user.user_id, profile_id)
+    {
+        Ok(()) => Ok(Json(json!({ "success": true }))),
         Err(e) => {
             tracing::error!("Failed to delete contact profile: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to delete contact profile" }))
+                Json(json!({ "error": "Failed to delete contact profile" })),
             ))
         }
     }
@@ -381,14 +420,17 @@ pub async fn update_default_mode(
         if !["critical", "digest", "ignore"].contains(&mode.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" }))
+                Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" })),
             ));
         }
-        if let Err(e) = state.user_core.set_default_notification_mode(auth_user.user_id, mode) {
+        if let Err(e) = state
+            .user_core
+            .set_default_notification_mode(auth_user.user_id, mode)
+        {
             tracing::error!("Failed to update default notification mode: {:?}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to update default mode" }))
+                Json(json!({ "error": "Failed to update default mode" })),
             ));
         }
     }
@@ -398,25 +440,31 @@ pub async fn update_default_mode(
         if !["sms", "call", "call_sms"].contains(&noti_type.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" }))
+                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" })),
             ));
         }
-        if let Err(e) = state.user_core.set_default_notification_type(auth_user.user_id, noti_type) {
+        if let Err(e) = state
+            .user_core
+            .set_default_notification_type(auth_user.user_id, noti_type)
+        {
             tracing::error!("Failed to update default notification type: {:?}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to update notification type" }))
+                Json(json!({ "error": "Failed to update notification type" })),
             ));
         }
     }
 
     // Update notify on call if provided
     if let Some(notify_on_call) = request.notify_on_call {
-        if let Err(e) = state.user_core.set_default_notify_on_call(auth_user.user_id, notify_on_call) {
+        if let Err(e) = state
+            .user_core
+            .set_default_notify_on_call(auth_user.user_id, notify_on_call)
+        {
             tracing::error!("Failed to update default notify on call: {:?}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to update call setting" }))
+                Json(json!({ "error": "Failed to update call setting" })),
             ));
         }
     }
@@ -436,18 +484,25 @@ pub async fn search_chats(
     if !["whatsapp", "telegram", "signal"].contains(&service.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid service. Must be 'whatsapp', 'telegram', or 'signal'" }))
+            Json(
+                json!({ "error": "Invalid service. Must be 'whatsapp', 'telegram', or 'signal'" }),
+            ),
         ));
     }
 
     // Use existing bridge room search functionality
-    match crate::utils::bridge::search_bridge_rooms(&service, &state, auth_user.user_id, &query.q).await {
+    match crate::utils::bridge::search_bridge_rooms(&service, &state, auth_user.user_id, &query.q)
+        .await
+    {
         Ok(rooms) => {
-            let results: Vec<serde_json::Value> = rooms.iter()
-                .map(|room| json!({
-                    "display_name": room.display_name,
-                    "last_activity_formatted": room.last_activity_formatted
-                }))
+            let results: Vec<serde_json::Value> = rooms
+                .iter()
+                .map(|room| {
+                    json!({
+                        "display_name": room.display_name,
+                        "last_activity_formatted": room.last_activity_formatted
+                    })
+                })
                 .collect();
 
             Ok(Json(json!({ "results": results })))
@@ -456,7 +511,7 @@ pub async fn search_chats(
             tracing::error!("Failed to search chats: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to search: {}", e) }))
+                Json(json!({ "error": format!("Failed to search: {}", e) })),
             ))
         }
     }

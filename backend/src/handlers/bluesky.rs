@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -39,14 +35,17 @@ pub async fn resolve_bluesky_url(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract post from Bluesky URL"}))
+                Json(json!({"error": "Could not extract post from Bluesky URL"})),
             ));
         }
     };
 
     // Bluesky iframe embed URL - pass the full post URL as a parameter
     let post_url = format!("https://bsky.app/profile/{}/post/{}", handle, post_id);
-    let embed_url = format!("https://embed.bsky.app/embed?url={}", urlencoding::encode(&post_url));
+    let embed_url = format!(
+        "https://embed.bsky.app/embed?url={}",
+        urlencoding::encode(&post_url)
+    );
 
     Ok(Json(BlueskyEmbedResponse {
         post_id,

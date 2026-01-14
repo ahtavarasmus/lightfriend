@@ -1,23 +1,16 @@
-use std::sync::Arc;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 use serde_json::json;
+use std::sync::Arc;
 use stripe::Client;
 
-use crate::{
-    AppState,
-    handlers::auth_middleware::AuthUser,
-};
+use crate::{handlers::auth_middleware::AuthUser, AppState};
 
 /// Response for refund eligibility check
 #[derive(Serialize)]
 pub struct RefundEligibilityResponse {
     pub eligible: bool,
-    pub refund_type: Option<String>,  // "subscription"
+    pub refund_type: Option<String>, // "subscription"
     pub reason: String,
     pub usage_percent: Option<f32>,
     pub days_remaining: Option<i32>,
@@ -34,7 +27,7 @@ pub struct RefundRequestResponse {
     pub refund_id: Option<String>,
 }
 
-const SUBSCRIPTION_USAGE_THRESHOLD: f32 = 30.0;  // 30%
+const SUBSCRIPTION_USAGE_THRESHOLD: f32 = 30.0; // 30%
 const REFUND_WINDOW_DAYS: i64 = 7;
 const CONTACT_EMAIL: &str = "rasmus@ahtava.com";
 
@@ -80,7 +73,11 @@ async fn get_first_paid_invoice_timestamp(
     let invoices = stripe::Invoice::list(
         client,
         &stripe::ListInvoices {
-            customer: Some(customer_id.parse().map_err(|e| format!("Invalid customer ID: {}", e))?),
+            customer: Some(
+                customer_id
+                    .parse()
+                    .map_err(|e| format!("Invalid customer ID: {}", e))?,
+            ),
             status: Some(stripe::InvoiceStatus::Paid),
             limit: Some(100),
             ..Default::default()
@@ -91,7 +88,9 @@ async fn get_first_paid_invoice_timestamp(
 
     // Find the earliest paid invoice that's not a trial-related €0 invoice
     // Sort by created date and find first non-zero payment
-    let mut paid_invoices: Vec<_> = invoices.data.into_iter()
+    let mut paid_invoices: Vec<_> = invoices
+        .data
+        .into_iter()
         .filter(|inv| inv.amount_paid.unwrap_or(0) > 0)
         .collect();
 
@@ -108,7 +107,11 @@ async fn get_latest_subscription_payment_intent(
     let invoices = stripe::Invoice::list(
         client,
         &stripe::ListInvoices {
-            customer: Some(customer_id.parse().map_err(|e| format!("Invalid customer ID: {}", e))?),
+            customer: Some(
+                customer_id
+                    .parse()
+                    .map_err(|e| format!("Invalid customer ID: {}", e))?,
+            ),
             status: Some(stripe::InvoiceStatus::Paid),
             limit: Some(10),
             ..Default::default()
@@ -137,7 +140,11 @@ async fn get_active_subscription_id(
     let subscriptions = stripe::Subscription::list(
         client,
         &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().map_err(|e| format!("Invalid customer ID: {}", e))?),
+            customer: Some(
+                customer_id
+                    .parse()
+                    .map_err(|e| format!("Invalid customer ID: {}", e))?,
+            ),
             status: Some(stripe::SubscriptionStatusFilter::Active),
             ..Default::default()
         },
@@ -167,13 +174,32 @@ pub async fn get_refund_eligibility(
     let user_id = auth_user.user_id;
 
     // Get user
-    let user = state.user_core.find_by_id(user_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Database error: {}", e)}))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "User not found"}))))?;
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Check if already refunded
-    let refund_info = state.user_repository.get_refund_info(user_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Database error: {}", e)}))))?;
+    let refund_info = state
+        .user_repository
+        .get_refund_info(user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     if let Some(ref info) = refund_info {
         if info.has_refunded == 1 {
@@ -207,8 +233,8 @@ pub async fn get_refund_eligibility(
         }
     };
 
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
-        .expect("STRIPE_SECRET_KEY must be set");
+    let stripe_secret_key =
+        std::env::var("STRIPE_SECRET_KEY").expect("STRIPE_SECRET_KEY must be set");
     let client = Client::new(stripe_secret_key);
 
     let now = chrono::Utc::now().timestamp();
@@ -255,7 +281,10 @@ pub async fn get_refund_eligibility(
             return Ok(Json(RefundEligibilityResponse {
                 eligible: false,
                 refund_type: Some("subscription".to_string()),
-                reason: format!("Refund window expired {} days ago.", days_since_payment - REFUND_WINDOW_DAYS),
+                reason: format!(
+                    "Refund window expired {} days ago.",
+                    days_since_payment - REFUND_WINDOW_DAYS
+                ),
                 usage_percent: None,
                 days_remaining: Some(0),
                 refund_amount_cents: None,
@@ -312,7 +341,10 @@ pub async fn get_refund_eligibility(
         return Ok(Json(RefundEligibilityResponse {
             eligible: false,
             refund_type: Some("subscription".to_string()),
-            reason: format!("Refund window expired {} days ago.", days_since_payment - REFUND_WINDOW_DAYS),
+            reason: format!(
+                "Refund window expired {} days ago.",
+                days_since_payment - REFUND_WINDOW_DAYS
+            ),
             usage_percent: None,
             days_remaining: Some(0),
             refund_amount_cents: None,
@@ -326,7 +358,8 @@ pub async fn get_refund_eligibility(
         &state,
         user.phone_number_country.as_deref(),
         user.plan_type.as_deref(),
-    ).await;
+    )
+    .await;
 
     let credits_used = max_credits - user.credits_left;
     let usage_percent = if max_credits > 0.0 {
@@ -339,7 +372,10 @@ pub async fn get_refund_eligibility(
         return Ok(Json(RefundEligibilityResponse {
             eligible: false,
             refund_type: Some("subscription".to_string()),
-            reason: format!("You've used {:.0}% of your credits. Refunds require less than {}% usage.", usage_percent, SUBSCRIPTION_USAGE_THRESHOLD as i32),
+            reason: format!(
+                "You've used {:.0}% of your credits. Refunds require less than {}% usage.",
+                usage_percent, SUBSCRIPTION_USAGE_THRESHOLD as i32
+            ),
             usage_percent: Some(usage_percent),
             days_remaining: Some((REFUND_WINDOW_DAYS - days_since_payment) as i32),
             refund_amount_cents: None,
@@ -360,7 +396,10 @@ pub async fn get_refund_eligibility(
     Ok(Json(RefundEligibilityResponse {
         eligible: true,
         refund_type: Some("subscription".to_string()),
-        reason: format!("You've used {:.0}% of your credits (max {}% for refund).", usage_percent, SUBSCRIPTION_USAGE_THRESHOLD as i32),
+        reason: format!(
+            "You've used {:.0}% of your credits (max {}% for refund).",
+            usage_percent, SUBSCRIPTION_USAGE_THRESHOLD as i32
+        ),
         usage_percent: Some(usage_percent),
         days_remaining: Some(days_remaining),
         refund_amount_cents,
@@ -387,36 +426,65 @@ pub async fn request_refund(
         }));
     }
 
-    let user = state.user_core.find_by_id(user_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Database error: {}", e)}))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "User not found"}))))?;
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
-    let customer_id = user.stripe_customer_id.as_ref()
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No Stripe customer ID"}))))?;
+    let customer_id = user.stripe_customer_id.as_ref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "No Stripe customer ID"})),
+        )
+    })?;
 
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
-        .expect("STRIPE_SECRET_KEY must be set");
+    let stripe_secret_key =
+        std::env::var("STRIPE_SECRET_KEY").expect("STRIPE_SECRET_KEY must be set");
     let client = Client::new(stripe_secret_key);
 
     // Get payment intent to refund
     let (payment_intent_id, _amount) = get_latest_subscription_payment_intent(&client, customer_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No payment found to refund"}))))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "No payment found to refund"})),
+            )
+        })?;
 
     // Create the refund
     let refund = stripe::Refund::create(
         &client,
         stripe::CreateRefund {
             payment_intent: Some(payment_intent_id.parse().map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Invalid payment intent ID: {}", e)})))
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Invalid payment intent ID: {}", e)})),
+                )
             })?),
             reason: Some(stripe::RefundReasonFilter::RequestedByCustomer),
             ..Default::default()
         },
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to create refund: {}", e)}))))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create refund: {}", e)})),
+        )
+    })?;
 
     // Cancel the subscription
     if let Ok(Some(sub_id)) = get_active_subscription_id(&client, customer_id).await {
@@ -424,7 +492,8 @@ pub async fn request_refund(
             &client,
             &sub_id.parse().unwrap(),
             stripe::CancelSubscription::default(),
-        ).await;
+        )
+        .await;
 
         // Clear subscription data
         let _ = state.user_repository.set_subscription_tier(user_id, None);
@@ -433,17 +502,26 @@ pub async fn request_refund(
 
     // Mark as refunded
     let now = chrono::Utc::now().timestamp() as i32;
-    state.user_repository.set_has_refunded(user_id, now)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to update refund status: {}", e)}))))?;
+    state
+        .user_repository
+        .set_has_refunded(user_id, now)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update refund status: {}", e)})),
+            )
+        })?;
 
     tracing::info!(
         "Refund processed for user {}: refund_id={}",
-        user_id, refund.id
+        user_id,
+        refund.id
     );
 
     Ok(Json(RefundRequestResponse {
         success: true,
-        message: "Refund processed successfully. You should see the refund in 5-10 business days.".to_string(),
+        message: "Refund processed successfully. You should see the refund in 5-10 business days."
+            .to_string(),
         refund_id: Some(refund.id.to_string()),
     }))
 }
