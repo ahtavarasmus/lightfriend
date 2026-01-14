@@ -62,12 +62,6 @@ enum DashboardTab {
     Settings,
 }
 
-pub fn is_logged_in() -> bool {
-    // Cookie-based auth - we can't check from client side
-    // This will be verified by the backend on API calls
-    true
-}
-
 /// Usage status indicator component - compact inline display
 #[derive(Properties, PartialEq, Clone)]
 struct UsageStatusIndicatorProps {
@@ -250,9 +244,9 @@ pub fn Home() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
     let user_verified = use_state(|| true);
     let error = use_state(|| None::<String>);
-    let is_expanded = use_state(|| false);
+    let _is_expanded = use_state(|| false);
     let active_tab = use_state(|| DashboardTab::Connections);
-    let navigator = use_navigator().unwrap();
+    let _navigator = use_navigator().unwrap();
     let location = use_location().unwrap();
     let success = use_state(|| None::<String>);
     let totp_enabled = use_state(|| None::<bool>);
@@ -437,7 +431,7 @@ pub fn Home() -> Html {
         }, (*profile_data).clone());
     }
 
-    let refetch_profile = {
+    let _refetch_profile = {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
@@ -1030,7 +1024,7 @@ pub fn Home() -> Html {
                                         let call_duration = call_duration.clone();
                                         let call_error = call_error.clone();
                                         let call_cost_per_min = call_cost_per_min.clone();
-                                        let refetch_usage = refetch_usage.clone();
+                                        let _refetch_usage = refetch_usage.clone();
 
                                         call_connecting.set(true);
                                         call_error.set(None);
@@ -1096,7 +1090,7 @@ pub fn Home() -> Html {
                                     Callback::from(move |_| {
                                         let call_active = call_active.clone();
                                         let call_duration = call_duration.clone();
-                                        let call_error = call_error.clone();
+                                        let _call_error = call_error.clone();
                                         let refetch_usage = refetch_usage.clone();
 
                                         spawn_local(async move {

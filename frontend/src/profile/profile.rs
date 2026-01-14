@@ -19,7 +19,7 @@ pub fn Billing() -> Html {
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let active_tab = use_state(|| BillingTab::Billing);
-    let navigator = use_navigator().unwrap();
+    let _navigator = use_navigator().unwrap();
     let location = use_location().unwrap();
 
     // Check for subscription success parameter

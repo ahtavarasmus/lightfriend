@@ -1,8 +1,4 @@
 use yew::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::closure::Closure;
-use crate::config;
-use gloo_net::http::Request;
 use crate::utils::api::Api;
 use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;

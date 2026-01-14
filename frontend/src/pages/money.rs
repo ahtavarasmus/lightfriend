@@ -618,7 +618,7 @@ pub struct CheckoutButtonProps {
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_id = props.user_id;
-    let user_email = props.user_email.clone();
+    let _user_email = props.user_email.clone();
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
     let plan_type = props.plan_type.clone();
@@ -1693,7 +1693,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("Other".to_string(), 49.00),
     ]);
     let hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
-    let guaranteed_total_price = guaranteed_prices.get(&props.selected_country).unwrap_or(&0.0);
+    let _guaranteed_total_price = guaranteed_prices.get(&props.selected_country).unwrap_or(&0.0);
     let hosted_features = vec![
         Feature {
             text: "Fully managed service hosted in EU".to_string(),
@@ -1716,7 +1716,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
     ];
-    let guaranteed_features = vec![
+    let _guaranteed_features = vec![
         Feature {
             text: "Full Hosted Plan".to_string(),
             sub_items: vec![],
