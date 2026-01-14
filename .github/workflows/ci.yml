@@ -22,6 +22,7 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
+        working-directory: backend
         run: cargo fmt --check
 
   clippy:
@@ -38,9 +39,11 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
+          workspaces: backend
           cache-on-failure: true
 
       - name: Run Clippy
+        working-directory: backend
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
@@ -55,9 +58,11 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
+          workspaces: backend
           cache-on-failure: true
 
       - name: Run tests
+        working-directory: backend
         run: cargo test --workspace
 
   wasm-check:
@@ -74,6 +79,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
+          workspaces: frontend
           cache-on-failure: true
 
       - name: Check WASM compilation
