@@ -93,6 +93,7 @@ pub mod repositories {
     pub mod webauthn_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
+    #[cfg(test)]
     pub mod mock_signup_repository;
 }
 pub mod services {
