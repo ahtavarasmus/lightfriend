@@ -232,7 +232,7 @@ pub async fn send_subscription_activated_email(
     let login_url = format!("{}/login", frontend_url);
 
     let content = format!(
-        r#"<p>We noticed you already have an account with this email. Your subscription has been linked to your existing account.</p>
+        r#"<p>Your subscription has been activated and linked to your existing Lightfriend account.</p>
 
         <p>Log in to get started:</p>
 
@@ -242,6 +242,11 @@ pub async fn send_subscription_activated_email(
 
         <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
         <p style="font-size: 14px; word-break: break-all;"><a href="{link}" style="color: {blue};">{link}</a></p>
+
+        <p style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px; color: #495057;">
+            <strong>Didn't mean to subscribe with this email?</strong><br>
+            If you entered the wrong email address during checkout, please reply to this email so we can help sort it out.
+        </p>
 
         <p style="margin-top: 30px; font-size: 14px; color: #666;">Have questions or feature requests? Just reply to this email - I'd love to hear from you!</p>"#,
         link = login_url,
