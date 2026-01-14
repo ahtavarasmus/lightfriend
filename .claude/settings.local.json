@@ -147,7 +147,25 @@
       "Bash(uniq*)",
       "Bash(awk*)",
       "Bash(sed*)",
-      "Bash(xargs*)"
+      "Bash(xargs*)",
+      "Bash(git -C /Users/ahtavarasmus/Developer/sites/lightfriend-cloud log:*)",
+      "Bash(git -C /Users/ahtavarasmus/Developer/sites/lightfriend-cloud show 8a1f0fa -- backend/src/handlers/profile_handlers.rs)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/database.db)",
+      "Read(**/backend/matrix_store/**)",
+      "Bash(rm -rf *)",
+      "Bash(rm -rf ./*)",
+      "Bash(sudo *)",
+      "Bash(*cd ..*)",
+      "Bash(*cd /*)",
+      "Bash(*cd ~*)"
     ],
     "ask": [
       "Bash(git push*)",
@@ -172,22 +190,6 @@
       "Bash(gh repo delete*)",
       "Bash(gh release delete*)",
       "Bash(rm*)"
-    ],
-    "deny": [
-      "Read(.env)",
-      "Read(**/.env)",
-      "Read(**/.env.*)",
-      "Read(**/secrets/**)",
-      "Read(**/*.pem)",
-      "Read(**/*.key)",
-      "Read(**/database.db)",
-      "Read(**/backend/matrix_store/**)",
-      "Bash(rm -rf *)",
-      "Bash(rm -rf ./*)",
-      "Bash(sudo *)",
-      "Bash(*cd ..*)",
-      "Bash(*cd /*)",
-      "Bash(*cd ~*)"
     ]
   }
 }
