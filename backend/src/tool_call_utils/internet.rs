@@ -388,11 +388,12 @@ pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("direct_response"),
             description: Some(String::from(
-                "Use this tool ONLY when the user's question can be answered from general knowledge \
-                or conversation context WITHOUT needing to fetch any current data. Examples: \
-                greetings, math calculations, explaining concepts, answering factual questions. \
-                Do NOT use this for questions about messages, emails, weather, calendar, or tasks - \
-                those require fetching fresh data."
+                "Use this tool ONLY for simple acknowledgments and conversational responses that don't \
+                require any factual information. Examples: greetings ('Hello!', 'Hi there'), \
+                acknowledgments ('Got it', 'OK', 'Sure'), simple math ('2+2=4'), or responses based \
+                entirely on the current conversation context. Do NOT use this for any factual questions, \
+                definitions, or 'what is X?' questions - use ask_perplexity for those instead. \
+                Do NOT use this for questions about messages, emails, weather, calendar, or tasks."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
