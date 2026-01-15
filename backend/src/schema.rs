@@ -186,6 +186,8 @@ diesel::table! {
         error_message -> Nullable<Text>,
         created_at -> Integer,
         updated_at -> Integer,
+        price -> Nullable<Float>,
+        price_unit -> Nullable<Text>,
     }
 }
 

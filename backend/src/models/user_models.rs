@@ -810,6 +810,8 @@ pub struct MessageStatusLog {
     pub error_message: Option<String>,
     pub created_at: i32,
     pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -825,4 +827,6 @@ pub struct NewMessageStatusLog {
     pub error_message: Option<String>,
     pub created_at: i32,
     pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
 }

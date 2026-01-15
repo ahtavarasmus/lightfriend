@@ -851,6 +851,8 @@ pub async fn send_conversation_message(
             error_message: None,
             created_at: now,
             updated_at: now,
+            price: None,        // Price comes from Twilio callback after delivery
+            price_unit: None,
         };
 
         if let Err(e) = diesel::insert_into(message_status_log::table)

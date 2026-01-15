@@ -4,17 +4,41 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use serde_json::json;
-
-#[derive(Serialize)]
-struct BroadcastMessage {
-    message: String,
-}
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct EmailBroadcastMessage {
     subject: String,
     message: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct MessageStatusLog {
+    id: Option<i32>,
+    message_sid: String,
+    user_id: i32,
+    direction: String,
+    to_number: String,
+    from_number: Option<String>,
+    status: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    price: Option<f32>,
+    price_unit: Option<String>,
+    created_at: i32,
+    updated_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct MessageStatsResponse {
+    user_id: i32,
+    total_messages: i64,
+    delivered: i64,
+    failed: i64,
+    undelivered: i64,
+    queued: i64,
+    sent: i64,
+    recent_messages: Vec<MessageStatusLog>,
 }
 
 #[derive(Serialize)]
@@ -48,12 +72,163 @@ struct DeleteModalState {
     user_email: Option<String>,
 }
 
+fn render_message_stats(
+    user_id: i32,
+    stats: Option<&MessageStatsResponse>,
+    is_loading: bool,
+    show_all: bool,
+    message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>>,
+    loading_stats: UseStateHandle<Option<i32>>,
+    show_all_messages: UseStateHandle<bool>,
+) -> Html {
+    if stats.is_none() && !is_loading {
+        let message_stats = message_stats.clone();
+        let loading_stats = loading_stats.clone();
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <button
+                    onclick={Callback::from(move |_| {
+                        let message_stats = message_stats.clone();
+                        let loading_stats = loading_stats.clone();
+                        loading_stats.set(Some(user_id));
+                        wasm_bindgen_futures::spawn_local(async move {
+                            match Api::get(&format!("/api/admin/users/{}/message-stats", user_id))
+                                .send()
+                                .await
+                            {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<MessageStatsResponse>().await {
+                                            let mut new_stats = (*message_stats).clone();
+                                            new_stats.insert(user_id, data);
+                                            message_stats.set(new_stats);
+                                        }
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                            loading_stats.set(None);
+                        });
+                    })}
+                    class="iq-button stats-button"
+                >
+                    {"Load Message Stats"}
+                </button>
+            </div>
+        }
+    } else if is_loading {
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <p class="loading">{"Loading stats..."}</p>
+            </div>
+        }
+    } else if let Some(stats) = stats {
+        let filtered_messages: Vec<_> = if show_all {
+            stats.recent_messages.clone()
+        } else {
+            stats.recent_messages.iter()
+                .filter(|m| m.status == "failed" || m.status == "undelivered")
+                .cloned()
+                .collect()
+        };
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <div class="stats-summary">
+                    <div class="stat-card total">
+                        <span class="stat-number">{stats.total_messages}</span>
+                        <span class="stat-label">{"Total"}</span>
+                    </div>
+                    <div class="stat-card delivered">
+                        <span class="stat-number">{stats.delivered}</span>
+                        <span class="stat-label">{"Delivered"}</span>
+                    </div>
+                    <div class="stat-card failed">
+                        <span class="stat-number">{stats.failed}</span>
+                        <span class="stat-label">{"Failed"}</span>
+                    </div>
+                    <div class="stat-card undelivered">
+                        <span class="stat-number">{stats.undelivered}</span>
+                        <span class="stat-label">{"Undelivered"}</span>
+                    </div>
+                </div>
+                <div class="filter-toggle">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={show_all}
+                            onchange={Callback::from(move |_| {
+                                show_all_messages.set(!show_all);
+                            })}
+                        />
+                        {" Show all messages (not just failed)"}
+                    </label>
+                </div>
+                {
+                    if filtered_messages.is_empty() {
+                        html! { <p class="no-messages">{"No failed/undelivered messages found"}</p> }
+                    } else {
+                        html! {
+                            <table class="message-log-table">
+                                <thead>
+                                    <tr>
+                                        <th>{"Status"}</th>
+                                        <th>{"To"}</th>
+                                        <th>{"Price"}</th>
+                                        <th>{"Error"}</th>
+                                        <th>{"Time"}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {
+                                        filtered_messages.iter().map(|msg| {
+                                            let status_class = match msg.status.as_str() {
+                                                "delivered" => "status-delivered",
+                                                "failed" => "status-failed",
+                                                "undelivered" => "status-undelivered",
+                                                "sent" => "status-sent",
+                                                _ => "status-queued",
+                                            };
+                                            let price_str = msg.price
+                                                .map(|p| format!("{:.4} {}", p.abs(), msg.price_unit.as_deref().unwrap_or("USD")))
+                                                .unwrap_or_else(|| "-".to_string());
+                                            let error_str = msg.error_code.clone()
+                                                .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
+                                                .unwrap_or_else(|| "-".to_string());
+                                            let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                .single()
+                                                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                .unwrap_or_else(|| "Invalid".to_string());
+                                            html! {
+                                                <tr key={msg.message_sid.clone()}>
+                                                    <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
+                                                    <td>{&msg.to_number}</td>
+                                                    <td>{price_str}</td>
+                                                    <td class="error-cell">{error_str}</td>
+                                                    <td>{time_str}</td>
+                                                </tr>
+                                            }
+                                        }).collect::<Html>()
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    }
+                }
+            </div>
+        }
+    } else {
+        html! {}
+    }
+}
+
 #[function_component(AdminDashboard)]
 pub fn admin_dashboard() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
-    let message = use_state(|| String::new());
     let email_subject = use_state(|| String::new());
     let email_message = use_state(|| String::new());
     let delete_modal = use_state(|| DeleteModalState {
@@ -64,6 +239,10 @@ pub fn admin_dashboard() -> Html {
     let reset_link_status = use_state(|| None::<(i32, String)>); // (user_id, message)
     let new_password = use_state(|| String::new());
     let password_status = use_state(|| None::<String>);
+    // Message stats state
+    let message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>> = use_state(|| HashMap::new());
+    let loading_stats = use_state(|| None::<i32>);
+    let show_all_messages = use_state(|| false); // Default: show only failed/undelivered
 
     let users_effect = users.clone();
     let error_effect = error.clone();
@@ -116,66 +295,6 @@ pub fn admin_dashboard() -> Html {
                     <Link<Route> to={Route::Home} classes="back-link">
                         {"Back to Home"}
                     </Link<Route>>
-                </div>
-
-                
-                <div class="broadcast-section">
-                    <h2>{"SMS Broadcast"}</h2>
-                    <textarea
-                        value={(*message).clone()}
-                        onchange={{
-                            let message = message.clone();
-                            Callback::from(move |e: Event| {
-                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                message.set(input.value());
-                            })
-                        }}
-                        placeholder="Enter SMS message to broadcast..."
-                        class="broadcast-textarea"
-                    />
-                    <button
-                        onclick={{
-                            let message = message.clone();
-                            let error = error.clone();
-                            Callback::from(move |_| {
-                                let message = message.clone();
-                                let error = error.clone();
-                                
-                                if message.is_empty() {
-                                    error.set(Some("Message cannot be empty".to_string()));
-                                    return;
-                                }
-                                
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    let broadcast_message = BroadcastMessage {
-                                        message: (*message).clone(),
-                                    };
-
-                                    match Api::post("/api/admin/broadcast")
-                                        .json(&broadcast_message)
-                                        .unwrap()
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            if response.ok() {
-                                                message.set(String::new());
-                                                error.set(Some("SMS broadcast sent successfully".to_string()));
-                                            } else {
-                                                error.set(Some("Failed to send SMS broadcast(hahaa you were brave enough to try!)".to_string()));
-                                            }
-                                        }
-                                        Err(_) => {
-                                            error.set(Some("Failed to send SMS broadcast request(hahaa you were brave enough to try!)".to_string()));
-                                        }
-                                    }
-                                });
-                            })
-                        }}
-                        class="broadcast-button"
-                    >
-                        {"Send SMS Broadcast"}
-                    </button>
                 </div>
 
                 <div class="broadcast-section email-broadcast">
@@ -253,44 +372,6 @@ pub fn admin_dashboard() -> Html {
                         {"Send Email Broadcast"}
                     </button>
                 </div>
-
-                <div class="test-section">
-                <h2>{"Test Backend"}</h2>
-                <button
-                    onclick={{
-                        let error = error.clone();
-                        Callback::from(move |_| {
-                            let error = error.clone();
-                            wasm_bindgen_futures::spawn_local(async move {
-                                let params = json!({
-                                    "param1": "test_value1",
-                                    "param2": "test_value2"
-                                });
-                                match Api::post("/testing")
-                                    .json(&params)
-                                    .unwrap()
-                                    .send()
-                                    .await
-                                {
-                                    Ok(response) => {
-                                        if response.ok() {
-                                            error.set(Some("Test request sent successfully".to_string()));
-                                        } else {
-                                            error.set(Some("Failed to send test request".to_string()));
-                                        }
-                                    }
-                                    Err(_) => {
-                                        error.set(Some("Failed to send test request".to_string()));
-                                    }
-                                }
-                            });
-                        })
-                    }}
-                    class="broadcast-button"
-                >
-                    {"Test Backend"}
-                </button>
-            </div>
 
                 // Change Password Section
                 <div class="password-section">
@@ -519,7 +600,18 @@ pub fn admin_dashboard() -> Html {
                                                                             <div class="preferred-number-section">
                                                                                 <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
                                                                             </div>
-                                                                            
+
+                                                                            // Message Stats Section
+                                                                            {render_message_stats(
+                                                                                user.id,
+                                                                                message_stats.get(&user.id),
+                                                                                *loading_stats == Some(user.id),
+                                                                                *show_all_messages,
+                                                                                message_stats.clone(),
+                                                                                loading_stats.clone(),
+                                                                                show_all_messages.clone(),
+                                                                            )}
+
                                                                         <button 
                                                                             onclick={{
                                                                                 let users = users.clone();
@@ -1734,6 +1826,167 @@ pub fn admin_dashboard() -> Html {
                             background: rgba(30, 144, 255, 0.2);
                             margin-bottom: 0.25rem;
                         }
+                    }
+
+                    /* Message Stats Section */
+                    .message-stats-section {
+                        margin: 1.5rem 0;
+                        padding: 1rem;
+                        background: rgba(30, 144, 255, 0.05);
+                        border-radius: 8px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .message-stats-section h3 {
+                        margin: 0 0 1rem 0;
+                        color: #FFD700;
+                        font-size: 1.1rem;
+                    }
+
+                    .stats-button {
+                        background: linear-gradient(135deg, #1E90FF 0%, #4169E1 100%);
+                    }
+
+                    .stats-summary {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .stat-card {
+                        flex: 1;
+                        min-width: 80px;
+                        padding: 0.75rem;
+                        border-radius: 6px;
+                        text-align: center;
+                        background: rgba(255, 255, 255, 0.1);
+                    }
+
+                    .stat-card.total {
+                        background: rgba(100, 100, 100, 0.3);
+                    }
+
+                    .stat-card.delivered {
+                        background: rgba(40, 167, 69, 0.3);
+                        border: 1px solid rgba(40, 167, 69, 0.5);
+                    }
+
+                    .stat-card.failed {
+                        background: rgba(220, 53, 69, 0.3);
+                        border: 1px solid rgba(220, 53, 69, 0.5);
+                    }
+
+                    .stat-card.undelivered {
+                        background: rgba(255, 165, 0, 0.3);
+                        border: 1px solid rgba(255, 165, 0, 0.5);
+                    }
+
+                    .stat-number {
+                        display: block;
+                        font-size: 1.5rem;
+                        font-weight: bold;
+                        color: white;
+                    }
+
+                    .stat-label {
+                        display: block;
+                        font-size: 0.75rem;
+                        color: #ccc;
+                        text-transform: uppercase;
+                    }
+
+                    .filter-toggle {
+                        margin-bottom: 1rem;
+                    }
+
+                    .filter-toggle label {
+                        color: #ccc;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+
+                    .filter-toggle input[type="checkbox"] {
+                        width: 16px;
+                        height: 16px;
+                    }
+
+                    .message-log-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.85rem;
+                    }
+
+                    .message-log-table th,
+                    .message-log-table td {
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .message-log-table th {
+                        color: #FFD700;
+                        font-weight: 600;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .message-log-table tr:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .message-log-table .error-cell {
+                        max-width: 200px;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                        color: #ff6b6b;
+                    }
+
+                    .status-badge {
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        font-size: 0.75rem;
+                        font-weight: 600;
+                        text-transform: uppercase;
+                    }
+
+                    .status-delivered {
+                        background: rgba(40, 167, 69, 0.8);
+                        color: white;
+                    }
+
+                    .status-failed {
+                        background: rgba(220, 53, 69, 0.8);
+                        color: white;
+                    }
+
+                    .status-undelivered {
+                        background: rgba(255, 165, 0, 0.8);
+                        color: black;
+                    }
+
+                    .status-sent {
+                        background: rgba(30, 144, 255, 0.8);
+                        color: white;
+                    }
+
+                    .status-queued {
+                        background: rgba(128, 128, 128, 0.8);
+                        color: white;
+                    }
+
+                    .no-messages {
+                        color: #999;
+                        font-style: italic;
+                        text-align: center;
+                        padding: 1rem;
+                    }
+
+                    .loading {
+                        color: #FFD700;
+                        font-style: italic;
                     }
 
                 "#}

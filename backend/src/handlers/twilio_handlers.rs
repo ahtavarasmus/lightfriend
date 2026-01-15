@@ -576,6 +576,10 @@ pub struct TwilioStatusCallback {
     pub account_sid: Option<String>,
     #[serde(default, alias = "ApiVersion")]
     pub api_version: Option<String>,
+    #[serde(default, alias = "Price")]
+    pub price: Option<String>,
+    #[serde(default, alias = "PriceUnit")]
+    pub price_unit: Option<String>,
 }
 
 /// Handle Twilio SMS status callback webhooks
@@ -611,6 +615,9 @@ pub async fn twilio_status_callback(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
+    // Parse price from string to f32 (Twilio sends as string like "-0.0075")
+    let price_value: Option<f32> = payload.price.as_ref().and_then(|p| p.parse().ok());
+
     let update_result = diesel::update(
         message_status_log::table.filter(message_status_log::message_sid.eq(&payload.message_sid))
     )
@@ -618,6 +625,8 @@ pub async fn twilio_status_callback(
         message_status_log::status.eq(&payload.message_status),
         message_status_log::error_code.eq(&payload.error_code),
         message_status_log::error_message.eq(&payload.error_message),
+        message_status_log::price.eq(price_value),
+        message_status_log::price_unit.eq(&payload.price_unit),
         message_status_log::updated_at.eq(now),
     ))
     .execute(conn);
