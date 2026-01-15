@@ -591,6 +591,103 @@ pub struct TwilioStatusCallback {
     pub RawDlrDoneDate: Option<String>,
 }
 
+/// Response from Twilio Messages API when fetching message details
+#[derive(Deserialize, Debug)]
+#[allow(non_snake_case)]
+struct TwilioMessageResponse {
+    #[serde(default)]
+    pub price: Option<String>,
+    #[serde(default)]
+    pub price_unit: Option<String>,
+}
+
+/// Fetch message details from Twilio API to get pricing info
+async fn fetch_message_price(
+    message_sid: &str,
+    account_sid: &str,
+    auth_token: &str,
+) -> Option<(f32, String)> {
+    let client = Client::new();
+    let url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}.json",
+        account_sid, message_sid
+    );
+
+    match client
+        .get(&url)
+        .basic_auth(account_sid, Some(auth_token))
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<TwilioMessageResponse>().await {
+                    Ok(msg) => {
+                        if let (Some(price_str), Some(price_unit)) = (msg.price, msg.price_unit) {
+                            if let Ok(price) = price_str.parse::<f32>() {
+                                tracing::info!(
+                                    "Fetched price for message {}: {} {}",
+                                    message_sid, price, price_unit
+                                );
+                                return Some((price, price_unit));
+                            }
+                        }
+                        tracing::warn!("Message {} has no price info", message_sid);
+                        None
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse Twilio message response: {}", e);
+                        None
+                    }
+                }
+            } else {
+                tracing::error!(
+                    "Failed to fetch message {}: status {}",
+                    message_sid, response.status()
+                );
+                None
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch message {}: {}", message_sid, e);
+            None
+        }
+    }
+}
+
+/// Delete a message from Twilio (called after message reaches final status)
+async fn delete_message_from_twilio(
+    message_sid: &str,
+    account_sid: &str,
+    auth_token: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+    let url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}.json",
+        account_sid, message_sid
+    );
+
+    match client
+        .delete(&url)
+        .basic_auth(account_sid, Some(auth_token))
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                tracing::info!("Deleted message {} from Twilio", message_sid);
+                Ok(())
+            } else {
+                Err(format!(
+                    "Failed to delete message {}: status {}",
+                    message_sid, response.status()
+                ))
+            }
+        }
+        Err(e) => Err(format!("Failed to delete message {}: {}", message_sid, e)),
+    }
+}
+
 /// Handle Twilio SMS status callback webhooks
 ///
 /// This endpoint receives delivery status updates from Twilio for outbound messages.
@@ -702,6 +799,67 @@ pub async fn twilio_status_callback(
                     tracing::error!("Failed to send SMS failure admin email: {}", e);
                 }
             });
+        }
+    }
+
+    // On final status, fetch price from Twilio API and delete the message
+    let is_final_status = matches!(
+        payload.MessageStatus.as_str(),
+        "delivered" | "failed" | "undelivered"
+    );
+
+    if is_final_status {
+        // Get Twilio credentials from env
+        let account_sid = env::var("TWILIO_ACCOUNT_SID").ok();
+        let auth_token = env::var("TWILIO_AUTH_TOKEN").ok();
+
+        if let (Some(account_sid), Some(auth_token)) = (account_sid, auth_token) {
+            let message_sid = payload.MessageSid.clone();
+            let db_pool = state.db_pool.clone();
+
+            // Spawn task to fetch price and delete message
+            tokio::spawn(async move {
+                // Fetch price from Twilio API
+                if let Some((price, price_unit)) = fetch_message_price(
+                    &message_sid,
+                    &account_sid,
+                    &auth_token,
+                ).await {
+                    // Update message_status_log with price
+                    if let Ok(mut conn) = db_pool.get() {
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i32;
+
+                        if let Err(e) = diesel::update(
+                            message_status_log::table
+                                .filter(message_status_log::message_sid.eq(&message_sid))
+                        )
+                        .set((
+                            message_status_log::price.eq(price),
+                            message_status_log::price_unit.eq(&price_unit),
+                            message_status_log::updated_at.eq(now),
+                        ))
+                        .execute(&mut conn) {
+                            tracing::error!("Failed to update price for message {}: {}", message_sid, e);
+                        } else {
+                            tracing::info!("Updated price for message {}: {} {}", message_sid, price, price_unit);
+                        }
+                    }
+                }
+
+                // Delete message from Twilio
+                if let Err(e) = delete_message_from_twilio(
+                    &message_sid,
+                    &account_sid,
+                    &auth_token,
+                ).await {
+                    tracing::error!("{}", e);
+                }
+            });
+        } else {
+            tracing::warn!("Missing Twilio credentials, skipping price fetch and deletion for {}", payload.MessageSid);
         }
     }
 

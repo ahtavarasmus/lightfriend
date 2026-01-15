@@ -1,7 +1,6 @@
 use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::spawn;
 use crate::AppState;
 use serde::Deserialize;
 use std::env;
@@ -865,16 +864,8 @@ pub async fn send_conversation_message(
         }
     }
 
-    let state_clone = state.clone();
-    let msg_sid = response.sid.clone();
-    let user_clone = user.clone();
-
-    tracing::info!("going into deleting handler for the sent message");
-    spawn(async move {
-        if let Err(e) = delete_twilio_message(&state_clone, &msg_sid, &user_clone).await {
-            tracing::error!("Failed to delete message {}: {}", msg_sid, e);
-        }
-    });
+    // Message deletion now happens in the status callback handler
+    // when the message reaches a final status (delivered/failed/undelivered)
 
     Ok(response.sid)
 }

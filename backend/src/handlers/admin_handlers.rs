@@ -729,3 +729,130 @@ pub async fn get_user_message_stats(
         recent_messages,
     }))
 }
+
+/// Message status log with user info for global stats
+#[derive(Serialize)]
+pub struct MessageStatusLogWithUser {
+    pub id: Option<i32>,
+    pub message_sid: String,
+    pub user_id: i32,
+    pub user_email: Option<String>,
+    pub user_phone: Option<String>,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+}
+
+/// Response for global message stats endpoint
+#[derive(Serialize)]
+pub struct GlobalMessageStatsResponse {
+    pub total_messages: i64,
+    pub delivered: i64,
+    pub failed: i64,
+    pub undelivered: i64,
+    pub queued: i64,
+    pub sent: i64,
+    pub recent_failed: Vec<MessageStatusLogWithUser>,
+}
+
+/// Get global message delivery stats across all users
+/// GET /api/admin/global-message-stats
+pub async fn get_global_message_stats(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<GlobalMessageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::schema::users;
+
+    let conn = &mut state.db_pool.get().map_err(|e| {
+        tracing::error!("Failed to get DB connection: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+    })?;
+
+    // Get all messages (last 1000 for stats)
+    let all_messages: Vec<MessageStatusLog> = message_status_log::table
+        .order(message_status_log::created_at.desc())
+        .limit(1000)
+        .load(conn)
+        .map_err(|e| {
+            tracing::error!("Failed to get global message stats: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get message stats"})))
+        })?;
+
+    // Count by status
+    let total_messages = all_messages.len() as i64;
+    let delivered = all_messages.iter().filter(|m| m.status == "delivered").count() as i64;
+    let failed = all_messages.iter().filter(|m| m.status == "failed").count() as i64;
+    let undelivered = all_messages.iter().filter(|m| m.status == "undelivered").count() as i64;
+    let queued = all_messages.iter().filter(|m| m.status == "queued").count() as i64;
+    let sent = all_messages.iter().filter(|m| m.status == "sent").count() as i64;
+
+    // Get recent failed/undelivered messages with user info (last 20)
+    let failed_messages: Vec<MessageStatusLog> = all_messages
+        .iter()
+        .filter(|m| m.status == "failed" || m.status == "undelivered")
+        .take(20)
+        .cloned()
+        .collect();
+
+    // Get user info for failed messages
+    let user_ids: Vec<i32> = failed_messages.iter().map(|m| m.user_id).collect();
+    let users_info: Vec<(i32, String, String)> = users::table
+        .filter(users::id.eq_any(&user_ids))
+        .select((users::id, users::email, users::phone_number))
+        .load(conn)
+        .unwrap_or_default();
+
+    let users_map: std::collections::HashMap<i32, (String, String)> = users_info
+        .into_iter()
+        .map(|(id, email, phone)| (id, (email, phone)))
+        .collect();
+
+    let recent_failed: Vec<MessageStatusLogWithUser> = failed_messages
+        .into_iter()
+        .map(|m| {
+            let (user_email, user_phone) = users_map
+                .get(&m.user_id)
+                .map(|(e, p)| (Some(e.clone()), Some(p.clone())))
+                .unwrap_or((None, None));
+
+            MessageStatusLogWithUser {
+                id: m.id,
+                message_sid: m.message_sid,
+                user_id: m.user_id,
+                user_email,
+                user_phone,
+                direction: m.direction,
+                to_number: m.to_number,
+                from_number: m.from_number,
+                status: m.status,
+                error_code: m.error_code,
+                error_message: m.error_message,
+                price: m.price,
+                price_unit: m.price_unit,
+                created_at: m.created_at,
+                updated_at: m.updated_at,
+            }
+        })
+        .collect();
+
+    tracing::info!(
+        "Global stats: total={}, delivered={}, failed={}, undelivered={}, queued={}, sent={}",
+        total_messages, delivered, failed, undelivered, queued, sent
+    );
+
+    Ok(Json(GlobalMessageStatsResponse {
+        total_messages,
+        delivered,
+        failed,
+        undelivered,
+        queued,
+        sent,
+        recent_failed,
+    }))
+}

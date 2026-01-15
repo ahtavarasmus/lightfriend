@@ -41,6 +41,36 @@ struct MessageStatsResponse {
     recent_messages: Vec<MessageStatusLog>,
 }
 
+#[derive(Deserialize, Clone, Debug)]
+struct MessageStatusLogWithUser {
+    id: Option<i32>,
+    message_sid: String,
+    user_id: i32,
+    user_email: Option<String>,
+    user_phone: Option<String>,
+    direction: String,
+    to_number: String,
+    from_number: Option<String>,
+    status: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    price: Option<f32>,
+    price_unit: Option<String>,
+    created_at: i32,
+    updated_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct GlobalMessageStatsResponse {
+    total_messages: i64,
+    delivered: i64,
+    failed: i64,
+    undelivered: i64,
+    queued: i64,
+    sent: i64,
+    recent_failed: Vec<MessageStatusLogWithUser>,
+}
+
 #[derive(Serialize)]
 struct ChangePasswordRequest {
     new_password: String,
@@ -176,6 +206,7 @@ fn render_message_stats(
                                     <tr>
                                         <th>{"Status"}</th>
                                         <th>{"To"}</th>
+                                        <th>{"From"}</th>
                                         <th>{"Price"}</th>
                                         <th>{"Error"}</th>
                                         <th>{"Time"}</th>
@@ -191,6 +222,7 @@ fn render_message_stats(
                                                 "sent" => "status-sent",
                                                 _ => "status-queued",
                                             };
+                                            let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
                                             let price_str = msg.price
                                                 .map(|p| format!("{:.4} {}", p.abs(), msg.price_unit.as_deref().unwrap_or("USD")))
                                                 .unwrap_or_else(|| "-".to_string());
@@ -205,6 +237,7 @@ fn render_message_stats(
                                                 <tr key={msg.message_sid.clone()}>
                                                     <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
                                                     <td>{&msg.to_number}</td>
+                                                    <td>{from_str}</td>
                                                     <td>{price_str}</td>
                                                     <td class="error-cell">{error_str}</td>
                                                     <td>{time_str}</td>
@@ -243,14 +276,20 @@ pub fn admin_dashboard() -> Html {
     let message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>> = use_state(|| HashMap::new());
     let loading_stats = use_state(|| None::<i32>);
     let show_all_messages = use_state(|| false); // Default: show only failed/undelivered
+    // Global message stats state
+    let global_stats: UseStateHandle<Option<GlobalMessageStatsResponse>> = use_state(|| None);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
+    let global_stats_effect = global_stats.clone();
 
     use_effect_with_deps(move |_| {
         let users = users_effect;
         let error = error_effect;
+        let global_stats = global_stats_effect;
+
         wasm_bindgen_futures::spawn_local(async move {
+            // Fetch users
             match Api::get("/api/admin/users")
                 .send()
                 .await
@@ -271,6 +310,18 @@ pub fn admin_dashboard() -> Html {
                 }
                 Err(_) => {
                     error.set(Some("Failed to fetch users".to_string()));
+                }
+            }
+
+            // Fetch global message stats
+            if let Ok(response) = Api::get("/api/admin/global-message-stats")
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<GlobalMessageStatsResponse>().await {
+                        global_stats.set(Some(data));
+                    }
                 }
             }
         });
@@ -454,6 +505,97 @@ pub fn admin_dashboard() -> Html {
                             }
                         }
                     </div>
+                </div>
+
+                // Global SMS Stats Section
+                <div class="global-stats-section">
+                    <h2>{"Global SMS Delivery Stats"}</h2>
+                    {
+                        if let Some(stats) = (*global_stats).as_ref() {
+                            html! {
+                                <>
+                                    <div class="stats-summary global">
+                                        <div class="stat-card total">
+                                            <span class="stat-number">{stats.total_messages}</span>
+                                            <span class="stat-label">{"Total"}</span>
+                                        </div>
+                                        <div class="stat-card delivered">
+                                            <span class="stat-number">{stats.delivered}</span>
+                                            <span class="stat-label">{"Delivered"}</span>
+                                        </div>
+                                        <div class="stat-card failed">
+                                            <span class="stat-number">{stats.failed}</span>
+                                            <span class="stat-label">{"Failed"}</span>
+                                        </div>
+                                        <div class="stat-card undelivered">
+                                            <span class="stat-number">{stats.undelivered}</span>
+                                            <span class="stat-label">{"Undelivered"}</span>
+                                        </div>
+                                        <div class="stat-card sent">
+                                            <span class="stat-number">{stats.sent}</span>
+                                            <span class="stat-label">{"Sent"}</span>
+                                        </div>
+                                    </div>
+                                    {
+                                        if !stats.recent_failed.is_empty() {
+                                            html! {
+                                                <>
+                                                    <h3>{"Recent Failed/Undelivered Messages"}</h3>
+                                                    <table class="message-log-table global-failed">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>{"User"}</th>
+                                                                <th>{"Status"}</th>
+                                                                <th>{"To"}</th>
+                                                                <th>{"From"}</th>
+                                                                <th>{"Error"}</th>
+                                                                <th>{"Time"}</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {
+                                                                stats.recent_failed.iter().map(|msg| {
+                                                                    let status_class = match msg.status.as_str() {
+                                                                        "failed" => "status-failed",
+                                                                        "undelivered" => "status-undelivered",
+                                                                        _ => "status-queued",
+                                                                    };
+                                                                    let user_str = msg.user_email.clone()
+                                                                        .unwrap_or_else(|| format!("User {}", msg.user_id));
+                                                                    let error_str = msg.error_code.clone()
+                                                                        .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
+                                                                        .unwrap_or_else(|| "-".to_string());
+                                                                    let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                                        .single()
+                                                                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                                        .unwrap_or_else(|| "Invalid".to_string());
+                                                                    let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
+                                                                    html! {
+                                                                        <tr key={msg.message_sid.clone()}>
+                                                                            <td class="user-cell">{user_str}</td>
+                                                                            <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
+                                                                            <td>{&msg.to_number}</td>
+                                                                            <td>{from_str}</td>
+                                                                            <td class="error-cell">{error_str}</td>
+                                                                            <td>{time_str}</td>
+                                                                        </tr>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </>
+                                            }
+                                        } else {
+                                            html! { <p class="no-messages">{"No failed messages - all messages delivered successfully!"}</p> }
+                                        }
+                                    }
+                                </>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading global stats..."}</p> }
+                        }
+                    }
                 </div>
 
                 {
