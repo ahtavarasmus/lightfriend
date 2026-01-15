@@ -13,7 +13,6 @@ mod utils {
 mod profile {
     pub mod stripe;
     pub mod billing_credits;
-    pub mod billing_payments;
     pub mod billing_models;
     pub mod profile;
     pub mod settings;
@@ -46,10 +45,8 @@ mod components {
 mod proactive {
     pub mod common;
     pub mod waiting_checks;
-    pub mod constant_monitoring;
     pub mod digest;
     pub mod critical;
-    pub mod agent_on;
     pub mod contact_profiles;
 }
 mod connections {
@@ -74,7 +71,6 @@ mod media {
 mod auth {
     pub mod connect;
     pub mod signup;
-    pub mod oauth_flow;
     pub mod set_password;
 }
 mod admin {
@@ -149,7 +145,7 @@ pub enum Route {
     #[at("/subscription-success")]
     SubscriptionSuccess,
 }
-fn switch(routes: Route, logged_in: bool) -> Html {
+fn switch(routes: Route) -> Html {
     match routes {
         Route::PasswordReset => {
             info!("Rendering Password Reset page");
@@ -611,7 +607,7 @@ fn App() -> Html {
         <>
             <BrowserRouter>
                 <Nav logged_in={*logged_in} on_logout={handle_logout} />
-                <Switch<Route> render={move |routes| switch(routes, *logged_in)} />
+                <Switch<Route> render={switch} />
             </BrowserRouter>
         </>
     }

@@ -142,12 +142,11 @@ pub fn supported_countries() -> Html {
     {
         let selected_country = selected_country.clone();
         let detected_country_name = detected_country_name.clone();
-        let _countries = countries.clone();
 
         use_effect_with_deps(
             move |_| {
                 wasm_bindgen_futures::spawn_local(async move {
-                    let mut opts = RequestInit::new();
+                    let opts = RequestInit::new();
                     opts.set_method("GET");
                     
                     let request = Request::new_with_str_and_init(
@@ -210,18 +209,18 @@ pub fn supported_countries() -> Html {
                         if country == &"Other Countries" && detected_country_name.is_some() {
                             let detected = detected_country_name.as_ref().unwrap();
                             let is_country_listed = countries.keys().any(|k| k.to_lowercase() == detected.to_lowercase());
-                            
+
                             if !is_country_listed {
-                                html! { 
-                                    <option value={country.clone()}>
+                                html! {
+                                    <option value={(*country).to_string()}>
                                         {format!("Other Countries (including {})", detected)}
-                                    </option> 
+                                    </option>
                                 }
                             } else {
-                                html! { <option value={country.clone()}>{country}</option> }
+                                html! { <option value={(*country).to_string()}>{*country}</option> }
                             }
                         } else {
-                            html! { <option value={country.clone()}>{country}</option> }
+                            html! { <option value={(*country).to_string()}>{*country}</option> }
                         }
                     })}
                 </select>

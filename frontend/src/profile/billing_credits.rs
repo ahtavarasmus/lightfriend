@@ -137,13 +137,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         }, ());
     }
 
-    // Rate constants (replace with actual values from crate::profile::billing_models)
-    let _voice_second_cost = crate::profile::billing_models::VOICE_SECOND_COST;
-    let _message_cost = crate::profile::billing_models::MESSAGE_COST;
-    // Calculate usage estimates for one-time credits
     let one_time_credits = user_profile.credits;
-    // Calculate usage estimates for monthly quota
-    let _monthly_credits = user_profile.credits_left;
     // Function to update auto top-up settings and refresh the profile
     let update_auto_topup = {
         let user_id = user_profile.id;

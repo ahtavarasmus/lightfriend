@@ -138,7 +138,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let is_resetting = use_state(|| false);
     let reset_success = use_state(|| false);
     let is_cleaning_up = use_state(|| false);
-    let is_disconnecting = use_state(|| false);
 
     // Function to fetch status
     let fetch_status = {

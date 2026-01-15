@@ -148,8 +148,11 @@
       "Bash(awk*)",
       "Bash(sed*)",
       "Bash(xargs*)",
-      "Bash(git -C /Users/ahtavarasmus/Developer/sites/lightfriend-cloud log:*)",
-      "Bash(git -C /Users/ahtavarasmus/Developer/sites/lightfriend-cloud show 8a1f0fa -- backend/src/handlers/profile_handlers.rs)"
+      "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode remote:*)",
+      "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/auth/oauth_flow.rs)",
+      "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/agent_on.rs)",
+      "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/constant_monitoring.rs)",
+      "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/profile/billing_payments.rs)"
     ],
     "deny": [
       "Read(.env)",

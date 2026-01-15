@@ -48,16 +48,6 @@ struct DeleteModalState {
     user_email: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct EmailJudgmentResponse {
-    id: i32,
-    email_timestamp: i32,
-    processed_at: i32,
-    should_notify: bool,
-    score: i32,
-    reason: String,
-}
-
 #[function_component(AdminDashboard)]
 pub fn admin_dashboard() -> Html {
     let users = use_state(|| Vec::new());

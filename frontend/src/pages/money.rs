@@ -461,123 +461,6 @@ pub fn byot_pricing_display() -> Html {
     }
 }
 
-#[derive(Clone, PartialEq, Deserialize)]
-struct CountryPricing {
-    country_code: String,
-    country_name: String,
-    sms_price: f32,
-    voice_price: f32,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
-struct NotificationPricingResponse {
-    countries: Vec<CountryPricing>,
-    formula_note: String,
-}
-
-#[function_component(NotificationPricingTable)]
-fn notification_pricing_table() -> Html {
-    let pricing = use_state(|| None::<NotificationPricingResponse>);
-    let loading = use_state(|| true);
-
-    {
-        let pricing = pricing.clone();
-        let loading = loading.clone();
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                let response = Api::get("/api/pricing/notification-only").send().await;
-                if let Ok(resp) = response {
-                    if let Ok(data) = resp.json::<NotificationPricingResponse>().await {
-                        pricing.set(Some(data));
-                    }
-                }
-                loading.set(false);
-            });
-            || ()
-        }, ());
-    }
-
-    let table_css = r#"
-    .notification-pricing-table {
-        margin-top: 1.5rem;
-    }
-    .notification-pricing-table h3 {
-        color: #7EB2FF;
-        font-size: 1.3rem;
-        margin-bottom: 1rem;
-    }
-    .notification-pricing-table table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 1rem 0;
-    }
-    .notification-pricing-table th,
-    .notification-pricing-table td {
-        padding: 0.75rem;
-        text-align: left;
-        border-bottom: 1px solid rgba(30, 144, 255, 0.15);
-    }
-    .notification-pricing-table th {
-        color: #7EB2FF;
-        font-weight: 600;
-    }
-    .notification-pricing-table td {
-        color: #e0e0e0;
-    }
-    .notification-pricing-table tr:hover {
-        background: rgba(30, 144, 255, 0.05);
-    }
-    .formula-note {
-        color: #999;
-        font-size: 0.85rem;
-        margin-top: 1rem;
-        font-style: italic;
-    }
-    "#;
-
-    html! {
-        <div class="notification-pricing-table">
-            <style>{table_css}</style>
-            <h3>{"Country Pricing"}</h3>
-            if *loading {
-                <p>{"Loading prices..."}</p>
-            } else if let Some(data) = (*pricing).as_ref() {
-                <table>
-                    <thead>
-                        <tr>
-                            <th>{"Country"}</th>
-                            <th>{"SMS Price"}</th>
-                            <th>{"Voice (per min)"}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        { for data.countries.iter().map(|c| html! {
-                            <tr>
-                                <td>{&c.country_name}</td>
-                                <td>{format!("€{:.2}", c.sms_price)}</td>
-                                <td>{format!("€{:.2}", c.voice_price)}</td>
-                            </tr>
-                        })}
-                    </tbody>
-                </table>
-                <p class="formula-note">{&data.formula_note}</p>
-            } else {
-                <p>{"Unable to load pricing"}</p>
-            }
-        </div>
-    }
-}
-
-#[derive(Deserialize, Clone)]
-struct UserProfile {
-    id: i32,
-    email: String,
-    sub_tier: Option<String>,
-    plan_type: Option<String>,
-    phone_number: Option<String>,
-    verified: bool,
-    phone_number_country: Option<String>,
-}
 #[derive(Clone, PartialEq)]
 pub struct Feature {
     pub text: String,
@@ -618,8 +501,6 @@ pub struct CheckoutButtonProps {
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_id = props.user_id;
-    let _user_email = props.user_email.clone();
-    let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
     let plan_type = props.plan_type.clone();
 
@@ -628,14 +509,12 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
 
     let onclick = {
         let user_id = user_id.clone();
-        let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
         let plan_type = plan_type.clone();
 
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
-            let subscription_type = subscription_type.clone();
             let selected_country = selected_country.clone();
             let plan_type = plan_type.clone();
 
@@ -653,11 +532,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 let endpoint = format!("/api/stripe/unified-subscription-checkout/{}", user_id);
                 let mut request_body = json!({
-                    "subscription_type": match subscription_type.as_str() {
-                        "hosted" => "Hosted",
-                        "guaranteed" => "Guaranteed",
-                        _ => "Hosted" // Default to Hosted if unknown
-                    },
+                    "subscription_type": "Hosted",
                 });
                 if let Some(pt) = plan_type {
                     request_body["plan_type"] = json!(pt);
@@ -959,15 +834,6 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub struct Addon {
-    pub id: String,
-    pub name: String,
-    pub price: f64,
-    pub description: String,
-    pub currency: String,
-    pub available: bool,
-}
 #[derive(Properties, PartialEq)]
 pub struct PricingCardProps {
     pub plan_name: String,
@@ -1377,7 +1243,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             let sub_items = feature.sub_items.iter().map(|sub| html! { <li class="sub-item">{sub}</li> }).collect::<Vec<_>>();
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
-                        { if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
+                        { if props.subscription_type == "hosted" && props.selected_country == "Other" {
                             html! { <li>{"Bring your own number. See the guide below."}</li> }
                         } else { html! {} }}
                     </ul>
@@ -1682,18 +1548,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("NZ".to_string(), 29.00),
         ("Other".to_string(), 19.00),  // BYOT plan stays at €19
     ]);
-    // Digest plan prices (€49 for euro countries)
-    let guaranteed_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 59.00),
-        ("CA".to_string(), 59.00),
-        ("FI".to_string(), 49.00),
-        ("NL".to_string(), 49.00),
-        ("GB".to_string(), 49.00),
-        ("AU".to_string(), 49.00),
-        ("Other".to_string(), 49.00),
-    ]);
     let hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
-    let _guaranteed_total_price = guaranteed_prices.get(&props.selected_country).unwrap_or(&0.0);
     let hosted_features = vec![
         Feature {
             text: "Fully managed service hosted in EU".to_string(),
@@ -1714,27 +1569,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         Feature {
             text: "7-day one-click refund, no questions asked".to_string(),
             sub_items: vec![],
-        },
-    ];
-    let _guaranteed_features = vec![
-        Feature {
-            text: "Full Hosted Plan".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Password Vault & Cheating Checker".to_string(),
-            sub_items: vec!["Lightfriend password vault for app blockers and physical lock boxes, 60-min relock window or permanent downgrade.".to_string()],
-        },
-        Feature {
-            text: "Free Cold Turkey Blocker Pro".to_string(),
-            sub_items: vec!["Block computer temptations with no escape hatch.".to_string()],
-        },
-        Feature {
-            text: "Optional Signup Bonuses".to_string(),
-            sub_items: vec![
-                "If needed: $20 for $40 Amazon gift card (for a dumbphone if you don't have one).".to_string(),
-                "For smartphone locking: $10 for $20 Amazon gift card (for a smartphone lock box you can close with a password).".to_string(),
-            ],
         },
     ];
     let pricing_css = r#"
@@ -2416,27 +2250,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         }
                     }
                 }
-                /*
-                <PricingCard
-                    plan_name={"Guaranteed Plan"}
-                    best_for={"Hosted Plan with zero loop holes. Full refund for the first month if not satisfied."}
-                    price={*guaranteed_total_price}
-                    currency={if props.selected_country == "US" || props.selected_country == "CA" { "$" } else { "€" }}
-                    period={"/month"}
-                    features={guaranteed_features.clone()}
-                    subscription_type={"guaranteed"}
-                    is_popular={false}
-                    is_premium={true}
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={props.selected_country.clone()}
-                    coming_soon={false}
-                    hosted_prices={hosted_prices.clone()}
-                />
-            */
             </div>
             <FeatureList selected_country={props.selected_country.clone()} />
             <CreditPricing selected_country={props.selected_country.clone()} />

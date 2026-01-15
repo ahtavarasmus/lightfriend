@@ -48,11 +48,9 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
     let onclick_uber = {
         let connecting_uber = connecting_uber.clone();
         let error = error.clone();
-        let uber_connected = uber_connected.clone();
         Callback::from(move |_: MouseEvent| {
             let connecting_uber = connecting_uber.clone();
             let error = error.clone();
-            let uber_connected = uber_connected.clone();
             connecting_uber.set(true);
             error.set(None);
             // Auth handled by cookies

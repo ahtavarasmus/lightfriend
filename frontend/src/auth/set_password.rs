@@ -13,8 +13,6 @@ struct SetPasswordRequest {
 #[derive(Deserialize)]
 struct MagicLinkResponse {
     needs_password: bool,
-    #[serde(default)]
-    message: Option<String>,
 }
 
 #[derive(Deserialize)]
