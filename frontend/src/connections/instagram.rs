@@ -7,25 +7,18 @@ use gloo_timers::future::TimeoutFuture;
 #[derive(Deserialize, Clone, Debug)]
 struct InstagramStatus {
     connected: bool,
-    status: String,
     created_at: i32,
 }
 #[derive(Serialize)]
 struct InstagramLoginRequest {
     curl_paste: String,
 }
-#[derive(Deserialize, Clone, Debug)]
-struct InstagramConnectionResponse {
-    message: String,
-}
 #[derive(Properties, PartialEq)]
-pub struct InstagramProps {
-    pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
-}
+pub struct InstagramProps {}
+
 #[function_component(InstagramConnect)]
 pub fn instagram_connect(props: &InstagramProps) -> Html {
+    assert!(std::mem::size_of_val(props) == 0);
     let connection_status = use_state(|| None::<InstagramStatus>);
     let error = use_state(|| None::<String>);
     let success_message = use_state(|| None::<String>);
@@ -260,7 +253,6 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
                             if response.ok() {
                                 connection_status.set(Some(InstagramStatus {
                                     connected: false,
-                                    status: "not_connected".to_string(),
                                     created_at: (js_sys::Date::now() as i32),
                                 }));
                                 error.set(None);

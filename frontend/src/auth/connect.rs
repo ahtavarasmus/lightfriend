@@ -297,13 +297,6 @@ pub fn connect(props: &ConnectProps) -> Html {
         },
         (),
     );
-    let currency = if props.phone_number.starts_with("+1") || props.phone_number.starts_with("+61") {
-        "$"
-    } else if props.phone_number.starts_with("+358") || props.phone_number.starts_with("+44") {
-        "€"
-    } else {
-        "$"
-    };
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
             "calendar" => html! { <CalendarConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
@@ -311,8 +304,8 @@ pub fn connect(props: &ConnectProps) -> Html {
             "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "instagram" => html! { <InstagramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "messenger" => html! { <MessengerConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "instagram" => html! { <InstagramConnect /> },
+            "messenger" => html! { <MessengerConnect /> },
             "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },

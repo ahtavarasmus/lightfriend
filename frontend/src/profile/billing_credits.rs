@@ -137,13 +137,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         }, ());
     }
 
-    // Rate constants (replace with actual values from crate::profile::billing_models)
-    let voice_second_cost = crate::profile::billing_models::VOICE_SECOND_COST;
-    let message_cost = crate::profile::billing_models::MESSAGE_COST;
-    // Calculate usage estimates for one-time credits
     let one_time_credits = user_profile.credits;
-    // Calculate usage estimates for monthly quota
-    let monthly_credits = user_profile.credits_left;
     // Function to update auto top-up settings and refresh the profile
     let update_auto_topup = {
         let user_id = user_profile.id;
@@ -316,7 +310,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         Callback::from(move |_| {
             let user_id = user_id;
             let error = error.clone();
-            let success = success.clone();
+            let _success = success.clone();
             let show_confirmation_modal = show_confirmation_modal.clone();
             let buy_credits_amount = buy_credits_amount.clone();
             let enable_auto_topup = *enable_auto_topup_with_purchase && !*auto_topup_active;
@@ -399,7 +393,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         })
     };
     // Handle redirect after successful payment
-    let handle_successful_payment = {
+    let _handle_successful_payment = {
         let success = success.clone();
         let error = error.clone();
         use_effect_with_deps(move |_| {
@@ -741,8 +735,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         }
                                     }
                                 } else if let Some(projection) = (*usage_projection).as_ref() {
-                                    let percentage = projection.usage_percentage.min(100.0);
-                                    let bar_color = if projection.usage_percentage <= 60.0 {
+                                    let _percentage = projection.usage_percentage.min(100.0);
+                                    let _bar_color = if projection.usage_percentage <= 60.0 {
                                         "#4CAF50" // Green
                                     } else if projection.usage_percentage <= 90.0 {
                                         "#FFC107" // Yellow
@@ -1521,9 +1515,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             }
                                         } else if elig.eligible {
                                             let refund_amount = elig.refund_amount_cents.map(|c| c as f32 / 100.0).unwrap_or(0.0);
-                                            let refund_type = elig.refund_type.as_deref().unwrap_or("subscription");
+                                            let _refund_type = elig.refund_type.as_deref().unwrap_or("subscription");
                                             let days_left = elig.days_remaining.unwrap_or(0);
-                                            let usage = elig.usage_percent.unwrap_or(0.0);
+                                            let _usage = elig.usage_percent.unwrap_or(0.0);
 
                                             html! {
                                                 <div class="refund-status refund-eligible">

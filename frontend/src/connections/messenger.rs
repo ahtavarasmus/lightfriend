@@ -8,7 +8,6 @@ use gloo_timers::future::TimeoutFuture;
 #[derive(Deserialize, Clone, Debug)]
 struct MessengerStatus {
     connected: bool,
-    status: String,
     created_at: i32,
 }
 
@@ -17,20 +16,12 @@ struct MessengerLoginRequest {
     curl_paste: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-struct MessengerConnectionResponse {
-    message: String,
-}
-
 #[derive(Properties, PartialEq)]
-pub struct MessengerProps {
-    pub user_id: i32,
-    pub sub_tier: Option<String>,
-    pub discount: bool,
-}
+pub struct MessengerProps {}
 
 #[function_component(MessengerConnect)]
 pub fn messenger_connect(props: &MessengerProps) -> Html {
+    assert!(std::mem::size_of_val(props) == 0);
     let connection_status = use_state(|| None::<MessengerStatus>);
     let error = use_state(|| None::<String>);
     let success_message = use_state(|| None::<String>);
@@ -132,60 +123,57 @@ pub fn messenger_connect(props: &MessengerProps) -> Html {
                     .await
                     {
                         Ok(response) => {
-                            match response.json::<MessengerConnectionResponse>().await {
-                                Ok(_) => {
-                                    error.set(None);
-                                    show_auth_form.set(false);
-                                    let poll_interval = 5000;
-                                    let poll_duration = 300000;
-                                    let start_time = js_sys::Date::now();
-                                    fn create_poll_fn(
-                                        start_time: f64,
-                                        poll_duration: i32,
-                                        poll_interval: i32,
-                                        is_connecting: UseStateHandle<bool>,
-                                        error: UseStateHandle<Option<String>>,
-                                        fetch_status: Callback<()>,
-                                    ) -> Box<dyn Fn()> {
-                                        Box::new(move || {
-                                            if js_sys::Date::now() - start_time > poll_duration as f64 {
-                                                is_connecting.set(false);
-                                                error.set(Some("Connection attempt timed out".to_string()));
-                                                return;
-                                            }
-                                            fetch_status.emit(());
-                                            let is_connecting = is_connecting.clone();
-                                            let error = error.clone();
-                                            let fetch_status = fetch_status.clone();
-                                            let poll_fn = create_poll_fn(
-                                                start_time,
-                                                poll_duration,
-                                                poll_interval,
-                                                is_connecting,
-                                                error,
-                                                fetch_status,
-                                            );
-                                            let handle = gloo_timers::callback::Timeout::new(
-                                                poll_interval as u32,
-                                                move || poll_fn(),
-                                            );
-                                            handle.forget();
-                                        })
-                                    }
-                                    let poll_fn = create_poll_fn(
-                                        start_time,
-                                        poll_duration,
-                                        poll_interval,
-                                        is_connecting.clone(),
-                                        error.clone(),
-                                        fetch_status.clone(),
-                                    );
-                                    poll_fn();
+                            if response.ok() {
+                                error.set(None);
+                                show_auth_form.set(false);
+                                let poll_interval = 5000;
+                                let poll_duration = 300000;
+                                let start_time = js_sys::Date::now();
+                                fn create_poll_fn(
+                                    start_time: f64,
+                                    poll_duration: i32,
+                                    poll_interval: i32,
+                                    is_connecting: UseStateHandle<bool>,
+                                    error: UseStateHandle<Option<String>>,
+                                    fetch_status: Callback<()>,
+                                ) -> Box<dyn Fn()> {
+                                    Box::new(move || {
+                                        if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                            is_connecting.set(false);
+                                            error.set(Some("Connection attempt timed out".to_string()));
+                                            return;
+                                        }
+                                        fetch_status.emit(());
+                                        let is_connecting = is_connecting.clone();
+                                        let error = error.clone();
+                                        let fetch_status = fetch_status.clone();
+                                        let poll_fn = create_poll_fn(
+                                            start_time,
+                                            poll_duration,
+                                            poll_interval,
+                                            is_connecting,
+                                            error,
+                                            fetch_status,
+                                        );
+                                        let handle = gloo_timers::callback::Timeout::new(
+                                            poll_interval as u32,
+                                            move || poll_fn(),
+                                        );
+                                        handle.forget();
+                                    })
                                 }
-                                Err(_) => {
-                                    is_connecting.set(false);
-                                    error.set(Some("Failed to parse connection response".to_string()));
-                                }
+                                let poll_fn = create_poll_fn(
+                                    start_time,
+                                    poll_duration,
+                                    poll_interval,
+                                    is_connecting.clone(),
+                                    error.clone(),
+                                    fetch_status.clone(),
+                                );
+                                poll_fn();
+                            } else {
+                                is_connecting.set(false);
+                                error.set(Some("Failed to start Messenger connection".to_string()));
                             }
                         }
                         Err(_) => {
@@ -216,7 +204,6 @@ pub fn messenger_connect(props: &MessengerProps) -> Html {
                         Ok(_) => {
                             connection_status.set(Some(MessengerStatus {
                                 connected: false,
-                                status: "not_connected".to_string(),
                                 created_at: (js_sys::Date::now() as i32),
                             }));
                             error.set(None);

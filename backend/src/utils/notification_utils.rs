@@ -1,7 +1,7 @@
-use crate::repositories::user_repository::LogUsageParams;
-use crate::AppState;
 use std::error::Error;
 use std::sync::Arc;
+use crate::AppState;
+use crate::repositories::user_repository::LogUsageParams;
 
 /// Sends an email to the admin (rasmus@ahtava.com) with usage statistics
 /// for Tinfoil API key renewals. This helps monitor token consumption patterns.
@@ -24,15 +24,13 @@ pub async fn send_tinfoil_renewal_notification(
     use axum::extract::{Json, State as AxumState};
 
     // Get user details
-    let user = state
-        .user_core
-        .find_by_id(user_id)
+    let user = state.user_core.find_by_id(user_id)
         .map_err(|e| format!("Failed to find user: {}", e))?
         .ok_or("User not found")?;
 
     // Calculate tokens per day
     let days_elapsed = if days_until_renewal >= 30 {
-        1 // Prevent division by zero on first renewal
+        1  // Prevent division by zero on first renewal
     } else {
         30 - days_until_renewal
     };
@@ -68,7 +66,7 @@ pub async fn send_tinfoil_renewal_notification(
     let email_request = crate::handlers::imap_handlers::SendEmailRequest {
         to: "rasmus@ahtava.com".to_string(),
         subject: format!("Tinfoil Key Renewal - User {}", user_id),
-        body: body.replace("\n", "\r\n"), // CRLF for email
+        body: body.replace("\n", "\r\n"),  // CRLF for email
     };
 
     // Create a fake auth user for sending (admin context)
@@ -82,21 +80,13 @@ pub async fn send_tinfoil_renewal_notification(
         AxumState(state.clone()),
         auth_user,
         Json(email_request),
-    )
-    .await
-    {
+    ).await {
         Ok(_) => {
-            tracing::info!(
-                "Successfully sent Tinfoil renewal notification for user {}",
-                user_id
-            );
+            tracing::info!("Successfully sent Tinfoil renewal notification for user {}", user_id);
             Ok(())
         }
         Err((status, err)) => {
-            let error_msg = format!(
-                "Failed to send Tinfoil renewal notification: {:?} - {:?}",
-                status, err
-            );
+            let error_msg = format!("Failed to send Tinfoil renewal notification: {:?} - {:?}", status, err);
             tracing::error!("{}", error_msg);
             Err(error_msg.into())
         }
@@ -128,17 +118,12 @@ pub async fn send_tinfoil_renewal_notification(
 /// * `Err(Box<dyn Error>)` - Error sending email
 ///
 /// # Example
-/// ```no_run
-/// # use std::sync::Arc;
-/// # use backend::AppState;
-/// # async fn example(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
-/// backend::utils::notification_utils::send_admin_alert(
+/// ```ignore
+/// send_admin_alert(
 ///     &state,
 ///     "Bridge Connection Failed - WhatsApp",
 ///     "WhatsApp bridge connection check failed for user 123"
 /// ).await?;
-/// # Ok(())
-/// # }
 /// ```
 pub async fn send_admin_alert(
     state: &Arc<AppState>,
@@ -148,8 +133,8 @@ pub async fn send_admin_alert(
     use axum::extract::{Json, State as AxumState};
 
     // Get the admin alert email from environment variable or default to rasmus@ahtava.com
-    let admin_email =
-        std::env::var("ADMIN_ALERT_EMAIL").unwrap_or_else(|_| "rasmus@ahtava.com".to_string());
+    let admin_email = std::env::var("ADMIN_ALERT_EMAIL")
+        .unwrap_or_else(|_| "rasmus@ahtava.com".to_string());
 
     if admin_email.is_empty() {
         tracing::warn!("ADMIN_ALERT_EMAIL is empty, skipping alert");
@@ -161,26 +146,19 @@ pub async fn send_admin_alert(
 
     // Check cooldown: has this alert type been sent recently?
     match state.user_repository.has_recent_notification(
-        1,       // Admin user ID
+        1, // Admin user ID
         subject, // Use subject as the notification type
-        cooldown_seconds,
+        cooldown_seconds
     ) {
         Ok(true) => {
-            tracing::debug!(
-                "Skipping admin alert '{}' - still in {}-hour cooldown period",
-                subject,
-                COOLDOWN_HOURS
-            );
+            tracing::debug!("Skipping admin alert '{}' - still in {}-hour cooldown period", subject, COOLDOWN_HOURS);
             return Ok(());
         }
         Ok(false) => {
             // Not in cooldown, proceed with reply check
         }
         Err(e) => {
-            tracing::warn!(
-                "Failed to check alert cooldown: {}, proceeding with send",
-                e
-            );
+            tracing::warn!("Failed to check alert cooldown: {}, proceeding with send", e);
         }
     }
 
@@ -188,16 +166,7 @@ pub async fn send_admin_alert(
     // Search for emails from admin containing the subject line
     if let Ok(Some(_)) = state.user_repository.get_imap_credentials(1) {
         // Admin (user_id 1) has IMAP configured, check for replies
-        match crate::handlers::imap_handlers::fetch_emails_imap(
-            state,
-            1,
-            false,
-            Some(10),
-            false,
-            true,
-        )
-        .await
-        {
+        match crate::handlers::imap_handlers::fetch_emails_imap(state, 1, false, Some(10), false, true).await {
             Ok(emails) => {
                 // Check if any email from admin's sent folder or replies contains the subject
                 // and has content indicating they want to disable alerts
@@ -207,15 +176,11 @@ pub async fn send_admin_alert(
                             if let Some(snippet) = &email.snippet {
                                 let lower_snippet = snippet.to_lowercase();
                                 // Check for common disable phrases
-                                if lower_snippet.contains("disable")
-                                    || lower_snippet.contains("stop")
-                                    || lower_snippet.contains("unsubscribe")
-                                    || lower_snippet.contains("mute")
-                                {
-                                    tracing::info!(
-                                        "Admin has replied to disable alerts for '{}', skipping",
-                                        subject
-                                    );
+                                if lower_snippet.contains("disable") ||
+                                   lower_snippet.contains("stop") ||
+                                   lower_snippet.contains("unsubscribe") ||
+                                   lower_snippet.contains("mute") {
+                                    tracing::info!("Admin has replied to disable alerts for '{}', skipping", subject);
                                     return Ok(());
                                 }
                             }
@@ -257,16 +222,14 @@ pub async fn send_admin_alert(
         AxumState(state.clone()),
         auth_user,
         Json(email_request),
-    )
-    .await
-    {
+    ).await {
         Ok(_) => {
             tracing::info!("Successfully sent admin alert email: {}", subject);
 
             // Log this alert in usage_logs for cooldown tracking
             if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                user_id: 1,                         // Admin user ID
-                sid: None,                          // No SID for email alerts
+                user_id: 1, // Admin user ID
+                sid: None, // No SID for email alerts
                 activity_type: subject.to_string(), // Use subject as activity_type
                 credits: None,
                 time_consumed: None,

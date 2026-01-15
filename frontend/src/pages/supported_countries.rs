@@ -30,7 +30,6 @@ struct CountryFeatureAvailability {
 pub fn supported_countries() -> Html {
     let countries = use_state(|| {
         let mut map: HashMap<String, CountryFeatureAvailability> = HashMap::new();
-        let mut country_order: Vec<String> = Vec::new();
         map.insert("United States".to_string(), CountryFeatureAvailability {
             lightfriend_can_provide_local_number: FeatureStatus::Available,
             user_can_bring_their_own_number: FeatureStatus::Unavailable,
@@ -143,13 +142,12 @@ pub fn supported_countries() -> Html {
     {
         let selected_country = selected_country.clone();
         let detected_country_name = detected_country_name.clone();
-        let countries = countries.clone();
-        
+
         use_effect_with_deps(
             move |_| {
                 wasm_bindgen_futures::spawn_local(async move {
-                    let mut opts = RequestInit::new();
-                    opts.method("GET");
+                    let opts = RequestInit::new();
+                    opts.set_method("GET");
                     
                     let request = Request::new_with_str_and_init(
                         "https://ipapi.co/json/",
@@ -211,18 +209,18 @@ pub fn supported_countries() -> Html {
                         if country == &"Other Countries" && detected_country_name.is_some() {
                             let detected = detected_country_name.as_ref().unwrap();
                             let is_country_listed = countries.keys().any(|k| k.to_lowercase() == detected.to_lowercase());
-                            
+
                             if !is_country_listed {
-                                html! { 
-                                    <option value={country.clone()}>
+                                html! {
+                                    <option value={(*country).to_string()}>
                                         {format!("Other Countries (including {})", detected)}
-                                    </option> 
+                                    </option>
                                 }
                             } else {
-                                html! { <option value={country.clone()}>{country}</option> }
+                                html! { <option value={(*country).to_string()}>{*country}</option> }
                             }
                         } else {
-                            html! { <option value={country.clone()}>{country}</option> }
+                            html! { <option value={(*country).to_string()}>{*country}</option> }
                         }
                     })}
                 </select>

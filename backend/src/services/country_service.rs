@@ -1,0 +1,189 @@
+//! Country detection service for phone numbers.
+//!
+//! Detects ISO country codes from phone numbers, with special handling
+//! for US/Canada (both use +1 prefix but have different area codes).
+//!
+//! Uses the existing `utils/country` module for non-North American countries.
+
+use std::collections::HashSet;
+use std::sync::LazyLock;
+
+/// Canadian area codes (40+ codes, all use +1 prefix)
+static CA_AREA_CODES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "+1204", "+1226", "+1236", "+1249", "+1250", "+1289", "+1306", "+1343",
+        "+1365", "+1367", "+1368", "+1403", "+1416", "+1418", "+1437", "+1438",
+        "+1450", "+1506", "+1514", "+1519", "+1548", "+1579", "+1581", "+1587",
+        "+1604", "+1613", "+1639", "+1647", "+1672", "+1705", "+1709", "+1778",
+        "+1780", "+1782", "+1807", "+1819", "+1825", "+1867", "+1873", "+1879",
+        "+1902", "+1905",
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// US area codes (300+ codes, all use +1 prefix)
+static US_AREA_CODES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "+1201", "+1202", "+1203", "+1205", "+1206", "+1207", "+1208", "+1209",
+        "+1210", "+1212", "+1213", "+1214", "+1215", "+1216", "+1217", "+1218",
+        "+1219", "+1220", "+1223", "+1224", "+1225", "+1228", "+1229", "+1231",
+        "+1234", "+1239", "+1240", "+1248", "+1251", "+1252", "+1253", "+1254",
+        "+1256", "+1260", "+1262", "+1267", "+1269", "+1270", "+1272", "+1274",
+        "+1276", "+1281", "+1301", "+1302", "+1303", "+1304", "+1305", "+1307",
+        "+1308", "+1309", "+1310", "+1312", "+1313", "+1314", "+1315", "+1316",
+        "+1317", "+1318", "+1319", "+1320", "+1321", "+1323", "+1325", "+1330",
+        "+1331", "+1332", "+1334", "+1336", "+1337", "+1339", "+1341", "+1346",
+        "+1347", "+1351", "+1352", "+1359", "+1360", "+1361", "+1363", "+1364",
+        "+1369", "+1380", "+1385", "+1386", "+1401", "+1402", "+1404", "+1405",
+        "+1406", "+1407", "+1408", "+1409", "+1413", "+1414", "+1415", "+1417",
+        "+1419", "+1423", "+1424", "+1425", "+1430", "+1432", "+1434", "+1435",
+        "+1440", "+1443", "+1445", "+1447", "+1448", "+1463", "+1464", "+1469",
+        "+1470", "+1475", "+1478", "+1479", "+1480", "+1484", "+1501", "+1502",
+        "+1503", "+1504", "+1505", "+1507", "+1508", "+1509", "+1510", "+1512",
+        "+1513", "+1515", "+1516", "+1517", "+1518", "+1520", "+1530", "+1539",
+        "+1540", "+1541", "+1551", "+1559", "+1561", "+1562", "+1563", "+1567",
+        "+1570", "+1571", "+1573", "+1574", "+1575", "+1580", "+1585", "+1586",
+        "+1601", "+1602", "+1603", "+1605", "+1606", "+1607", "+1608", "+1609",
+        "+1610", "+1612", "+1614", "+1615", "+1616", "+1617", "+1618", "+1619",
+        "+1620", "+1623", "+1626", "+1630", "+1631", "+1636", "+1641", "+1646",
+        "+1650", "+1651", "+1657", "+1660", "+1661", "+1662", "+1667", "+1669",
+        "+1678", "+1679", "+1681", "+1682", "+1701", "+1702", "+1703", "+1704",
+        "+1706", "+1707", "+1708", "+1712", "+1713", "+1714", "+1715", "+1716",
+        "+1717", "+1718", "+1719", "+1720", "+1724", "+1725", "+1726", "+1727",
+        "+1731", "+1732", "+1734", "+1737", "+1740", "+1743", "+1747", "+1754",
+        "+1757", "+1760", "+1762", "+1763", "+1765", "+1769", "+1770", "+1771",
+        "+1772", "+1773", "+1774", "+1775", "+1781", "+1785", "+1786", "+1801",
+        "+1802", "+1803", "+1804", "+1805", "+1806", "+1808", "+1810", "+1812",
+        "+1813", "+1814", "+1815", "+1816", "+1817", "+1818", "+1828", "+1830",
+        "+1831", "+1832", "+1837", "+1843", "+1845", "+1847", "+1848", "+1850",
+        "+1856", "+1857", "+1858", "+1859", "+1860", "+1862", "+1863", "+1864",
+        "+1865", "+1870", "+1872", "+1878", "+1901", "+1903", "+1904", "+1906",
+        "+1907", "+1908", "+1909", "+1914", "+1915", "+1916", "+1917", "+1918",
+        "+1919", "+1920", "+1925", "+1928", "+1929", "+1931", "+1936", "+1937",
+        "+1940", "+1941", "+1945", "+1949", "+1951", "+1952", "+1954", "+1956",
+        "+1959", "+1970", "+1971", "+1972", "+1973", "+1978", "+1979", "+1980",
+        "+1984", "+1985", "+1986", "+1989",
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Detect country code from phone number.
+///
+/// For +1 numbers, uses area code lookup to distinguish US from Canada.
+/// For other prefixes, delegates to `utils/country` module.
+///
+/// Returns:
+/// - `Some("US")` for US phone numbers
+/// - `Some("CA")` for Canadian phone numbers
+/// - `Some(code)` for other supported countries (FI, NL, GB, AU, DE, FR, etc.)
+/// - `Some("Other")` for unsupported countries
+/// - `None` for +1 numbers with unrecognized area codes
+pub fn detect_country(phone: &str) -> Option<String> {
+    if phone.starts_with("+1") {
+        // US/CA need special handling due to shared +1 prefix
+        let area_code = phone.get(0..5).unwrap_or_default();
+
+        if CA_AREA_CODES.contains(area_code) {
+            Some("CA".to_string())
+        } else if US_AREA_CODES.contains(area_code) {
+            Some("US".to_string())
+        } else {
+            // Unknown +1 area code
+            None
+        }
+    } else {
+        // Use existing country detection for all other countries
+        match crate::utils::country::get_country_code_from_phone(phone) {
+            Some(code) => Some(code),
+            None => Some("Other".to_string()),
+        }
+    }
+}
+
+/// Check if phone number is from the US.
+pub fn is_us_phone(phone: &str) -> bool {
+    matches!(detect_country(phone), Some(ref c) if c == "US")
+}
+
+/// Check if phone number is from Canada.
+pub fn is_ca_phone(phone: &str) -> bool {
+    matches!(detect_country(phone), Some(ref c) if c == "CA")
+}
+
+/// Check if phone number is from US or Canada.
+pub fn is_north_american(phone: &str) -> bool {
+    phone.starts_with("+1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_us_detection() {
+        // San Francisco
+        assert_eq!(detect_country("+14155551234"), Some("US".to_string()));
+        // New York
+        assert_eq!(detect_country("+12125551234"), Some("US".to_string()));
+        // Los Angeles
+        assert_eq!(detect_country("+13105551234"), Some("US".to_string()));
+    }
+
+    #[test]
+    fn test_ca_detection() {
+        // Toronto
+        assert_eq!(detect_country("+14165551234"), Some("CA".to_string()));
+        // Vancouver
+        assert_eq!(detect_country("+16045551234"), Some("CA".to_string()));
+        // Montreal
+        assert_eq!(detect_country("+15145551234"), Some("CA".to_string()));
+    }
+
+    #[test]
+    fn test_european_detection() {
+        // Finland
+        assert_eq!(detect_country("+358401234567"), Some("FI".to_string()));
+        // Germany
+        assert_eq!(detect_country("+4915123456789"), Some("DE".to_string()));
+        // UK
+        assert_eq!(detect_country("+447911123456"), Some("GB".to_string()));
+        // Netherlands
+        assert_eq!(detect_country("+31612345678"), Some("NL".to_string()));
+    }
+
+    #[test]
+    fn test_other_country() {
+        // China - not in supported list
+        assert_eq!(detect_country("+86123456789"), Some("Other".to_string()));
+        // Japan - not in supported list
+        assert_eq!(detect_country("+81901234567"), Some("Other".to_string()));
+    }
+
+    #[test]
+    fn test_unknown_north_american() {
+        // Invalid +1 area code
+        assert_eq!(detect_country("+11115551234"), None);
+    }
+
+    #[test]
+    fn test_is_us_phone() {
+        assert!(is_us_phone("+14155551234"));
+        assert!(!is_us_phone("+14165551234")); // Canada
+        assert!(!is_us_phone("+358401234567")); // Finland
+    }
+
+    #[test]
+    fn test_is_ca_phone() {
+        assert!(is_ca_phone("+14165551234"));
+        assert!(!is_ca_phone("+14155551234")); // US
+    }
+
+    #[test]
+    fn test_is_north_american() {
+        assert!(is_north_american("+14155551234")); // US
+        assert!(is_north_american("+14165551234")); // CA
+        assert!(!is_north_american("+358401234567")); // Finland
+    }
+}

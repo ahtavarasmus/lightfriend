@@ -9,10 +9,6 @@ use crate::config;
 use serde::Deserialize;
 use crate::utils::api::Api;
 #[derive(Deserialize, Clone, PartialEq)]
-pub struct AvailablePhoneNumbersResponse {
-    pub available_phone_numbers: Vec<AvailablePhoneNumber>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
 pub struct AvailablePhoneNumber {
     pub phone_number: String,
     pub friendly_name: String,
@@ -110,21 +106,6 @@ pub struct TwilioPrices {
     pub phone_numbers: PhoneNumberCountry,
     pub messaging: MessagingCountry,
     pub voice: VoiceCountry,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct RegulationsResponse {
-    pub results: Vec<Regulation>,
-    pub meta: Meta,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct Meta {
-    pub page: i32,
-    pub page_size: i32,
-    pub first_page_url: String,
-    pub previous_page_url: Option<String>,
-    pub url: String,
-    pub next_page_url: Option<String>,
-    pub key: String,
 }
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct Regulation {
@@ -1188,7 +1169,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     let textbee_device_id = use_state(|| props.textbee_device_id.clone().unwrap_or_default());
     let phone_save_status = use_state(|| None::<Result<(), String>>);
     let creds_save_status = use_state(|| None::<Result<(), String>>);
-    let textbee_save_status = use_state(|| None::<Result<(), String>>);
     {
         let phone_number = phone_number.clone();
         let account_sid = account_sid.clone();
@@ -1252,20 +1232,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         Callback::from(move |e: Event| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
             auth_token.set(input.value());
-        })
-    };
-    let on_textbee_key_change = {
-        let textbee_api_key = textbee_api_key.clone();
-        Callback::from(move |e: Event| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            textbee_api_key.set(input.value());
-        })
-    };
-    let on_textbee_id_change = {
-        let textbee_device_id = textbee_device_id.clone();
-        Callback::from(move |e: Event| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            textbee_device_id.set(input.value());
         })
     };
     let on_country_change = {
@@ -1405,56 +1371,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             });
         })
     };
-    let on_save_textbee = {
-        let textbee_api_key = textbee_api_key.clone();
-        let textbee_device_id = textbee_device_id.clone();
-        let textbee_save_status = textbee_save_status.clone();
-        Callback::from(move |_: MouseEvent| {
-            let textbee_api_key = textbee_api_key.clone();
-            let textbee_device_id = textbee_device_id.clone();
-            let textbee_save_status = textbee_save_status.clone();
-            let key_val = (*textbee_api_key).clone();
-            if key_val.is_empty() || key_val.starts_with("...") {
-                textbee_save_status.set(Some(Err("Invalid API Key".to_string())));
-                return;
-            }
-            let id_val = (*textbee_device_id).clone();
-            if id_val.is_empty() || id_val.starts_with("...") {
-                textbee_save_status.set(Some(Err("Invalid Device ID".to_string())));
-                return;
-            }
-            textbee_save_status.set(None);
-            spawn_local(async move {
-                let result = Api::post("/api/profile/textbee-creds")
-                    .header("Content-Type", "application/json")
-                    .body(serde_json::to_string(&json!({
-                        "textbee_api_key": *textbee_api_key,
-                        "textbee_device_id": *textbee_device_id
-                    })).unwrap())
-                    .send()
-                    .await;
-                match result {
-                        Ok(response) => {
-                            if response.status() == 401 {
-                                if let Some(window) = window() {
-                                    if let Ok(Some(storage)) = window.local_storage() {
-                                        let _ = storage.remove_item("token");
-                                    }
-                                }
-                                textbee_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
-                            } else if response.ok() {
-                                textbee_save_status.set(Some(Ok(())));
-                            } else {
-                                textbee_save_status.set(Some(Err("Failed to save TextBee credentials".to_string())));
-                            }
-                        }
-                    Err(_) => {
-                        textbee_save_status.set(Some(Err("Network error occurred".to_string())));
-                    }
-                }
-            });
-        })
-    };
     let close_modal = {
         let modal_visible = modal_visible.clone();
         Callback::from(move |_: MouseEvent| {
@@ -1491,14 +1407,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     let is_token_valid = {
         let val = &*auth_token;
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
-    };
-    let is_textbee_key_valid = {
-        let val = &*textbee_api_key;
-        !val.is_empty() && !val.starts_with("...")
-    };
-    let is_textbee_id_valid = {
-        let val = &*textbee_device_id;
-        !val.is_empty() && !val.starts_with("...")
     };
     let country_info = use_state(|| None::<CountryInfoResponse>);
     let fetch_error = use_state(|| None::<String>);

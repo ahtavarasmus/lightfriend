@@ -1,8 +1,4 @@
 use yew::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::closure::Closure;
-use crate::config;
-use gloo_net::http::Request;
 use crate::utils::api::Api;
 use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
@@ -50,16 +46,6 @@ struct DeleteModalState {
     show: bool,
     user_id: Option<i32>,
     user_email: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct EmailJudgmentResponse {
-    id: i32,
-    email_timestamp: i32,
-    processed_at: i32,
-    should_notify: bool,
-    score: i32,
-    reason: String,
 }
 
 #[function_component(AdminDashboard)]

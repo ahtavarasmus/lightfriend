@@ -1,4 +1,3 @@
-use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -58,16 +57,7 @@ pub struct UserProfile {
     pub has_any_connection: bool, // whether user has connected any service (for onboarding modal)
 }
 
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct StripeSetupIntentResponse {
-    pub client_secret: String, // Client secret for the SetupIntent
-}
-
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;
-pub const VOICE_SECOND_COST: f32 = 0.0033;
-pub const MESSAGE_COST: f32 = 0.20;
-pub const WEB_CALL_MINUTE_COST_EUR: f32 = 0.15; // 15 cents per minute for Euro countries
-pub const WEB_CALL_MINUTE_COST_US_CA: f32 = 1.0; // 1 message credit per minute for US/CA
 
 /// Usage projection response - all values in NOTIFICATION UNITS (not currency)
 #[derive(Deserialize, Clone, PartialEq, Debug)]
@@ -156,15 +146,6 @@ pub struct OverageInfo {
     pub estimated_cost_euros: f32,
     /// Whether auto top-up will cover it
     pub covered_by_auto_topup: bool,
-}
-
-pub fn format_timestamp(timestamp: i32) -> String {
-    match Utc.timestamp_opt(timestamp as i64, 0) {
-        chrono::offset::LocalResult::Single(dt) => {
-            dt.format("%B %d, %Y").to_string()
-        },
-        _ => "Unknown date".to_string(),
-    }
 }
 
 /// Response for refund eligibility check
