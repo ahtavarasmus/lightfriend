@@ -560,26 +560,26 @@ pub async fn get_country_info(
 /// https://www.twilio.com/docs/messaging/guides/track-outbound-message-status
 #[derive(Deserialize, Debug)]
 pub struct TwilioStatusCallback {
-    #[serde(alias = "MessageSid", alias = "SmsSid")]
-    pub message_sid: String,
-    #[serde(alias = "MessageStatus", alias = "SmsStatus")]
-    pub message_status: String,
-    #[serde(default, alias = "ErrorCode")]
-    pub error_code: Option<String>,
-    #[serde(default, alias = "ErrorMessage")]
-    pub error_message: Option<String>,
-    #[serde(default, alias = "To")]
-    pub to: Option<String>,
-    #[serde(default, alias = "From")]
-    pub from: Option<String>,
-    #[serde(default, alias = "AccountSid")]
-    pub account_sid: Option<String>,
-    #[serde(default, alias = "ApiVersion")]
-    pub api_version: Option<String>,
-    #[serde(default, alias = "Price")]
-    pub price: Option<String>,
-    #[serde(default, alias = "PriceUnit")]
-    pub price_unit: Option<String>,
+    #[serde(alias = "MessageSid", alias = "SmsSid", alias = "message_sid")]
+    pub MessageSid: String,
+    #[serde(alias = "MessageStatus", alias = "SmsStatus", alias = "message_status")]
+    pub MessageStatus: String,
+    #[serde(default, alias = "ErrorCode", alias = "error_code")]
+    pub ErrorCode: Option<String>,
+    #[serde(default, alias = "ErrorMessage", alias = "error_message")]
+    pub ErrorMessage: Option<String>,
+    #[serde(default, alias = "To", alias = "to")]
+    pub To: Option<String>,
+    #[serde(default, alias = "From", alias = "from")]
+    pub From: Option<String>,
+    #[serde(default, alias = "AccountSid", alias = "account_sid")]
+    pub AccountSid: Option<String>,
+    #[serde(default, alias = "ApiVersion", alias = "api_version")]
+    pub ApiVersion: Option<String>,
+    #[serde(default, alias = "Price", alias = "price")]
+    pub Price: Option<String>,
+    #[serde(default, alias = "PriceUnit", alias = "price_unit")]
+    pub PriceUnit: Option<String>,
 }
 
 /// Handle Twilio SMS status callback webhooks
@@ -596,9 +596,9 @@ pub async fn twilio_status_callback(
 ) -> StatusCode {
     tracing::info!(
         "Twilio status callback received: sid={}, status={}, error_code={:?}",
-        payload.message_sid,
-        payload.message_status,
-        payload.error_code
+        payload.MessageSid,
+        payload.MessageStatus,
+        payload.ErrorCode
     );
 
     // Update message status in database
@@ -616,17 +616,17 @@ pub async fn twilio_status_callback(
         .unwrap()
         .as_secs() as i32;
     // Parse price from string to f32 (Twilio sends as string like "-0.0075")
-    let price_value: Option<f32> = payload.price.as_ref().and_then(|p| p.parse().ok());
+    let price_value: Option<f32> = payload.Price.as_ref().and_then(|p| p.parse().ok());
 
     let update_result = diesel::update(
-        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.message_sid))
+        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.MessageSid))
     )
     .set((
-        message_status_log::status.eq(&payload.message_status),
-        message_status_log::error_code.eq(&payload.error_code),
-        message_status_log::error_message.eq(&payload.error_message),
+        message_status_log::status.eq(&payload.MessageStatus),
+        message_status_log::error_code.eq(&payload.ErrorCode),
+        message_status_log::error_message.eq(&payload.ErrorMessage),
         message_status_log::price.eq(price_value),
-        message_status_log::price_unit.eq(&payload.price_unit),
+        message_status_log::price_unit.eq(&payload.PriceUnit),
         message_status_log::updated_at.eq(now),
     ))
     .execute(conn);
@@ -635,14 +635,14 @@ pub async fn twilio_status_callback(
         Ok(0) => {
             tracing::warn!(
                 "No message_status_log record found for SID {}, status update skipped",
-                payload.message_sid
+                payload.MessageSid
             );
         }
         Ok(_) => {
             tracing::info!(
                 "Updated message_status_log for SID {} to status {}",
-                payload.message_sid,
-                payload.message_status
+                payload.MessageSid,
+                payload.MessageStatus
             );
         }
         Err(e) => {
@@ -651,10 +651,10 @@ pub async fn twilio_status_callback(
     }
 
     // Send admin email if delivery failed
-    if payload.message_status == "failed" || payload.message_status == "undelivered" {
+    if payload.MessageStatus == "failed" || payload.MessageStatus == "undelivered" {
         // Get user_id from the message_status_log
         let user_info: Option<(i32, String, Option<String>)> = message_status_log::table
-            .filter(message_status_log::message_sid.eq(&payload.message_sid))
+            .filter(message_status_log::message_sid.eq(&payload.MessageSid))
             .select((
                 message_status_log::user_id,
                 message_status_log::to_number,
@@ -668,8 +668,8 @@ pub async fn twilio_status_callback(
             let from = from_number.unwrap_or("Unknown".to_string());
 
             // Spawn email sending to not block the webhook response
-            let error_code = payload.error_code.clone();
-            let error_message = payload.error_message.clone();
+            let error_code = payload.ErrorCode.clone();
+            let error_message = payload.ErrorMessage.clone();
             tokio::spawn(async move {
                 if let Err(e) = send_sms_failure_admin_email(
                     user_id,
