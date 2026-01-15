@@ -599,6 +599,8 @@ struct TwilioMessageResponse {
     pub price: Option<String>,
     #[serde(default)]
     pub price_unit: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 /// Fetch message details from Twilio API to get pricing info
@@ -623,6 +625,10 @@ async fn fetch_message_price(
             if response.status().is_success() {
                 match response.json::<TwilioMessageResponse>().await {
                     Ok(msg) => {
+                        tracing::info!(
+                            "Twilio message {} response: status={:?}, price={:?}, price_unit={:?}",
+                            message_sid, msg.status, msg.price, msg.price_unit
+                        );
                         if let (Some(price_str), Some(price_unit)) = (msg.price, msg.price_unit) {
                             if let Ok(price) = price_str.parse::<f32>() {
                                 tracing::info!(
@@ -632,7 +638,7 @@ async fn fetch_message_price(
                                 return Some((price, price_unit));
                             }
                         }
-                        tracing::warn!("Message {} has no price info", message_sid);
+                        tracing::warn!("Message {} has no price info yet (status: {:?})", message_sid, msg.status);
                         None
                     }
                     Err(e) => {
@@ -640,6 +646,9 @@ async fn fetch_message_price(
                         None
                     }
                 }
+            } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+                tracing::warn!("Message {} not found in Twilio (already deleted?)", message_sid);
+                None
             } else {
                 tracing::error!(
                     "Failed to fetch message {}: status {}",
@@ -676,6 +685,10 @@ async fn delete_message_from_twilio(
         Ok(response) => {
             if response.status().is_success() {
                 tracing::info!("Deleted message {} from Twilio", message_sid);
+                Ok(())
+            } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+                // Message already deleted - that's fine
+                tracing::info!("Message {} already deleted from Twilio", message_sid);
                 Ok(())
             } else {
                 Err(format!(
@@ -819,6 +832,9 @@ pub async fn twilio_status_callback(
 
             // Spawn task to fetch price and delete message
             tokio::spawn(async move {
+                // Wait a few seconds for Twilio to calculate pricing
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
                 // Fetch price from Twilio API
                 if let Some((price, price_unit)) = fetch_message_price(
                     &message_sid,
