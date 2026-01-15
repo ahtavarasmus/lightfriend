@@ -3,7 +3,7 @@ use std::env;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use axum::{
-    extract::{Json, State, Form},
+    extract::{Json, State},
     http::StatusCode,
 };
 use crate::AppState;
@@ -558,28 +558,37 @@ pub async fn get_country_info(
 
 /// Twilio Status Callback payload
 /// https://www.twilio.com/docs/messaging/guides/track-outbound-message-status
+/// Note: Twilio sends both MessageSid/SmsSid and MessageStatus/SmsStatus with same values.
+/// We only capture the Message-prefixed ones to avoid serde duplicate field errors.
 #[derive(Deserialize, Debug)]
+#[allow(non_snake_case)]
 pub struct TwilioStatusCallback {
-    #[serde(alias = "MessageSid", alias = "SmsSid", alias = "message_sid")]
     pub MessageSid: String,
-    #[serde(alias = "MessageStatus", alias = "SmsStatus", alias = "message_status")]
     pub MessageStatus: String,
-    #[serde(default, alias = "ErrorCode", alias = "error_code")]
+    #[serde(default)]
     pub ErrorCode: Option<String>,
-    #[serde(default, alias = "ErrorMessage", alias = "error_message")]
+    #[serde(default)]
     pub ErrorMessage: Option<String>,
-    #[serde(default, alias = "To", alias = "to")]
+    #[serde(default)]
     pub To: Option<String>,
-    #[serde(default, alias = "From", alias = "from")]
+    #[serde(default)]
     pub From: Option<String>,
-    #[serde(default, alias = "AccountSid", alias = "account_sid")]
+    #[serde(default)]
     pub AccountSid: Option<String>,
-    #[serde(default, alias = "ApiVersion", alias = "api_version")]
+    #[serde(default)]
     pub ApiVersion: Option<String>,
-    #[serde(default, alias = "Price", alias = "price")]
+    #[serde(default)]
     pub Price: Option<String>,
-    #[serde(default, alias = "PriceUnit", alias = "price_unit")]
+    #[serde(default)]
     pub PriceUnit: Option<String>,
+    // Twilio also sends these SMS-prefixed duplicates - we ignore them
+    #[serde(default)]
+    pub SmsSid: Option<String>,
+    #[serde(default)]
+    pub SmsStatus: Option<String>,
+    // Additional fields Twilio may send
+    #[serde(default)]
+    pub RawDlrDoneDate: Option<String>,
 }
 
 /// Handle Twilio SMS status callback webhooks
