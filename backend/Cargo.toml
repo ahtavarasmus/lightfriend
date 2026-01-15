@@ -66,3 +66,4 @@ webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"]
 async-stream = "0.3"
 tokio-stream = "0.1"
 resend-rs = "0.9"
+serde_urlencoded = "0.7.1"

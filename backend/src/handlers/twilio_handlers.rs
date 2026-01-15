@@ -592,10 +592,21 @@ pub struct TwilioStatusCallback {
 ///              queued -> failed (immediate failure)
 pub async fn twilio_status_callback(
     State(state): State<Arc<AppState>>,
-    Form(payload): Form<TwilioStatusCallback>,
+    body: String,
 ) -> StatusCode {
+    tracing::info!("Twilio status callback raw body: {}", body);
+
+    // Parse form data manually
+    let payload: TwilioStatusCallback = match serde_urlencoded::from_str(&body) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("Failed to parse Twilio status callback: {}", e);
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+
     tracing::info!(
-        "Twilio status callback received: sid={}, status={}, error_code={:?}",
+        "Twilio status callback parsed: sid={}, status={}, error_code={:?}",
         payload.MessageSid,
         payload.MessageStatus,
         payload.ErrorCode

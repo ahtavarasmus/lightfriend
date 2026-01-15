@@ -684,6 +684,8 @@ pub async fn get_user_message_stats(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<MessageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Getting message stats for user_id={}", user_id);
+
     let conn = &mut state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
@@ -700,6 +702,11 @@ pub async fn get_user_message_stats(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get message stats"})))
         })?;
 
+    tracing::info!("Found {} messages for user_id={}", recent_messages.len(), user_id);
+    for msg in &recent_messages {
+        tracing::info!("  Message: sid={}, status={}, to={}", msg.message_sid, msg.status, msg.to_number);
+    }
+
     // Count by status
     let total_messages = recent_messages.len() as i64;
     let delivered = recent_messages.iter().filter(|m| m.status == "delivered").count() as i64;
@@ -707,6 +714,9 @@ pub async fn get_user_message_stats(
     let undelivered = recent_messages.iter().filter(|m| m.status == "undelivered").count() as i64;
     let queued = recent_messages.iter().filter(|m| m.status == "queued").count() as i64;
     let sent = recent_messages.iter().filter(|m| m.status == "sent").count() as i64;
+
+    tracing::info!("Stats: total={}, delivered={}, failed={}, undelivered={}, queued={}, sent={}",
+        total_messages, delivered, failed, undelivered, queued, sent);
 
     Ok(Json(MessageStatsResponse {
         user_id,
