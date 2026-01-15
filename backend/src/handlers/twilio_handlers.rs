@@ -3,11 +3,16 @@ use std::env;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use axum::{
-    extract::{Json, State},
+    extract::{Json, State, Form},
     http::StatusCode,
 };
-use crate::AppState; 
+use crate::AppState;
 use serde_json::{json, Value};
+use diesel::prelude::*;
+use crate::schema::message_status_log;
+use crate::utils::email::send_sms_failure_admin_email;
+use crate::utils::country::get_country_code_from_phone;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize, Debug)]
 pub struct AvailablePhoneNumbersResponse {
@@ -549,4 +554,128 @@ pub async fn get_country_info(
         prices,
         regulations,
     }))
+}
+
+/// Twilio Status Callback payload
+/// https://www.twilio.com/docs/messaging/guides/track-outbound-message-status
+#[derive(Deserialize, Debug)]
+pub struct TwilioStatusCallback {
+    #[serde(alias = "MessageSid", alias = "SmsSid")]
+    pub message_sid: String,
+    #[serde(alias = "MessageStatus", alias = "SmsStatus")]
+    pub message_status: String,
+    #[serde(default, alias = "ErrorCode")]
+    pub error_code: Option<String>,
+    #[serde(default, alias = "ErrorMessage")]
+    pub error_message: Option<String>,
+    #[serde(default, alias = "To")]
+    pub to: Option<String>,
+    #[serde(default, alias = "From")]
+    pub from: Option<String>,
+    #[serde(default, alias = "AccountSid")]
+    pub account_sid: Option<String>,
+    #[serde(default, alias = "ApiVersion")]
+    pub api_version: Option<String>,
+}
+
+/// Handle Twilio SMS status callback webhooks
+///
+/// This endpoint receives delivery status updates from Twilio for outbound messages.
+/// It updates the message_status_log table and sends admin email on failures.
+///
+/// Status flow: queued -> sending -> sent -> delivered (success)
+///              queued -> sending -> sent -> undelivered (failure)
+///              queued -> failed (immediate failure)
+pub async fn twilio_status_callback(
+    State(state): State<Arc<AppState>>,
+    Form(payload): Form<TwilioStatusCallback>,
+) -> StatusCode {
+    tracing::info!(
+        "Twilio status callback received: sid={}, status={}, error_code={:?}",
+        payload.message_sid,
+        payload.message_status,
+        payload.error_code
+    );
+
+    // Update message status in database
+    let conn = &mut match state.db_pool.get() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to get DB connection for status callback: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    // Try to update the existing record
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+    let update_result = diesel::update(
+        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.message_sid))
+    )
+    .set((
+        message_status_log::status.eq(&payload.message_status),
+        message_status_log::error_code.eq(&payload.error_code),
+        message_status_log::error_message.eq(&payload.error_message),
+        message_status_log::updated_at.eq(now),
+    ))
+    .execute(conn);
+
+    match update_result {
+        Ok(0) => {
+            tracing::warn!(
+                "No message_status_log record found for SID {}, status update skipped",
+                payload.message_sid
+            );
+        }
+        Ok(_) => {
+            tracing::info!(
+                "Updated message_status_log for SID {} to status {}",
+                payload.message_sid,
+                payload.message_status
+            );
+        }
+        Err(e) => {
+            tracing::error!("Failed to update message_status_log: {}", e);
+        }
+    }
+
+    // Send admin email if delivery failed
+    if payload.message_status == "failed" || payload.message_status == "undelivered" {
+        // Get user_id from the message_status_log
+        let user_info: Option<(i32, String, Option<String>)> = message_status_log::table
+            .filter(message_status_log::message_sid.eq(&payload.message_sid))
+            .select((
+                message_status_log::user_id,
+                message_status_log::to_number,
+                message_status_log::from_number,
+            ))
+            .first(conn)
+            .ok();
+
+        if let Some((user_id, to_number, from_number)) = user_info {
+            let country = get_country_code_from_phone(&to_number).unwrap_or("Unknown".to_string());
+            let from = from_number.unwrap_or("Unknown".to_string());
+
+            // Spawn email sending to not block the webhook response
+            let error_code = payload.error_code.clone();
+            let error_message = payload.error_message.clone();
+            tokio::spawn(async move {
+                if let Err(e) = send_sms_failure_admin_email(
+                    user_id,
+                    &to_number,
+                    &from,
+                    error_code.as_deref(),
+                    error_message.as_deref(),
+                    &country,
+                ).await {
+                    tracing::error!("Failed to send SMS failure admin email: {}", e);
+                }
+            });
+        }
+    }
+
+    // Always return 200 OK to Twilio
+    StatusCode::OK
 }

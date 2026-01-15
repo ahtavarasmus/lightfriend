@@ -11,7 +11,8 @@ use rand::Rng;
 use diesel::prelude::*;
 
 use crate::schema::waitlist;
-use crate::models::user_models::WaitlistEntry;
+use crate::schema::message_status_log;
+use crate::models::user_models::{WaitlistEntry, MessageStatusLog};
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -662,4 +663,59 @@ pub async fn set_user_twilio_credentials(
 
     tracing::info!("Set Twilio credentials for user {}", req.user_id);
     Ok(Json(json!({"success": true})))
+}
+
+/// Response for message stats endpoint
+#[derive(Serialize)]
+pub struct MessageStatsResponse {
+    pub user_id: i32,
+    pub total_messages: i64,
+    pub delivered: i64,
+    pub failed: i64,
+    pub undelivered: i64,
+    pub queued: i64,
+    pub sent: i64,
+    pub recent_messages: Vec<MessageStatusLog>,
+}
+
+/// Get message delivery stats for a user
+/// GET /api/admin/users/:id/message-stats
+pub async fn get_user_message_stats(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<MessageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let conn = &mut state.db_pool.get().map_err(|e| {
+        tracing::error!("Failed to get DB connection: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+    })?;
+
+    // Get recent messages (last 50)
+    let recent_messages: Vec<MessageStatusLog> = message_status_log::table
+        .filter(message_status_log::user_id.eq(user_id))
+        .order(message_status_log::created_at.desc())
+        .limit(50)
+        .load(conn)
+        .map_err(|e| {
+            tracing::error!("Failed to get message stats: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get message stats"})))
+        })?;
+
+    // Count by status
+    let total_messages = recent_messages.len() as i64;
+    let delivered = recent_messages.iter().filter(|m| m.status == "delivered").count() as i64;
+    let failed = recent_messages.iter().filter(|m| m.status == "failed").count() as i64;
+    let undelivered = recent_messages.iter().filter(|m| m.status == "undelivered").count() as i64;
+    let queued = recent_messages.iter().filter(|m| m.status == "queued").count() as i64;
+    let sent = recent_messages.iter().filter(|m| m.status == "sent").count() as i64;
+
+    Ok(Json(MessageStatsResponse {
+        user_id,
+        total_messages,
+        delivered,
+        failed,
+        undelivered,
+        queued,
+        sent,
+        recent_messages,
+    }))
 }

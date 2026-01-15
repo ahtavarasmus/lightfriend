@@ -26,6 +26,7 @@ use crate::schema::webauthn_challenges;
 use crate::schema::waitlist;
 use crate::schema::youtube;
 use crate::schema::contact_profiles;
+use crate::schema::message_status_log;
 use serde::{Serialize, Deserialize};
 
 
@@ -791,4 +792,37 @@ pub struct RefundInfo {
 pub struct NewRefundInfo {
     pub user_id: i32,
     pub has_refunded: i32,
+}
+
+// Message Status Log models for tracking SMS delivery metadata (no message content)
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = message_status_log)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct MessageStatusLog {
+    pub id: Option<i32>,
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = message_status_log)]
+pub struct NewMessageStatusLog {
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
 }

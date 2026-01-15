@@ -96,6 +96,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    digests (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        time -> Text,
+        tools -> Text,
+        tool_params -> Nullable<Text>,
+        enabled -> Integer,
+        last_sent_at -> Nullable<Integer>,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     email_judgments (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -157,6 +170,22 @@ diesel::table! {
         created_at -> Integer,
         conversation_id -> Text,
         tool_calls_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    message_status_log (id) {
+        id -> Nullable<Integer>,
+        message_sid -> Text,
+        user_id -> Integer,
+        direction -> Text,
+        to_number -> Text,
+        from_number -> Nullable<Text>,
+        status -> Text,
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
@@ -444,6 +473,7 @@ diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(contact_profile_exceptions -> contact_profiles (profile_id));
 diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
+diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
@@ -468,11 +498,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     conversations,
     country_availability,
     critical_categories,
+    digests,
     email_judgments,
     google_calendar,
     imap_connection,
     keywords,
     message_history,
+    message_status_log,
     priority_senders,
     processed_emails,
     refund_info,

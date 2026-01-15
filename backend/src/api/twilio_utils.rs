@@ -5,8 +5,11 @@ use tokio::spawn;
 use crate::AppState;
 use serde::Deserialize;
 use std::env;
-use crate::models::user_models::User;
+use crate::models::user_models::{User, NewMessageStatusLog};
 use std::error::Error;
+use std::time::{SystemTime, UNIX_EPOCH};
+use diesel::prelude::*;
+use crate::schema::message_status_log;
 use axum::{
     http::{Request, StatusCode},
     extract::State,
@@ -438,6 +441,105 @@ pub async fn validate_twilio_signature(
 }
 
 
+/// Validate Twilio signature for status callbacks
+///
+/// This is a simpler version that doesn't need to look up users since:
+/// 1. Status callbacks come from our main Twilio account
+/// 2. The From number is Lightfriend's number, not the user's
+pub async fn validate_twilio_status_callback_signature(
+    request: Request<Body>,
+    next: middleware::Next,
+) -> Result<Response, StatusCode> {
+    tracing::debug!("=== Starting Twilio Status Callback Signature Validation ===");
+
+    // Get the Twilio signature from headers
+    let signature = match request.headers().get("X-Twilio-Signature") {
+        Some(header) => match header.to_str() {
+            Ok(s) => s.to_string(),
+            Err(e) => {
+                tracing::error!("Error converting X-Twilio-Signature to string: {}", e);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        },
+        None => {
+            tracing::error!("No X-Twilio-Signature header found for status callback");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
+
+    // Get the auth token - always use main account for status callbacks
+    let auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to get TWILIO_AUTH_TOKEN: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Get request body for validation
+    let (parts, body) = request.into_parts();
+    let body_bytes = match to_bytes(body, 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("Failed to read request body: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let params_str = match String::from_utf8(body_bytes.to_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to convert body to UTF-8: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    // Parse form parameters into a sorted map
+    let params: BTreeMap<String, String> = form_urlencoded::parse(params_str.as_bytes())
+        .into_owned()
+        .collect();
+
+    // Build the callback URL
+    let url = match std::env::var("SERVER_URL") {
+        Ok(url) => format!("{}/api/twilio/status-callback", url),
+        Err(e) => {
+            tracing::error!("Failed to get SERVER_URL: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Build the string to sign (URL + sorted params)
+    let mut string_to_sign = url;
+    for (key, value) in params.iter() {
+        string_to_sign.push_str(key);
+        string_to_sign.push_str(value);
+    }
+
+    // Create HMAC-SHA1
+    let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
+        Ok(mac) => mac,
+        Err(e) => {
+            tracing::error!("Failed to create HMAC: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    mac.update(string_to_sign.as_bytes());
+    let result = BASE64.encode(mac.finalize().into_bytes());
+
+    // Compare signatures
+    if result != signature {
+        tracing::error!("Status callback signature validation failed");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    tracing::debug!("Status callback signature validation successful");
+
+    // Rebuild request and pass to next handler
+    let request = Request::from_parts(parts, Body::from(params_str));
+    Ok(next.run(request).await)
+}
+
 pub async fn delete_twilio_message_media(
     state: &Arc<AppState>,
     media_sid: &str,
@@ -676,6 +778,10 @@ pub async fn send_conversation_message(
     let mut form_data = vec![("To", user.phone_number.as_str()), ("Body", body)];
     let sid = env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
 
+    // Add StatusCallback URL for delivery status tracking
+    let server_url = env::var("SERVER_URL").unwrap_or_default();
+    let status_callback_url = format!("{}/api/twilio/status-callback", server_url);
+
     if use_messaging_service {
         form_data.push(("MessagingServiceSid", sid.as_str()));
     } else if !from_number.is_empty() {
@@ -683,6 +789,11 @@ pub async fn send_conversation_message(
     } else {
         tracing::warn!("No valid From available for user {} and country {:?}", user.id, country);
         // Fallback or error as needed
+    }
+
+    // Only add StatusCallback if SERVER_URL is configured
+    if !server_url.is_empty() {
+        form_data.push(("StatusCallback", status_callback_url.as_str()));
     }
 
 
@@ -719,9 +830,38 @@ pub async fn send_conversation_message(
 
     let response: MessageResponse = resp.json().await?;
 
-    tracing::debug!("Successfully sent message{} with SID: {}", 
+    tracing::debug!("Successfully sent message{} with SID: {}",
         if media_sid.is_some() { " with media" } else { "" },
         response.sid);
+
+    // Log initial message status to database for tracking
+    if let Ok(mut conn) = state.db_pool.get() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let new_status = NewMessageStatusLog {
+            message_sid: response.sid.clone(),
+            user_id: user.id,
+            direction: "outbound".to_string(),
+            to_number: user.phone_number.clone(),
+            from_number: if from_number.is_empty() { None } else { Some(from_number.clone()) },
+            status: "queued".to_string(),
+            error_code: None,
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        if let Err(e) = diesel::insert_into(message_status_log::table)
+            .values(&new_status)
+            .execute(&mut conn)
+        {
+            tracing::error!("Failed to log message status for SID {}: {}", response.sid, e);
+        } else {
+            tracing::info!("Logged initial message status for SID {}", response.sid);
+        }
+    }
 
     let state_clone = state.clone();
     let msg_sid = response.sid.clone();

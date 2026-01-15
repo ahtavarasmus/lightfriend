@@ -21,7 +21,7 @@ use crate::{
     schema::{
         users, usage_logs,
         tasks, priority_senders, keywords, contact_profiles,
-        contact_profile_exceptions,
+        contact_profile_exceptions, message_status_log,
     },
     DbPool,
 };
@@ -699,6 +699,16 @@ impl UserRepository {
             tasks::table
                 .filter(tasks::status.ne("active"))
                 .filter(tasks::completed_at.lt(before_timestamp))
+        ).execute(&mut conn)
+    }
+
+    /// Delete old message status logs (for database cleanup)
+    /// Keeps logs for diagnostics but removes old entries to prevent bloat
+    pub fn delete_old_message_status_logs(&self, before_timestamp: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(
+            message_status_log::table
+                .filter(message_status_log::created_at.lt(before_timestamp))
         ).execute(&mut conn)
     }
 
