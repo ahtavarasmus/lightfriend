@@ -830,18 +830,39 @@ pub async fn twilio_status_callback(
             let message_sid = payload.MessageSid.clone();
             let db_pool = state.db_pool.clone();
 
-            // Spawn task to fetch price and delete message
+            // Spawn task to fetch price with retry, then delete message
             tokio::spawn(async move {
-                // Wait a few seconds for Twilio to calculate pricing
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                // Retry fetching price with backoff: 3s, 8s, 15s (total ~15s max)
+                let delays_secs = [3u64, 5, 7];
+                let mut price_result: Option<(f32, String)> = None;
 
-                // Fetch price from Twilio API
-                if let Some((price, price_unit)) = fetch_message_price(
-                    &message_sid,
-                    &account_sid,
-                    &auth_token,
-                ).await {
-                    // Update message_status_log with price
+                for (attempt, delay) in delays_secs.iter().enumerate() {
+                    tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
+
+                    if let Some(result) = fetch_message_price(
+                        &message_sid,
+                        &account_sid,
+                        &auth_token,
+                    ).await {
+                        price_result = Some(result);
+                        break;
+                    }
+
+                    if attempt < delays_secs.len() - 1 {
+                        tracing::info!(
+                            "Price fetch attempt {} for {} returned no price, retrying...",
+                            attempt + 1, message_sid
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Price fetch failed after {} attempts for {}, giving up",
+                            delays_secs.len(), message_sid
+                        );
+                    }
+                }
+
+                // Update price in DB if we got it
+                if let Some((price, price_unit)) = price_result {
                     if let Ok(mut conn) = db_pool.get() {
                         let now = SystemTime::now()
                             .duration_since(UNIX_EPOCH)

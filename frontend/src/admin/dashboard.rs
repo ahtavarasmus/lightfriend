@@ -13,6 +13,7 @@ struct EmailBroadcastMessage {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct MessageStatusLog {
     id: Option<i32>,
     message_sid: String,
@@ -30,6 +31,7 @@ struct MessageStatusLog {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct MessageStatsResponse {
     user_id: i32,
     total_messages: i64,
@@ -42,6 +44,7 @@ struct MessageStatsResponse {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct MessageStatusLogWithUser {
     id: Option<i32>,
     message_sid: String,
@@ -61,6 +64,7 @@ struct MessageStatusLogWithUser {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct GlobalMessageStatsResponse {
     total_messages: i64,
     delivered: i64,
