@@ -100,7 +100,8 @@ pub async fn get_cost_stats(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get SMS stats"})))
         })?;
 
-    let total_sms_cost: f32 = sms_data_30d.iter().filter_map(|(_, p, _)| *p).sum();
+    // Twilio prices are negative (money out), so use .abs()
+    let total_sms_cost: f32 = sms_data_30d.iter().filter_map(|(_, p, _)| p.map(|v| v.abs())).sum();
 
     // Get voice costs from usage_logs (last 30 days)
     let total_voice_cost: f32 = usage_logs::table
@@ -132,11 +133,11 @@ pub async fn get_cost_stats(
         }
     }
 
-    // Aggregate costs per user for 30 days
+    // Aggregate costs per user for 30 days (use .abs() for Twilio's negative prices)
     let mut user_costs_30d: std::collections::HashMap<i32, (f32, i64)> = std::collections::HashMap::new();
     for (user_id, price, _) in &sms_data_30d {
         let entry = user_costs_30d.entry(*user_id).or_insert((0.0, 0));
-        entry.0 += price.unwrap_or(0.0);
+        entry.0 += price.unwrap_or(0.0).abs();
         entry.1 += 1;
     }
 
@@ -145,7 +146,7 @@ pub async fn get_cost_stats(
     for (user_id, price, created_at) in &sms_data_30d {
         if *created_at >= from_7d {
             let entry = user_costs_7d.entry(*user_id).or_insert(0.0);
-            *entry += price.unwrap_or(0.0);
+            *entry += price.unwrap_or(0.0).abs();
         }
     }
 
@@ -288,13 +289,13 @@ pub async fn get_usage_stats(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get call records"})))
         })?;
 
-    // Aggregate by day
+    // Aggregate by day (use .abs() for Twilio's negative prices)
     let mut daily_sms: std::collections::HashMap<i32, (i64, f32)> = std::collections::HashMap::new();
     for (created_at, price) in &sms_records {
         let day = (created_at / 86400) * 86400;
         let entry = daily_sms.entry(day).or_insert((0, 0.0));
         entry.0 += 1;
-        entry.1 += price.unwrap_or(0.0);
+        entry.1 += price.unwrap_or(0.0).abs();
     }
 
     let mut daily_calls: std::collections::HashMap<i32, i64> = std::collections::HashMap::new();
