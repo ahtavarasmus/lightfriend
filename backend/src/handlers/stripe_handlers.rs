@@ -1085,7 +1085,9 @@ pub async fn stripe_webhook(
 
                         // Use SignupService to handle user creation/linking
                         use crate::repositories::signup_repository_impl::CompositeSignupRepository;
-                        use crate::services::signup_service::{SignupService, SignupResult, SignupError};
+                        use crate::services::signup_service::{
+                            SignupError, SignupResult, SignupService,
+                        };
 
                         let signup_repo = std::sync::Arc::new(CompositeSignupRepository::new(
                             state.user_core.clone(),
@@ -1093,29 +1095,67 @@ pub async fn stripe_webhook(
                         ));
                         let signup_service = SignupService::new(signup_repo);
 
-                        match signup_service.handle_new_subscription(&email, &phone, customer_id.as_ref()) {
-                            Ok(SignupResult::ExistingUserLinked { user_id, send_welcome_email, .. }) => {
-                                tracing::info!("Linked existing user {} to Stripe customer {}", user_id, customer_id);
+                        match signup_service.handle_new_subscription(
+                            &email,
+                            &phone,
+                            customer_id.as_ref(),
+                        ) {
+                            Ok(SignupResult::ExistingUserLinked {
+                                user_id,
+                                send_welcome_email,
+                                ..
+                            }) => {
+                                tracing::info!(
+                                    "Linked existing user {} to Stripe customer {}",
+                                    user_id,
+                                    customer_id
+                                );
 
                                 if send_welcome_email {
                                     let email_clone = email.clone();
                                     tokio::spawn(async move {
-                                        if let Err(e) = crate::utils::email::send_subscription_activated_email(&email_clone).await {
-                                            tracing::error!("Failed to send subscription activated email: {}", e);
+                                        if let Err(e) =
+                                            crate::utils::email::send_subscription_activated_email(
+                                                &email_clone,
+                                            )
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                "Failed to send subscription activated email: {}",
+                                                e
+                                            );
                                         }
                                     });
                                 }
 
                                 user_id
                             }
-                            Ok(SignupResult::NewUserCreated { user_id, magic_token, email, phone_skipped_duplicate }) => {
-                                tracing::info!("Created new user {} from guest checkout (phone_skipped: {})", user_id, phone_skipped_duplicate);
+                            Ok(SignupResult::NewUserCreated {
+                                user_id,
+                                magic_token,
+                                email,
+                                phone_skipped_duplicate,
+                            }) => {
+                                tracing::info!(
+                                    "Created new user {} from guest checkout (phone_skipped: {})",
+                                    user_id,
+                                    phone_skipped_duplicate
+                                );
 
-                                let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
-                                let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
+                                let frontend_url =
+                                    std::env::var("FRONTEND_URL").unwrap_or_default();
+                                let magic_link =
+                                    format!("{}/set-password/{}", frontend_url, magic_token);
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = crate::utils::email::send_magic_link_email_with_options(&email, &magic_link, phone_skipped_duplicate).await {
+                                    if let Err(e) =
+                                        crate::utils::email::send_magic_link_email_with_options(
+                                            &email,
+                                            &magic_link,
+                                            phone_skipped_duplicate,
+                                        )
+                                        .await
+                                    {
                                         tracing::error!("Failed to send magic link email: {}", e);
                                     }
                                 });
@@ -1123,12 +1163,21 @@ pub async fn stripe_webhook(
                                 user_id
                             }
                             Err(SignupError::EmptyEmail) => {
-                                tracing::error!("No email found for Stripe customer {}", customer_id);
-                                return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Customer has no email"}))));
+                                tracing::error!(
+                                    "No email found for Stripe customer {}",
+                                    customer_id
+                                );
+                                return Err((
+                                    StatusCode::BAD_REQUEST,
+                                    Json(json!({"error": "Customer has no email"})),
+                                ));
                             }
                             Err(e) => {
                                 tracing::error!("Signup error: {}", e);
-                                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"}))));
+                                return Err((
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": "Failed to create user"})),
+                                ));
                             }
                         }
                     }
