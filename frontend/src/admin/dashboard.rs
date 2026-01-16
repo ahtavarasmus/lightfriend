@@ -4,17 +4,135 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use serde_json::json;
-
-#[derive(Serialize)]
-struct BroadcastMessage {
-    message: String,
-}
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct EmailBroadcastMessage {
     subject: String,
     message: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct MessageStatusLog {
+    id: Option<i32>,
+    message_sid: String,
+    user_id: i32,
+    direction: String,
+    to_number: String,
+    from_number: Option<String>,
+    status: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    price: Option<f32>,
+    price_unit: Option<String>,
+    created_at: i32,
+    updated_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct MessageStatsResponse {
+    user_id: i32,
+    total_messages: i64,
+    delivered: i64,
+    failed: i64,
+    undelivered: i64,
+    queued: i64,
+    sent: i64,
+    recent_messages: Vec<MessageStatusLog>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct MessageStatusLogWithUser {
+    id: Option<i32>,
+    message_sid: String,
+    user_id: i32,
+    user_email: Option<String>,
+    user_phone: Option<String>,
+    direction: String,
+    to_number: String,
+    from_number: Option<String>,
+    status: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    price: Option<f32>,
+    price_unit: Option<String>,
+    created_at: i32,
+    updated_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct GlobalMessageStatsResponse {
+    total_messages: i64,
+    delivered: i64,
+    failed: i64,
+    undelivered: i64,
+    queued: i64,
+    sent: i64,
+    recent_failed: Vec<MessageStatusLogWithUser>,
+}
+
+// Cost Stats Response
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct CostStatsResponse {
+    // Key metrics
+    avg_cost_per_intl_user_30d: f32,
+    avg_cost_per_us_ca_user_30d: f32,
+    avg_cost_per_intl_user_7d_projected: f32,
+    avg_cost_per_us_ca_user_7d_projected: f32,
+    // Counts
+    intl_user_count: i64,
+    us_ca_user_count: i64,
+    // Totals
+    total_cost: f32,
+    total_sms_cost: f32,
+    total_voice_cost: f32,
+    international_sms_cost: f32,
+    us_ca_sms_cost: f32,
+    // Per-user
+    costs_per_user: Vec<UserCostEntry>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct UserCostEntry {
+    user_id: i32,
+    country_code: String,
+    sms_cost: f32,
+    sms_count: i64,
+    is_international: bool,
+}
+
+// Usage Stats Response
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct UsageStatsResponse {
+    daily_stats: Vec<DailyUsageStat>,
+    total_messages_7d: i64,
+    total_messages_30d: i64,
+    growth_rate_7d: f32,
+    growth_rate_30d: f32,
+    active_users_7d: i64,
+    active_users_30d: i64,
+    breakdown_by_type: Vec<ActivityTypeBreakdown>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct DailyUsageStat {
+    date: String,
+    sms_count: i64,
+    call_count: i64,
+    total_cost: f32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct ActivityTypeBreakdown {
+    activity_type: String,
+    count: i64,
+    total_credits: f32,
 }
 
 #[derive(Serialize)]
@@ -48,12 +166,166 @@ struct DeleteModalState {
     user_email: Option<String>,
 }
 
+fn render_message_stats(
+    user_id: i32,
+    stats: Option<&MessageStatsResponse>,
+    is_loading: bool,
+    show_all: bool,
+    message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>>,
+    loading_stats: UseStateHandle<Option<i32>>,
+    show_all_messages: UseStateHandle<bool>,
+) -> Html {
+    if stats.is_none() && !is_loading {
+        let message_stats = message_stats.clone();
+        let loading_stats = loading_stats.clone();
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <button
+                    onclick={Callback::from(move |_| {
+                        let message_stats = message_stats.clone();
+                        let loading_stats = loading_stats.clone();
+                        loading_stats.set(Some(user_id));
+                        wasm_bindgen_futures::spawn_local(async move {
+                            match Api::get(&format!("/api/admin/users/{}/message-stats", user_id))
+                                .send()
+                                .await
+                            {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<MessageStatsResponse>().await {
+                                            let mut new_stats = (*message_stats).clone();
+                                            new_stats.insert(user_id, data);
+                                            message_stats.set(new_stats);
+                                        }
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                            loading_stats.set(None);
+                        });
+                    })}
+                    class="iq-button stats-button"
+                >
+                    {"Load Message Stats"}
+                </button>
+            </div>
+        }
+    } else if is_loading {
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <p class="loading">{"Loading stats..."}</p>
+            </div>
+        }
+    } else if let Some(stats) = stats {
+        let filtered_messages: Vec<_> = if show_all {
+            stats.recent_messages.clone()
+        } else {
+            stats.recent_messages.iter()
+                .filter(|m| m.status == "failed" || m.status == "undelivered")
+                .cloned()
+                .collect()
+        };
+        html! {
+            <div class="message-stats-section">
+                <h3>{"SMS Delivery Stats"}</h3>
+                <div class="stats-summary">
+                    <div class="stat-card total">
+                        <span class="stat-number">{stats.total_messages}</span>
+                        <span class="stat-label">{"Total"}</span>
+                    </div>
+                    <div class="stat-card delivered">
+                        <span class="stat-number">{stats.delivered}</span>
+                        <span class="stat-label">{"Delivered"}</span>
+                    </div>
+                    <div class="stat-card failed">
+                        <span class="stat-number">{stats.failed}</span>
+                        <span class="stat-label">{"Failed"}</span>
+                    </div>
+                    <div class="stat-card undelivered">
+                        <span class="stat-number">{stats.undelivered}</span>
+                        <span class="stat-label">{"Undelivered"}</span>
+                    </div>
+                </div>
+                <div class="filter-toggle">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={show_all}
+                            onchange={Callback::from(move |_| {
+                                show_all_messages.set(!show_all);
+                            })}
+                        />
+                        {" Show all messages (not just failed)"}
+                    </label>
+                </div>
+                {
+                    if filtered_messages.is_empty() {
+                        html! { <p class="no-messages">{"No failed/undelivered messages found"}</p> }
+                    } else {
+                        html! {
+                            <table class="message-log-table">
+                                <thead>
+                                    <tr>
+                                        <th>{"Status"}</th>
+                                        <th>{"To"}</th>
+                                        <th>{"From"}</th>
+                                        <th>{"Price"}</th>
+                                        <th>{"Error"}</th>
+                                        <th>{"Time"}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {
+                                        filtered_messages.iter().map(|msg| {
+                                            let status_class = match msg.status.as_str() {
+                                                "delivered" => "status-delivered",
+                                                "failed" => "status-failed",
+                                                "undelivered" => "status-undelivered",
+                                                "sent" => "status-sent",
+                                                _ => "status-queued",
+                                            };
+                                            let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
+                                            let price_str = msg.price
+                                                .map(|p| format!("{:.4} {}", p.abs(), msg.price_unit.as_deref().unwrap_or("USD")))
+                                                .unwrap_or_else(|| "-".to_string());
+                                            let error_str = msg.error_code.clone()
+                                                .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
+                                                .unwrap_or_else(|| "-".to_string());
+                                            let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                .single()
+                                                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                .unwrap_or_else(|| "Invalid".to_string());
+                                            html! {
+                                                <tr key={msg.message_sid.clone()}>
+                                                    <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
+                                                    <td>{&msg.to_number}</td>
+                                                    <td>{from_str}</td>
+                                                    <td>{price_str}</td>
+                                                    <td class="error-cell">{error_str}</td>
+                                                    <td>{time_str}</td>
+                                                </tr>
+                                            }
+                                        }).collect::<Html>()
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    }
+                }
+            </div>
+        }
+    } else {
+        html! {}
+    }
+}
+
 #[function_component(AdminDashboard)]
 pub fn admin_dashboard() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
-    let message = use_state(|| String::new());
     let email_subject = use_state(|| String::new());
     let email_message = use_state(|| String::new());
     let delete_modal = use_state(|| DeleteModalState {
@@ -64,14 +336,34 @@ pub fn admin_dashboard() -> Html {
     let reset_link_status = use_state(|| None::<(i32, String)>); // (user_id, message)
     let new_password = use_state(|| String::new());
     let password_status = use_state(|| None::<String>);
+    // Message stats state
+    let message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>> = use_state(|| HashMap::new());
+    let loading_stats = use_state(|| None::<i32>);
+    let show_all_messages = use_state(|| false); // Default: show only failed/undelivered
+    // Global message stats state
+    let global_stats: UseStateHandle<Option<GlobalMessageStatsResponse>> = use_state(|| None);
+    // Cost and usage stats state
+    let cost_stats: UseStateHandle<Option<CostStatsResponse>> = use_state(|| None);
+    let usage_stats: UseStateHandle<Option<UsageStatsResponse>> = use_state(|| None);
+    let stats_days = use_state(|| 30i32);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
+    let global_stats_effect = global_stats.clone();
+    let cost_stats_effect = cost_stats.clone();
+    let usage_stats_effect = usage_stats.clone();
+    let stats_days_effect = (*stats_days).clone();
 
     use_effect_with_deps(move |_| {
         let users = users_effect;
         let error = error_effect;
+        let global_stats = global_stats_effect;
+        let cost_stats = cost_stats_effect;
+        let usage_stats = usage_stats_effect;
+        let stats_days = stats_days_effect;
+
         wasm_bindgen_futures::spawn_local(async move {
+            // Fetch users
             match Api::get("/api/admin/users")
                 .send()
                 .await
@@ -92,6 +384,42 @@ pub fn admin_dashboard() -> Html {
                 }
                 Err(_) => {
                     error.set(Some("Failed to fetch users".to_string()));
+                }
+            }
+
+            // Fetch global message stats
+            if let Ok(response) = Api::get("/api/admin/global-message-stats")
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<GlobalMessageStatsResponse>().await {
+                        global_stats.set(Some(data));
+                    }
+                }
+            }
+
+            // Fetch cost stats
+            if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", stats_days))
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<CostStatsResponse>().await {
+                        cost_stats.set(Some(data));
+                    }
+                }
+            }
+
+            // Fetch usage stats
+            if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", stats_days))
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                        usage_stats.set(Some(data));
+                    }
                 }
             }
         });
@@ -116,66 +444,6 @@ pub fn admin_dashboard() -> Html {
                     <Link<Route> to={Route::Home} classes="back-link">
                         {"Back to Home"}
                     </Link<Route>>
-                </div>
-
-                
-                <div class="broadcast-section">
-                    <h2>{"SMS Broadcast"}</h2>
-                    <textarea
-                        value={(*message).clone()}
-                        onchange={{
-                            let message = message.clone();
-                            Callback::from(move |e: Event| {
-                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                message.set(input.value());
-                            })
-                        }}
-                        placeholder="Enter SMS message to broadcast..."
-                        class="broadcast-textarea"
-                    />
-                    <button
-                        onclick={{
-                            let message = message.clone();
-                            let error = error.clone();
-                            Callback::from(move |_| {
-                                let message = message.clone();
-                                let error = error.clone();
-                                
-                                if message.is_empty() {
-                                    error.set(Some("Message cannot be empty".to_string()));
-                                    return;
-                                }
-                                
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    let broadcast_message = BroadcastMessage {
-                                        message: (*message).clone(),
-                                    };
-
-                                    match Api::post("/api/admin/broadcast")
-                                        .json(&broadcast_message)
-                                        .unwrap()
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            if response.ok() {
-                                                message.set(String::new());
-                                                error.set(Some("SMS broadcast sent successfully".to_string()));
-                                            } else {
-                                                error.set(Some("Failed to send SMS broadcast(hahaa you were brave enough to try!)".to_string()));
-                                            }
-                                        }
-                                        Err(_) => {
-                                            error.set(Some("Failed to send SMS broadcast request(hahaa you were brave enough to try!)".to_string()));
-                                        }
-                                    }
-                                });
-                            })
-                        }}
-                        class="broadcast-button"
-                    >
-                        {"Send SMS Broadcast"}
-                    </button>
                 </div>
 
                 <div class="broadcast-section email-broadcast">
@@ -253,44 +521,6 @@ pub fn admin_dashboard() -> Html {
                         {"Send Email Broadcast"}
                     </button>
                 </div>
-
-                <div class="test-section">
-                <h2>{"Test Backend"}</h2>
-                <button
-                    onclick={{
-                        let error = error.clone();
-                        Callback::from(move |_| {
-                            let error = error.clone();
-                            wasm_bindgen_futures::spawn_local(async move {
-                                let params = json!({
-                                    "param1": "test_value1",
-                                    "param2": "test_value2"
-                                });
-                                match Api::post("/testing")
-                                    .json(&params)
-                                    .unwrap()
-                                    .send()
-                                    .await
-                                {
-                                    Ok(response) => {
-                                        if response.ok() {
-                                            error.set(Some("Test request sent successfully".to_string()));
-                                        } else {
-                                            error.set(Some("Failed to send test request".to_string()));
-                                        }
-                                    }
-                                    Err(_) => {
-                                        error.set(Some("Failed to send test request".to_string()));
-                                    }
-                                }
-                            });
-                        })
-                    }}
-                    class="broadcast-button"
-                >
-                    {"Test Backend"}
-                </button>
-            </div>
 
                 // Change Password Section
                 <div class="password-section">
@@ -373,6 +603,327 @@ pub fn admin_dashboard() -> Html {
                             }
                         }
                     </div>
+                </div>
+
+                // Cost & Usage Statistics Section
+                <div class="cost-usage-stats-section">
+                    <h2>{"Cost & Usage Statistics"}</h2>
+                    <div class="stats-period-selector">
+                        <span>{"Period: "}</span>
+                        <select
+                            value={format!("{}", *stats_days)}
+                            onchange={{
+                                let stats_days = stats_days.clone();
+                                let cost_stats = cost_stats.clone();
+                                let usage_stats = usage_stats.clone();
+                                Callback::from(move |e: Event| {
+                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                    let days: i32 = select.value().parse().unwrap_or(30);
+                                    stats_days.set(days);
+                                    // Refetch stats with new period
+                                    let cost_stats = cost_stats.clone();
+                                    let usage_stats = usage_stats.clone();
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", days))
+                                            .send()
+                                            .await
+                                        {
+                                            if response.ok() {
+                                                if let Ok(data) = response.json::<CostStatsResponse>().await {
+                                                    cost_stats.set(Some(data));
+                                                }
+                                            }
+                                        }
+                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", days))
+                                            .send()
+                                            .await
+                                        {
+                                            if response.ok() {
+                                                if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                                                    usage_stats.set(Some(data));
+                                                }
+                                            }
+                                        }
+                                    });
+                                })
+                            }}
+                        >
+                            <option value="7">{"7 days"}</option>
+                            <option value="30" selected=true>{"30 days"}</option>
+                            <option value="90">{"90 days"}</option>
+                        </select>
+                    </div>
+
+                    // Cost Stats
+                    {
+                        if let Some(costs) = (*cost_stats).as_ref() {
+                            html! {
+                                <div class="cost-stats">
+                                    <h3>{"Avg Cost Per User (30 days)"}</h3>
+                                    <div class="key-metrics-row">
+                                        <div class="key-metric intl">
+                                            <span class="key-label">{"International"}</span>
+                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_intl_user_30d)}</span>
+                                            <span class="key-context">{format!("{} users", costs.intl_user_count)}</span>
+                                        </div>
+                                        <div class="key-metric us-ca">
+                                            <span class="key-label">{"US/CA"}</span>
+                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_us_ca_user_30d)}</span>
+                                            <span class="key-context">{format!("{} users", costs.us_ca_user_count)}</span>
+                                        </div>
+                                    </div>
+
+                                    {
+                                        if !costs.costs_per_user.is_empty() {
+                                            let max_cost = costs.costs_per_user.iter()
+                                                .map(|u| u.sms_cost)
+                                                .fold(0.0f32, |a, b| a.max(b));
+
+                                            html! {
+                                                <>
+                                                    <h4>{"Cost Per User"}</h4>
+                                                    <div class="user-cost-chart">
+                                                        {
+                                                            costs.costs_per_user.iter().map(|u| {
+                                                                let bar_width = if max_cost > 0.0 {
+                                                                    (u.sms_cost / max_cost * 100.0) as i32
+                                                                } else {
+                                                                    0
+                                                                };
+                                                                let bar_class = if u.is_international { "bar intl" } else { "bar us-ca" };
+                                                                html! {
+                                                                    <div class="chart-row" key={u.user_id}>
+                                                                        <span class="chart-label">{format!("#{} ({})", u.user_id, u.country_code)}</span>
+                                                                        <div class="chart-bar-container">
+                                                                            <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
+                                                                        </div>
+                                                                        <span class="chart-value">{format!("${:.4} ({} msgs)", u.sms_cost, u.sms_count)}</span>
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                </>
+                                            }
+                                        } else {
+                                            html! { <p class="no-data">{"No user cost data"}</p> }
+                                        }
+                                    }
+
+                                    // Collapsible details section
+                                    <details class="cost-details">
+                                        <summary>{"Details"}</summary>
+                                        <div class="details-content">
+                                            <div class="detail-row">
+                                                <span>{"7d projected (Intl):"}</span>
+                                                <span>{format!("${:.4}", costs.avg_cost_per_intl_user_7d_projected)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"7d projected (US/CA):"}</span>
+                                                <span>{format!("${:.4}", costs.avg_cost_per_us_ca_user_7d_projected)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total Intl SMS cost:"}</span>
+                                                <span>{format!("${:.4}", costs.international_sms_cost)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total US/CA SMS cost:"}</span>
+                                                <span>{format!("${:.4}", costs.us_ca_sms_cost)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total cost (SMS+Voice):"}</span>
+                                                <span>{format!("${:.4}", costs.total_cost)}</span>
+                                            </div>
+                                        </div>
+                                    </details>
+                                </div>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading cost stats..."}</p> }
+                        }
+                    }
+
+                    // Usage Stats
+                    {
+                        if let Some(usage) = (*usage_stats).as_ref() {
+                            html! {
+                                <div class="usage-stats">
+                                    <h3>{"Usage Trends"}</h3>
+                                    <div class="stats-summary usage-summary">
+                                        <div class="stat-card growth">
+                                            <span class="stat-number">{usage.total_messages_7d}</span>
+                                            <span class="stat-label">{format!("Messages (7d) {}%", if usage.growth_rate_7d >= 0.0 { format!("+{:.1}", usage.growth_rate_7d) } else { format!("{:.1}", usage.growth_rate_7d) })}</span>
+                                        </div>
+                                        <div class="stat-card growth">
+                                            <span class="stat-number">{usage.total_messages_30d}</span>
+                                            <span class="stat-label">{format!("Messages (30d) {}%", if usage.growth_rate_30d >= 0.0 { format!("+{:.1}", usage.growth_rate_30d) } else { format!("{:.1}", usage.growth_rate_30d) })}</span>
+                                        </div>
+                                        <div class="stat-card active-users">
+                                            <span class="stat-number">{usage.active_users_7d}</span>
+                                            <span class="stat-label">{"Active Users (7d)"}</span>
+                                        </div>
+                                        <div class="stat-card active-users">
+                                            <span class="stat-number">{usage.active_users_30d}</span>
+                                            <span class="stat-label">{"Active Users (30d)"}</span>
+                                        </div>
+                                    </div>
+
+                                    {
+                                        // Only show activity breakdown if any item has non-zero credits
+                                        if usage.breakdown_by_type.iter().any(|a| a.total_credits > 0.0) {
+                                            html! {
+                                                <>
+                                                    <h4>{"Activity Breakdown"}</h4>
+                                                    <div class="activity-breakdown">
+                                                        {
+                                                            usage.breakdown_by_type.iter().map(|a| {
+                                                                html! {
+                                                                    <span class="activity-item" key={a.activity_type.clone()}>
+                                                                        {format!("{}: {} ({:.4} credits)", a.activity_type, a.count, a.total_credits)}
+                                                                    </span>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    {
+                                        if !usage.daily_stats.is_empty() {
+                                            html! {
+                                                <>
+                                                    <h4>{"Daily Stats (Recent)"}</h4>
+                                                    <table class="daily-stats-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>{"Date"}</th>
+                                                                <th>{"SMS"}</th>
+                                                                <th>{"Calls"}</th>
+                                                                <th>{"Cost"}</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {
+                                                                usage.daily_stats.iter().rev().take(14).map(|d| {
+                                                                    html! {
+                                                                        <tr key={d.date.clone()}>
+                                                                            <td>{&d.date}</td>
+                                                                            <td>{d.sms_count}</td>
+                                                                            <td>{d.call_count}</td>
+                                                                            <td>{format!("${:.4}", d.total_cost)}</td>
+                                                                        </tr>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading usage stats..."}</p> }
+                        }
+                    }
+                </div>
+
+                // Global SMS Stats Section
+                <div class="global-stats-section">
+                    <h2>{"Global SMS Delivery Stats"}</h2>
+                    {
+                        if let Some(stats) = (*global_stats).as_ref() {
+                            html! {
+                                <>
+                                    <div class="stats-summary global">
+                                        <div class="stat-card total">
+                                            <span class="stat-number">{stats.total_messages}</span>
+                                            <span class="stat-label">{"Total"}</span>
+                                        </div>
+                                        <div class="stat-card delivered">
+                                            <span class="stat-number">{stats.delivered}</span>
+                                            <span class="stat-label">{"Delivered"}</span>
+                                        </div>
+                                        <div class="stat-card failed">
+                                            <span class="stat-number">{stats.failed}</span>
+                                            <span class="stat-label">{"Failed"}</span>
+                                        </div>
+                                        <div class="stat-card undelivered">
+                                            <span class="stat-number">{stats.undelivered}</span>
+                                            <span class="stat-label">{"Undelivered"}</span>
+                                        </div>
+                                        <div class="stat-card sent">
+                                            <span class="stat-number">{stats.sent}</span>
+                                            <span class="stat-label">{"Sent"}</span>
+                                        </div>
+                                    </div>
+                                    {
+                                        if !stats.recent_failed.is_empty() {
+                                            html! {
+                                                <>
+                                                    <h3>{"Recent Failed/Undelivered Messages"}</h3>
+                                                    <table class="message-log-table global-failed">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>{"User"}</th>
+                                                                <th>{"Status"}</th>
+                                                                <th>{"To"}</th>
+                                                                <th>{"From"}</th>
+                                                                <th>{"Error"}</th>
+                                                                <th>{"Time"}</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {
+                                                                stats.recent_failed.iter().map(|msg| {
+                                                                    let status_class = match msg.status.as_str() {
+                                                                        "failed" => "status-failed",
+                                                                        "undelivered" => "status-undelivered",
+                                                                        _ => "status-queued",
+                                                                    };
+                                                                    let user_str = msg.user_email.clone()
+                                                                        .unwrap_or_else(|| format!("User {}", msg.user_id));
+                                                                    let error_str = msg.error_code.clone()
+                                                                        .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
+                                                                        .unwrap_or_else(|| "-".to_string());
+                                                                    let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                                        .single()
+                                                                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                                        .unwrap_or_else(|| "Invalid".to_string());
+                                                                    let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
+                                                                    html! {
+                                                                        <tr key={msg.message_sid.clone()}>
+                                                                            <td class="user-cell">{user_str}</td>
+                                                                            <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
+                                                                            <td>{&msg.to_number}</td>
+                                                                            <td>{from_str}</td>
+                                                                            <td class="error-cell">{error_str}</td>
+                                                                            <td>{time_str}</td>
+                                                                        </tr>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </>
+                                            }
+                                        } else {
+                                            html! { <p class="no-messages">{"No failed messages - all messages delivered successfully!"}</p> }
+                                        }
+                                    }
+                                </>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading global stats..."}</p> }
+                        }
+                    }
                 </div>
 
                 {
@@ -519,7 +1070,18 @@ pub fn admin_dashboard() -> Html {
                                                                             <div class="preferred-number-section">
                                                                                 <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
                                                                             </div>
-                                                                            
+
+                                                                            // Message Stats Section
+                                                                            {render_message_stats(
+                                                                                user.id,
+                                                                                message_stats.get(&user.id),
+                                                                                *loading_stats == Some(user.id),
+                                                                                *show_all_messages,
+                                                                                message_stats.clone(),
+                                                                                loading_stats.clone(),
+                                                                                show_all_messages.clone(),
+                                                                            )}
+
                                                                         <button 
                                                                             onclick={{
                                                                                 let users = users.clone();
@@ -1734,6 +2296,420 @@ pub fn admin_dashboard() -> Html {
                             background: rgba(30, 144, 255, 0.2);
                             margin-bottom: 0.25rem;
                         }
+                    }
+
+                    /* Message Stats Section */
+                    .message-stats-section {
+                        margin: 1.5rem 0;
+                        padding: 1rem;
+                        background: rgba(30, 144, 255, 0.05);
+                        border-radius: 8px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .message-stats-section h3 {
+                        margin: 0 0 1rem 0;
+                        color: #FFD700;
+                        font-size: 1.1rem;
+                    }
+
+                    .stats-button {
+                        background: linear-gradient(135deg, #1E90FF 0%, #4169E1 100%);
+                    }
+
+                    .stats-summary {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .stat-card {
+                        flex: 1;
+                        min-width: 80px;
+                        padding: 0.75rem;
+                        border-radius: 6px;
+                        text-align: center;
+                        background: rgba(255, 255, 255, 0.1);
+                    }
+
+                    .stat-card.total {
+                        background: rgba(100, 100, 100, 0.3);
+                    }
+
+                    .stat-card.delivered {
+                        background: rgba(40, 167, 69, 0.3);
+                        border: 1px solid rgba(40, 167, 69, 0.5);
+                    }
+
+                    .stat-card.failed {
+                        background: rgba(220, 53, 69, 0.3);
+                        border: 1px solid rgba(220, 53, 69, 0.5);
+                    }
+
+                    .stat-card.undelivered {
+                        background: rgba(255, 165, 0, 0.3);
+                        border: 1px solid rgba(255, 165, 0, 0.5);
+                    }
+
+                    .stat-card.sent {
+                        background: rgba(100, 149, 237, 0.3);
+                        border: 1px solid rgba(100, 149, 237, 0.5);
+                    }
+
+                    .stat-card.cost {
+                        background: rgba(30, 144, 255, 0.2);
+                        border: 1px solid rgba(30, 144, 255, 0.4);
+                    }
+
+                    .stat-card.total-cost {
+                        background: rgba(255, 215, 0, 0.25);
+                        border: 1px solid rgba(255, 215, 0, 0.5);
+                    }
+
+                    .stat-card.growth {
+                        background: rgba(138, 43, 226, 0.25);
+                        border: 1px solid rgba(138, 43, 226, 0.5);
+                    }
+
+                    .stat-card.active-users {
+                        background: rgba(0, 191, 165, 0.25);
+                        border: 1px solid rgba(0, 191, 165, 0.5);
+                    }
+
+                    .stat-card.international {
+                        background: rgba(255, 87, 51, 0.3);
+                        border: 1px solid rgba(255, 87, 51, 0.6);
+                    }
+
+                    .stat-card.international-avg {
+                        background: rgba(255, 165, 0, 0.3);
+                        border: 1px solid rgba(255, 165, 0, 0.6);
+                    }
+
+                    .stat-card.us-ca {
+                        background: rgba(40, 167, 69, 0.2);
+                        border: 1px solid rgba(40, 167, 69, 0.4);
+                    }
+
+                    .stat-number {
+                        display: block;
+                        font-size: 1.5rem;
+                        font-weight: bold;
+                        color: white;
+                    }
+
+                    .stat-label {
+                        display: block;
+                        font-size: 0.75rem;
+                        color: #ccc;
+                        text-transform: uppercase;
+                    }
+
+                    .filter-toggle {
+                        margin-bottom: 1rem;
+                    }
+
+                    .filter-toggle label {
+                        color: #ccc;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+
+                    .filter-toggle input[type="checkbox"] {
+                        width: 16px;
+                        height: 16px;
+                    }
+
+                    .message-log-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.85rem;
+                    }
+
+                    .message-log-table th,
+                    .message-log-table td {
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .message-log-table th {
+                        color: #FFD700;
+                        font-weight: 600;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .message-log-table tr:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .message-log-table .error-cell {
+                        max-width: 200px;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                        color: #ff6b6b;
+                    }
+
+                    .status-badge {
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        font-size: 0.75rem;
+                        font-weight: 600;
+                        text-transform: uppercase;
+                    }
+
+                    .status-delivered {
+                        background: rgba(40, 167, 69, 0.8);
+                        color: white;
+                    }
+
+                    .status-failed {
+                        background: rgba(220, 53, 69, 0.8);
+                        color: white;
+                    }
+
+                    .status-undelivered {
+                        background: rgba(255, 165, 0, 0.8);
+                        color: black;
+                    }
+
+                    .status-sent {
+                        background: rgba(30, 144, 255, 0.8);
+                        color: white;
+                    }
+
+                    .status-queued {
+                        background: rgba(128, 128, 128, 0.8);
+                        color: white;
+                    }
+
+                    .no-messages {
+                        color: #999;
+                        font-style: italic;
+                        text-align: center;
+                        padding: 1rem;
+                    }
+
+                    .loading {
+                        color: #FFD700;
+                        font-style: italic;
+                    }
+
+                    /* Cost & Usage Stats Section */
+                    .cost-usage-stats-section {
+                        margin: 2rem 0;
+                        padding: 1.5rem;
+                        background: rgba(30, 144, 255, 0.05);
+                        border-radius: 12px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .cost-usage-stats-section h2 {
+                        color: #FFD700;
+                        margin: 0 0 1rem 0;
+                    }
+
+                    .cost-usage-stats-section h3 {
+                        color: #7EB2FF;
+                        margin: 1.5rem 0 0.75rem 0;
+                        font-size: 1.1rem;
+                    }
+
+                    .cost-usage-stats-section h4 {
+                        color: #ccc;
+                        margin: 1rem 0 0.5rem 0;
+                        font-size: 0.95rem;
+                    }
+
+                    /* Key metrics row - side by side */
+                    .key-metrics-row {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .key-metric {
+                        flex: 1;
+                        text-align: center;
+                        padding: 1rem;
+                        border-radius: 12px;
+                    }
+
+                    .key-metric.intl {
+                        background: rgba(255, 87, 51, 0.15);
+                        border: 2px solid rgba(255, 87, 51, 0.5);
+                    }
+
+                    .key-metric.us-ca {
+                        background: rgba(40, 167, 69, 0.15);
+                        border: 2px solid rgba(40, 167, 69, 0.5);
+                    }
+
+                    .key-label {
+                        display: block;
+                        font-size: 0.85rem;
+                        color: #aaa;
+                        margin-bottom: 0.25rem;
+                    }
+
+                    .key-number {
+                        display: block;
+                        font-size: 2rem;
+                        font-weight: bold;
+                    }
+
+                    .key-metric.intl .key-number {
+                        color: #FF5733;
+                    }
+
+                    .key-metric.us-ca .key-number {
+                        color: #28a745;
+                    }
+
+                    .key-context {
+                        display: block;
+                        font-size: 0.8rem;
+                        color: #888;
+                        margin-top: 0.25rem;
+                    }
+
+                    /* Collapsible details */
+                    .cost-details {
+                        margin-top: 1rem;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        border-radius: 8px;
+                    }
+
+                    .cost-details summary {
+                        padding: 0.75rem 1rem;
+                        cursor: pointer;
+                        color: #888;
+                        font-size: 0.9rem;
+                    }
+
+                    .cost-details summary:hover {
+                        color: #aaa;
+                    }
+
+                    .details-content {
+                        padding: 0.5rem 1rem 1rem;
+                        border-top: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .detail-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 0.25rem 0;
+                        font-size: 0.85rem;
+                    }
+
+                    .detail-row span:first-child {
+                        color: #888;
+                    }
+
+                    .detail-row span:last-child {
+                        color: #ddd;
+                    }
+
+                    /* User cost chart */
+                    .user-cost-chart {
+                        margin-top: 0.5rem;
+                    }
+
+                    .chart-row {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        margin-bottom: 0.4rem;
+                    }
+
+                    .chart-label {
+                        width: 100px;
+                        font-size: 0.8rem;
+                        color: #aaa;
+                        flex-shrink: 0;
+                    }
+
+                    .chart-bar-container {
+                        flex: 1;
+                        height: 20px;
+                        background: rgba(255, 255, 255, 0.1);
+                        border-radius: 3px;
+                        overflow: hidden;
+                    }
+
+                    .chart-bar-container .bar {
+                        height: 100%;
+                        border-radius: 3px;
+                        transition: width 0.3s ease;
+                    }
+
+                    .chart-bar-container .bar.intl {
+                        background: linear-gradient(90deg, #FF5733, #FF8C5A);
+                    }
+
+                    .chart-bar-container .bar.us-ca {
+                        background: linear-gradient(90deg, #28a745, #5cb85c);
+                    }
+
+                    .chart-value {
+                        width: 60px;
+                        font-size: 0.85rem;
+                        color: #fff;
+                        text-align: right;
+                        flex-shrink: 0;
+                    }
+
+                    .no-data {
+                        color: #666;
+                        font-style: italic;
+                    }
+
+                    .daily-stats-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.85rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .daily-stats-table th,
+                    .daily-stats-table td {
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .daily-stats-table th {
+                        color: #7EB2FF;
+                        font-weight: 600;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .daily-stats-table td {
+                        color: #ddd;
+                    }
+
+                    .daily-stats-table tr:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .activity-breakdown {
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 0.75rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .activity-item {
+                        background: rgba(100, 100, 100, 0.3);
+                        padding: 0.4rem 0.8rem;
+                        border-radius: 4px;
+                        font-size: 0.85rem;
+                        color: #ddd;
                     }
 
                 "#}

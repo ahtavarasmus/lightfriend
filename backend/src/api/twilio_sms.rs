@@ -1920,14 +1920,12 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "direct_response" {
                     tracing::debug!("Executing direct_response tool call");
-                    // Parse the response from the tool call arguments
-                    #[derive(Deserialize)]
-                    struct DirectResponse {
-                        response: String,
-                    }
-                    if let Ok(args) = serde_json::from_str::<DirectResponse>(arguments) {
-                        tool_answers.insert(tool_call_id, args.response);
-                    }
+                    // Don't echo the response back - instead tell the follow-up model to answer directly
+                    // This prevents the model from thinking the answer was already delivered
+                    tool_answers.insert(
+                        tool_call_id,
+                        "No external data needed for this question. Answer the user's question directly and helpfully from your own knowledge.".to_string()
+                    );
                 } else {
                     // Unknown tool - this is a system error, not a user error
                     tracing::error!("Unknown tool called: {}", name);

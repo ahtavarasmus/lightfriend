@@ -10,6 +10,7 @@ use crate::schema::google_calendar;
 use crate::schema::imap_connection;
 use crate::schema::keywords;
 use crate::schema::message_history;
+use crate::schema::message_status_log;
 use crate::schema::priority_senders;
 use crate::schema::processed_emails;
 use crate::schema::subaccounts;
@@ -784,4 +785,41 @@ pub struct RefundInfo {
 pub struct NewRefundInfo {
     pub user_id: i32,
     pub has_refunded: i32,
+}
+
+// Message Status Log models for tracking SMS delivery metadata (no message content)
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = message_status_log)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct MessageStatusLog {
+    pub id: Option<i32>,
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = message_status_log)]
+pub struct NewMessageStatusLog {
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
 }

@@ -1,6 +1,7 @@
 // Module declarations - moved from main.rs for library access
 pub mod handlers {
     pub mod admin_handlers;
+    pub mod admin_stats_handlers;
     pub mod auth_dtos;
     pub mod auth_handlers;
     pub mod auth_middleware;

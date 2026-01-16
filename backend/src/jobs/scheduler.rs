@@ -840,16 +840,29 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let task_cleanup_job = Job::new_async("0 0 3 * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            debug!("Running daily task cleanup...");
-            let cutoff = std::time::SystemTime::now()
+            debug!("Running daily cleanup...");
+
+            // Clean up old tasks (7 days)
+            let task_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32
                 - (7 * 24 * 60 * 60); // 7 days ago
 
-            match state.user_repository.delete_old_tasks(cutoff) {
+            match state.user_repository.delete_old_tasks(task_cutoff) {
                 Ok(count) => debug!("Cleaned up {} old tasks", count),
                 Err(e) => error!("Failed to cleanup old tasks: {}", e),
+            }
+
+            // Clean up old message status logs (30 days)
+            let message_log_cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32 - (30 * 24 * 60 * 60); // 30 days ago
+
+            match state.user_repository.delete_old_message_status_logs(message_log_cutoff) {
+                Ok(count) => debug!("Cleaned up {} old message status logs", count),
+                Err(e) => error!("Failed to cleanup old message status logs: {}", e),
             }
         })
     })

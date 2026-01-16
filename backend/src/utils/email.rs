@@ -329,3 +329,105 @@ pub async fn send_broadcast_email(
 pub fn is_resend_configured() -> bool {
     get_resend_config().is_some()
 }
+
+/// Send an admin notification email for SMS delivery failures
+///
+/// Uses Resend API for reliable email delivery.
+/// If Resend is not configured, logs a warning and returns Ok (graceful fallback).
+///
+/// # Arguments
+/// * `user_id` - The user whose message failed
+/// * `to_number` - Destination phone number (will be partially masked)
+/// * `from_number` - Source phone number
+/// * `error_code` - Twilio error code
+/// * `error_message` - Twilio error message
+/// * `country` - Destination country code
+pub async fn send_sms_failure_admin_email(
+    user_id: i32,
+    to_number: &str,
+    from_number: &str,
+    error_code: Option<&str>,
+    error_message: Option<&str>,
+    country: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let (resend, from_email, _reply_to) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            tracing::warn!("SMS failure admin email NOT sent (RESEND_API_KEY not configured)");
+            return Ok(());
+        }
+    };
+
+    // Get admin email from env, default to rasmus@lightfriend.ai
+    let admin_email = std::env::var("ADMIN_EMAIL")
+        .unwrap_or_else(|_| "rasmus@lightfriend.ai".to_string());
+
+    // Mask the phone number for privacy (show only last 4 digits)
+    let masked_number = if to_number.len() > 4 {
+        format!("{}****{}", &to_number[..3], &to_number[to_number.len()-4..])
+    } else {
+        "****".to_string()
+    };
+
+    let error_code_str = error_code.unwrap_or("N/A");
+    let error_message_str = error_message.unwrap_or("No error message provided");
+
+    let content = format!(
+        r#"<p>An SMS delivery failure occurred:</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 10px; font-weight: bold;">User ID</td>
+                <td style="padding: 10px;">{user_id}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 10px; font-weight: bold;">To Number (masked)</td>
+                <td style="padding: 10px;">{masked_number}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 10px; font-weight: bold;">From Number</td>
+                <td style="padding: 10px;">{from_number}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 10px; font-weight: bold;">Country</td>
+                <td style="padding: 10px;">{country}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 10px; font-weight: bold;">Error Code</td>
+                <td style="padding: 10px; color: #dc3545;">{error_code}</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; font-weight: bold;">Error Message</td>
+                <td style="padding: 10px;">{error_message}</td>
+            </tr>
+        </table>
+
+        <p style="font-size: 14px; color: #666;">
+            <a href="https://www.twilio.com/docs/api/errors/{error_code}" style="color: {blue};">View Twilio Error Documentation</a>
+        </p>"#,
+        user_id = user_id,
+        masked_number = masked_number,
+        from_number = from_number,
+        country = country,
+        error_code = error_code_str,
+        error_message = error_message_str,
+        blue = PRIMARY_BLUE
+    );
+
+    let email_body = wrap_email_body(
+        &format!("SMS Delivery Failed - User {} to {}", user_id, country),
+        &content,
+        "Lightfriend System"
+    );
+
+    let from_with_name = format!("Lightfriend Alerts <{}>", from_email);
+    let subject = format!("SMS Delivery Failed - User {} to {}", user_id, country);
+    let email = CreateEmailBaseOptions::new(from_with_name, [admin_email.as_str()], &subject)
+        .with_html(&email_body);
+
+    resend.emails.send(email).await?;
+
+    tracing::info!("SMS failure admin email sent for user {} to {}", user_id, country);
+
+    Ok(())
+}

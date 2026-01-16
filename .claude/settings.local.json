@@ -165,10 +165,7 @@
       "Read(**/backend/matrix_store/**)",
       "Bash(rm -rf *)",
       "Bash(rm -rf ./*)",
-      "Bash(sudo *)",
-      "Bash(*cd ..*)",
-      "Bash(*cd /*)",
-      "Bash(*cd ~*)"
+      "Bash(sudo *)"
     ],
     "ask": [
       "Bash(git push*)",

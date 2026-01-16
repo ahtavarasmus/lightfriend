@@ -17,8 +17,8 @@ use crate::{
         NewPrioritySender, NewTask, NewUber, NewUsageLog, PrioritySender, Task, User,
     },
     schema::{
-        contact_profile_exceptions, contact_profiles, keywords, priority_senders, tasks,
-        usage_logs, users,
+        contact_profile_exceptions, contact_profiles, keywords, message_status_log,
+        priority_senders, tasks, usage_logs, users,
     },
     DbPool,
 };
@@ -751,6 +751,16 @@ impl UserRepository {
                 .filter(tasks::completed_at.lt(before_timestamp)),
         )
         .execute(&mut conn)
+    }
+
+    /// Delete old message status logs (for database cleanup)
+    /// Keeps logs for diagnostics but removes old entries to prevent bloat
+    pub fn delete_old_message_status_logs(&self, before_timestamp: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(
+            message_status_log::table
+                .filter(message_status_log::created_at.lt(before_timestamp))
+        ).execute(&mut conn)
     }
 
     // Priority Senders methods

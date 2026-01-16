@@ -344,12 +344,23 @@ async fn main() {
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
     });
-    let twilio_routes = Router::new()
+    // SMS server route - validates signature using user lookup
+    let twilio_sms_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             api::twilio_utils::validate_twilio_signature,
         ));
+    // Status callback route - validates signature using main Twilio account
+    let twilio_status_routes = Router::new()
+        .route(
+            "/api/twilio/status-callback",
+            post(twilio_handlers::twilio_status_callback),
+        )
+        .layer(middleware::from_fn(
+            api::twilio_utils::validate_twilio_status_callback_signature,
+        ));
+    let twilio_routes = twilio_sms_routes.merge(twilio_status_routes);
     let textbee_routes = Router::new().route(
         "/api/sms/textbee-server",
         post(twilio_sms::handle_textbee_sms),
@@ -566,6 +577,22 @@ async fn main() {
         .route(
             "/api/admin/set-twilio-creds",
             post(admin_handlers::set_user_twilio_credentials),
+        )
+        .route(
+            "/api/admin/users/{user_id}/message-stats",
+            get(admin_handlers::get_user_message_stats),
+        )
+        .route(
+            "/api/admin/global-message-stats",
+            get(admin_handlers::get_global_message_stats),
+        )
+        .route(
+            "/api/admin/stats/costs",
+            get(handlers::admin_stats_handlers::get_cost_stats),
+        )
+        .route(
+            "/api/admin/stats/usage",
+            get(handlers::admin_stats_handlers::get_usage_stats),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
