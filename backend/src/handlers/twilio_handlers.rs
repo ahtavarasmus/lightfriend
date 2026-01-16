@@ -8,11 +8,6 @@ use axum::{
 };
 use crate::AppState;
 use serde_json::{json, Value};
-use diesel::prelude::*;
-use crate::schema::message_status_log;
-use crate::utils::email::send_sms_failure_admin_email;
-use crate::utils::country::get_country_code_from_phone;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize, Debug)]
 pub struct AvailablePhoneNumbersResponse {
@@ -591,116 +586,6 @@ pub struct TwilioStatusCallback {
     pub RawDlrDoneDate: Option<String>,
 }
 
-/// Response from Twilio Messages API when fetching message details
-#[derive(Deserialize, Debug)]
-#[allow(non_snake_case)]
-struct TwilioMessageResponse {
-    #[serde(default)]
-    pub price: Option<String>,
-    #[serde(default)]
-    pub price_unit: Option<String>,
-    #[serde(default)]
-    pub status: Option<String>,
-}
-
-/// Fetch message details from Twilio API to get pricing info
-async fn fetch_message_price(
-    message_sid: &str,
-    account_sid: &str,
-    auth_token: &str,
-) -> Option<(f32, String)> {
-    let client = Client::new();
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}.json",
-        account_sid, message_sid
-    );
-
-    match client
-        .get(&url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success() {
-                match response.json::<TwilioMessageResponse>().await {
-                    Ok(msg) => {
-                        tracing::info!(
-                            "Twilio message {} response: status={:?}, price={:?}, price_unit={:?}",
-                            message_sid, msg.status, msg.price, msg.price_unit
-                        );
-                        if let (Some(price_str), Some(price_unit)) = (msg.price, msg.price_unit) {
-                            if let Ok(price) = price_str.parse::<f32>() {
-                                tracing::info!(
-                                    "Fetched price for message {}: {} {}",
-                                    message_sid, price, price_unit
-                                );
-                                return Some((price, price_unit));
-                            }
-                        }
-                        tracing::warn!("Message {} has no price info yet (status: {:?})", message_sid, msg.status);
-                        None
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to parse Twilio message response: {}", e);
-                        None
-                    }
-                }
-            } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-                tracing::warn!("Message {} not found in Twilio (already deleted?)", message_sid);
-                None
-            } else {
-                tracing::error!(
-                    "Failed to fetch message {}: status {}",
-                    message_sid, response.status()
-                );
-                None
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to fetch message {}: {}", message_sid, e);
-            None
-        }
-    }
-}
-
-/// Delete a message from Twilio (called after message reaches final status)
-async fn delete_message_from_twilio(
-    message_sid: &str,
-    account_sid: &str,
-    auth_token: &str,
-) -> Result<(), String> {
-    let client = Client::new();
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}.json",
-        account_sid, message_sid
-    );
-
-    match client
-        .delete(&url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success() {
-                tracing::info!("Deleted message {} from Twilio", message_sid);
-                Ok(())
-            } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-                // Message already deleted - that's fine
-                tracing::info!("Message {} already deleted from Twilio", message_sid);
-                Ok(())
-            } else {
-                Err(format!(
-                    "Failed to delete message {}: status {}",
-                    message_sid, response.status()
-                ))
-            }
-        }
-        Err(e) => Err(format!("Failed to delete message {}: {}", message_sid, e)),
-    }
-}
-
 /// Handle Twilio SMS status callback webhooks
 ///
 /// This endpoint receives delivery status updates from Twilio for outbound messages.
@@ -713,6 +598,12 @@ pub async fn twilio_status_callback(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> StatusCode {
+    use crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository;
+    use crate::repositories::real_twilio_client::RealTwilioClient;
+    use crate::services::twilio_status_service::{
+        StatusCallbackInput, TwilioStatusService, TwilioStatusServiceConfig,
+    };
+
     tracing::info!("Twilio status callback raw body: {}", body);
 
     // Parse form data manually
@@ -731,175 +622,71 @@ pub async fn twilio_status_callback(
         payload.ErrorCode
     );
 
-    // Update message status in database
-    let conn = &mut match state.db_pool.get() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to get DB connection for status callback: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR;
-        }
-    };
-
-    // Try to update the existing record
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
     // Parse price from string to f32 (Twilio sends as string like "-0.0075")
     let price_value: Option<f32> = payload.Price.as_ref().and_then(|p| p.parse().ok());
 
-    let update_result = diesel::update(
-        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.MessageSid))
-    )
-    .set((
-        message_status_log::status.eq(&payload.MessageStatus),
-        message_status_log::error_code.eq(&payload.ErrorCode),
-        message_status_log::error_message.eq(&payload.ErrorMessage),
-        message_status_log::price.eq(price_value),
-        message_status_log::price_unit.eq(&payload.PriceUnit),
-        message_status_log::updated_at.eq(now),
-    ))
-    .execute(conn);
+    // Create the input for the service
+    let input = StatusCallbackInput {
+        message_sid: payload.MessageSid.clone(),
+        message_status: payload.MessageStatus.clone(),
+        error_code: payload.ErrorCode.clone(),
+        error_message: payload.ErrorMessage.clone(),
+        price: price_value,
+        price_unit: payload.PriceUnit.clone(),
+    };
 
-    match update_result {
-        Ok(0) => {
-            tracing::warn!(
-                "No message_status_log record found for SID {}, status update skipped",
-                payload.MessageSid
-            );
+    // Create real implementations
+    let repository = Arc::new(DieselTwilioStatusRepository::new(state.db_pool.clone()));
+
+    // Check if Twilio credentials are available
+    let twilio_client = RealTwilioClient::from_env();
+
+    if let Some(client) = twilio_client {
+        let client = Arc::new(client);
+        let service = TwilioStatusService::new(repository, client);
+
+        if let Err(e) = service.process_status_callback(input).await {
+            tracing::error!("Failed to process status callback: {}", e);
+            // Still return OK to Twilio to prevent retries
         }
-        Ok(_) => {
-            tracing::info!(
-                "Updated message_status_log for SID {} to status {}",
-                payload.MessageSid,
-                payload.MessageStatus
-            );
-        }
-        Err(e) => {
-            tracing::error!("Failed to update message_status_log: {}", e);
-        }
-    }
+    } else {
+        // Fallback: process without Twilio client (no price fetch or deletion)
+        tracing::warn!(
+            "Missing Twilio credentials, processing status callback without API calls"
+        );
 
-    // Send admin email if delivery failed
-    if payload.MessageStatus == "failed" || payload.MessageStatus == "undelivered" {
-        // Get user_id from the message_status_log
-        let user_info: Option<(i32, String, Option<String>)> = message_status_log::table
-            .filter(message_status_log::message_sid.eq(&payload.MessageSid))
-            .select((
-                message_status_log::user_id,
-                message_status_log::to_number,
-                message_status_log::from_number,
-            ))
-            .first(conn)
-            .ok();
+        // Create a no-op client for when credentials aren't available
+        let client = Arc::new(NoOpTwilioClient);
+        let config = TwilioStatusServiceConfig {
+            send_failure_notifications: true,
+            fetch_price_on_final: false,
+            delete_on_final: false,
+            price_fetch_delays: vec![],
+        };
+        let service = TwilioStatusService::with_config(repository, client, config);
 
-        if let Some((user_id, to_number, from_number)) = user_info {
-            let country = get_country_code_from_phone(&to_number).unwrap_or("Unknown".to_string());
-            let from = from_number.unwrap_or("Unknown".to_string());
-
-            // Spawn email sending to not block the webhook response
-            let error_code = payload.ErrorCode.clone();
-            let error_message = payload.ErrorMessage.clone();
-            tokio::spawn(async move {
-                if let Err(e) = send_sms_failure_admin_email(
-                    user_id,
-                    &to_number,
-                    &from,
-                    error_code.as_deref(),
-                    error_message.as_deref(),
-                    &country,
-                ).await {
-                    tracing::error!("Failed to send SMS failure admin email: {}", e);
-                }
-            });
-        }
-    }
-
-    // On final status, fetch price from Twilio API and delete the message
-    let is_final_status = matches!(
-        payload.MessageStatus.as_str(),
-        "delivered" | "failed" | "undelivered"
-    );
-
-    if is_final_status {
-        // Get Twilio credentials from env
-        let account_sid = env::var("TWILIO_ACCOUNT_SID").ok();
-        let auth_token = env::var("TWILIO_AUTH_TOKEN").ok();
-
-        if let (Some(account_sid), Some(auth_token)) = (account_sid, auth_token) {
-            let message_sid = payload.MessageSid.clone();
-            let db_pool = state.db_pool.clone();
-
-            // Spawn task to fetch price with retry, then delete message
-            tokio::spawn(async move {
-                // Retry fetching price with backoff: 3s, 8s, 15s (total ~15s max)
-                let delays_secs = [3u64, 5, 7];
-                let mut price_result: Option<(f32, String)> = None;
-
-                for (attempt, delay) in delays_secs.iter().enumerate() {
-                    tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
-
-                    if let Some(result) = fetch_message_price(
-                        &message_sid,
-                        &account_sid,
-                        &auth_token,
-                    ).await {
-                        price_result = Some(result);
-                        break;
-                    }
-
-                    if attempt < delays_secs.len() - 1 {
-                        tracing::info!(
-                            "Price fetch attempt {} for {} returned no price, retrying...",
-                            attempt + 1, message_sid
-                        );
-                    } else {
-                        tracing::warn!(
-                            "Price fetch failed after {} attempts for {}, giving up",
-                            delays_secs.len(), message_sid
-                        );
-                    }
-                }
-
-                // Update price in DB if we got it
-                if let Some((price, price_unit)) = price_result {
-                    if let Ok(mut conn) = db_pool.get() {
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs() as i32;
-
-                        if let Err(e) = diesel::update(
-                            message_status_log::table
-                                .filter(message_status_log::message_sid.eq(&message_sid))
-                        )
-                        .set((
-                            message_status_log::price.eq(price),
-                            message_status_log::price_unit.eq(&price_unit),
-                            message_status_log::updated_at.eq(now),
-                        ))
-                        .execute(&mut conn) {
-                            tracing::error!("Failed to update price for message {}: {}", message_sid, e);
-                        } else {
-                            tracing::info!("Updated price for message {}: {} {}", message_sid, price, price_unit);
-                        }
-                    }
-                }
-
-                // Delete message from Twilio
-                if let Err(e) = delete_message_from_twilio(
-                    &message_sid,
-                    &account_sid,
-                    &auth_token,
-                ).await {
-                    tracing::error!("{}", e);
-                }
-            });
-        } else {
-            tracing::warn!("Missing Twilio credentials, skipping price fetch and deletion for {}", payload.MessageSid);
+        if let Err(e) = service.process_status_callback(input).await {
+            tracing::error!("Failed to process status callback: {}", e);
         }
     }
 
     // Always return 200 OK to Twilio
     StatusCode::OK
+}
+
+/// No-op Twilio client for when credentials aren't available
+struct NoOpTwilioClient;
+
+#[async_trait::async_trait]
+impl crate::repositories::twilio_client::TwilioClient for NoOpTwilioClient {
+    async fn fetch_message_price(
+        &self,
+        _message_sid: &str,
+    ) -> Result<Option<crate::repositories::twilio_client::MessagePrice>, crate::repositories::twilio_client::TwilioClientError> {
+        Ok(None)
+    }
+
+    async fn delete_message(&self, _message_sid: &str) -> Result<(), crate::repositories::twilio_client::TwilioClientError> {
+        Ok(())
+    }
 }

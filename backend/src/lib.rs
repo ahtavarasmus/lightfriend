@@ -94,12 +94,21 @@ pub mod repositories {
     pub mod webauthn_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
+    pub mod twilio_status_repository;
+    pub mod twilio_status_repository_impl;
+    pub mod twilio_client;
+    pub mod real_twilio_client;
     #[cfg(test)]
     pub mod mock_signup_repository;
+    #[cfg(test)]
+    pub mod mock_twilio_status_repository;
+    #[cfg(test)]
+    pub mod mock_twilio_client;
 }
 pub mod services {
     pub mod country_service;
     pub mod signup_service;
+    pub mod twilio_status_service;
 }
 pub mod schema;
 pub mod jobs {
