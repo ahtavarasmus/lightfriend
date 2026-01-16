@@ -64,10 +64,9 @@ impl TwilioClient for RealTwilioClient {
             .map_err(|e| TwilioClientError::RequestFailed(e.to_string()))?;
 
         if response.status().is_success() {
-            let msg: TwilioMessageResponse = response
-                .json()
-                .await
-                .map_err(|e| TwilioClientError::ApiError(format!("Failed to parse response: {}", e)))?;
+            let msg: TwilioMessageResponse = response.json().await.map_err(|e| {
+                TwilioClientError::ApiError(format!("Failed to parse response: {}", e))
+            })?;
 
             tracing::info!(
                 "Twilio message {} response: status={:?}, price={:?}, price_unit={:?}",

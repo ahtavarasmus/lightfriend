@@ -107,10 +107,12 @@ impl TwilioStatusRepository for DieselTwilioStatusRepository {
             .optional()
             .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
 
-        Ok(result.map(|(user_id, to_number, from_number)| MessageUserInfo {
-            user_id,
-            to_number,
-            from_number,
-        }))
+        Ok(
+            result.map(|(user_id, to_number, from_number)| MessageUserInfo {
+                user_id,
+                to_number,
+                from_number,
+            }),
+        )
     }
 }

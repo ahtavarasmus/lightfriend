@@ -218,7 +218,9 @@ mod tests {
             price_unit: None,
         };
 
-        let result = repo.update_message_status("SM_NONEXISTENT", &update).unwrap();
+        let result = repo
+            .update_message_status("SM_NONEXISTENT", &update)
+            .unwrap();
         assert_eq!(result, 0);
     }
 

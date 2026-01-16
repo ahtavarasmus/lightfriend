@@ -94,7 +94,11 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
     }
 
     /// Create a new service with custom configuration.
-    pub fn with_config(repository: Arc<R>, client: Arc<C>, config: TwilioStatusServiceConfig) -> Self {
+    pub fn with_config(
+        repository: Arc<R>,
+        client: Arc<C>,
+        config: TwilioStatusServiceConfig,
+    ) -> Self {
         Self {
             repository,
             client,
@@ -129,7 +133,9 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
             price_unit: input.price_unit.clone(),
         };
 
-        let rows_updated = self.repository.update_message_status(&input.message_sid, &update)?;
+        let rows_updated = self
+            .repository
+            .update_message_status(&input.message_sid, &update)?;
 
         if rows_updated == 0 {
             tracing::warn!(
@@ -145,8 +151,7 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
         }
 
         // Send admin notification on failure
-        let notification_triggered =
-            self.handle_failure_notification(&input).await;
+        let notification_triggered = self.handle_failure_notification(&input).await;
 
         // Check if this is a final status
         let is_final_status = matches!(
@@ -197,8 +202,11 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
             }
         };
 
-        let country = get_country_code_from_phone(&user_info.to_number).unwrap_or_else(|| "Unknown".to_string());
-        let from = user_info.from_number.unwrap_or_else(|| "Unknown".to_string());
+        let country = get_country_code_from_phone(&user_info.to_number)
+            .unwrap_or_else(|| "Unknown".to_string());
+        let from = user_info
+            .from_number
+            .unwrap_or_else(|| "Unknown".to_string());
 
         // Clone values for the spawned task
         let user_id = user_info.user_id;
@@ -262,11 +270,7 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
                             }
                         }
                         Err(e) => {
-                            tracing::error!(
-                                "Price fetch error for {}: {}",
-                                message_sid,
-                                e
-                            );
+                            tracing::error!("Price fetch error for {}: {}", message_sid, e);
                             break;
                         }
                     }
