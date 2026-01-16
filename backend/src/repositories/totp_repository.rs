@@ -1,13 +1,13 @@
-use diesel::prelude::*;
-use diesel::result::Error as DieselError;
+use crate::utils::encryption::{decrypt, encrypt};
 use crate::{
-    models::user_models::{TotpSecret, NewTotpSecret, TotpBackupCode, NewTotpBackupCode},
-    schema::{totp_secrets, totp_backup_codes},
+    models::user_models::{NewTotpBackupCode, NewTotpSecret, TotpBackupCode, TotpSecret},
+    schema::{totp_backup_codes, totp_secrets},
     DbPool,
 };
-use crate::utils::encryption::{encrypt, decrypt};
-use std::time::{SystemTime, UNIX_EPOCH};
+use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use rand::Rng;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct TotpRepository {
     pool: DbPool,
@@ -24,10 +24,12 @@ impl TotpRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the secret before storing
-        let encrypted_secret = encrypt(secret)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
-                format!("Encryption error: {}", e)
-            ))))?;
+        let encrypted_secret = encrypt(secret).map_err(|e| {
+            DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
+                "Encryption error: {}",
+                e
+            ))))
+        })?;
 
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -64,10 +66,12 @@ impl TotpRepository {
 
         match secret_opt {
             Some(secret) => {
-                let decrypted = decrypt(&secret.encrypted_secret)
-                    .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
-                        format!("Decryption error: {}", e)
-                    ))))?;
+                let decrypted = decrypt(&secret.encrypted_secret).map_err(|e| {
+                    DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
+                        "Decryption error: {}",
+                        e
+                    ))))
+                })?;
                 Ok(Some(decrypted))
             }
             None => Ok(None),
@@ -140,10 +144,12 @@ impl TotpRepository {
                 .collect();
 
             // Hash the code with bcrypt
-            let code_hash = bcrypt::hash(&code, bcrypt::DEFAULT_COST)
-                .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
-                    format!("Bcrypt error: {}", e)
-                ))))?;
+            let code_hash = bcrypt::hash(&code, bcrypt::DEFAULT_COST).map_err(|e| {
+                DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
+                    "Bcrypt error: {}",
+                    e
+                ))))
+            })?;
 
             let new_code = NewTotpBackupCode {
                 user_id,
@@ -177,9 +183,9 @@ impl TotpRepository {
         for backup_code in backup_codes {
             if bcrypt::verify(code, &backup_code.code_hash).unwrap_or(false) {
                 // Mark as used
-                diesel::update(totp_backup_codes::table.filter(
-                    totp_backup_codes::id.eq(backup_code.id)
-                ))
+                diesel::update(
+                    totp_backup_codes::table.filter(totp_backup_codes::id.eq(backup_code.id)),
+                )
                 .set(totp_backup_codes::used.eq(1))
                 .execute(&mut conn)?;
 

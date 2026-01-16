@@ -1,12 +1,10 @@
-use std::sync::Arc;
 use chrono::Timelike;
 use serde_json::Value;
-use tracing::{info, error};
+use std::sync::Arc;
+use tracing::{error, info};
 
 use crate::{
-    api::tesla::TeslaClient,
-    handlers::tesla_auth::get_valid_tesla_access_token,
-    AppState,
+    api::tesla::TeslaClient, handlers::tesla_auth::get_valid_tesla_access_token, AppState,
 };
 
 // Tool definition for switching between Tesla vehicles
@@ -33,10 +31,7 @@ pub fn get_tesla_switch_vehicle_tool() -> openai_api_rs::v1::chat_completion::To
 }
 
 // Handle Tesla vehicle switch tool call
-pub async fn handle_tesla_switch_vehicle(
-    state: &Arc<AppState>,
-    user_id: i32,
-) -> String {
+pub async fn handle_tesla_switch_vehicle(state: &Arc<AppState>, user_id: i32) -> String {
     info!("Switching Tesla vehicle for user {}", user_id);
 
     // Check if user has Tier 2 subscription
@@ -102,11 +97,15 @@ pub async fn handle_tesla_switch_vehicle(
 
     if vehicles.len() == 1 {
         let name = vehicles[0].display_name.as_deref().unwrap_or("your Tesla");
-        return format!("You only have one Tesla vehicle: {}. No other vehicles to switch to.", name);
+        return format!(
+            "You only have one Tesla vehicle: {}. No other vehicles to switch to.",
+            name
+        );
     }
 
     // Get currently selected vehicle VIN
-    let selected_vin = state.user_repository
+    let selected_vin = state
+        .user_repository
         .get_selected_vehicle_vin(user_id)
         .ok()
         .flatten();
@@ -136,17 +135,24 @@ pub async fn handle_tesla_switch_vehicle(
         return "Error: Failed to save vehicle selection".to_string();
     }
 
-    info!("Switched user {} to vehicle: {} (VIN: {})", user_id, next_name, next_vin);
+    info!(
+        "Switched user {} to vehicle: {} (VIN: {})",
+        user_id, next_name, next_vin
+    );
 
     // Build vehicle list string
-    let vehicle_list: Vec<String> = vehicles.iter().enumerate().map(|(i, v)| {
-        let name = v.display_name.as_deref().unwrap_or("Unknown");
-        if i == next_index {
-            format!("{} (selected)", name)
-        } else {
-            name.to_string()
-        }
-    }).collect();
+    let vehicle_list: Vec<String> = vehicles
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let name = v.display_name.as_deref().unwrap_or("Unknown");
+            if i == next_index {
+                format!("{} (selected)", name)
+            } else {
+                name.to_string()
+            }
+        })
+        .collect();
 
     format!(
         "Switched to {}. You have {} vehicles: {}.",
@@ -227,17 +233,17 @@ pub async fn handle_tesla_command(
         }
     };
 
-    let command = args_value["command"]
-        .as_str()
-        .unwrap_or("unknown");
+    let command = args_value["command"].as_str().unwrap_or("unknown");
 
     // Parse notify_when_ready - defaults to false (user must explicitly request notification)
     // skip_notification overrides notify_when_ready when caller wants silent mode (e.g., dashboard calls)
-    let notify_when_ready = !skip_notification && args_value["notify_when_ready"]
-        .as_bool()
-        .unwrap_or(false);
+    let notify_when_ready =
+        !skip_notification && args_value["notify_when_ready"].as_bool().unwrap_or(false);
 
-    info!("Executing Tesla command '{}' for user {} (notify_when_ready: {})", command, user_id, notify_when_ready);
+    info!(
+        "Executing Tesla command '{}' for user {} (notify_when_ready: {})",
+        command, user_id, notify_when_ready
+    );
 
     // Check if user has Tier 2 subscription
     let user = match state.user_core.find_by_id(user_id) {
@@ -303,11 +309,18 @@ pub async fn handle_tesla_command(
     // Log found vehicles
     info!("Found {} vehicle(s) for user {}", vehicles.len(), user_id);
     for (i, v) in vehicles.iter().enumerate() {
-        info!("Vehicle {}: {} (VIN: {}, State: {})", i + 1, v.display_name.as_deref().unwrap_or("Unknown"), v.vin, v.state);
+        info!(
+            "Vehicle {}: {} (VIN: {}, State: {})",
+            i + 1,
+            v.display_name.as_deref().unwrap_or("Unknown"),
+            v.vin,
+            v.state
+        );
     }
 
     // Try to use selected vehicle, fall back to first vehicle if none selected
-    let selected_vin = state.user_repository
+    let selected_vin = state
+        .user_repository
         .get_selected_vehicle_vin(user_id)
         .ok()
         .flatten();
@@ -319,7 +332,10 @@ pub async fn handle_tesla_command(
                 v
             }
             None => {
-                info!("Selected vehicle VIN {} not found, falling back to first vehicle", vin);
+                info!(
+                    "Selected vehicle VIN {} not found, falling back to first vehicle",
+                    vin
+                );
                 &vehicles[0]
             }
         }
@@ -329,23 +345,34 @@ pub async fn handle_tesla_command(
     };
 
     let vehicle_id = vehicle.id.to_string();
-    let vehicle_vin = &vehicle.vin;  // VIN is required for signed commands
+    let vehicle_vin = &vehicle.vin; // VIN is required for signed commands
     let vehicle_name = vehicle.display_name.as_deref().unwrap_or("your Tesla");
 
-    info!("Using vehicle: {} (ID: {}, VIN: {}, State: {})", vehicle_name, vehicle_id, vehicle_vin, vehicle.state);
+    info!(
+        "Using vehicle: {} (ID: {}, VIN: {}, State: {})",
+        vehicle_name, vehicle_id, vehicle_vin, vehicle.state
+    );
 
     // Handle asleep vehicles: wake up first, then execute command
     // We wait for the full operation to complete so user gets a single response
     // Using deduplicated wake to prevent parallel wake attempts
     if command != "charge_status" && vehicle.state != "online" {
-        info!("Vehicle is {}, waking up before executing command", vehicle.state);
+        info!(
+            "Vehicle is {}, waking up before executing command",
+            vehicle.state
+        );
 
-        let wake_result = tesla_client.wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles).await
+        let wake_result = tesla_client
+            .wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles)
+            .await
             .map_err(|e| e.to_string());
 
         match wake_result {
             Ok(true) => {
-                info!("Vehicle woke up successfully, executing command: {}", command);
+                info!(
+                    "Vehicle woke up successfully, executing command: {}",
+                    command
+                );
                 // Continue to execute command below
             }
             Ok(false) => {
@@ -354,18 +381,35 @@ pub async fn handle_tesla_command(
             }
             Err(error_msg) => {
                 error!("Failed to wake up vehicle: {}", error_msg);
-                return format!("Couldn't reach your {}. This may be a Tesla server or connectivity issue. {}", vehicle_name, error_msg);
+                return format!(
+                    "Couldn't reach your {}. This may be a Tesla server or connectivity issue. {}",
+                    vehicle_name, error_msg
+                );
             }
         }
     }
 
     // Execute the command (vehicle is now online, either already was or just woke up)
-    let result = execute_tesla_command(&tesla_client, &access_token, vehicle_vin, vehicle_name, command).await;
+    let result = execute_tesla_command(
+        &tesla_client,
+        &access_token,
+        vehicle_vin,
+        vehicle_name,
+        command,
+    )
+    .await;
 
     // Spawn climate monitoring only if user explicitly requested notification
     if notify_when_ready && (command == "defrost" || command == "climate_on") {
         info!("User requested climate ready notification, starting monitoring");
-        spawn_climate_monitoring(state, user_id, region, access_token, vehicle_vin.to_string(), vehicle_name.to_string());
+        spawn_climate_monitoring(
+            state,
+            user_id,
+            region,
+            access_token,
+            vehicle_vin.to_string(),
+            vehicle_name.to_string(),
+        );
     }
 
     result
@@ -563,7 +607,10 @@ fn spawn_climate_monitoring(
 ) {
     // Check if already monitoring
     if state.tesla_monitoring_tasks.contains_key(&user_id) {
-        info!("Climate monitoring already in progress for user {}", user_id);
+        info!(
+            "Climate monitoring already in progress for user {}",
+            user_id
+        );
         return;
     }
 
@@ -572,39 +619,63 @@ fn spawn_climate_monitoring(
         info!("Starting climate monitoring for user {}", user_id);
         let tesla_client = TeslaClient::new_with_proxy(&region);
 
-        let monitoring_result = tesla_client.monitor_climate_ready(&access_token, &vehicle_vin).await
+        let monitoring_result = tesla_client
+            .monitor_climate_ready(&access_token, &vehicle_vin)
+            .await
             .map_err(|e| e.to_string());
 
         match monitoring_result {
             Ok(Some(temp)) => {
                 // Check if user is present in the vehicle before sending notification
-                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
-                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                let is_user_present = match tesla_client
+                    .get_vehicle_data(&access_token, &vehicle_vin)
+                    .await
+                {
+                    Ok(data) => data
+                        .vehicle_state
+                        .and_then(|vs| vs.is_user_present)
+                        .unwrap_or(false),
                     Err(_) => false,
                 };
 
                 if is_user_present {
                     info!("User is present in vehicle, skipping climate ready notification for user {}", user_id);
                 } else {
-                    let msg = format!("Your {} is ready to drive! Cabin temp is {:.1}°C.", &vehicle_name, temp);
+                    let msg = format!(
+                        "Your {} is ready to drive! Cabin temp is {:.1}°C.",
+                        &vehicle_name, temp
+                    );
                     crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
                         "tesla_ready_to_drive".to_string(),
-                        Some(format!("Your {} is warmed up and ready to drive!", &vehicle_name)),
-                    ).await;
+                        Some(format!(
+                            "Your {} is warmed up and ready to drive!",
+                            &vehicle_name
+                        )),
+                    )
+                    .await;
                 }
             }
             Ok(None) => {
                 // Check if user is present in the vehicle before sending notification
-                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
-                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                let is_user_present = match tesla_client
+                    .get_vehicle_data(&access_token, &vehicle_vin)
+                    .await
+                {
+                    Ok(data) => data
+                        .vehicle_state
+                        .and_then(|vs| vs.is_user_present)
+                        .unwrap_or(false),
                     Err(_) => false,
                 };
 
                 if is_user_present {
-                    info!("User is present in vehicle, skipping timeout notification for user {}", user_id);
+                    info!(
+                        "User is present in vehicle, skipping timeout notification for user {}",
+                        user_id
+                    );
                 } else {
                     let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", &vehicle_name);
                     crate::proactive::utils::send_notification(
@@ -612,13 +683,20 @@ fn spawn_climate_monitoring(
                         user_id,
                         &msg,
                         "tesla_ready_timeout".to_string(),
-                        Some(format!("Your {} should be warmed up by now.", &vehicle_name)),
-                    ).await;
+                        Some(format!(
+                            "Your {} should be warmed up by now.",
+                            &vehicle_name
+                        )),
+                    )
+                    .await;
                 }
             }
             Err(error_msg) => {
                 let is_stopped = error_msg.contains("turned off");
-                error!("Climate monitoring error for user {}: {}", user_id, error_msg);
+                error!(
+                    "Climate monitoring error for user {}: {}",
+                    user_id, error_msg
+                );
                 if is_stopped {
                     crate::proactive::utils::send_notification(
                         &state_clone,
@@ -626,7 +704,8 @@ fn spawn_climate_monitoring(
                         "Tesla climate was turned off before reaching target temperature.",
                         "tesla_climate_stopped".to_string(),
                         Some(format!("Your {} climate was stopped early.", &vehicle_name)),
-                    ).await;
+                    )
+                    .await;
                 }
             }
         }

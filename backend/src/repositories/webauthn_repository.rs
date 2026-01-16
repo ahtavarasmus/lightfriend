@@ -1,11 +1,13 @@
-use diesel::prelude::*;
-use diesel::result::Error as DieselError;
+use crate::utils::encryption::{decrypt, encrypt};
 use crate::{
-    models::user_models::{WebauthnCredential, NewWebauthnCredential, WebauthnChallenge, NewWebauthnChallenge},
-    schema::{webauthn_credentials, webauthn_challenges},
+    models::user_models::{
+        NewWebauthnChallenge, NewWebauthnCredential, WebauthnChallenge, WebauthnCredential,
+    },
+    schema::{webauthn_challenges, webauthn_credentials},
     DbPool,
 };
-use crate::utils::encryption::{encrypt, decrypt};
+use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Parameters for creating a WebAuthn credential
@@ -33,10 +35,12 @@ impl WebauthnRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the public key before storing
-        let encrypted_public_key = encrypt(&params.public_key)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
-                format!("Encryption error: {}", e)
-            ))))?;
+        let encrypted_public_key = encrypt(&params.public_key).map_err(|e| {
+            DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
+                "Encryption error: {}",
+                e
+            ))))
+        })?;
 
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -63,7 +67,10 @@ impl WebauthnRepository {
     }
 
     /// Get all credentials for a user
-    pub fn get_credentials_by_user(&self, user_id: i32) -> Result<Vec<WebauthnCredential>, DieselError> {
+    pub fn get_credentials_by_user(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<WebauthnCredential>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         webauthn_credentials::table
@@ -74,11 +81,16 @@ impl WebauthnRepository {
     }
 
     /// Get decrypted public key for a credential
-    pub fn get_decrypted_public_key(&self, credential: &WebauthnCredential) -> Result<String, DieselError> {
-        decrypt(&credential.encrypted_public_key)
-            .map_err(|e| DieselError::QueryBuilderError(Box::new(std::io::Error::other(
-                format!("Decryption error: {}", e)
+    pub fn get_decrypted_public_key(
+        &self,
+        credential: &WebauthnCredential,
+    ) -> Result<String, DieselError> {
+        decrypt(&credential.encrypted_public_key).map_err(|e| {
+            DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
+                "Decryption error: {}",
+                e
             ))))
+        })
     }
 
     /// Update the signature counter for a credential
@@ -90,9 +102,10 @@ impl WebauthnRepository {
             .unwrap()
             .as_secs() as i32;
 
-        diesel::update(webauthn_credentials::table.filter(
-            webauthn_credentials::credential_id.eq(credential_id)
-        ))
+        diesel::update(
+            webauthn_credentials::table
+                .filter(webauthn_credentials::credential_id.eq(credential_id)),
+        )
         .set((
             webauthn_credentials::counter.eq(new_counter),
             webauthn_credentials::last_used_at.eq(current_time),
@@ -103,13 +116,17 @@ impl WebauthnRepository {
     }
 
     /// Delete a credential
-    pub fn delete_credential(&self, user_id: i32, credential_id: &str) -> Result<bool, DieselError> {
+    pub fn delete_credential(
+        &self,
+        user_id: i32,
+        credential_id: &str,
+    ) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let rows_deleted = diesel::delete(
             webauthn_credentials::table
                 .filter(webauthn_credentials::user_id.eq(user_id))
-                .filter(webauthn_credentials::credential_id.eq(credential_id))
+                .filter(webauthn_credentials::credential_id.eq(credential_id)),
         )
         .execute(&mut conn)?;
 
@@ -117,13 +134,18 @@ impl WebauthnRepository {
     }
 
     /// Rename a credential
-    pub fn rename_credential(&self, user_id: i32, credential_id: &str, new_name: &str) -> Result<bool, DieselError> {
+    pub fn rename_credential(
+        &self,
+        user_id: i32,
+        credential_id: &str,
+        new_name: &str,
+    ) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let rows_updated = diesel::update(
             webauthn_credentials::table
                 .filter(webauthn_credentials::user_id.eq(user_id))
-                .filter(webauthn_credentials::credential_id.eq(credential_id))
+                .filter(webauthn_credentials::credential_id.eq(credential_id)),
         )
         .set(webauthn_credentials::device_name.eq(new_name))
         .execute(&mut conn)?;
@@ -179,7 +201,7 @@ impl WebauthnRepository {
         diesel::delete(
             webauthn_challenges::table
                 .filter(webauthn_challenges::user_id.eq(user_id))
-                .filter(webauthn_challenges::challenge_type.eq(challenge_type))
+                .filter(webauthn_challenges::challenge_type.eq(challenge_type)),
         )
         .execute(&mut conn)?;
 
@@ -222,13 +244,17 @@ impl WebauthnRepository {
     }
 
     /// Delete all challenges for a user of a specific type
-    pub fn delete_challenges_by_type(&self, user_id: i32, challenge_type: &str) -> Result<(), DieselError> {
+    pub fn delete_challenges_by_type(
+        &self,
+        user_id: i32,
+        challenge_type: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(
             webauthn_challenges::table
                 .filter(webauthn_challenges::user_id.eq(user_id))
-                .filter(webauthn_challenges::challenge_type.eq(challenge_type))
+                .filter(webauthn_challenges::challenge_type.eq(challenge_type)),
         )
         .execute(&mut conn)?;
 

@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -38,7 +34,7 @@ pub async fn resolve_instagram_reel(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract reel ID from Instagram URL"}))
+                Json(json!({"error": "Could not extract reel ID from Instagram URL"})),
             ));
         }
     };
@@ -47,10 +43,7 @@ pub async fn resolve_instagram_reel(
     // The /p/ route works for both posts and reels
     let embed_url = format!("https://www.instagram.com/p/{}/embed/", reel_id);
 
-    Ok(Json(InstagramEmbedResponse {
-        reel_id,
-        embed_url,
-    }))
+    Ok(Json(InstagramEmbedResponse { reel_id, embed_url }))
 }
 
 /// Extracts reel/post ID from Instagram URL

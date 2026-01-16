@@ -1,11 +1,12 @@
-use axum::{
-    extract::{State, Json},
-};
-use serde::Deserialize;
-use crate::{AppState, utils::bridge::{fetch_bridge_messages, BridgeMessage, BridgeRoom}};
-use serde::Serialize;
-use chrono::Utc;
 use crate::handlers::auth_middleware::AuthUser;
+use crate::{
+    utils::bridge::{fetch_bridge_messages, BridgeMessage, BridgeRoom},
+    AppState,
+};
+use axum::extract::{Json, State};
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 #[derive(Serialize)]
 pub struct MessengerMessagesResponse {
     messages: Vec<BridgeMessage>,
@@ -34,10 +35,16 @@ pub async fn send_messenger_message(
     Json(request): Json<SendMessengerMessageRequest>,
 ) -> Result<Json<SendMessengerMessageResponse>, String> {
     // Get bridge info first to verify Messenger is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Messenger bridge not found".to_string())?;
-    tracing::info!("Found Messenger bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
+    tracing::info!(
+        "Found Messenger bridge: status={}, room_id={:?}",
+        bridge.status,
+        bridge.room_id
+    );
     if bridge.status != "connected" {
         return Err("Messenger is not connected".to_string());
     }
@@ -48,9 +55,14 @@ pub async fn send_messenger_message(
         &request.chat_name,
         &request.message,
         request.image_url,
-    ).await {
+    )
+    .await
+    {
         Ok(message) => {
-            tracing::info!("Successfully sent Messenger message to {}", request.chat_name);
+            tracing::info!(
+                "Successfully sent Messenger message to {}",
+                request.chat_name
+            );
             Ok(Json(SendMessengerMessageResponse { message }))
         }
         Err(e) => {
@@ -64,36 +76,60 @@ pub async fn test_fetch_messenger_messages(
     auth_user: AuthUser,
 ) -> Result<Json<MessengerMessagesResponse>, String> {
     // Get bridge info first
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Messenger bridge not found".to_string())?;
-    tracing::info!("Found Messenger bridge: status={}, room_id={:?}", bridge.status, bridge.room_id);
+    tracing::info!(
+        "Found Messenger bridge: status={}, room_id={:?}",
+        bridge.status,
+        bridge.room_id
+    );
     if bridge.status != "connected" {
         return Err("Messenger is not connected".to_string());
     }
     // Get a wider time range - last 24 hours
     let now = Utc::now();
     let start_time = (now - chrono::Duration::hours(24)).timestamp();
-    let end_time = now.timestamp()+1000000;
+    let end_time = now.timestamp() + 1000000;
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
-    match crate::utils::bridge::fetch_bridge_messages("messenger", &state, auth_user.user_id, start_time, false).await {
+    match crate::utils::bridge::fetch_bridge_messages(
+        "messenger",
+        &state,
+        auth_user.user_id,
+        start_time,
+        false,
+    )
+    .await
+    {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
             Ok(Json(MessengerMessagesResponse { messages }))
         }
         Err(e) => {
             tracing::error!("Error fetching messages: {}", e);
-          
+
             // Try to fall back to the older fetch_messenger_messages method
-            match fetch_bridge_messages("messenger", &state, auth_user.user_id, start_time, false).await {
+            match fetch_bridge_messages("messenger", &state, auth_user.user_id, start_time, false)
+                .await
+            {
                 Ok(fallback_messages) => {
-                    tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
-                    Ok(Json(MessengerMessagesResponse { messages: fallback_messages }))
-                },
+                    tracing::info!(
+                        "Fallback successful, found {} messages",
+                        fallback_messages.len()
+                    );
+                    Ok(Json(MessengerMessagesResponse {
+                        messages: fallback_messages,
+                    }))
+                }
                 Err(fallback_err) => {
                     tracing::error!("Fallback also failed: {}", fallback_err);
                     // Return a proper error response with status code
-                    Err(format!("Failed to fetch messages: {}. Fallback also failed: {}", e, fallback_err))
+                    Err(format!(
+                        "Failed to fetch messages: {}. Fallback also failed: {}",
+                        e, fallback_err
+                    ))
                 }
             }
         }
@@ -106,7 +142,9 @@ pub async fn search_messenger_rooms_handler(
     Json(request): Json<SearchMessengerRoomsRequest>,
 ) -> Result<Json<SearchMessengerRoomsResponse>, String> {
     // Get bridge info first to verify Messenger is connected
-    let bridge = state.user_repository.get_bridge(auth_user.user_id, "messenger")
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "messenger")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Messenger bridge not found".to_string())?;
     if bridge.status != "connected" {
@@ -117,10 +155,15 @@ pub async fn search_messenger_rooms_handler(
         &state,
         auth_user.user_id,
         &request.search_term,
-    ).await {
+    )
+    .await
+    {
         Ok(rooms) => {
             if rooms.is_empty() {
-                tracing::error!("No rooms found matching search term: '{}'", request.search_term);
+                tracing::error!(
+                    "No rooms found matching search term: '{}'",
+                    request.search_term
+                );
             }
             Ok(Json(SearchMessengerRoomsResponse { rooms }))
         }

@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -39,25 +35,26 @@ pub async fn resolve_rumble_url(
 
     // Use Rumble's oEmbed API to get the proper embed URL
     match fetch_rumble_oembed(url).await {
-        Some((video_id, embed_url)) => {
-            Ok(Json(RumbleEmbedResponse {
-                video_id,
-                embed_url,
-            }))
-        }
-        None => {
-            Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not fetch Rumble video embed. Make sure the URL is valid."}))
-            ))
-        }
+        Some((video_id, embed_url)) => Ok(Json(RumbleEmbedResponse {
+            video_id,
+            embed_url,
+        })),
+        None => Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"error": "Could not fetch Rumble video embed. Make sure the URL is valid."}),
+            ),
+        )),
     }
 }
 
 /// Fetches oEmbed data from Rumble and extracts the embed URL
 async fn fetch_rumble_oembed(url: &str) -> Option<(String, String)> {
     let client = reqwest::Client::new();
-    let oembed_url = format!("https://rumble.com/api/Media/oembed.json?url={}", urlencoding::encode(url));
+    let oembed_url = format!(
+        "https://rumble.com/api/Media/oembed.json?url={}",
+        urlencoding::encode(url)
+    );
 
     tracing::info!("Fetching Rumble oEmbed: {}", oembed_url);
 

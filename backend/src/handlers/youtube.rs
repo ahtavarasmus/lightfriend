@@ -1,14 +1,14 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
-    extract::{Query, State, Path},
-    response::Json,
+    extract::{Path, Query, State},
     http::StatusCode,
+    response::Json,
 };
+use oauth2::TokenResponse;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
-use oauth2::TokenResponse;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -33,16 +33,13 @@ async fn refresh_youtube_token(
         .map_err(|e| format!("Failed to refresh token: {}", e))?;
 
     let new_access_token = token_result.access_token().secret().to_string();
-    let expires_in = token_result.expires_in()
-        .unwrap_or_default()
-        .as_secs() as i32;
+    let expires_in = token_result.expires_in().unwrap_or_default().as_secs() as i32;
 
     // Update the access token in the database
-    state.user_repository.update_youtube_access_token(
-        user_id,
-        &new_access_token,
-        expires_in,
-    ).map_err(|e| format!("Failed to store refreshed token: {}", e))?;
+    state
+        .user_repository
+        .update_youtube_access_token(user_id, &new_access_token, expires_in)
+        .map_err(|e| format!("Failed to store refreshed token: {}", e))?;
 
     tracing::info!("Successfully refreshed YouTube token for user {}", user_id);
     Ok(new_access_token)
@@ -77,7 +74,7 @@ pub struct SearchQuery {
     pub q: String,
     #[serde(rename = "type")]
     pub search_type: Option<String>, // "video", "channel", or "all"
-    pub channel_id: Option<String>,  // Filter videos by channel ID
+    pub channel_id: Option<String>, // Filter videos by channel ID
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,11 +134,7 @@ async fn fetch_subscription_feed_with_token(
     // First, get the user's subscriptions
     let subscriptions_response = client
         .get("https://www.googleapis.com/youtube/v3/subscriptions")
-        .query(&[
-            ("part", "snippet"),
-            ("mine", "true"),
-            ("maxResults", "20"),
-        ])
+        .query(&[("part", "snippet"), ("mine", "true"), ("maxResults", "20")])
         .header("Authorization", format!("Bearer {}", access_token))
         .send()
         .await
@@ -203,15 +196,24 @@ async fn fetch_subscription_feed_with_token(
                             all_videos.push(Video {
                                 id: video_id.to_string(),
                                 title: snippet["title"].as_str().unwrap_or_default().to_string(),
-                                channel: snippet["channelTitle"].as_str().unwrap_or_default().to_string(),
-                                channel_id: snippet["channelId"].as_str().unwrap_or_default().to_string(),
+                                channel: snippet["channelTitle"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                channel_id: snippet["channelId"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string(),
                                 thumbnail: snippet["thumbnails"]["medium"]["url"]
                                     .as_str()
                                     .or_else(|| snippet["thumbnails"]["default"]["url"].as_str())
                                     .unwrap_or_default()
                                     .to_string(),
                                 duration: "".to_string(), // Would need additional API call to get duration
-                                published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
+                                published_at: snippet["publishedAt"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string(),
                                 view_count: "".to_string(), // Would need additional API call
                             });
                         }
@@ -235,25 +237,29 @@ pub async fn get_subscription_feed(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<SubscriptionFeedResponse>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Fetching YouTube subscription feed for user {}", auth_user.user_id);
+    tracing::info!(
+        "Fetching YouTube subscription feed for user {}",
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -263,7 +269,10 @@ pub async fn get_subscription_feed(
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
             if status == 401 {
-                tracing::info!("YouTube token expired, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
@@ -271,10 +280,15 @@ pub async fn get_subscription_feed(
                         match fetch_subscription_feed_with_token(&client, &new_token).await {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
-                                tracing::error!("YouTube API error after token refresh: {}", retry_error);
+                                tracing::error!(
+                                    "YouTube API error after token refresh: {}",
+                                    retry_error
+                                );
                                 Err((
                                     StatusCode::FORBIDDEN,
-                                    Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
                                 ))
                             }
                         }
@@ -283,7 +297,9 @@ pub async fn get_subscription_feed(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
@@ -291,7 +307,7 @@ pub async fn get_subscription_feed(
                 tracing::error!("YouTube API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "YouTube API error"}))
+                    Json(json!({"error": "YouTube API error"})),
                 ))
             }
         }
@@ -354,15 +370,24 @@ async fn perform_youtube_search(
             videos.push(Video {
                 id: video_id.to_string(),
                 title: snippet["title"].as_str().unwrap_or_default().to_string(),
-                channel: snippet["channelTitle"].as_str().unwrap_or_default().to_string(),
-                channel_id: snippet["channelId"].as_str().unwrap_or_default().to_string(),
+                channel: snippet["channelTitle"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                channel_id: snippet["channelId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 thumbnail: snippet["thumbnails"]["medium"]["url"]
                     .as_str()
                     .or_else(|| snippet["thumbnails"]["default"]["url"].as_str())
                     .unwrap_or_default()
                     .to_string(),
                 duration: "".to_string(),
-                published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
+                published_at: snippet["publishedAt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 view_count: "".to_string(),
             });
         } else if kind == "youtube#channel" {
@@ -370,7 +395,10 @@ async fn perform_youtube_search(
             channels.push(Channel {
                 id: channel_id.to_string(),
                 title: snippet["title"].as_str().unwrap_or_default().to_string(),
-                description: snippet["description"].as_str().unwrap_or_default().to_string(),
+                description: snippet["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 thumbnail: snippet["thumbnails"]["medium"]["url"]
                     .as_str()
                     .or_else(|| snippet["thumbnails"]["default"]["url"].as_str())
@@ -384,7 +412,11 @@ async fn perform_youtube_search(
 
     Ok(SearchResponse {
         videos,
-        channels: if channels.is_empty() { None } else { Some(channels) },
+        channels: if channels.is_empty() {
+            None
+        } else {
+            Some(channels)
+        },
     })
 }
 
@@ -394,25 +426,30 @@ pub async fn search_youtube(
     auth_user: AuthUser,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Searching YouTube for '{}' for user {}", query.q, auth_user.user_id);
+    tracing::info!(
+        "Searching YouTube for '{}' for user {}",
+        query.q,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
     let search_type = query.search_type.as_deref().unwrap_or("video");
@@ -432,18 +469,30 @@ pub async fn search_youtube(
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
             if status == 401 {
-                tracing::info!("YouTube token expired during search, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired during search, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
                         // Retry with new token
-                        match perform_youtube_search(&client, &new_token, &query.q, type_param, channel_id).await {
+                        match perform_youtube_search(
+                            &client, &new_token, &query.q, type_param, channel_id,
+                        )
+                        .await
+                        {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
-                                tracing::error!("YouTube search API error after token refresh: {}", retry_error);
+                                tracing::error!(
+                                    "YouTube search API error after token refresh: {}",
+                                    retry_error
+                                );
                                 Err((
                                     StatusCode::FORBIDDEN,
-                                    Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
                                 ))
                             }
                         }
@@ -452,7 +501,9 @@ pub async fn search_youtube(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
@@ -460,7 +511,7 @@ pub async fn search_youtube(
                 tracing::error!("YouTube search API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "YouTube API error"}))
+                    Json(json!({"error": "YouTube API error"})),
                 ))
             }
         }
@@ -472,7 +523,11 @@ pub fn extract_video_id(input: &str) -> Option<String> {
     let input = input.trim();
 
     // If it's already just an ID (11 characters, alphanumeric with - and _)
-    if input.len() == 11 && input.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if input.len() == 11
+        && input
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Some(input.to_string());
     }
 
@@ -559,15 +614,24 @@ async fn fetch_video_details_with_token(
     let video = Video {
         id: video_id.to_string(),
         title: snippet["title"].as_str().unwrap_or_default().to_string(),
-        channel: snippet["channelTitle"].as_str().unwrap_or_default().to_string(),
-        channel_id: snippet["channelId"].as_str().unwrap_or_default().to_string(),
+        channel: snippet["channelTitle"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        channel_id: snippet["channelId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         thumbnail: snippet["thumbnails"]["high"]["url"]
             .as_str()
             .or_else(|| snippet["thumbnails"]["medium"]["url"].as_str())
             .unwrap_or_default()
             .to_string(),
         duration,
-        published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
+        published_at: snippet["publishedAt"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         view_count: view_count_formatted,
     };
 
@@ -578,7 +642,10 @@ async fn fetch_video_details_with_token(
         // modestbranding=1 - Reduce YouTube branding
         // iv_load_policy=3 - Hide video annotations
         // disablekb=0 - Keep keyboard controls enabled
-        embed_url: format!("https://www.youtube.com/embed/{}?rel=0&modestbranding=1&iv_load_policy=3", video_id),
+        embed_url: format!(
+            "https://www.youtube.com/embed/{}?rel=0&modestbranding=1&iv_load_policy=3",
+            video_id
+        ),
     })
 }
 
@@ -594,30 +661,35 @@ pub async fn get_video_details(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid YouTube video ID or URL"}))
+                Json(json!({"error": "Invalid YouTube video ID or URL"})),
             ));
         }
     };
 
-    tracing::info!("Getting video details for {} for user {}", video_id, auth_user.user_id);
+    tracing::info!(
+        "Getting video details for {} for user {}",
+        video_id,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -627,7 +699,10 @@ pub async fn get_video_details(
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
             if status == 401 {
-                tracing::info!("YouTube token expired for video details, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for video details, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
@@ -638,13 +713,18 @@ pub async fn get_video_details(
                                 if retry_status == 404 {
                                     Err((
                                         StatusCode::NOT_FOUND,
-                                        Json(json!({"error": "Video not found"}))
+                                        Json(json!({"error": "Video not found"})),
                                     ))
                                 } else {
-                                    tracing::error!("YouTube video API error after token refresh: {}", retry_error);
+                                    tracing::error!(
+                                        "YouTube video API error after token refresh: {}",
+                                        retry_error
+                                    );
                                     Err((
                                         StatusCode::FORBIDDEN,
-                                        Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                        Json(
+                                            json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                        ),
                                     ))
                                 }
                             }
@@ -654,20 +734,22 @@ pub async fn get_video_details(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
             } else if status == 404 {
                 Err((
                     StatusCode::NOT_FOUND,
-                    Json(json!({"error": "Video not found"}))
+                    Json(json!({"error": "Video not found"})),
                 ))
             } else {
                 tracing::error!("YouTube video API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "YouTube API error"}))
+                    Json(json!({"error": "YouTube API error"})),
                 ))
             }
         }
@@ -722,11 +804,7 @@ async fn get_user_subscription_ids(client: &reqwest::Client, access_token: &str)
     // Fetch up to 50 subscriptions (one page)
     let response = client
         .get("https://www.googleapis.com/youtube/v3/subscriptions")
-        .query(&[
-            ("part", "snippet"),
-            ("mine", "true"),
-            ("maxResults", "50"),
-        ])
+        .query(&[("part", "snippet"), ("mine", "true"), ("maxResults", "50")])
         .header("Authorization", format!("Bearer {}", access_token))
         .send()
         .await;
@@ -736,7 +814,9 @@ async fn get_user_subscription_ids(client: &reqwest::Client, access_token: &str)
             if let Ok(data) = resp.json::<serde_json::Value>().await {
                 if let Some(items) = data["items"].as_array() {
                     for item in items {
-                        if let Some(channel_id) = item["snippet"]["resourceId"]["channelId"].as_str() {
+                        if let Some(channel_id) =
+                            item["snippet"]["resourceId"]["channelId"].as_str()
+                        {
                             channel_ids.push(channel_id.to_string());
                         }
                     }
@@ -800,25 +880,30 @@ pub async fn subscribe_to_channel(
     auth_user: AuthUser,
     Json(request): Json<SubscribeRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Subscribing to channel {} for user {}", request.channel_id, auth_user.user_id);
+    tracing::info!(
+        "Subscribing to channel {} for user {}",
+        request.channel_id,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -828,7 +913,10 @@ pub async fn subscribe_to_channel(
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
             if status == 401 {
-                tracing::info!("YouTube token expired for subscribe, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for subscribe, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
@@ -836,10 +924,15 @@ pub async fn subscribe_to_channel(
                         match perform_subscribe(&client, &new_token, &request.channel_id).await {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
-                                tracing::error!("YouTube subscribe API error after token refresh: {}", retry_error);
+                                tracing::error!(
+                                    "YouTube subscribe API error after token refresh: {}",
+                                    retry_error
+                                );
                                 Err((
                                     StatusCode::FORBIDDEN,
-                                    Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
                                 ))
                             }
                         }
@@ -848,22 +941,29 @@ pub async fn subscribe_to_channel(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
             } else if status == 403 {
                 // Insufficient scope - need write access
-                tracing::error!("YouTube subscribe failed due to insufficient scope: {}", error_text);
+                tracing::error!(
+                    "YouTube subscribe failed due to insufficient scope: {}",
+                    error_text
+                );
                 Err((
                     StatusCode::FORBIDDEN,
-                    Json(json!({"error": "Insufficient permissions. Please grant subscribe permission first.", "insufficient_scope": true}))
+                    Json(
+                        json!({"error": "Insufficient permissions. Please grant subscribe permission first.", "insufficient_scope": true}),
+                    ),
                 ))
             } else {
                 tracing::error!("YouTube subscribe API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to subscribe to channel"}))
+                    Json(json!({"error": "Failed to subscribe to channel"})),
                 ))
             }
         }
@@ -943,25 +1043,30 @@ pub async fn unsubscribe_from_channel(
     auth_user: AuthUser,
     Path(channel_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Unsubscribing from channel {} for user {}", channel_id, auth_user.user_id);
+    tracing::info!(
+        "Unsubscribing from channel {} for user {}",
+        channel_id,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -971,7 +1076,10 @@ pub async fn unsubscribe_from_channel(
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
             if status == 401 {
-                tracing::info!("YouTube token expired for unsubscribe, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for unsubscribe, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
@@ -979,10 +1087,15 @@ pub async fn unsubscribe_from_channel(
                         match perform_unsubscribe(&client, &new_token, &channel_id).await {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
-                                tracing::error!("YouTube unsubscribe API error after token refresh: {}", retry_error);
+                                tracing::error!(
+                                    "YouTube unsubscribe API error after token refresh: {}",
+                                    retry_error
+                                );
                                 Err((
                                     StatusCode::FORBIDDEN,
-                                    Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
                                 ))
                             }
                         }
@@ -991,22 +1104,29 @@ pub async fn unsubscribe_from_channel(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
             } else if status == 403 {
                 // Insufficient scope - need write access
-                tracing::error!("YouTube unsubscribe failed due to insufficient scope: {}", error_text);
+                tracing::error!(
+                    "YouTube unsubscribe failed due to insufficient scope: {}",
+                    error_text
+                );
                 Err((
                     StatusCode::FORBIDDEN,
-                    Json(json!({"error": "Insufficient permissions. Please grant subscribe permission first.", "insufficient_scope": true}))
+                    Json(
+                        json!({"error": "Insufficient permissions. Please grant subscribe permission first.", "insufficient_scope": true}),
+                    ),
                 ))
             } else {
                 tracing::error!("YouTube unsubscribe API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to unsubscribe from channel"}))
+                    Json(json!({"error": "Failed to unsubscribe from channel"})),
                 ))
             }
         }
@@ -1051,12 +1171,27 @@ async fn fetch_comments_with_token(
             let snippet = &item["snippet"]["topLevelComment"]["snippet"];
             comments.push(Comment {
                 id: item["id"].as_str().unwrap_or_default().to_string(),
-                author: snippet["authorDisplayName"].as_str().unwrap_or_default().to_string(),
-                author_profile_image: snippet["authorProfileImageUrl"].as_str().unwrap_or_default().to_string(),
-                author_channel_id: snippet["authorChannelId"]["value"].as_str().unwrap_or_default().to_string(),
-                text: snippet["textDisplay"].as_str().unwrap_or_default().to_string(),
+                author: snippet["authorDisplayName"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                author_profile_image: snippet["authorProfileImageUrl"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                author_channel_id: snippet["authorChannelId"]["value"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                text: snippet["textDisplay"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 like_count: snippet["likeCount"].as_u64().unwrap_or(0),
-                published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
+                published_at: snippet["publishedAt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 reply_count: item["snippet"]["totalReplyCount"].as_u64().unwrap_or(0) as u32,
             });
         }
@@ -1078,25 +1213,30 @@ pub async fn get_video_comments(
     auth_user: AuthUser,
     Path(video_id): Path<String>,
 ) -> Result<Json<CommentsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Fetching comments for video {} for user {}", video_id, auth_user.user_id);
+    tracing::info!(
+        "Fetching comments for video {} for user {}",
+        video_id,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -1105,17 +1245,25 @@ pub async fn get_video_comments(
         Ok(response) => Ok(Json(response)),
         Err((status, error_text)) => {
             if status == 401 {
-                tracing::info!("YouTube token expired for comments, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for comments, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
                         match fetch_comments_with_token(&client, &new_token, &video_id).await {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
-                                tracing::error!("YouTube comments API error after token refresh: {}", retry_error);
+                                tracing::error!(
+                                    "YouTube comments API error after token refresh: {}",
+                                    retry_error
+                                );
                                 Err((
                                     StatusCode::FORBIDDEN,
-                                    Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
                                 ))
                             }
                         }
@@ -1124,7 +1272,9 @@ pub async fn get_video_comments(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
@@ -1139,7 +1289,7 @@ pub async fn get_video_comments(
                 tracing::error!("YouTube comments API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to fetch comments"}))
+                    Json(json!({"error": "Failed to fetch comments"})),
                 ))
             }
         }
@@ -1188,12 +1338,27 @@ async fn post_comment_with_token(
     let snippet = &data["snippet"]["topLevelComment"]["snippet"];
     Ok(Comment {
         id: data["id"].as_str().unwrap_or_default().to_string(),
-        author: snippet["authorDisplayName"].as_str().unwrap_or_default().to_string(),
-        author_profile_image: snippet["authorProfileImageUrl"].as_str().unwrap_or_default().to_string(),
-        author_channel_id: snippet["authorChannelId"]["value"].as_str().unwrap_or_default().to_string(),
-        text: snippet["textDisplay"].as_str().unwrap_or_default().to_string(),
+        author: snippet["authorDisplayName"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        author_profile_image: snippet["authorProfileImageUrl"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        author_channel_id: snippet["authorChannelId"]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        text: snippet["textDisplay"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         like_count: 0,
-        published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
+        published_at: snippet["publishedAt"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         reply_count: 0,
     })
 }
@@ -1205,32 +1370,37 @@ pub async fn post_video_comment(
     Path(video_id): Path<String>,
     Json(request): Json<CommentRequest>,
 ) -> Result<Json<Comment>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Posting comment on video {} for user {}", video_id, auth_user.user_id);
+    tracing::info!(
+        "Posting comment on video {} for user {}",
+        video_id,
+        auth_user.user_id
+    );
 
     if request.text.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Comment text cannot be empty"}))
+            Json(json!({"error": "Comment text cannot be empty"})),
         ));
     }
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -1239,23 +1409,35 @@ pub async fn post_video_comment(
         Ok(comment) => Ok(Json(comment)),
         Err((status, error_text)) => {
             if status == 401 {
-                tracing::info!("YouTube token expired for posting comment, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for posting comment, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
-                        match post_comment_with_token(&client, &new_token, &video_id, &request.text).await {
+                        match post_comment_with_token(&client, &new_token, &video_id, &request.text)
+                            .await
+                        {
                             Ok(comment) => Ok(Json(comment)),
                             Err((retry_status, retry_error)) => {
                                 if retry_status == 403 {
                                     Err((
                                         StatusCode::FORBIDDEN,
-                                        Json(json!({"error": "Insufficient permissions. Please grant comment permission first.", "insufficient_scope": true}))
+                                        Json(
+                                            json!({"error": "Insufficient permissions. Please grant comment permission first.", "insufficient_scope": true}),
+                                        ),
                                     ))
                                 } else {
-                                    tracing::error!("YouTube post comment API error after token refresh: {}", retry_error);
+                                    tracing::error!(
+                                        "YouTube post comment API error after token refresh: {}",
+                                        retry_error
+                                    );
                                     Err((
                                         StatusCode::FORBIDDEN,
-                                        Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                                        Json(
+                                            json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                        ),
                                     ))
                                 }
                             }
@@ -1265,45 +1447,59 @@ pub async fn post_video_comment(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
             } else if status == 403 {
                 tracing::error!("YouTube post comment 403 error: {}", error_text);
                 // Check if it's a scope issue or something else
-                if error_text.contains("insufficientPermissions") || error_text.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+                if error_text.contains("insufficientPermissions")
+                    || error_text.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")
+                {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Insufficient permissions. Please grant comment permission first.", "insufficient_scope": true}))
+                        Json(
+                            json!({"error": "Insufficient permissions. Please grant comment permission first.", "insufficient_scope": true}),
+                        ),
                     ))
-                } else if error_text.contains("ineligibleAccount") || error_text.contains("not connected to Google+") {
+                } else if error_text.contains("ineligibleAccount")
+                    || error_text.contains("not connected to Google+")
+                {
                     // YouTube account restriction - some accounts can't comment via API
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Your YouTube account cannot post comments via third-party apps. Please comment directly on YouTube."}))
+                        Json(
+                            json!({"error": "Your YouTube account cannot post comments via third-party apps. Please comment directly on YouTube."}),
+                        ),
                     ))
                 } else if error_text.contains("commentsDisabled") {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Comments are disabled on this video"}))
+                        Json(json!({"error": "Comments are disabled on this video"})),
                     ))
-                } else if error_text.contains("forbidden") || error_text.contains("processingFailure") {
+                } else if error_text.contains("forbidden")
+                    || error_text.contains("processingFailure")
+                {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Unable to post comment. The video may have restricted comments."}))
+                        Json(
+                            json!({"error": "Unable to post comment. The video may have restricted comments."}),
+                        ),
                     ))
                 } else {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Unable to post comment on this video"}))
+                        Json(json!({"error": "Unable to post comment on this video"})),
                     ))
                 }
             } else {
                 tracing::error!("YouTube post comment API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to post comment"}))
+                    Json(json!({"error": "Failed to post comment"})),
                 ))
             }
         }
@@ -1319,10 +1515,7 @@ async fn rate_video_with_token(
 ) -> Result<(), (u16, String)> {
     let response = client
         .post("https://www.googleapis.com/youtube/v3/videos/rate")
-        .query(&[
-            ("id", video_id),
-            ("rating", rating),
-        ])
+        .query(&[("id", video_id), ("rating", rating)])
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Length", "0")
         .send()
@@ -1350,29 +1543,35 @@ pub async fn rate_video(
     if !["like", "dislike", "none"].contains(&rating.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid rating. Must be 'like', 'dislike', or 'none'"}))
+            Json(json!({"error": "Invalid rating. Must be 'like', 'dislike', or 'none'"})),
         ));
     }
 
-    tracing::info!("Rating video {} as {} for user {}", video_id, rating, auth_user.user_id);
+    tracing::info!(
+        "Rating video {} as {} for user {}",
+        video_id,
+        rating,
+        auth_user.user_id
+    );
 
     // Get YouTube tokens
-    let (access_token, refresh_token) = match state.user_repository.get_youtube_tokens(auth_user.user_id) {
-        Ok(Some(tokens)) => tokens,
-        Ok(None) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "YouTube not connected", "youtube_auth_error": true}))
-            ));
-        },
-        Err(e) => {
-            tracing::error!("Failed to get YouTube tokens: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get YouTube tokens"}))
-            ));
-        }
-    };
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
 
     let client = reqwest::Client::new();
 
@@ -1381,7 +1580,10 @@ pub async fn rate_video(
         Ok(()) => Ok(Json(json!({"success": true, "rating": rating}))),
         Err((status, error_text)) => {
             if status == 401 {
-                tracing::info!("YouTube token expired for rating, attempting refresh for user {}", auth_user.user_id);
+                tracing::info!(
+                    "YouTube token expired for rating, attempting refresh for user {}",
+                    auth_user.user_id
+                );
 
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
@@ -1391,13 +1593,18 @@ pub async fn rate_video(
                                 if retry_status == 403 {
                                     Err((
                                         StatusCode::FORBIDDEN,
-                                        Json(json!({"error": "Insufficient permissions. Please grant extended access first.", "insufficient_scope": true}))
+                                        Json(
+                                            json!({"error": "Insufficient permissions. Please grant extended access first.", "insufficient_scope": true}),
+                                        ),
                                     ))
                                 } else {
-                                    tracing::error!("YouTube rate video API error after token refresh: {}", retry_error);
+                                    tracing::error!(
+                                        "YouTube rate video API error after token refresh: {}",
+                                        retry_error
+                                    );
                                     Err((
                                         StatusCode::INTERNAL_SERVER_ERROR,
-                                        Json(json!({"error": "Failed to rate video"}))
+                                        Json(json!({"error": "Failed to rate video"})),
                                     ))
                                 }
                             }
@@ -1407,28 +1614,34 @@ pub async fn rate_video(
                         tracing::error!("Failed to refresh YouTube token: {}", e);
                         Err((
                             StatusCode::FORBIDDEN,
-                            Json(json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}))
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
                         ))
                     }
                 }
             } else if status == 403 {
                 tracing::error!("YouTube rate video 403 error: {}", error_text);
-                if error_text.contains("insufficientPermissions") || error_text.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+                if error_text.contains("insufficientPermissions")
+                    || error_text.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")
+                {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Insufficient permissions. Please grant extended access first.", "insufficient_scope": true}))
+                        Json(
+                            json!({"error": "Insufficient permissions. Please grant extended access first.", "insufficient_scope": true}),
+                        ),
                     ))
                 } else {
                     Err((
                         StatusCode::FORBIDDEN,
-                        Json(json!({"error": "Unable to rate this video"}))
+                        Json(json!({"error": "Unable to rate this video"})),
                     ))
                 }
             } else {
                 tracing::error!("YouTube rate video API error {}: {}", status, error_text);
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to rate video"}))
+                    Json(json!({"error": "Failed to rate video"})),
                 ))
             }
         }

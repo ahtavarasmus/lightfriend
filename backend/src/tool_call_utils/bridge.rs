@@ -1,7 +1,7 @@
 use crate::AppState;
-use std::sync::Arc;
-use serde::Deserialize;
 use axum::Json;
+use serde::Deserialize;
+use std::sync::Arc;
 
 pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
@@ -67,7 +67,9 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         "limit".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Optional: Maximum number of messages to fetch (default: 20).".to_string()),
+            description: Some(
+                "Optional: Maximum number of messages to fetch (default: 20).".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -162,7 +164,7 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_chat_message"),
-            description: 
+            description:
                 Some(String::from(
                     "Sends a message to a specific chat on the specified platform. \
                     Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
@@ -178,9 +180,9 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
     }
 }
 
-use axum::http::{StatusCode, HeaderName};
-use crate::models::user_models::User;
 use crate::api::twilio_sms::TwilioResponse;
+use crate::models::user_models::User;
+use axum::http::{HeaderName, StatusCode};
 
 #[derive(Deserialize)]
 struct SendChatMessageArgs {
@@ -193,19 +195,37 @@ pub async fn handle_send_chat_message(
     user_id: i32,
     args: &str,
     user: &User,
-    image_url: Option<&str>
-) -> Result<(StatusCode, [(HeaderName, &'static str); 1], Json<TwilioResponse>), Box<dyn std::error::Error>> {
+    image_url: Option<&str>,
+) -> Result<
+    (
+        StatusCode,
+        [(HeaderName, &'static str); 1],
+        Json<TwilioResponse>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
-    let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
+    let capitalized_platform = args
+        .platform
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default()
+        + &args.platform[1..];
     let bridge = state.user_repository.get_bridge(user_id, &args.platform)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
+        let error_msg = format!(
+            "Failed to find contact. Please make sure you're connected to {} bridge.",
+            capitalized_platform
+        );
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             state,
             error_msg.as_str(),
             None,
             user,
-        ).await {
+        )
+        .await
+        {
             eprintln!("Failed to send error message: {}", e);
         }
         return Ok((
@@ -213,7 +233,7 @@ pub async fn handle_send_chat_message(
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             Json(TwilioResponse {
                 message: error_msg.to_string(),
-            })
+            }),
         ));
     }
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
@@ -221,26 +241,25 @@ pub async fn handle_send_chat_message(
         Ok(rooms) => rooms,
         Err(e) => {
             let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                &error_msg,
-                None,
-                user,
-            ).await {
+            if let Err(e) =
+                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
+                    .await
+            {
                 eprintln!("Failed to send error message: {}", e);
             }
             return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: error_msg,
-                })
+                Json(TwilioResponse { message: error_msg }),
             ));
         }
     };
 
     // First, try to resolve chat_name via contact profile nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
+    let profiles = state
+        .user_repository
+        .get_contact_profiles(user_id)
+        .unwrap_or_default();
     let profile_chat = profiles.iter().find_map(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let chat_name_lower = args.chat_name.to_lowercase();
@@ -249,7 +268,7 @@ pub async fn handle_send_chat_message(
                 "whatsapp" => p.whatsapp_chat.clone(),
                 "telegram" => p.telegram_chat.clone(),
                 "signal" => p.signal_chat.clone(),
-                _ => None
+                _ => None,
             }
         } else {
             None
@@ -262,21 +281,21 @@ pub async fn handle_send_chat_message(
     let best_match = match best_match {
         Some(room) => room,
         None => {
-            let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, args.chat_name.as_str());
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                &error_msg,
-                None,
-                user,
-            ).await {
+            let error_msg = format!(
+                "No {} contacts found matching '{}'.",
+                capitalized_platform,
+                args.chat_name.as_str()
+            );
+            if let Err(e) =
+                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
+                    .await
+            {
                 eprintln!("Failed to send error message: {}", e);
             }
             return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: error_msg,
-                })
+                Json(TwilioResponse { message: error_msg }),
             ));
         }
     };
@@ -296,15 +315,13 @@ pub async fn handle_send_chat_message(
         )
     };
     // Send the queued message
-    match crate::api::twilio_utils::send_conversation_message(
-        state,
-        &queued_msg,
-        None,
-        user,
-    ).await {
+    match crate::api::twilio_utils::send_conversation_message(state, &queued_msg, None, user).await
+    {
         Ok(_) => {
             // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
+            if let Err(e) =
+                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
+            {
                 tracing::error!("Failed to deduct user credits: {}", e);
             }
         }
@@ -315,7 +332,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                })
+                }),
             ));
         }
     }
@@ -345,14 +362,21 @@ pub async fn handle_send_chat_message(
                 &cloned_exact_name,
                 &cloned_message,
                 cloned_image_url,
-            ).await {
-                let error_msg = format!("Failed to send {} message: {}", cloned_capitalized_platform, e);
+            )
+            .await
+            {
+                let error_msg = format!(
+                    "Failed to send {} message: {}",
+                    cloned_capitalized_platform, e
+                );
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &cloned_state,
                     &error_msg,
                     None,
                     &cloned_user,
-                ).await {
+                )
+                .await
+                {
                     eprintln!("Failed to send error message: {}", e);
                 }
             }
@@ -371,7 +395,7 @@ pub async fn handle_send_chat_message(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(TwilioResponse {
             message: "Message queued".to_string(),
-        })
+        }),
     ))
 }
 
@@ -395,7 +419,10 @@ pub async fn handle_search_chat_contacts(
     };
 
     // First, try to resolve search_term via contact profile nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
+    let profiles = state
+        .user_repository
+        .get_contact_profiles(user_id)
+        .unwrap_or_default();
     let profile_chat = profiles.iter().find_map(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let search_lower = args.search_term.to_lowercase();
@@ -404,7 +431,7 @@ pub async fn handle_search_chat_contacts(
                 "whatsapp" => p.whatsapp_chat.clone(),
                 "telegram" => p.telegram_chat.clone(),
                 "signal" => p.signal_chat.clone(),
-                _ => None
+                _ => None,
             }
         } else {
             None
@@ -414,38 +441,50 @@ pub async fn handle_search_chat_contacts(
     // Use profile's chat name if found, otherwise fall back to user's input
     let search_term = profile_chat.unwrap_or_else(|| args.search_term.clone());
 
-    match crate::utils::bridge::search_bridge_rooms(
-        &args.platform,
-        state,
-        user_id,
-        &search_term,
-    ).await {
+    match crate::utils::bridge::search_bridge_rooms(&args.platform, state, user_id, &search_term)
+        .await
+    {
         Ok(rooms) => {
             if rooms.is_empty() {
-                let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-                format!("No {} contacts found matching '{}'.", capitalized_platform, args.search_term)
+                let capitalized_platform = args
+                    .platform
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().collect::<String>())
+                    .unwrap_or_default()
+                    + &args.platform[1..];
+                format!(
+                    "No {} contacts found matching '{}'.",
+                    capitalized_platform, args.search_term
+                )
             } else {
                 let mut response = String::new();
                 for (i, room) in rooms.iter().take(5).enumerate() {
                     if i == 0 {
-                        response.push_str(&format!("{}. {} (last active: {})",
+                        response.push_str(&format!(
+                            "{}. {} (last active: {})",
                             i + 1,
-                            room.display_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"),
+                            room.display_name
+                                .trim_end_matches(" (WA)")
+                                .trim_end_matches(" (Telegram)"),
                             room.last_activity_formatted
                         ));
                     } else {
-                        response.push_str(&format!("\n{}. {} (last active: {})",
+                        response.push_str(&format!(
+                            "\n{}. {} (last active: {})",
                             i + 1,
-                            room.display_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"),
+                            room.display_name
+                                .trim_end_matches(" (WA)")
+                                .trim_end_matches(" (Telegram)"),
                             room.last_activity_formatted
                         ));
                     }
                 }
-               
+
                 if rooms.len() > 5 {
                     response.push_str(&format!("\n\n(+ {} more contacts)", rooms.len() - 5));
                 }
-               
+
                 response
             }
         }
@@ -463,11 +502,7 @@ struct FetchChatMessagesArgs {
     limit: Option<u64>,
 }
 
-pub async fn handle_fetch_chat_messages(
-    state: &Arc<AppState>,
-    user_id: i32,
-    args: &str,
-) -> String {
+pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, args: &str) -> String {
     let args: FetchChatMessagesArgs = match serde_json::from_str(args) {
         Ok(args) => args,
         Err(e) => {
@@ -477,7 +512,10 @@ pub async fn handle_fetch_chat_messages(
     };
 
     // First, try to find a matching contact profile by nickname
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
+    let profiles = state
+        .user_repository
+        .get_contact_profiles(user_id)
+        .unwrap_or_default();
     let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let chat_name_lower = args.chat_name.to_lowercase();
@@ -487,14 +525,14 @@ pub async fn handle_fetch_chat_messages(
     // Determine platform and chat_name to use
     let (platform, chat_name) = if let Some(platform) = &args.platform {
         // Platform was specified - use existing behavior
-        let chat = matching_profile.and_then(|p| {
-            match platform.as_str() {
+        let chat = matching_profile
+            .and_then(|p| match platform.as_str() {
                 "whatsapp" => p.whatsapp_chat.clone(),
                 "telegram" => p.telegram_chat.clone(),
                 "signal" => p.signal_chat.clone(),
-                _ => None
-            }
-        }).unwrap_or_else(|| args.chat_name.clone());
+                _ => None,
+            })
+            .unwrap_or_else(|| args.chat_name.clone());
         (platform.clone(), chat)
     } else if let Some(profile) = matching_profile {
         // No platform specified - find the most recently active platform from profile
@@ -509,16 +547,23 @@ pub async fn handle_fetch_chat_messages(
             if let Some(chat) = chat_opt {
                 // Check if bridge is connected and get room activity
                 if let Ok(Some(_)) = state.user_repository.get_bridge(user_id, plat) {
-                    if let Ok(client) = crate::utils::matrix_auth::get_cached_client(user_id, state).await {
-                        if let Ok(rooms) = crate::utils::bridge::get_service_rooms(&client, plat).await {
+                    if let Ok(client) =
+                        crate::utils::matrix_auth::get_cached_client(user_id, state).await
+                    {
+                        if let Ok(rooms) =
+                            crate::utils::bridge::get_service_rooms(&client, plat).await
+                        {
                             // Find the room matching this chat
                             let chat_lower = chat.to_lowercase();
                             if let Some(room) = rooms.iter().find(|r| {
                                 let name_lower = r.display_name.to_lowercase();
                                 name_lower.contains(&chat_lower) || chat_lower.contains(&name_lower)
                             }) {
-                                if best_platform.is_none() || room.last_activity > best_platform.as_ref().unwrap().2 {
-                                    best_platform = Some((plat.to_string(), chat.clone(), room.last_activity));
+                                if best_platform.is_none()
+                                    || room.last_activity > best_platform.as_ref().unwrap().2
+                                {
+                                    best_platform =
+                                        Some((plat.to_string(), chat.clone(), room.last_activity));
                                 }
                             }
                         }
@@ -539,17 +584,25 @@ pub async fn handle_fetch_chat_messages(
     };
 
     match crate::utils::bridge::fetch_bridge_room_messages(
-        &platform,
-        state,
-        user_id,
-        &chat_name,
-        args.limit,
-    ).await {
+        &platform, state, user_id, &chat_name, args.limit,
+    )
+    .await
+    {
         Ok((messages, room_name)) => {
             if messages.is_empty() {
-                format!("No messages found in chat '{}'.", room_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"))
+                format!(
+                    "No messages found in chat '{}'.",
+                    room_name
+                        .trim_end_matches(" (WA)")
+                        .trim_end_matches(" (Telegram)")
+                )
             } else {
-                let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"));
+                let mut response = format!(
+                    "Messages from '{}':\n\n",
+                    room_name
+                        .trim_end_matches(" (WA)")
+                        .trim_end_matches(" (Telegram)")
+                );
                 for (i, msg) in messages.iter().take(10).enumerate() {
                     let content = if msg.content.chars().count() > 100 {
                         let truncated: String = msg.content.chars().take(97).collect();
@@ -557,28 +610,30 @@ pub async fn handle_fetch_chat_messages(
                     } else {
                         msg.content.clone()
                     };
-                    
+
                     if i == 0 {
-                        response.push_str(&format!("{}. {} at {}:\n{}", 
-                            i + 1, 
+                        response.push_str(&format!(
+                            "{}. {} at {}:\n{}",
+                            i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
                     } else {
-                        response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
-                            i + 1, 
+                        response.push_str(&format!(
+                            "\n\n{}. {} at {}:\n{}",
+                            i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
                     }
                 }
-                
+
                 if messages.len() > 10 {
                     response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 10));
                 }
-                
+
                 response
             }
         }
@@ -609,7 +664,13 @@ pub async fn handle_fetch_recent_messages(
             return "Failed to parse recent messages request.".to_string();
         }
     };
-    let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
+    let capitalized_platform = args
+        .platform
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default()
+        + &args.platform[1..];
     // Parse the RFC3339 timestamps into Unix timestamps
     let start_time = match DateTime::parse_from_rfc3339(&args.start) {
         Ok(dt) => dt.timestamp(),
@@ -624,10 +685,15 @@ pub async fn handle_fetch_recent_messages(
         user_id,
         start_time,
         false,
-    ).await {
+    )
+    .await
+    {
         Ok(messages) => {
             if messages.is_empty() {
-                format!("No {} messages found for this time period.", capitalized_platform)
+                format!(
+                    "No {} messages found for this time period.",
+                    capitalized_platform
+                )
             } else {
                 let mut response = String::new();
                 for (i, msg) in messages.iter().take(15).enumerate() {
@@ -637,16 +703,18 @@ pub async fn handle_fetch_recent_messages(
                     } else {
                         msg.content.clone()
                     };
-                   
+
                     if i == 0 {
-                        response.push_str(&format!("{}. {} at {}:\n{}",
+                        response.push_str(&format!(
+                            "{}. {} at {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
                     } else {
-                        response.push_str(&format!("\n\n{}. {} at {}:\n{}",
+                        response.push_str(&format!(
+                            "\n\n{}. {} at {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
@@ -654,11 +722,11 @@ pub async fn handle_fetch_recent_messages(
                         ));
                     }
                 }
-               
+
                 if messages.len() > 15 {
                     response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 15));
                 }
-               
+
                 response
             }
         }

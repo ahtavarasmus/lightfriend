@@ -1,4 +1,3 @@
-
 pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
@@ -8,7 +7,9 @@ pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion
         "enabled".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Set to true to turn the notifications on, false to turn it off.".to_string()),
+            description: Some(
+                "Set to true to turn the notifications on, false to turn it off.".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -42,7 +43,10 @@ pub async fn handle_set_proactive_agent(
     let args: ProactiveAgentArgs = serde_json::from_str(args)?;
 
     // Assuming there's a method to update the proactive agent status for the user
-    state.user_core.update_proactive_agent_on(user_id, args.enabled).map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    state
+        .user_core
+        .update_proactive_agent_on(user_id, args.enabled)
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
 
     let status = if args.enabled { "on" } else { "off" };
     Ok(format!("Proactive agent turned {}.", status))
@@ -165,7 +169,7 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 4. Email monitoring: 'let me know when I get an email about my job application'\n\
                 5. Conditional actions: 'if mom hasn't replied by 8pm, send her a follow up'\n\n\
                 For monitoring tasks, the condition describes what to look for.\n\
-                For scheduled tasks, use trigger_type='once' with trigger_time."
+                For scheduled tasks, use trigger_type='once' with trigger_time.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -179,19 +183,18 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
     }
 }
 
-
-use serde::Deserialize;
-use std::sync::Arc;
 use crate::AppState;
-use std::error::Error;
 use chrono_tz::Tz;
+use serde::Deserialize;
+use std::error::Error;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct CreateTaskArgs {
-    pub trigger_type: String,        // "once" | "recurring_email" | "recurring_messaging"
+    pub trigger_type: String, // "once" | "recurring_email" | "recurring_messaging"
     pub trigger_time: Option<String>, // "2025-12-30T13:00" (required for "once")
     pub condition: Option<String>,
-    pub action_spec: String,         // Detailed step-by-step instructions for runtime AI
+    pub action_spec: String, // Detailed step-by-step instructions for runtime AI
     pub notification_type: Option<String>,
 }
 
@@ -205,11 +208,15 @@ pub async fn handle_create_task(
     // Build trigger field
     let trigger = match args.trigger_type.as_str() {
         "once" => {
-            let time_str = args.trigger_time.as_ref()
+            let time_str = args
+                .trigger_time
+                .as_ref()
                 .ok_or("trigger_time is required for 'once' trigger type")?;
 
             // Get user's timezone
-            let user_info = state.user_core.get_user_info(user_id)
+            let user_info = state
+                .user_core
+                .get_user_info(user_id)
                 .map_err(|e| format!("Failed to get user info: {:?}", e))?;
             let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
             let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
@@ -229,9 +236,12 @@ pub async fn handle_create_task(
         .as_secs() as i32;
 
     // Get user's default notification type from settings
-    let user_settings = state.user_core.get_user_settings(user_id)
+    let user_settings = state
+        .user_core
+        .get_user_settings(user_id)
         .map_err(|e| format!("Failed to get user settings: {:?}", e))?;
-    let default_noti_type = user_settings.notification_type
+    let default_noti_type = user_settings
+        .notification_type
         .unwrap_or_else(|| "sms".to_string());
 
     let new_task = crate::models::user_models::NewTask {
@@ -244,7 +254,9 @@ pub async fn handle_create_task(
         created_at: now,
     };
 
-    state.user_repository.create_task(&new_task)
+    state
+        .user_repository
+        .create_task(&new_task)
         .map_err(|e| format!("Failed to create task: {:?}", e))?;
 
     // Build confirmation message (use a short summary, not full action_spec)
@@ -256,20 +268,35 @@ pub async fn handle_create_task(
 
     let confirmation = match args.trigger_type.as_str() {
         "once" => {
-            format!("Got it! I'll handle '{}' at the scheduled time.", action_summary)
+            format!(
+                "Got it! I'll handle '{}' at the scheduled time.",
+                action_summary
+            )
         }
         "recurring_email" => {
             if let Some(cond) = &args.condition {
-                format!("Got it! I'll watch for emails matching '{}' and execute the task.", cond)
+                format!(
+                    "Got it! I'll watch for emails matching '{}' and execute the task.",
+                    cond
+                )
             } else {
-                format!("Got it! I'll monitor your emails and execute: {}", action_summary)
+                format!(
+                    "Got it! I'll monitor your emails and execute: {}",
+                    action_summary
+                )
             }
         }
         "recurring_messaging" => {
             if let Some(cond) = &args.condition {
-                format!("Got it! I'll watch for messages matching '{}' and execute the task.", cond)
+                format!(
+                    "Got it! I'll watch for messages matching '{}' and execute the task.",
+                    cond
+                )
             } else {
-                format!("Got it! I'll monitor your messages and execute: {}", action_summary)
+                format!(
+                    "Got it! I'll monitor your messages and execute: {}",
+                    action_summary
+                )
             }
         }
         _ => format!("Task created: {}", action_summary),
@@ -291,7 +318,8 @@ fn parse_datetime_to_timestamp(time_str: &str, tz: &Tz) -> Result<i32, Box<dyn E
     };
 
     // Interpret naive datetime in user's timezone, then get UTC timestamp
-    let local_dt = tz.from_local_datetime(&naive)
+    let local_dt = tz
+        .from_local_datetime(&naive)
         .single()
         .ok_or("Ambiguous or invalid local time")?;
 
@@ -308,7 +336,9 @@ pub fn get_send_reminder_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "message".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The reminder message to send to the user via SMS or call.".to_string()),
+            description: Some(
+                "The reminder message to send to the user via SMS or call.".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -354,7 +384,8 @@ pub async fn handle_send_reminder(
         &args.message,
         noti_type,
         first_message,
-    ).await;
+    )
+    .await;
 
     Ok(format!("Reminder sent: {}", args.message))
 }

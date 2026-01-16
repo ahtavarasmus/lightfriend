@@ -1,16 +1,16 @@
-use std::sync::Arc;
 use axum::{
-    Json,
-    extract::{State, Query},
+    extract::{Query, State},
     http::StatusCode,
+    Json,
 };
+use diesel::dsl::{count, sum};
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use diesel::prelude::*;
-use diesel::dsl::{count, sum};
+use std::sync::Arc;
 
-use crate::AppState;
 use crate::schema::{message_status_log, usage_logs, users};
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct StatsQuery {
@@ -87,21 +87,34 @@ pub async fn get_cost_stats(
 
     let conn = &mut state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database connection error"})),
+        )
     })?;
 
     // Get all SMS data for last 30 days with user_id and price
     let sms_data_30d: Vec<(i32, Option<f32>, i32)> = message_status_log::table
         .filter(message_status_log::created_at.ge(from_30d))
-        .select((message_status_log::user_id, message_status_log::price, message_status_log::created_at))
+        .select((
+            message_status_log::user_id,
+            message_status_log::price,
+            message_status_log::created_at,
+        ))
         .load(conn)
         .map_err(|e| {
             tracing::error!("Failed to get SMS stats: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get SMS stats"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get SMS stats"})),
+            )
         })?;
 
     // Twilio prices are negative (money out), so use .abs()
-    let total_sms_cost: f32 = sms_data_30d.iter().filter_map(|(_, p, _)| p.map(|v| v.abs())).sum();
+    let total_sms_cost: f32 = sms_data_30d
+        .iter()
+        .filter_map(|(_, p, _)| p.map(|v| v.abs()))
+        .sum();
 
     // Get voice costs from usage_logs (last 30 days)
     let total_voice_cost: f32 = usage_logs::table
@@ -134,7 +147,8 @@ pub async fn get_cost_stats(
     }
 
     // Aggregate costs per user for 30 days (use .abs() for Twilio's negative prices)
-    let mut user_costs_30d: std::collections::HashMap<i32, (f32, i64)> = std::collections::HashMap::new();
+    let mut user_costs_30d: std::collections::HashMap<i32, (f32, i64)> =
+        std::collections::HashMap::new();
     for (user_id, price, _) in &sms_data_30d {
         let entry = user_costs_30d.entry(*user_id).or_insert((0.0, 0));
         entry.0 += price.unwrap_or(0.0).abs();
@@ -163,7 +177,10 @@ pub async fn get_cost_stats(
         if byot_users.contains(user_id) {
             continue;
         }
-        let country = country_map.get(user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
+        let country = country_map
+            .get(user_id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
         let is_intl = country != "US" && country != "CA";
         if is_intl {
             intl_total_cost_30d += cost;
@@ -179,7 +196,10 @@ pub async fn get_cost_stats(
         if byot_users.contains(user_id) {
             continue;
         }
-        let country = country_map.get(user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
+        let country = country_map
+            .get(user_id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
         let is_intl = country != "US" && country != "CA";
         if is_intl {
             intl_total_cost_7d += cost;
@@ -222,7 +242,10 @@ pub async fn get_cost_stats(
         .into_iter()
         .filter(|(user_id, _)| !byot_users.contains(user_id))
         .map(|(user_id, (sms_cost, sms_count))| {
-            let country = country_map.get(&user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
+            let country = country_map
+                .get(&user_id)
+                .cloned()
+                .unwrap_or_else(|| "Unknown".to_string());
             let is_international = country != "US" && country != "CA";
             UserCostEntry {
                 user_id,
@@ -235,7 +258,11 @@ pub async fn get_cost_stats(
         .collect();
 
     // Sort by cost descending
-    costs_per_user.sort_by(|a, b| b.sms_cost.partial_cmp(&a.sms_cost).unwrap_or(std::cmp::Ordering::Equal));
+    costs_per_user.sort_by(|a, b| {
+        b.sms_cost
+            .partial_cmp(&a.sms_cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(Json(CostStatsResponse {
         avg_cost_per_intl_user_30d,
@@ -265,7 +292,10 @@ pub async fn get_usage_stats(
 
     let conn = &mut state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database connection error"})),
+        )
     })?;
 
     // Get daily SMS stats
@@ -275,7 +305,10 @@ pub async fn get_usage_stats(
         .load(conn)
         .map_err(|e| {
             tracing::error!("Failed to get SMS records: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get SMS records"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get SMS records"})),
+            )
         })?;
 
     // Get daily call stats
@@ -286,11 +319,15 @@ pub async fn get_usage_stats(
         .load(conn)
         .map_err(|e| {
             tracing::error!("Failed to get call records: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get call records"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get call records"})),
+            )
         })?;
 
     // Aggregate by day (use .abs() for Twilio's negative prices)
-    let mut daily_sms: std::collections::HashMap<i32, (i64, f32)> = std::collections::HashMap::new();
+    let mut daily_sms: std::collections::HashMap<i32, (i64, f32)> =
+        std::collections::HashMap::new();
     for (created_at, price) in &sms_records {
         let day = (created_at / 86400) * 86400;
         let entry = daily_sms.entry(day).or_insert((0, 0.0));
@@ -333,12 +370,24 @@ pub async fn get_usage_stats(
     let fourteen_days_ago = now - (14 * 86400);
     let sixty_days_ago = now - (60 * 86400);
 
-    let total_messages_7d = sms_records.iter().filter(|(ts, _)| *ts >= seven_days_ago).count() as i64;
-    let total_messages_30d = sms_records.iter().filter(|(ts, _)| *ts >= thirty_days_ago).count() as i64;
+    let total_messages_7d = sms_records
+        .iter()
+        .filter(|(ts, _)| *ts >= seven_days_ago)
+        .count() as i64;
+    let total_messages_30d = sms_records
+        .iter()
+        .filter(|(ts, _)| *ts >= thirty_days_ago)
+        .count() as i64;
 
     // For growth rate, compare to previous period
-    let prev_7d_count = sms_records.iter().filter(|(ts, _)| *ts >= fourteen_days_ago && *ts < seven_days_ago).count() as i64;
-    let prev_30d_count = sms_records.iter().filter(|(ts, _)| *ts >= sixty_days_ago && *ts < thirty_days_ago).count() as i64;
+    let prev_7d_count = sms_records
+        .iter()
+        .filter(|(ts, _)| *ts >= fourteen_days_ago && *ts < seven_days_ago)
+        .count() as i64;
+    let prev_30d_count = sms_records
+        .iter()
+        .filter(|(ts, _)| *ts >= sixty_days_ago && *ts < thirty_days_ago)
+        .count() as i64;
 
     let growth_rate_7d = if prev_7d_count > 0 {
         ((total_messages_7d as f32 - prev_7d_count as f32) / prev_7d_count as f32) * 100.0
@@ -390,11 +439,13 @@ pub async fn get_usage_stats(
 
     let breakdown_by_type: Vec<ActivityTypeBreakdown> = activity_breakdown
         .into_iter()
-        .map(|(activity_type, cnt, total_credits)| ActivityTypeBreakdown {
-            activity_type,
-            count: cnt,
-            total_credits: total_credits.unwrap_or(0.0),
-        })
+        .map(
+            |(activity_type, cnt, total_credits)| ActivityTypeBreakdown {
+                activity_type,
+                count: cnt,
+                total_credits: total_credits.unwrap_or(0.0),
+            },
+        )
         .collect();
 
     Ok(Json(UsageStatsResponse {

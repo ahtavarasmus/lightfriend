@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -38,7 +34,7 @@ pub async fn resolve_streamable_url(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract video ID from Streamable URL"}))
+                Json(json!({"error": "Could not extract video ID from Streamable URL"})),
             ));
         }
     };

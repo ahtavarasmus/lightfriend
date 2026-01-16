@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -35,7 +31,9 @@ pub async fn resolve_reddit_url(
 
     // Handle redd.it short URLs by following redirects
     let resolved_url = if url.contains("redd.it/") {
-        resolve_short_url(url).await.unwrap_or_else(|| url.to_string())
+        resolve_short_url(url)
+            .await
+            .unwrap_or_else(|| url.to_string())
     } else {
         url.to_string()
     };
@@ -46,7 +44,7 @@ pub async fn resolve_reddit_url(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract post ID from Reddit URL"}))
+                Json(json!({"error": "Could not extract post ID from Reddit URL"})),
             ));
         }
     };

@@ -1,10 +1,10 @@
 use crate::AppState;
-use std::sync::Arc;
-use serde::Deserialize;
 use axum::Json;
 use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use chrono_tz;
+use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
@@ -15,7 +15,9 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
+            description: Some(
+                "Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -23,7 +25,9 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         "end".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
+            description: Some(
+                "End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -47,7 +51,7 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
 pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
-// Add calendar event properties
+    // Add calendar event properties
     let mut calendar_event_properties = HashMap::new();
     calendar_event_properties.insert(
         "summary".to_string(),
@@ -61,7 +65,9 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         "start_time".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string()),
+            description: Some(
+                "Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -77,7 +83,10 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         "description".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional description of the event. Do not add unless user asks specifically.".to_string()),
+            description: Some(
+                "Optional description of the event. Do not add unless user asks specifically."
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -85,11 +94,13 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         "add_notification".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether to add a notification reminder (defaults to true unless specified)".to_string()),
+            description: Some(
+                "Whether to add a notification reminder (defaults to true unless specified)"
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
-
 
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
@@ -111,7 +122,6 @@ pub struct CalendarTimeFrame {
     pub end: String,
 }
 
-
 pub async fn handle_fetch_calendar_events(
     state: &Arc<AppState>,
     user_id: i32,
@@ -125,7 +135,11 @@ pub async fn handle_fetch_calendar_events(
         }
     };
 
-    match crate::handlers::google_calendar::handle_calendar_fetching(state, user_id, &c.start, &c.end).await {
+    match crate::handlers::google_calendar::handle_calendar_fetching(
+        state, user_id, &c.start, &c.end,
+    )
+    .await
+    {
         Ok(Json(response)) => {
             if let Some(events) = response.get("events") {
                 let empty_vec = Vec::new();
@@ -134,47 +148,62 @@ pub async fn handle_fetch_calendar_events(
                 let today = Local::now().date_naive();
 
                 // Collect events with their start times for sorting
-                let mut events_with_time: Vec<(Value, Option<DateTime<FixedOffset>>)> = events_array.iter().map(|event| {
-                    let start_str = event.get("start").and_then(Value::as_str).unwrap_or("");
-                    let start_time = DateTime::parse_from_rfc3339(start_str).ok();
-                    (event.clone(), start_time)
-                }).collect();
+                let mut events_with_time: Vec<(Value, Option<DateTime<FixedOffset>>)> =
+                    events_array
+                        .iter()
+                        .map(|event| {
+                            let start_str =
+                                event.get("start").and_then(Value::as_str).unwrap_or("");
+                            let start_time = DateTime::parse_from_rfc3339(start_str).ok();
+                            (event.clone(), start_time)
+                        })
+                        .collect();
 
                 // Sort by start time, placing events without times (all-day) at the end
-                events_with_time.sort_by(|a, b| {
-                    match (a.1, b.1) {
-                        (Some(t1), Some(t2)) => t1.cmp(&t2),
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    }
+                events_with_time.sort_by(|a, b| match (a.1, b.1) {
+                    (Some(t1), Some(t2)) => t1.cmp(&t2),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
                 });
 
                 for (event, _) in events_with_time.iter() {
-                    let summary = event.get("summary").and_then(|s| s.as_str()).unwrap_or("Untitled");
-                    let duration = event.get("duration_minutes").and_then(|d| d.as_i64()).unwrap_or(0);
+                    let summary = event
+                        .get("summary")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("Untitled");
+                    let duration = event
+                        .get("duration_minutes")
+                        .and_then(|d| d.as_i64())
+                        .unwrap_or(0);
                     let start_str = event.get("start").and_then(|s| s.as_str()).unwrap_or("");
                     let end_str = event.get("end").and_then(|s| s.as_str()).unwrap_or("");
 
-                    let formatted_event = if duration == 0 || start_str.len() == 10 { // All-day event
+                    let formatted_event = if duration == 0 || start_str.len() == 10 {
+                        // All-day event
                         let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
                             .or_else(|_| NaiveDate::parse_from_str(end_str, "%Y-%m-%d"))
                             .unwrap_or(today);
                         let end_date = NaiveDate::parse_from_str(end_str, "%Y-%m-%d")
                             .or_else(|_| NaiveDate::parse_from_str(start_str, "%Y-%m-%d"))
                             .unwrap_or(start_date);
-                        
+
                         if start_date == end_date {
                             format!("{}: All day, {}", summary, start_date.format("%b %d"))
                         } else {
                             format!(
                                 "{}: All day, {} - {}",
-                                summary, start_date.format("%b %d"), end_date.format("%b %d")
+                                summary,
+                                start_date.format("%b %d"),
+                                end_date.format("%b %d")
                             )
                         }
-                    } else { // Timed event
-                        match (DateTime::parse_from_rfc3339(start_str),
-                              DateTime::parse_from_rfc3339(end_str)) {
+                    } else {
+                        // Timed event
+                        match (
+                            DateTime::parse_from_rfc3339(start_str),
+                            DateTime::parse_from_rfc3339(end_str),
+                        ) {
                             (Ok(start_dt), Ok(end_dt)) => {
                                 let date_str = if start_dt.date_naive() == today {
                                     "today".to_string()
@@ -188,7 +217,7 @@ pub async fn handle_fetch_calendar_events(
                                     end_dt.format("%l:%M %p"),
                                     date_str
                                 )
-                            },
+                            }
                             _ => continue, // Skip invalid timed events
                         }
                     };
@@ -205,22 +234,25 @@ pub async fn handle_fetch_calendar_events(
                 "No events scheduled.".to_string()
             }
         }
-        Err((status, _)) => {
-            match status {
-                axum::http::StatusCode::BAD_REQUEST => "No active Google Calendar connection found. Visit the website to connect.".to_string(),
-                axum::http::StatusCode::UNAUTHORIZED => "Your calendar connection needs to be renewed. Please reconnect on the website.".to_string(),
-                _ => "Failed to fetch calendar events. Please try again later.".to_string(),
+        Err((status, _)) => match status {
+            axum::http::StatusCode::BAD_REQUEST => {
+                "No active Google Calendar connection found. Visit the website to connect."
+                    .to_string()
             }
-        }
+            axum::http::StatusCode::UNAUTHORIZED => {
+                "Your calendar connection needs to be renewed. Please reconnect on the website."
+                    .to_string()
+            }
+            _ => "Failed to fetch calendar events. Please try again later.".to_string(),
+        },
     }
 }
-
 
 #[derive(Deserialize)]
 struct CalendarEventArgs {
     summary: String,
     start_time: String,
-    duration_minutes: String,  // Changed to String to handle quoted numbers
+    duration_minutes: String, // Changed to String to handle quoted numbers
     description: Option<String>,
     add_notification: Option<bool>,
 }
@@ -230,25 +262,34 @@ pub async fn handle_create_calendar_event(
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
-) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
+) -> Result<
+    (
+        axum::http::StatusCode,
+        [(axum::http::HeaderName, &'static str); 1],
+        axum::Json<crate::api::twilio_sms::TwilioResponse>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let mut args: CalendarEventArgs = serde_json::from_str(args)?;
-    
+
     // Parse duration_minutes from String to i32
-    let duration_minutes: i32 = args.duration_minutes.parse().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    args.duration_minutes = duration_minutes.to_string();  // Optional: store back as string if needed, but not necessary
-    
+    let duration_minutes: i32 = args
+        .duration_minutes
+        .parse()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    args.duration_minutes = duration_minutes.to_string(); // Optional: store back as string if needed, but not necessary
+
     let user_info = state.user_core.get_user_info(user_id)?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
-   
+
     // Parse the start time
     let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-   
+
     // Convert to user's timezone
-    let user_tz: chrono_tz::Tz = timezone.parse()
-        .unwrap_or(chrono_tz::UTC);
+    let user_tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
     let local_time = start_time.with_timezone(&user_tz);
-   
+
     // Format the date and time
     let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
     // Create the event directly
@@ -261,17 +302,23 @@ pub async fn handle_create_calendar_event(
     };
     match crate::handlers::google_calendar::create_calendar_event(
         axum::extract::State(state.clone()),
-        crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false },
-        axum::Json(event_request)
-    ).await {
+        crate::handlers::auth_middleware::AuthUser {
+            user_id,
+            is_admin: false,
+        },
+        axum::Json(event_request),
+    )
+    .await
+    {
         Ok(_) => {
-            let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                &success_msg,
-                None,
-                user,
-            ).await {
+            let success_msg = format!(
+                "Calendar event '{}' created for {}",
+                args.summary, formatted_time
+            );
+            if let Err(e) =
+                crate::api::twilio_utils::send_conversation_message(state, &success_msg, None, user)
+                    .await
+            {
                 eprintln!("Failed to send success message: {}", e);
             }
             Ok((
@@ -279,27 +326,29 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: success_msg,
-                })
+                }),
             ))
         }
         Err((_, error_json)) => {
-            let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                &error_msg,
-                None,
-                user,
-            ).await {
+            let error_msg = format!(
+                "Failed to create calendar event: {}",
+                error_json
+                    .0
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error")
+            );
+            if let Err(e) =
+                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
+                    .await
+            {
                 eprintln!("Failed to send error message: {}", e);
             }
             Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: error_msg,
-                })
+                axum::Json(crate::api::twilio_sms::TwilioResponse { message: error_msg }),
             ))
         }
     }
 }
-

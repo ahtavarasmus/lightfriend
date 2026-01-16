@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -35,7 +31,9 @@ pub async fn resolve_twitter_url(
 
     // Handle t.co short URLs by following redirects
     let resolved_url = if url.contains("t.co/") {
-        resolve_short_url(url).await.unwrap_or_else(|| url.to_string())
+        resolve_short_url(url)
+            .await
+            .unwrap_or_else(|| url.to_string())
     } else {
         url.to_string()
     };
@@ -46,7 +44,7 @@ pub async fn resolve_twitter_url(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract tweet ID from Twitter/X URL"}))
+                Json(json!({"error": "Could not extract tweet ID from Twitter/X URL"})),
             ));
         }
     };
@@ -102,6 +100,10 @@ async fn resolve_short_url(short_url: &str) -> Option<String> {
     } else {
         // Try GET request if HEAD doesn't return location
         let response = client.get(short_url).send().await.ok()?;
-        response.headers().get("location").and_then(|l| l.to_str().ok()).map(|s| s.to_string())
+        response
+            .headers()
+            .get("location")
+            .and_then(|l| l.to_str().ok())
+            .map(|s| s.to_string())
     }
 }

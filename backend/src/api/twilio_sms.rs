@@ -1,20 +1,13 @@
-use std::sync::Arc;
-use crate::AppState;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::cell::RefCell;
-use axum::{
-    extract::Form,
-    extract::State,
-    http::StatusCode,
-    Json,
-};
-use crate::tool_call_utils::utils::{
-    ChatMessage, create_openai_client_for_user,
-};
 use crate::repositories::user_repository::LogUsageParams;
-use crate::{ModelPurpose, AiProvider};
+use crate::tool_call_utils::utils::{create_openai_client_for_user, ChatMessage};
+use crate::AppState;
+use crate::{AiProvider, ModelPurpose};
+use axum::{extract::Form, extract::State, http::StatusCode, Json};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 // Thread-local storage for media SID mapping
 thread_local! {
@@ -26,22 +19,32 @@ use openai_api_rs::v1::chat_completion;
 /// Error messages for tool call failures - privacy-safe, user-facing
 mod tool_error_messages {
     /// Internal Lightfriend errors (our fault)
-    pub const INTERNAL_ERROR: &str = "Sorry, we encountered an issue processing your request. Our team has been notified.";
+    pub const INTERNAL_ERROR: &str =
+        "Sorry, we encountered an issue processing your request. Our team has been notified.";
     /// External service errors (not our fault)
-    pub const PERPLEXITY_UNAVAILABLE: &str = "Sorry, I couldn't reach the search service right now.";
-    pub const WEATHER_UNAVAILABLE: &str = "Sorry, I couldn't get the weather information right now.";
+    pub const PERPLEXITY_UNAVAILABLE: &str =
+        "Sorry, I couldn't reach the search service right now.";
+    pub const WEATHER_UNAVAILABLE: &str =
+        "Sorry, I couldn't get the weather information right now.";
     pub const FIRECRAWL_UNAVAILABLE: &str = "Sorry, I couldn't search the web right now.";
     pub const DIRECTIONS_UNAVAILABLE: &str = "Sorry, I couldn't get directions right now.";
 }
 
 /// Log a tool call error without exposing user content (privacy-safe)
-fn log_tool_error(user_id: i32, tool_name: &str, category: &str, error_type: &str, error_msg: &str) {
+fn log_tool_error(
+    user_id: i32,
+    tool_name: &str,
+    category: &str,
+    error_type: &str,
+    error_msg: &str,
+) {
     tracing::error!(
         user_id = user_id,
         tool_name = tool_name,
         error_category = category,
         error_type = error_type,
-        "Tool execution failed: {}", error_msg
+        "Tool execution failed: {}",
+        error_msg
     );
 }
 
@@ -51,7 +54,11 @@ fn log_tool_error(user_id: i32, tool_name: &str, category: &str, error_type: &st
 
 /// The standard response type for SMS processing.
 /// This is the tuple returned by process_sms and related functions.
-pub type SmsProcessResponse = (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>);
+pub type SmsProcessResponse = (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    axum::Json<TwilioResponse>,
+);
 
 /// Represents the outcome of SMS processing.
 /// Use this to build consistent responses across all error paths.
@@ -77,11 +84,9 @@ impl SmsResult {
                 headers,
                 axum::Json(TwilioResponse { message: response }),
             ),
-            SmsResult::UserError { message, status } => (
-                status,
-                headers,
-                axum::Json(TwilioResponse { message }),
-            ),
+            SmsResult::UserError { message, status } => {
+                (status, headers, axum::Json(TwilioResponse { message }))
+            }
             SmsResult::SystemError { log_msg } => {
                 tracing::error!("SMS system error: {}", log_msg);
                 (
@@ -124,7 +129,9 @@ impl SmsResult {
     /// Helper to create a no subscription error
     pub fn no_subscription() -> Self {
         SmsResult::UserError {
-            message: "Active subscription required. Please subscribe to continue using the service.".to_string(),
+            message:
+                "Active subscription required. Please subscribe to continue using the service."
+                    .to_string(),
             status: StatusCode::FORBIDDEN,
         }
     }
@@ -171,9 +178,9 @@ pub struct TwilioResponse {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TextBeeWebhookPayload {
-    pub device_id: String,  // Required for verification
-    pub sender: String,     // Maps to 'from'
-    pub recipient: String,  // Maps to 'to' (your device's number)
+    pub device_id: String, // Required for verification
+    pub sender: String,    // Maps to 'from'
+    pub recipient: String, // Maps to 'to' (your device's number)
     pub body: String,
 }
 
@@ -204,7 +211,9 @@ impl ProcessSmsOptions {
     }
 
     /// Create options for testing with mock LLM response (deducts credits for testing)
-    pub fn test_with_mock(mock_response: openai_api_rs::v1::chat_completion::ChatCompletionResponse) -> Self {
+    pub fn test_with_mock(
+        mock_response: openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+    ) -> Self {
         Self {
             skip_twilio_send: true,
             skip_credit_deduction: false, // Still deduct credits so we can test credit deduction
@@ -264,7 +273,9 @@ impl SmsResponse {
             "Static response exceeds SMS limit: {} chars",
             content.chars().count()
         );
-        Self { content: content.to_string() }
+        Self {
+            content: content.to_string(),
+        }
     }
 
     /// Get the content as a String
@@ -327,7 +338,9 @@ async fn condense_response(
     max_chars: usize,
     model: &str,
 ) -> Result<String, String> {
-    use openai_api_rs::v1::chat_completion::{ChatCompletionRequest, ChatCompletionMessage, MessageRole, Content};
+    use openai_api_rs::v1::chat_completion::{
+        ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
+    };
 
     let prompt = format!(
         "Condense the following message to fit within {} characters while preserving the key information. \
@@ -345,7 +358,8 @@ async fn condense_response(
             tool_calls: None,
             tool_call_id: None,
         }],
-    ).max_tokens(300);
+    )
+    .max_tokens(300);
 
     match client.chat_completion(req).await {
         Ok(response) => {
@@ -361,7 +375,7 @@ async fn condense_response(
             }
             Err("No response from condensing".to_string())
         }
-        Err(e) => Err(format!("Failed to condense: {}", e))
+        Err(e) => Err(format!("Failed to condense: {}", e)),
     }
 }
 
@@ -369,8 +383,17 @@ async fn condense_response(
 pub async fn handle_textbee_sms(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<TextBeeWebhookPayload>,
-) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
-    tracing::debug!("Received TextBee SMS from: {} to: {} via device: {}", payload.sender, payload.recipient, payload.device_id);
+) -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    axum::Json<TwilioResponse>,
+) {
+    tracing::debug!(
+        "Received TextBee SMS from: {} to: {} via device: {}",
+        payload.sender,
+        payload.recipient,
+        payload.device_id
+    );
 
     // Step 1: Find user by sender phone (from)
     let user = match state.user_core.find_by_phone_number(&payload.sender) {
@@ -388,18 +411,25 @@ pub async fn handle_textbee_sms(
     // Step 2: Verify device_id matches user's stored TextBee credentials
     if let Ok((stored_device_id, _api_key)) = state.user_core.get_textbee_credentials(user.id) {
         if payload.device_id != stored_device_id {
-            tracing::warn!("Device ID mismatch for user {}: expected {}, got {}", user.id, stored_device_id, payload.device_id);
+            tracing::warn!(
+                "Device ID mismatch for user {}: expected {}, got {}",
+                user.id,
+                stored_device_id,
+                payload.device_id
+            );
             return SmsResult::UserError {
                 message: "Invalid request source".to_string(),
                 status: StatusCode::FORBIDDEN,
-            }.into_response();
+            }
+            .into_response();
         }
     } else {
         tracing::error!("No TextBee credentials found for user {}", user.id);
         return SmsResult::UserError {
             message: "No credentials configured".to_string(),
             status: StatusCode::FORBIDDEN,
-        }.into_response();
+        }
+        .into_response();
     }
 
     // Step 3: Map to Twilio payload format
@@ -420,7 +450,8 @@ pub async fn handle_textbee_sms(
         } else {
             return SmsResult::Success {
                 response: "You have been unsubscribed from notifications.".to_string(),
-            }.into_response();
+            }
+            .into_response();
         }
     }
 
@@ -428,23 +459,29 @@ pub async fn handle_textbee_sms(
     tokio::spawn(async move {
         let result = process_sms(&state, twilio_payload, ProcessSmsOptions::default()).await;
         if result.0 != StatusCode::OK {
-            tracing::error!("Background SMS processing failed with status: {:?}", result.0);
+            tracing::error!(
+                "Background SMS processing failed with status: {:?}",
+                result.0
+            );
         }
     });
 
     // Immediately return a success response
     SmsResult::Success {
         response: "Message received, processing in progress".to_string(),
-    }.into_response()
+    }
+    .into_response()
 }
-
-
 
 /// Handler for the regular SMS endpoint (Twilio webhook)
 pub async fn handle_regular_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
-) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
+) -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    axum::Json<TwilioResponse>,
+) {
     tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
 
     // First check if this user has a discount_tier == msg - they shouldn't be using this endpoint
@@ -452,18 +489,21 @@ pub async fn handle_regular_sms(
         Ok(Some(user)) => {
             if let Some(tier) = user.discount_tier {
                 if tier == "msg" {
-                    tracing::warn!("User {} with discount_tier=msg attempted to use regular SMS endpoint", user.id);
+                    tracing::warn!(
+                        "User {} with discount_tier=msg attempted to use regular SMS endpoint",
+                        user.id
+                    );
                     return SmsResult::UserError {
                         message: "Please use your dedicated SMS endpoint. Contact support if you need help.".to_string(),
                         status: StatusCode::FORBIDDEN,
                     }.into_response();
                 }
             }
-        },
+        }
         Ok(None) => {
             tracing::error!("No user found for phone number: {}", payload.from);
             return SmsResult::user_not_found().into_response();
-        },
+        }
         Err(e) => {
             tracing::error!("Database error while finding user: {}", e);
             return SmsResult::database_error(&e.to_string()).into_response();
@@ -478,7 +518,8 @@ pub async fn handle_regular_sms(
             } else {
                 return SmsResult::Success {
                     response: "You have been unsubscribed from notifications.".to_string(),
-                }.into_response();
+                }
+                .into_response();
             }
         }
     }
@@ -487,37 +528,48 @@ pub async fn handle_regular_sms(
     tokio::spawn(async move {
         let result = process_sms(&state, payload.clone(), ProcessSmsOptions::default()).await;
         if result.0 != StatusCode::OK {
-            tracing::error!("Background SMS processing failed with status: {:?}", result.0);
+            tracing::error!(
+                "Background SMS processing failed with status: {:?}",
+                result.0
+            );
         }
     });
 
     // Immediately return a success response to Twilio
     SmsResult::Success {
         response: "Message received, processing in progress".to_string(),
-    }.into_response()
+    }
+    .into_response()
 }
-
 
 pub async fn process_sms(
     state: &Arc<AppState>,
     payload: TwilioWebhookPayload,
     options: ProcessSmsOptions,
-) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
+) -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    axum::Json<TwilioResponse>,
+) {
     let start_time = std::time::Instant::now(); // Track processing time
     let user = match state.user_core.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => user,
         Ok(None) => {
             tracing::error!("No user found for phone number: {}", payload.from);
             return SmsResult::user_not_found().into_response();
-        },
+        }
         Err(e) => {
-            tracing::error!("Database error while finding user for phone number {}: {}", payload.from, e);
+            tracing::error!(
+                "Database error while finding user for phone number {}: {}",
+                payload.from,
+                e
+            );
             return SmsResult::database_error(&e.to_string()).into_response();
         }
     };
 
     // Check if user has sufficient credits before processing the message
-    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
+    if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "message", None).await {
         // Distinguish between different error types
         let result = if e.contains("deactivated") {
             tracing::warn!("User {} phone service is deactivated", user.id);
@@ -531,7 +583,11 @@ pub async fn process_sms(
         };
         return result.into_response();
     }
-    tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
+    tracing::info!(
+        "Found user with ID: {} for phone number: {}",
+        user.id,
+        payload.from
+    );
 
     // Handle 'cancel' message specially
     if payload.body.trim().to_lowercase() == "c" {
@@ -555,27 +611,39 @@ pub async fn process_sms(
                             &state_clone,
                             &response_msg_clone,
                             None,
-                            &user_clone
-                        ).await {
+                            &user_clone,
+                        )
+                        .await
+                        {
                             Ok(message_sid) => {
                                 // Log usage (similar to regular message)
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
-                                if let Err(e) = state_clone.user_repository.log_usage(LogUsageParams {
-                                    user_id: user_clone.id,
-                                    sid: Some(message_sid.clone()),
-                                    activity_type: "sms".to_string(),
-                                    credits: None,
-                                    time_consumed: Some(processing_time_secs as i32),
-                                    success: Some(true),
-                                    reason: Some("cancel handling".to_string()),
-                                    status: None,
-                                    recharge_threshold_timestamp: None,
-                                    zero_credits_timestamp: None,
-                                }) {
+                                if let Err(e) =
+                                    state_clone.user_repository.log_usage(LogUsageParams {
+                                        user_id: user_clone.id,
+                                        sid: Some(message_sid.clone()),
+                                        activity_type: "sms".to_string(),
+                                        credits: None,
+                                        time_consumed: Some(processing_time_secs as i32),
+                                        success: Some(true),
+                                        reason: Some("cancel handling".to_string()),
+                                        status: None,
+                                        recharge_threshold_timestamp: None,
+                                        zero_credits_timestamp: None,
+                                    })
+                                {
                                     tracing::error!("Failed to log SMS usage for cancel: {}", e);
                                 }
-                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
-                                    tracing::error!("Failed to deduct user credits for cancel: {}", e);
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(
+                                    &state_clone,
+                                    user_clone.id,
+                                    "message",
+                                    None,
+                                ) {
+                                    tracing::error!(
+                                        "Failed to deduct user credits for cancel: {}",
+                                        e
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -583,42 +651,51 @@ pub async fn process_sms(
                                 // Log the failed attempt
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
                                 let error_status = format!("failed to send: {}", e);
-                                if let Err(log_err) = state_clone.user_repository.log_usage(LogUsageParams {
-                                    user_id: user_clone.id,
-                                    sid: None,
-                                    activity_type: "sms".to_string(),
-                                    credits: None,
-                                    time_consumed: Some(processing_time_secs as i32),
-                                    success: Some(false),
-                                    reason: Some("cancel handling".to_string()),
-                                    status: Some(error_status),
-                                    recharge_threshold_timestamp: None,
-                                    zero_credits_timestamp: None,
-                                }) {
-                                    tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
+                                if let Err(log_err) =
+                                    state_clone.user_repository.log_usage(LogUsageParams {
+                                        user_id: user_clone.id,
+                                        sid: None,
+                                        activity_type: "sms".to_string(),
+                                        credits: None,
+                                        time_consumed: Some(processing_time_secs as i32),
+                                        success: Some(false),
+                                        reason: Some("cancel handling".to_string()),
+                                        status: Some(error_status),
+                                        recharge_threshold_timestamp: None,
+                                        zero_credits_timestamp: None,
+                                    })
+                                {
+                                    tracing::error!(
+                                        "Failed to log SMS usage after send error for cancel: {}",
+                                        log_err
+                                    );
                                 }
                             }
                         }
                     });
                 }
 
-                return SmsResult::Cancelled { message: response_msg }.into_response();
+                return SmsResult::Cancelled {
+                    message: response_msg,
+                }
+                .into_response();
             }
             Err(e) => {
                 tracing::error!("Failed to cancel pending message: {}", e);
                 return SmsResult::SystemError {
                     log_msg: format!("Failed to cancel pending message: {}", e),
-                }.into_response();
+                }
+                .into_response();
             }
         }
     }
-    
+
     // Log media information for admin user
     if user.id == 1 {
         if let (Some(num_media), Some(media_url), Some(content_type)) = (
             payload.num_media.as_ref(),
             payload.media_url0.as_ref(),
-            payload.media_content_type0.as_ref()
+            payload.media_content_type0.as_ref(),
         ) {
             tracing::debug!("Media information:");
             tracing::debug!("  Number of media items: {}", num_media);
@@ -648,7 +725,6 @@ pub async fn process_sms(
         tracing::error!("Failed to store user message in history: {}", e);
     }
 
-    
     // Get user settings to access timezone
     let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
@@ -656,23 +732,25 @@ pub async fn process_sms(
             tracing::error!("Failed to get user settings: {}", e);
             return SmsResult::SystemError {
                 log_msg: format!("Failed to get user settings: {}", e),
-            }.into_response();
+            }
+            .into_response();
         }
     };
 
-    let user_info= match state.user_core.get_user_info(user.id) {
+    let user_info = match state.user_core.get_user_info(user.id) {
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get user info: {}", e);
             return SmsResult::SystemError {
                 log_msg: format!("Failed to get user info: {}", e),
-            }.into_response();
+            }
+            .into_response();
         }
     };
 
     let user_given_info = match user_info.clone().info {
         Some(info) => info,
-        None => "".to_string()
+        None => "".to_string(),
     };
 
     let timezone_str = match user_info.timezone {
@@ -680,12 +758,14 @@ pub async fn process_sms(
         None => "UTC",
     };
 
-
     // Get timezone offset using jiff
     let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => {
-            tracing::error!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+            tracing::error!(
+                "Failed to get timezone offset for {}, defaulting to UTC",
+                timezone_str
+            );
             (0, 0) // UTC default
         }
     };
@@ -701,7 +781,8 @@ pub async fn process_sms(
     let formatted_time = Utc::now().with_timezone(&user_timezone).to_rfc3339();
 
     // Format offset string (e.g., "+02:00" or "-05:30")
-    let offset = format!("{}{:02}:{:02}", 
+    let offset = format!(
+        "{}{:02}:{:02}",
         if hours >= 0 { "+" } else { "-" },
         hours.abs(),
         minutes.abs()
@@ -740,10 +821,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         tool_calls: None,
         tool_call_id: None,
     }];
-    
+
     // Process the message body to remove "forget" if it exists at the start
     let processed_body = if payload.body.to_lowercase().starts_with("forget") {
-        payload.body.trim_start_matches(|c: char| c.is_alphabetic()).trim().to_string()
+        payload
+            .body
+            .trim_start_matches(|c: char| c.is_alphabetic())
+            .trim()
+            .to_string()
     } else {
         payload.body.clone()
     };
@@ -752,13 +837,15 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     if let (Some(num_media), Some(media_url), Some(_)) = (
         payload.num_media.as_ref(),
         payload.media_url0.as_ref(),
-        payload.media_content_type0.as_ref()
+        payload.media_content_type0.as_ref(),
     ) {
         if num_media != "0" {
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(state, media_sid, &user).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(state, media_sid, &user)
+                    .await
+                {
                     Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                     Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -768,18 +855,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     // Only include conversation history if message doesn't start with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
-
         // Get user's save_context setting
         let save_context = user_settings.save_context.unwrap_or(0);
-        
+
         if save_context > 0 {
             // Get the last N back-and-forth exchanges based on save_context
-            let history = state.user_repository
-                .get_conversation_history(
-                    user.id,
-                    save_context as i64,
-                    true,
-                )
+            let history = state
+                .user_repository
+                .get_conversation_history(user.id, save_context as i64, true)
                 .unwrap_or_default();
 
             let mut context_messages: Vec<ChatMessage> = Vec::new();
@@ -843,14 +926,16 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 };
                 context_messages.push(chat_msg);
             }
-            
+
             // Combine system message with conversation history
             chat_messages.extend(context_messages);
         }
     }
     // Get the user's LLM provider preference from settings
     let llm_provider_preference = state.user_core.get_llm_provider(user.id).unwrap_or(None);
-    let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
+    let provider = state
+        .ai_config
+        .provider_for_user_with_preference(llm_provider_preference.as_deref());
     let needs_two_step = state.ai_config.needs_two_step_vision(provider);
 
     // Handle image if present
@@ -859,7 +944,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     if let (Some(num_media), Some(media_url), Some(content_type)) = (
         payload.num_media.as_ref(),
         payload.media_url0.as_ref(),
-        payload.media_content_type0.as_ref()
+        payload.media_content_type0.as_ref(),
     ) {
         if num_media != "0" && content_type.starts_with("image/") {
             image_url = Some(media_url.clone());
@@ -870,17 +955,31 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             // Step 1: Call vision model to describe image
             // Step 2: Add description as text for tool-calling model
             if needs_two_step {
-                tracing::info!("Using two-step vision for {:?} provider (user {})", provider, user.id);
+                tracing::info!(
+                    "Using two-step vision for {:?} provider (user {})",
+                    provider,
+                    user.id
+                );
 
-                match state.ai_config.describe_image(provider, media_url, &processed_body).await {
+                match state
+                    .ai_config
+                    .describe_image(provider, media_url, &processed_body)
+                    .await
+                {
                     Ok(description) => {
-                        tracing::info!("Got vision description: {}", &description[..description.len().min(100)]);
+                        tracing::info!(
+                            "Got vision description: {}",
+                            &description[..description.len().min(100)]
+                        );
 
                         // Build the message with image description + user's question
                         let combined_content = if processed_body.trim().is_empty() {
                             format!("[Image description: {}]", description)
                         } else {
-                            format!("[Image description: {}]\n\nUser's question: {}", description, processed_body)
+                            format!(
+                                "[Image description: {}]\n\nUser's question: {}",
+                                description, processed_body
+                            )
                         };
 
                         chat_messages.push(ChatMessage {
@@ -891,7 +990,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         });
                     }
                     Err(e) => {
-                        tracing::error!("Vision description failed, falling back to direct image: {}", e);
+                        tracing::error!(
+                            "Vision description failed, falling back to direct image: {}",
+                            e
+                        );
                         // Fall back to direct image if vision description fails
                         let mut content_parts = vec![];
                         if !processed_body.trim().is_empty() {
@@ -999,13 +1101,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to initialize AI service".to_string(),
-                })
+                }),
             );
         }
     };
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
-    let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages.clone()
+    let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
+        .clone()
         .into_iter()
         .map(|msg| chat_completion::ChatCompletionMessage {
             role: match msg.role.as_str() {
@@ -1021,7 +1124,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         })
         .collect();
 
-
     // Get the model for this provider
     // For two-step vision providers, images were already converted to text,
     // so we always use the Default (tool-calling) model
@@ -1032,19 +1134,25 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         tracing::debug!("Using mock LLM response for testing");
         mock_response
     } else {
-        match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-                model.clone(),
-            completion_messages.clone(),
-        )
-        .tools(tools)
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .max_tokens(250)).await {
+        match client
+            .chat_completion(
+                chat_completion::ChatCompletionRequest::new(
+                    model.clone(),
+                    completion_messages.clone(),
+                )
+                .tools(tools)
+                .tool_choice(chat_completion::ToolChoiceType::Required)
+                .max_tokens(250),
+            )
+            .await
+        {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Failed to get chat completion: {}", e);
                 return SmsResult::SystemError {
                     log_msg: format!("Failed to get chat completion: {}", e),
-                }.into_response();
+                }
+                .into_response();
             }
         }
     };
@@ -1055,34 +1163,45 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         None | Some(chat_completion::FinishReason::stop) => {
             tracing::debug!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
-            
-            result.choices[0].message.content.clone().unwrap_or_default()
+
+            result.choices[0]
+                .message
+                .content
+                .clone()
+                .unwrap_or_default()
         }
         Some(chat_completion::FinishReason::tool_calls) => {
             tracing::debug!("Model requested tool calls - beginning tool execution phase");
 
-                        
             let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
                 Some(calls) => {
                     tracing::debug!("Found {} tool call(s) in response", calls.len());
                     calls
-                },
+                }
                 None => {
-                    tracing::error!("No tool calls found in response despite tool_calls finish reason");
+                    tracing::error!(
+                        "No tool calls found in response despite tool_calls finish reason"
+                    );
                     return SmsResult::SystemError {
-                        log_msg: "No tool calls found in response despite tool_calls finish reason".to_string(),
-                    }.into_response();
+                        log_msg: "No tool calls found in response despite tool_calls finish reason"
+                            .to_string(),
+                    }
+                    .into_response();
                 }
             };
 
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
-                tracing::debug!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
+                tracing::debug!(
+                    "Processing tool call: {:?} with id: {:?}",
+                    tool_call,
+                    tool_call_id
+                );
                 let name = match &tool_call.function.name {
                     Some(n) => {
                         tracing::debug!("Tool call function name: {}", n);
                         n
-                    },
+                    }
                     None => {
                         log_tool_error(
                             user.id,
@@ -1093,13 +1212,21 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         );
                         return SmsResult::SystemError {
                             log_msg: "Tool call missing function name".to_string(),
-                        }.into_response();
-                    },
+                        }
+                        .into_response();
+                    }
                 };
 
                 // Check if user has access to this tool
-                if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone(), user.discount) {
-                    tracing::info!("Attempted to use subscription-only tool {} without proper subscription", name);
+                if crate::tool_call_utils::utils::requires_subscription(
+                    name,
+                    user.sub_tier.clone(),
+                    user.discount,
+                ) {
+                    tracing::info!(
+                        "Attempted to use subscription-only tool {} without proper subscription",
+                        name
+                    );
                     tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
                     continue;
                 }
@@ -1115,7 +1242,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         );
                         return SmsResult::SystemError {
                             log_msg: format!("Tool call {} missing arguments", name),
-                        }.into_response();
+                        }
+                        .into_response();
                     }
                 };
                 if name == "ask_perplexity" {
@@ -1135,14 +1263,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "json_parse_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::INTERNAL_ERROR.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::INTERNAL_ERROR.to_string(),
+                            );
                             continue;
                         }
                     };
                     let query = format!("User info: {}. Query: {}", user_given_info, c.query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_given_info);
-                    match crate::utils::tool_exec::ask_perplexity(state, &query, &sys_prompt).await {
+                    match crate::utils::tool_exec::ask_perplexity(state, &query, &sys_prompt).await
+                    {
                         Ok(answer) => {
                             tracing::debug!("Successfully received Perplexity answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1155,7 +1287,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "api_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::PERPLEXITY_UNAVAILABLE.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::PERPLEXITY_UNAVAILABLE.to_string(),
+                            );
                             continue;
                         }
                     };
@@ -1177,7 +1312,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "json_parse_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::INTERNAL_ERROR.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::INTERNAL_ERROR.to_string(),
+                            );
                             continue;
                         }
                     };
@@ -1185,7 +1323,15 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     let units = c.units;
                     let forecast_type = c.forecast_type.unwrap_or_else(|| "current".to_string());
 
-                    match crate::utils::tool_exec::get_weather(state, &location, &units, &forecast_type, user.id).await {
+                    match crate::utils::tool_exec::get_weather(
+                        state,
+                        &location,
+                        &units,
+                        &forecast_type,
+                        user.id,
+                    )
+                    .await
+                    {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1198,11 +1344,13 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "api_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::WEATHER_UNAVAILABLE.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::WEATHER_UNAVAILABLE.to_string(),
+                            );
                             continue;
                         }
                     };
-
                 } else if name == "search_firecrawl" {
                     tracing::debug!("Executing search_firecrawl tool call");
                     #[derive(Deserialize, Serialize)]
@@ -1219,7 +1367,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "json_parse_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::INTERNAL_ERROR.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::INTERNAL_ERROR.to_string(),
+                            );
                             continue;
                         }
                     };
@@ -1237,7 +1388,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "api_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::FIRECRAWL_UNAVAILABLE.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::FIRECRAWL_UNAVAILABLE.to_string(),
+                            );
                             continue;
                         }
                     };
@@ -1259,14 +1413,23 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "json_parse_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::INTERNAL_ERROR.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::INTERNAL_ERROR.to_string(),
+                            );
                             continue;
                         }
                     };
                     let start_address = c.start_address;
                     let end_address = c.end_address;
                     let mode = c.mode;
-                    match crate::tool_call_utils::internet::handle_directions_tool(start_address, end_address, mode).await {
+                    match crate::tool_call_utils::internet::handle_directions_tool(
+                        start_address,
+                        end_address,
+                        mode,
+                    )
+                    .await
+                    {
                         Ok(answer) => {
                             tracing::debug!("Successfully received directions answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -1279,13 +1442,17 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "api_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::DIRECTIONS_UNAVAILABLE.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::DIRECTIONS_UNAVAILABLE.to_string(),
+                            );
                             continue;
                         }
                     };
                 } else if name == "fetch_emails" {
                     tracing::debug!("Executing fetch_emails tool call");
-                    let response = crate::tool_call_utils::email::handle_fetch_emails(state, user.id).await;
+                    let response =
+                        crate::tool_call_utils::email::handle_fetch_emails(state, user.id).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_specific_email" {
                     tracing::debug!("Executing fetch_specific_email tool call");
@@ -1293,7 +1460,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     struct EmailQuery {
                         query: String,
                     }
-                    
+
                     let query: EmailQuery = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
@@ -1304,23 +1471,37 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 "json_parse_failure",
                                 &e.to_string(),
                             );
-                            tool_answers.insert(tool_call_id, tool_error_messages::INTERNAL_ERROR.to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                tool_error_messages::INTERNAL_ERROR.to_string(),
+                            );
                             continue;
                         }
                     };
 
                     // First get the email ID
-                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(state, user.id, &query.query).await;
+                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(
+                        state,
+                        user.id,
+                        &query.query,
+                    )
+                    .await;
                     let auth_user = crate::handlers::auth_middleware::AuthUser {
                         user_id: user.id,
                         is_admin: false,
                     };
-                    
+
                     // Then fetch the complete email with that ID
-                    match crate::handlers::imap_handlers::fetch_single_imap_email(axum::extract::State(state.clone()), auth_user, axum::extract::Path(email_id)).await {
+                    match crate::handlers::imap_handlers::fetch_single_imap_email(
+                        axum::extract::State(state.clone()),
+                        auth_user,
+                        axum::extract::Path(email_id),
+                    )
+                    .await
+                    {
                         Ok(email) => {
                             let email = &email["email"];
-                            
+
                             // Format the response with all email details
                             let response = format!(
                                 "From: {}\nSubject: {}\nDate: {}\n\n{}",
@@ -1330,19 +1511,21 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 email["body"]
                             );
                             tool_answers.insert(tool_call_id, response);
-                        },
+                        }
                         Err(_) => {
-                            tool_answers.insert(tool_call_id, "Failed to fetch the complete email".to_string());
+                            tool_answers.insert(
+                                tool_call_id,
+                                "Failed to fetch the complete email".to_string(),
+                            );
                         }
                     }
                 } else if name == "send_email" {
                     tracing::debug!("Executing send_email tool call");
                     match crate::tool_call_utils::email::handle_send_email(
-                        state,
-                        user.id,
-                        arguments,
-                        &user,
-                    ).await {
+                        state, user.id, arguments, &user,
+                    )
+                    .await
+                    {
                         Ok((status, headers, Json(twilio_response))) => {
                             let history_entry = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
@@ -1354,22 +1537,32 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store email tool message in history: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&history_entry)
+                            {
+                                tracing::error!(
+                                    "Failed to store email tool message in history: {}",
+                                    e
+                                );
                             }
                             // Store the matching "tool" response history before returning
                             let tool_message = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
                                 role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(),  // Or "Email sent successfully" if you want a standard msg
+                                encrypted_content: twilio_response.message.clone(), // Or "Email sent successfully" if you want a standard msg
                                 tool_name: Some("send_email".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool response for send_email: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool response for send_email: {}",
+                                    e
+                                );
                             }
                             return (status, headers, Json(twilio_response));
                         }
@@ -1386,26 +1579,30 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool error response for send_email: {}", store_e);
+                            if let Err(store_e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool error response for send_email: {}",
+                                    store_e
+                                );
                             }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process email request".to_string(),
-                                })
+                                }),
                             );
                         }
                     }
                 } else if name == "respond_to_email" {
                     tracing::debug!("Executing respond_to_email tool call");
                     match crate::tool_call_utils::email::handle_respond_to_email(
-                        state,
-                        user.id,
-                        arguments,
-                        &user,
-                    ).await {
+                        state, user.id, arguments, &user,
+                    )
+                    .await
+                    {
                         Ok((status, headers, Json(twilio_response))) => {
                             let history_entry = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
@@ -1417,22 +1614,32 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store respond_to_email tool message in history: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&history_entry)
+                            {
+                                tracing::error!(
+                                    "Failed to store respond_to_email tool message in history: {}",
+                                    e
+                                );
                             }
                             // Store the matching "tool" response history before returning
                             let tool_message = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
                                 role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(),  // Or "Email sent successfully" if you want a standard msg
+                                encrypted_content: twilio_response.message.clone(), // Or "Email sent successfully" if you want a standard msg
                                 tool_name: Some("respond_to_email".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
-                                created_at: current_time+1,
+                                created_at: current_time + 1,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool response for send_email: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool response for send_email: {}",
+                                    e
+                                );
                             }
                             return (status, headers, Json(twilio_response));
                         }
@@ -1450,32 +1657,49 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool error response for send_email: {}", store_e);
+                            if let Err(store_e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool error response for send_email: {}",
+                                    store_e
+                                );
                             }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
-                                    message: "Failed to process respond_to_email request".to_string(),
-                                })
+                                    message: "Failed to process respond_to_email request"
+                                        .to_string(),
+                                }),
                             );
                         }
                     }
                 } else if name == "create_task" {
                     tracing::debug!("Executing create_task tool call");
-                    match crate::tool_call_utils::management::handle_create_task(state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_create_task(
+                        state, user.id, arguments,
+                    )
+                    .await
+                    {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
                             tracing::error!("Failed to create task: {}", e);
-                            tool_answers.insert(tool_call_id, format!("Sorry, I couldn't create the task: {}", e));
+                            tool_answers.insert(
+                                tool_call_id,
+                                format!("Sorry, I couldn't create the task: {}", e),
+                            );
                         }
                     }
                 } else if name == "update_monitoring_status" {
                     tracing::debug!("Executing update_monitoring_status tool call");
-                    match crate::tool_call_utils::management::handle_set_proactive_agent(state, user.id, arguments).await {
+                    match crate::tool_call_utils::management::handle_set_proactive_agent(
+                        state, user.id, arguments,
+                    )
+                    .await
+                    {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
@@ -1487,39 +1711,48 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 } else if name == "create_calendar_event" {
                     tracing::debug!("Executing create_calendar_event tool call");
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
-                        state,
-                        user.id,
-                        arguments,
-                        &user,
-                    ).await {
+                        state, user.id, arguments, &user,
+                    )
+                    .await
+                    {
                         Ok((status, headers, Json(twilio_response))) => {
                             let history_entry = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
                                 role: "assistant".to_string(),
                                 encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("create_calendar_event".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()), 
+                                tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
 
-                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store calendar tool message in history: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&history_entry)
+                            {
+                                tracing::error!(
+                                    "Failed to store calendar tool message in history: {}",
+                                    e
+                                );
                             }
                             // Store the matching "tool" response history before returning
                             let tool_message = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
                                 role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(),  
+                                encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("create_calendar_event".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool response for create_calendar_event: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool response for create_calendar_event: {}",
+                                    e
+                                );
                             }
 
                             return (status, headers, Json(twilio_response));
@@ -1538,7 +1771,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
+                            if let Err(store_e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
                                 tracing::error!("Failed to store tool error response for create_calendar_event: {}", store_e);
                             }
                             return (
@@ -1546,33 +1781,30 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process calendar event request".to_string(),
-                                })
+                                }),
                             );
                         }
                     }
                 } else if name == "search_chat_contacts" {
                     tracing::debug!("Executing search_chat_contacts tool call");
                     let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
-                        state,
-                        user.id,
-                        arguments,
-                    ).await;
+                        state, user.id, arguments,
+                    )
+                    .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_recent_messages" {
                     tracing::debug!("Executing fetch_recent_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_recent_messages(
-                        state,
-                        user.id,
-                        arguments,
-                    ).await;
+                        state, user.id, arguments,
+                    )
+                    .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_chat_messages" {
                     tracing::debug!("Executing fetch_chat_messages tool call");
                     let response = crate::tool_call_utils::bridge::handle_fetch_chat_messages(
-                        state,
-                        user.id,
-                        arguments,
-                    ).await;
+                        state, user.id, arguments,
+                    )
+                    .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "send_chat_message" {
                     tracing::debug!("Executing send_chat_message tool call");
@@ -1582,7 +1814,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         arguments,
                         &user,
                         image_url.as_deref(),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok((status, headers, Json(twilio_response))) => {
                             let history_entry = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
@@ -1594,22 +1828,32 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store send chat message tool message in history: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&history_entry)
+                            {
+                                tracing::error!(
+                                    "Failed to store send chat message tool message in history: {}",
+                                    e
+                                );
                             }
                             // Store the matching "tool" response history before returning
                             let tool_message = crate::models::user_models::NewMessageHistory {
                                 user_id: user.id,
                                 role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(), 
+                                encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("send_chat_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool response for send_chat_message: {}", e);
+                            if let Err(e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool response for send_chat_message: {}",
+                                    e
+                                );
                             }
                             return (status, headers, Json(twilio_response));
                         }
@@ -1627,45 +1871,52 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 created_at: current_time,
                                 conversation_id: "".to_string(),
                             };
-                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
-                                tracing::error!("Failed to store tool error response for send_chat_message: {}", store_e);
+                            if let Err(store_e) =
+                                state.user_repository.create_message_history(&tool_message)
+                            {
+                                tracing::error!(
+                                    "Failed to store tool error response for send_chat_message: {}",
+                                    store_e
+                                );
                             }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process chat message request".to_string(),
-                                })
+                                }),
                             );
                         }
                     }
                 } else if name == "scan_qr_code" {
-                    tracing::debug!("Executing scan_qr_code tool call with url: {:#?}", image_url);
-                    let response = crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref()).await;
+                    tracing::debug!(
+                        "Executing scan_qr_code tool call with url: {:#?}",
+                        image_url
+                    );
+                    let response =
+                        crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref())
+                            .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_calendar_events" {
                     tracing::debug!("Executing fetch_calendar_events tool call");
                     let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state,
-                        user.id,
-                        arguments,
-                    ).await;
+                        state, user.id, arguments,
+                    )
+                    .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "control_tesla" {
                     tracing::debug!("Executing control_tesla tool call");
                     let response = crate::tool_call_utils::tesla::handle_tesla_command(
-                        state,
-                        user.id,
-                        arguments,
+                        state, user.id, arguments,
                         false, // send notification for SMS-initiated commands
-                    ).await;
+                    )
+                    .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "switch_selected_tesla_vehicle" {
                     tracing::debug!("Executing switch_selected_tesla_vehicle tool call");
-                    let response = crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(
-                        state,
-                        user.id,
-                    ).await;
+                    let response =
+                        crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(state, user.id)
+                            .await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "direct_response" {
                     tracing::debug!("Executing direct_response tool call");
@@ -1688,17 +1939,21 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 }
             }
 
-
             let mut follow_up_messages = completion_messages.clone();
             // Add the assistant's message with tool calls
             follow_up_messages.push(chat_completion::ChatCompletionMessage {
                 role: chat_completion::MessageRole::assistant,
-                content: chat_completion::Content::Text(result.choices[0].message.content.clone().unwrap_or_default()),
+                content: chat_completion::Content::Text(
+                    result.choices[0]
+                        .message
+                        .content
+                        .clone()
+                        .unwrap_or_default(),
+                ),
                 name: None,
                 tool_calls: result.choices[0].message.tool_calls.clone(),
                 tool_call_id: None,
             });
-
 
             // Add the tool response
             if let Some(tool_calls) = &result.choices[0].message.tool_calls {
@@ -1731,7 +1986,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     tool_name: None, // We could store this if needed
                     tool_call_id: Some(tool_call_id.clone()),
                     tool_calls_json: None,
-                    created_at: current_time+1,
+                    created_at: current_time + 1,
                     conversation_id: "".to_string(),
                 };
 
@@ -1740,25 +1995,31 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 }
             }
 
-
             tracing::debug!("Making follow-up request to model with tool call answers");
-            let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                model.clone(),
-                follow_up_messages,
-            )
-            .max_tokens(250); // Allow up to ~480 chars for follow-up messages
+            let follow_up_req =
+                chat_completion::ChatCompletionRequest::new(model.clone(), follow_up_messages)
+                    .max_tokens(250); // Allow up to ~480 chars for follow-up messages
 
             match client.chat_completion(follow_up_req).await {
                 Ok(follow_up_result) => {
                     tracing::debug!("Received follow-up response from model");
-                    let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
+                    let response = follow_up_result.choices[0]
+                        .message
+                        .content
+                        .clone()
+                        .unwrap_or_default();
 
                     // If we got an empty response, fall back to the tool answer
                     if response.trim().is_empty() {
                         tracing::warn!("Follow-up response was empty, using tool answer directly");
-                        tool_answers.values().next()
+                        tool_answers
+                            .values()
+                            .next()
                             .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
-                            .unwrap_or_else(|| "I processed your request but couldn't generate a response.".to_string())
+                            .unwrap_or_else(|| {
+                                "I processed your request but couldn't generate a response."
+                                    .to_string()
+                            })
                     } else {
                         response
                     }
@@ -1790,7 +2051,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // Ensure response is within SMS character limit
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, &client, &model).await.into_inner()
+        SmsResponse::new(final_response, &client, &model)
+            .await
+            .into_inner()
     } else {
         // For failure messages, just truncate (they're already short)
         SmsResponse::truncated(final_response).into_inner()
@@ -1802,10 +2065,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     // Clean up old message history based on save_context setting
     let save_context = user_settings.save_context.unwrap_or(0);
-    if let Err(e) = state.user_repository.delete_old_message_history(
-        user.id,
-        save_context as i64
-    ) {
+    if let Err(e) = state
+        .user_repository
+        .delete_old_message_history(user.id, save_context as i64)
+    {
         tracing::error!("Failed to clean up old message history: {}", e);
     }
 
@@ -1826,7 +2089,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     };
 
     // Store messages in history
-    if let Err(e) = state.user_repository.create_message_history(&assistant_message) {
+    if let Err(e) = state
+        .user_repository
+        .create_message_history(&assistant_message)
+    {
         tracing::error!("Failed to store assistant message in history: {}", e);
     }
 
@@ -1850,14 +2116,16 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
         // Deduct credits unless caller handles credits themselves
         if !options.skip_credit_deduction {
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+            if let Err(e) =
+                crate::utils::usage::deduct_user_credits(state, user.id, "message", None)
+            {
                 tracing::error!("Failed to deduct user credits: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "Failed to process credits".to_string(),
-                    })
+                    }),
                 );
             }
         }
@@ -1867,25 +2135,29 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(TwilioResponse {
                 message: final_response_with_notice,
-            })
+            }),
         );
     }
 
     // Extract filenames from the response and look up their media SIDs
     let mut media_sids = Vec::new();
-    let clean_response = final_response_with_notice.lines().filter_map(|line| {
-        // Look for lines that contain filenames from the media map
-        MEDIA_SID_MAP.with(|map| {
-            let map = map.borrow();
-            for (filename, media_sid) in map.iter() {
-                if line.contains(filename) {
-                    media_sids.push(media_sid.clone());
-                    return None; // Remove the line containing the filename
+    let clean_response = final_response_with_notice
+        .lines()
+        .filter_map(|line| {
+            // Look for lines that contain filenames from the media map
+            MEDIA_SID_MAP.with(|map| {
+                let map = map.borrow();
+                for (filename, media_sid) in map.iter() {
+                    if line.contains(filename) {
+                        media_sids.push(media_sid.clone());
+                        return None; // Remove the line containing the filename
+                    }
                 }
-            }
-            Some(line.to_string())
+                Some(line.to_string())
+            })
         })
-    }).collect::<Vec<String>>().join("\n");
+        .collect::<Vec<String>>()
+        .join("\n");
 
     let media_sid = media_sids.first();
     let state_clone = state.clone();
@@ -1894,7 +2166,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     tracing::debug!("going into deleting the incoming message handler");
     tokio::spawn(async move {
-        if let Err(e) = crate::api::twilio_utils::delete_twilio_message(&state_clone, &msg_sid, &user_clone).await {
+        if let Err(e) =
+            crate::api::twilio_utils::delete_twilio_message(&state_clone, &msg_sid, &user_clone)
+                .await
+        {
             tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);
         }
     });
@@ -1904,8 +2179,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         state,
         &clean_response,
         media_sid,
-        &user
-    ).await {
+        &user,
+    )
+    .await
+    {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history
 
@@ -1925,36 +2202,44 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user.id, "message", None) {
+            if let Err(e) =
+                crate::utils::usage::deduct_user_credits(state, user.id, "message", None)
+            {
                 tracing::error!("Failed to deduct user credits: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "Failed to process credits points".to_string(),
-                    })
+                    }),
                 );
             }
-                    
+
             match state.user_repository.is_credits_under_threshold(user.id) {
                 Ok(is_under) => {
                     if is_under {
-                        tracing::debug!("User {} credits is under threshold, attempting automatic charge", user.id);
+                        tracing::debug!(
+                            "User {} credits is under threshold, attempting automatic charge",
+                            user.id
+                        );
                         // Get user information
                         if user.charge_when_under {
-                            use axum::extract::{State, Path};
+                            use axum::extract::{Path, State};
                             let state_clone = Arc::clone(state);
                             tokio::spawn(async move {
                                 let _ = crate::handlers::stripe_handlers::automatic_charge(
                                     State(state_clone),
                                     Path(user.id),
-                                ).await;
+                                )
+                                .await;
                                 tracing::debug!("Recharged the user successfully back up!");
                             });
                         }
                     }
-                },
-                Err(e) => tracing::error!("Failed to check if user credits is under threshold: {}", e),
+                }
+                Err(e) => {
+                    tracing::error!("Failed to check if user credits is under threshold: {}", e)
+                }
             }
 
             (
@@ -1962,7 +2247,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Message sent successfully".to_string(),
-                })
+                }),
             )
         }
         Err(e) => {
@@ -1988,9 +2273,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to send message".to_string(),
-                })
+                }),
             )
         }
     }
 }
-

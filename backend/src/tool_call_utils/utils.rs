@@ -1,11 +1,7 @@
-use openai_api_rs::v1::{
-    api::OpenAIClient,
-    chat_completion,
-    types,
-};
+use crate::AppState;
+use openai_api_rs::v1::{api::OpenAIClient, chat_completion, types};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::AppState;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -24,7 +20,9 @@ pub fn create_openai_client_for_user(
 ) -> Result<(OpenAIClient, crate::AiProvider), Box<dyn std::error::Error>> {
     // Use user's LLM provider preference from settings
     let llm_provider_preference = state.user_core.get_llm_provider(user_id).unwrap_or(None);
-    let provider = state.ai_config.provider_for_user_with_preference(llm_provider_preference.as_deref());
+    let provider = state
+        .ai_config
+        .provider_for_user_with_preference(llm_provider_preference.as_deref());
     let client = state.ai_config.create_client(provider)?;
     Ok((client, provider))
 }
@@ -35,7 +33,9 @@ pub fn create_openai_client(
     state: &Arc<AppState>,
 ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
     // Use OpenRouter for background tasks
-    state.ai_config.create_client(crate::AiProvider::OpenRouter)
+    state
+        .ai_config
+        .create_client(crate::AiProvider::OpenRouter)
         .map_err(|e| e as Box<dyn std::error::Error>)
 }
 
@@ -46,15 +46,19 @@ pub async fn cancel_pending_message(
     let mut senders = state.pending_message_senders.lock().await;
     if let Some(sender) = senders.remove(&user_id) {
         let _ = sender.send(());
-        Ok(true)  // Cancellation occurred
+        Ok(true) // Cancellation occurred
     } else {
-        Ok(false)  // No pending message to cancel
+        Ok(false) // No pending message to cancel
     }
 }
 
 // Helper function to check if a tool is accessible based on user's status
 // Only tier 2 (hosted) subscribers get full access to all tools
-pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
+pub fn requires_subscription(
+    tool_name: &str,
+    sub_tier: Option<String>,
+    has_discount: bool,
+) -> bool {
     // Only tier 2 (hosted) subscribers and users with discount get full access to everything
     if sub_tier == Some("tier 2".to_string()) || has_discount {
         println!("✅ User has tier 2 subscription or discount - granting full access");
@@ -64,7 +68,6 @@ pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_disc
     println!("❌ Tool {} requires tier 2 subscription", tool_name);
     true
 }
-
 
 // Function to create evaluation tools
 // Function to create email selection tool properties
@@ -82,7 +85,9 @@ pub fn create_email_select_properties() -> HashMap<String, Box<types::JSONSchema
         "reason".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Brief explanation of why this email was selected as most relevant".to_string()),
+            description: Some(
+                "Brief explanation of why this email was selected as most relevant".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -123,30 +128,25 @@ pub async fn select_most_relevant_email(
         },
     ];
 
-    let select_tools = vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("select_email"),
-                description: Some(String::from(
-                    "Selects the most relevant email based on the search query"
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(create_email_select_properties()),
-                    required: Some(vec![String::from("email_id")]),
-                },
+    let select_tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("select_email"),
+            description: Some(String::from(
+                "Selects the most relevant email based on the search query",
+            )),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(create_email_select_properties()),
+                required: Some(vec![String::from("email_id")]),
             },
         },
-    ];
+    }];
 
-    let select_req = chat_completion::ChatCompletionRequest::new(
-        model,
-        select_messages,
-    )
-    .tools(select_tools)
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
+    let select_req = chat_completion::ChatCompletionRequest::new(model, select_messages)
+        .tools(select_tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .max_tokens(200);
 
     match client.chat_completion(select_req).await {
         Ok(result) => {
@@ -155,7 +155,10 @@ pub async fn select_most_relevant_email(
                     if let Some(args) = &first_call.function.arguments {
                         match serde_json::from_str::<EmailSelectResponse>(args) {
                             Ok(select) => Ok((select.email_id, select.reason)),
-                            Err(e) => Err(format!("Failed to parse email selection response: {}", e).into())
+                            Err(e) => {
+                                Err(format!("Failed to parse email selection response: {}", e)
+                                    .into())
+                            }
                         }
                     } else {
                         Err("No arguments found in email selection tool call".into())
@@ -167,6 +170,6 @@ pub async fn select_most_relevant_email(
                 Err("No tool calls section in email selection response".into())
             }
         }
-        Err(e) => Err(format!("Failed to get email selection response: {}", e).into())
+        Err(e) => Err(format!("Failed to get email selection response: {}", e).into()),
     }
 }

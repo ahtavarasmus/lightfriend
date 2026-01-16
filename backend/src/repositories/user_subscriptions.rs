@@ -1,9 +1,9 @@
+use crate::{
+    models::user_models::{NewRefundInfo, RefundInfo, User},
+    schema::{refund_info, users},
+};
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use crate::{
-    models::user_models::{User, RefundInfo, NewRefundInfo},
-    schema::{users, refund_info},
-};
 
 impl crate::repositories::user_repository::UserRepository {
     // Subscription related methods
@@ -16,7 +16,11 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(sub_tier)
     }
 
-    pub fn set_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
+    pub fn set_subscription_tier(
+        &self,
+        user_id: i32,
+        tier: Option<&str>,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::sub_tier.eq(tier))
@@ -33,7 +37,11 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    pub fn update_user_credits_left(&self, user_id: i32, new_credits_left: f32) -> Result<(), DieselError> {
+    pub fn update_user_credits_left(
+        &self,
+        user_id: i32,
+        new_credits_left: f32,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::credits_left.eq(new_credits_left))
@@ -43,12 +51,10 @@ impl crate::repositories::user_repository::UserRepository {
 
     pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-        
+        let user = users::table.find(user_id).first::<User>(&mut conn)?;
+
         let new_credits = user.credits + amount;
-        
+
         diesel::update(users::table.find(user_id))
             .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;
@@ -65,7 +71,11 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(stripe_id)
     }
 
-    pub fn set_stripe_customer_id(&self, user_id: i32, customer_id: &str) -> Result<(), DieselError> {
+    pub fn set_stripe_customer_id(
+        &self,
+        user_id: i32,
+        customer_id: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_customer_id.eq(customer_id))
@@ -73,7 +83,10 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    pub fn get_stripe_payment_method_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+    pub fn get_stripe_payment_method_id(
+        &self,
+        user_id: i32,
+    ) -> Result<Option<String>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let payment_method_id = users::table
             .find(user_id)
@@ -81,8 +94,12 @@ impl crate::repositories::user_repository::UserRepository {
             .first::<Option<String>>(&mut conn)?;
         Ok(payment_method_id)
     }
-    
-    pub fn set_stripe_payment_method_id(&self, user_id: i32, payment_method_id: &str) -> Result<(), DieselError> {
+
+    pub fn set_stripe_payment_method_id(
+        &self,
+        user_id: i32,
+        payment_method_id: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_payment_method_id.eq(payment_method_id))
@@ -90,7 +107,10 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    pub fn find_by_stripe_customer_id(&self, customer_id: &str) -> Result<Option<User>, DieselError> {
+    pub fn find_by_stripe_customer_id(
+        &self,
+        customer_id: &str,
+    ) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .filter(users::stripe_customer_id.eq(customer_id))
@@ -99,7 +119,11 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(user)
     }
 
-    pub fn set_stripe_checkout_session_id(&self, user_id: i32, session_id: &str) -> Result<(), DieselError> {
+    pub fn set_stripe_checkout_session_id(
+        &self,
+        user_id: i32,
+        session_id: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_checkout_session_id.eq(session_id))
@@ -116,7 +140,11 @@ impl crate::repositories::user_repository::UserRepository {
     }
 
     /// Update the user's plan type ("monitor", "digest", or None for US/CA)
-    pub fn update_plan_type(&self, user_id: i32, plan_type: Option<&str>) -> Result<(), DieselError> {
+    pub fn update_plan_type(
+        &self,
+        user_id: i32,
+        plan_type: Option<&str>,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::plan_type.eq(plan_type))
@@ -125,7 +153,11 @@ impl crate::repositories::user_repository::UserRepository {
     }
 
     // Check if user has a specific subscription tier and has messages left
-    pub fn has_valid_subscription_tier(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
+    pub fn has_valid_subscription_tier(
+        &self,
+        user_id: i32,
+        tier: &str,
+    ) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
@@ -134,7 +166,6 @@ impl crate::repositories::user_repository::UserRepository {
 
         // If user has msg discount tier, they always have messages available
         if user.1.as_deref() == Some("msg") {
-
             return Ok(user.0.is_some_and(|t| t == tier));
         }
 
@@ -196,7 +227,12 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    pub fn update_last_credit_pack_purchase(&self, user_id: i32, amount: f32, timestamp: i32) -> Result<(), DieselError> {
+    pub fn update_last_credit_pack_purchase(
+        &self,
+        user_id: i32,
+        amount: f32,
+        timestamp: i32,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Ensure row exists
@@ -211,4 +247,3 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 }
-
