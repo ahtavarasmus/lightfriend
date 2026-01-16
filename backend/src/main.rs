@@ -394,6 +394,8 @@ async fn main() {
         .route("/api/admin/set-twilio-creds", post(admin_handlers::set_user_twilio_credentials))
         .route("/api/admin/users/{user_id}/message-stats", get(admin_handlers::get_user_message_stats))
         .route("/api/admin/global-message-stats", get(admin_handlers::get_global_message_stats))
+        .route("/api/admin/stats/costs", get(handlers::admin_stats_handlers::get_cost_stats))
+        .route("/api/admin/stats/usage", get(handlers::admin_stats_handlers::get_usage_stats))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
     // Protected routes that need user authentication
     let protected_routes = Router::new()

@@ -3,6 +3,7 @@ pub mod handlers {
     pub mod auth_middleware;
     pub mod auth_dtos;
     pub mod admin_handlers;
+    pub mod admin_stats_handlers;
     pub mod auth_handlers;
     pub mod profile_handlers;
     pub mod filter_handlers;

@@ -75,6 +75,58 @@ struct GlobalMessageStatsResponse {
     recent_failed: Vec<MessageStatusLogWithUser>,
 }
 
+// Cost Stats Response
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct CostStatsResponse {
+    total_cost: f32,
+    total_sms_cost: f32,
+    total_voice_cost: f32,
+    avg_cost_per_intl_user_30d: f32,
+    avg_cost_per_intl_user_7d_projected: f32,
+    intl_user_count: i64,
+    international_sms_cost: f32,
+    costs_per_user: Vec<UserCostEntry>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct UserCostEntry {
+    user_id: i32,
+    country_code: String,
+    sms_cost: f32,
+    sms_count: i64,
+    is_international: bool,
+}
+
+// Usage Stats Response
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct UsageStatsResponse {
+    daily_stats: Vec<DailyUsageStat>,
+    total_messages_7d: i64,
+    total_messages_30d: i64,
+    growth_rate_7d: f32,
+    growth_rate_30d: f32,
+    active_users_7d: i64,
+    active_users_30d: i64,
+    breakdown_by_type: Vec<ActivityTypeBreakdown>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct DailyUsageStat {
+    date: String,
+    sms_count: i64,
+    call_count: i64,
+    total_cost: f32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct ActivityTypeBreakdown {
+    activity_type: String,
+    count: i64,
+    total_credits: f32,
+}
+
 #[derive(Serialize)]
 struct ChangePasswordRequest {
     new_password: String,
@@ -282,15 +334,25 @@ pub fn admin_dashboard() -> Html {
     let show_all_messages = use_state(|| false); // Default: show only failed/undelivered
     // Global message stats state
     let global_stats: UseStateHandle<Option<GlobalMessageStatsResponse>> = use_state(|| None);
+    // Cost and usage stats state
+    let cost_stats: UseStateHandle<Option<CostStatsResponse>> = use_state(|| None);
+    let usage_stats: UseStateHandle<Option<UsageStatsResponse>> = use_state(|| None);
+    let stats_days = use_state(|| 30i32);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
     let global_stats_effect = global_stats.clone();
+    let cost_stats_effect = cost_stats.clone();
+    let usage_stats_effect = usage_stats.clone();
+    let stats_days_effect = (*stats_days).clone();
 
     use_effect_with_deps(move |_| {
         let users = users_effect;
         let error = error_effect;
         let global_stats = global_stats_effect;
+        let cost_stats = cost_stats_effect;
+        let usage_stats = usage_stats_effect;
+        let stats_days = stats_days_effect;
 
         wasm_bindgen_futures::spawn_local(async move {
             // Fetch users
@@ -325,6 +387,30 @@ pub fn admin_dashboard() -> Html {
                 if response.ok() {
                     if let Ok(data) = response.json::<GlobalMessageStatsResponse>().await {
                         global_stats.set(Some(data));
+                    }
+                }
+            }
+
+            // Fetch cost stats
+            if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", stats_days))
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<CostStatsResponse>().await {
+                        cost_stats.set(Some(data));
+                    }
+                }
+            }
+
+            // Fetch usage stats
+            if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", stats_days))
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                        usage_stats.set(Some(data));
                     }
                 }
             }
@@ -509,6 +595,216 @@ pub fn admin_dashboard() -> Html {
                             }
                         }
                     </div>
+                </div>
+
+                // Cost & Usage Statistics Section
+                <div class="cost-usage-stats-section">
+                    <h2>{"Cost & Usage Statistics"}</h2>
+                    <div class="stats-period-selector">
+                        <span>{"Period: "}</span>
+                        <select
+                            value={format!("{}", *stats_days)}
+                            onchange={{
+                                let stats_days = stats_days.clone();
+                                let cost_stats = cost_stats.clone();
+                                let usage_stats = usage_stats.clone();
+                                Callback::from(move |e: Event| {
+                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                    let days: i32 = select.value().parse().unwrap_or(30);
+                                    stats_days.set(days);
+                                    // Refetch stats with new period
+                                    let cost_stats = cost_stats.clone();
+                                    let usage_stats = usage_stats.clone();
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", days))
+                                            .send()
+                                            .await
+                                        {
+                                            if response.ok() {
+                                                if let Ok(data) = response.json::<CostStatsResponse>().await {
+                                                    cost_stats.set(Some(data));
+                                                }
+                                            }
+                                        }
+                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", days))
+                                            .send()
+                                            .await
+                                        {
+                                            if response.ok() {
+                                                if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                                                    usage_stats.set(Some(data));
+                                                }
+                                            }
+                                        }
+                                    });
+                                })
+                            }}
+                        >
+                            <option value="7">{"7 days"}</option>
+                            <option value="30" selected=true>{"30 days"}</option>
+                            <option value="90">{"90 days"}</option>
+                        </select>
+                    </div>
+
+                    // Cost Stats
+                    {
+                        if let Some(costs) = (*cost_stats).as_ref() {
+                            html! {
+                                <div class="cost-stats">
+                                    <h3>{"Avg Cost Per International User (30 days)"}</h3>
+                                    <div class="key-metric">
+                                        <span class="key-number">{format!("${:.2}", costs.avg_cost_per_intl_user_30d)}</span>
+                                        <span class="key-context">{format!("across {} intl users", costs.intl_user_count)}</span>
+                                    </div>
+
+                                    <div class="secondary-metrics">
+                                        <div class="metric-item">
+                                            <span class="metric-label">{"7-day projected to 30d:"}</span>
+                                            <span class="metric-value">{format!("${:.2}", costs.avg_cost_per_intl_user_7d_projected)}</span>
+                                        </div>
+                                        <div class="metric-item">
+                                            <span class="metric-label">{"Total intl cost (30d):"}</span>
+                                            <span class="metric-value">{format!("${:.2}", costs.international_sms_cost)}</span>
+                                        </div>
+                                        <div class="metric-item">
+                                            <span class="metric-label">{"Total cost (all):"}</span>
+                                            <span class="metric-value">{format!("${:.2}", costs.total_cost)}</span>
+                                        </div>
+                                    </div>
+
+                                    {
+                                        if !costs.costs_per_user.is_empty() {
+                                            // Find max cost for scaling bars
+                                            let max_cost = costs.costs_per_user.iter()
+                                                .map(|u| u.sms_cost)
+                                                .fold(0.0f32, |a, b| a.max(b));
+
+                                            html! {
+                                                <>
+                                                    <h4>{"Cost Per User (30 days)"}</h4>
+                                                    <div class="user-cost-chart">
+                                                        {
+                                                            costs.costs_per_user.iter().map(|u| {
+                                                                let bar_width = if max_cost > 0.0 {
+                                                                    (u.sms_cost / max_cost * 100.0) as i32
+                                                                } else {
+                                                                    0
+                                                                };
+                                                                let bar_class = if u.is_international { "bar intl" } else { "bar us-ca" };
+                                                                html! {
+                                                                    <div class="chart-row" key={u.user_id}>
+                                                                        <span class="chart-label">{format!("#{} ({})", u.user_id, u.country_code)}</span>
+                                                                        <div class="chart-bar-container">
+                                                                            <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
+                                                                        </div>
+                                                                        <span class="chart-value">{format!("${:.2} ({} msgs)", u.sms_cost, u.sms_count)}</span>
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                </>
+                                            }
+                                        } else {
+                                            html! { <p class="no-data">{"No user cost data"}</p> }
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading cost stats..."}</p> }
+                        }
+                    }
+
+                    // Usage Stats
+                    {
+                        if let Some(usage) = (*usage_stats).as_ref() {
+                            html! {
+                                <div class="usage-stats">
+                                    <h3>{"Usage Trends"}</h3>
+                                    <div class="stats-summary usage-summary">
+                                        <div class="stat-card growth">
+                                            <span class="stat-number">{usage.total_messages_7d}</span>
+                                            <span class="stat-label">{format!("Messages (7d) {}%", if usage.growth_rate_7d >= 0.0 { format!("+{:.1}", usage.growth_rate_7d) } else { format!("{:.1}", usage.growth_rate_7d) })}</span>
+                                        </div>
+                                        <div class="stat-card growth">
+                                            <span class="stat-number">{usage.total_messages_30d}</span>
+                                            <span class="stat-label">{format!("Messages (30d) {}%", if usage.growth_rate_30d >= 0.0 { format!("+{:.1}", usage.growth_rate_30d) } else { format!("{:.1}", usage.growth_rate_30d) })}</span>
+                                        </div>
+                                        <div class="stat-card active-users">
+                                            <span class="stat-number">{usage.active_users_7d}</span>
+                                            <span class="stat-label">{"Active Users (7d)"}</span>
+                                        </div>
+                                        <div class="stat-card active-users">
+                                            <span class="stat-number">{usage.active_users_30d}</span>
+                                            <span class="stat-label">{"Active Users (30d)"}</span>
+                                        </div>
+                                    </div>
+
+                                    {
+                                        if !usage.breakdown_by_type.is_empty() {
+                                            html! {
+                                                <>
+                                                    <h4>{"Activity Breakdown"}</h4>
+                                                    <div class="activity-breakdown">
+                                                        {
+                                                            usage.breakdown_by_type.iter().map(|a| {
+                                                                html! {
+                                                                    <span class="activity-item" key={a.activity_type.clone()}>
+                                                                        {format!("{}: {} ({:.2} credits)", a.activity_type, a.count, a.total_credits)}
+                                                                    </span>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    {
+                                        if !usage.daily_stats.is_empty() {
+                                            html! {
+                                                <>
+                                                    <h4>{"Daily Stats (Recent)"}</h4>
+                                                    <table class="daily-stats-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>{"Date"}</th>
+                                                                <th>{"SMS"}</th>
+                                                                <th>{"Calls"}</th>
+                                                                <th>{"Cost"}</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {
+                                                                usage.daily_stats.iter().rev().take(14).map(|d| {
+                                                                    html! {
+                                                                        <tr key={d.date.clone()}>
+                                                                            <td>{&d.date}</td>
+                                                                            <td>{d.sms_count}</td>
+                                                                            <td>{d.call_count}</td>
+                                                                            <td>{format!("${:.4}", d.total_cost)}</td>
+                                                                        </tr>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! { <p class="loading">{"Loading usage stats..."}</p> }
+                        }
+                    }
                 </div>
 
                 // Global SMS Stats Section
@@ -2028,6 +2324,46 @@ pub fn admin_dashboard() -> Html {
                         border: 1px solid rgba(255, 165, 0, 0.5);
                     }
 
+                    .stat-card.sent {
+                        background: rgba(100, 149, 237, 0.3);
+                        border: 1px solid rgba(100, 149, 237, 0.5);
+                    }
+
+                    .stat-card.cost {
+                        background: rgba(30, 144, 255, 0.2);
+                        border: 1px solid rgba(30, 144, 255, 0.4);
+                    }
+
+                    .stat-card.total-cost {
+                        background: rgba(255, 215, 0, 0.25);
+                        border: 1px solid rgba(255, 215, 0, 0.5);
+                    }
+
+                    .stat-card.growth {
+                        background: rgba(138, 43, 226, 0.25);
+                        border: 1px solid rgba(138, 43, 226, 0.5);
+                    }
+
+                    .stat-card.active-users {
+                        background: rgba(0, 191, 165, 0.25);
+                        border: 1px solid rgba(0, 191, 165, 0.5);
+                    }
+
+                    .stat-card.international {
+                        background: rgba(255, 87, 51, 0.3);
+                        border: 1px solid rgba(255, 87, 51, 0.6);
+                    }
+
+                    .stat-card.international-avg {
+                        background: rgba(255, 165, 0, 0.3);
+                        border: 1px solid rgba(255, 165, 0, 0.6);
+                    }
+
+                    .stat-card.us-ca {
+                        background: rgba(40, 167, 69, 0.2);
+                        border: 1px solid rgba(40, 167, 69, 0.4);
+                    }
+
                     .stat-number {
                         display: block;
                         font-size: 1.5rem;
@@ -2133,6 +2469,170 @@ pub fn admin_dashboard() -> Html {
                     .loading {
                         color: #FFD700;
                         font-style: italic;
+                    }
+
+                    /* Cost & Usage Stats Section */
+                    .cost-usage-stats-section {
+                        margin: 2rem 0;
+                        padding: 1.5rem;
+                        background: rgba(30, 144, 255, 0.05);
+                        border-radius: 12px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .cost-usage-stats-section h2 {
+                        color: #FFD700;
+                        margin: 0 0 1rem 0;
+                    }
+
+                    .cost-usage-stats-section h3 {
+                        color: #7EB2FF;
+                        margin: 1.5rem 0 0.75rem 0;
+                        font-size: 1.1rem;
+                    }
+
+                    .cost-usage-stats-section h4 {
+                        color: #ccc;
+                        margin: 1rem 0 0.5rem 0;
+                        font-size: 0.95rem;
+                    }
+
+                    /* Key metric display */
+                    .key-metric {
+                        text-align: center;
+                        padding: 1.5rem;
+                        background: rgba(255, 87, 51, 0.15);
+                        border: 2px solid rgba(255, 87, 51, 0.5);
+                        border-radius: 12px;
+                        margin-bottom: 1rem;
+                    }
+
+                    .key-number {
+                        display: block;
+                        font-size: 3rem;
+                        font-weight: bold;
+                        color: #FF5733;
+                    }
+
+                    .key-context {
+                        display: block;
+                        font-size: 0.9rem;
+                        color: #aaa;
+                        margin-top: 0.25rem;
+                    }
+
+                    .secondary-metrics {
+                        display: flex;
+                        gap: 1.5rem;
+                        flex-wrap: wrap;
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .metric-item {
+                        display: flex;
+                        gap: 0.5rem;
+                    }
+
+                    .metric-label {
+                        color: #888;
+                    }
+
+                    .metric-value {
+                        color: #fff;
+                        font-weight: 600;
+                    }
+
+                    /* User cost chart */
+                    .user-cost-chart {
+                        margin-top: 0.5rem;
+                    }
+
+                    .chart-row {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        margin-bottom: 0.4rem;
+                    }
+
+                    .chart-label {
+                        width: 100px;
+                        font-size: 0.8rem;
+                        color: #aaa;
+                        flex-shrink: 0;
+                    }
+
+                    .chart-bar-container {
+                        flex: 1;
+                        height: 20px;
+                        background: rgba(255, 255, 255, 0.1);
+                        border-radius: 3px;
+                        overflow: hidden;
+                    }
+
+                    .chart-bar-container .bar {
+                        height: 100%;
+                        border-radius: 3px;
+                        transition: width 0.3s ease;
+                    }
+
+                    .chart-bar-container .bar.intl {
+                        background: linear-gradient(90deg, #FF5733, #FF8C5A);
+                    }
+
+                    .chart-bar-container .bar.us-ca {
+                        background: linear-gradient(90deg, #28a745, #5cb85c);
+                    }
+
+                    .chart-value {
+                        width: 60px;
+                        font-size: 0.85rem;
+                        color: #fff;
+                        text-align: right;
+                        flex-shrink: 0;
+                    }
+
+                    .no-data {
+                        color: #666;
+                        font-style: italic;
+                    }
+
+                    .daily-stats-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.85rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .daily-stats-table th,
+                    .daily-stats-table td {
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .daily-stats-table th {
+                        color: #7EB2FF;
+                        font-weight: 600;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .daily-stats-table tr:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .activity-breakdown {
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 0.75rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .activity-item {
+                        background: rgba(100, 100, 100, 0.3);
+                        padding: 0.4rem 0.8rem;
+                        border-radius: 4px;
+                        font-size: 0.85rem;
+                        color: #ddd;
                     }
 
                 "#}
