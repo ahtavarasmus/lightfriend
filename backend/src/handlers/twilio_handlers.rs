@@ -723,18 +723,27 @@ async fn fetch_message_price(
                     Ok(msg) => {
                         tracing::info!(
                             "Twilio message {} response: status={:?}, price={:?}, price_unit={:?}",
-                            message_sid, msg.status, msg.price, msg.price_unit
+                            message_sid,
+                            msg.status,
+                            msg.price,
+                            msg.price_unit
                         );
                         if let (Some(price_str), Some(price_unit)) = (msg.price, msg.price_unit) {
                             if let Ok(price) = price_str.parse::<f32>() {
                                 tracing::info!(
                                     "Fetched price for message {}: {} {}",
-                                    message_sid, price, price_unit
+                                    message_sid,
+                                    price,
+                                    price_unit
                                 );
                                 return Some((price, price_unit));
                             }
                         }
-                        tracing::warn!("Message {} has no price info yet (status: {:?})", message_sid, msg.status);
+                        tracing::warn!(
+                            "Message {} has no price info yet (status: {:?})",
+                            message_sid,
+                            msg.status
+                        );
                         None
                     }
                     Err(e) => {
@@ -743,12 +752,16 @@ async fn fetch_message_price(
                     }
                 }
             } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-                tracing::warn!("Message {} not found in Twilio (already deleted?)", message_sid);
+                tracing::warn!(
+                    "Message {} not found in Twilio (already deleted?)",
+                    message_sid
+                );
                 None
             } else {
                 tracing::error!(
                     "Failed to fetch message {}: status {}",
-                    message_sid, response.status()
+                    message_sid,
+                    response.status()
                 );
                 None
             }
@@ -789,7 +802,8 @@ async fn delete_message_from_twilio(
             } else {
                 Err(format!(
                     "Failed to delete message {}: status {}",
-                    message_sid, response.status()
+                    message_sid,
+                    response.status()
                 ))
             }
         }
@@ -845,7 +859,7 @@ pub async fn twilio_status_callback(
     let price_value: Option<f32> = payload.Price.as_ref().and_then(|p| p.parse().ok());
 
     let update_result = diesel::update(
-        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.MessageSid))
+        message_status_log::table.filter(message_status_log::message_sid.eq(&payload.MessageSid)),
     )
     .set((
         message_status_log::status.eq(&payload.MessageStatus),
@@ -904,7 +918,9 @@ pub async fn twilio_status_callback(
                     error_code.as_deref(),
                     error_message.as_deref(),
                     &country,
-                ).await {
+                )
+                .await
+                {
                     tracing::error!("Failed to send SMS failure admin email: {}", e);
                 }
             });
@@ -935,11 +951,9 @@ pub async fn twilio_status_callback(
                 for (attempt, delay) in delays_secs.iter().enumerate() {
                     tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
 
-                    if let Some(result) = fetch_message_price(
-                        &message_sid,
-                        &account_sid,
-                        &auth_token,
-                    ).await {
+                    if let Some(result) =
+                        fetch_message_price(&message_sid, &account_sid, &auth_token).await
+                    {
                         price_result = Some(result);
                         break;
                     }
@@ -947,12 +961,14 @@ pub async fn twilio_status_callback(
                     if attempt < delays_secs.len() - 1 {
                         tracing::info!(
                             "Price fetch attempt {} for {} returned no price, retrying...",
-                            attempt + 1, message_sid
+                            attempt + 1,
+                            message_sid
                         );
                     } else {
                         tracing::warn!(
                             "Price fetch failed after {} attempts for {}, giving up",
-                            delays_secs.len(), message_sid
+                            delays_secs.len(),
+                            message_sid
                         );
                     }
                 }
@@ -967,32 +983,43 @@ pub async fn twilio_status_callback(
 
                         if let Err(e) = diesel::update(
                             message_status_log::table
-                                .filter(message_status_log::message_sid.eq(&message_sid))
+                                .filter(message_status_log::message_sid.eq(&message_sid)),
                         )
                         .set((
                             message_status_log::price.eq(price),
                             message_status_log::price_unit.eq(&price_unit),
                             message_status_log::updated_at.eq(now),
                         ))
-                        .execute(&mut conn) {
-                            tracing::error!("Failed to update price for message {}: {}", message_sid, e);
+                        .execute(&mut conn)
+                        {
+                            tracing::error!(
+                                "Failed to update price for message {}: {}",
+                                message_sid,
+                                e
+                            );
                         } else {
-                            tracing::info!("Updated price for message {}: {} {}", message_sid, price, price_unit);
+                            tracing::info!(
+                                "Updated price for message {}: {} {}",
+                                message_sid,
+                                price,
+                                price_unit
+                            );
                         }
                     }
                 }
 
                 // Delete message from Twilio
-                if let Err(e) = delete_message_from_twilio(
-                    &message_sid,
-                    &account_sid,
-                    &auth_token,
-                ).await {
+                if let Err(e) =
+                    delete_message_from_twilio(&message_sid, &account_sid, &auth_token).await
+                {
                     tracing::error!("{}", e);
                 }
             });
         } else {
-            tracing::warn!("Missing Twilio credentials, skipping price fetch and deletion for {}", payload.MessageSid);
+            tracing::warn!(
+                "Missing Twilio credentials, skipping price fetch and deletion for {}",
+                payload.MessageSid
+            );
         }
     }
 

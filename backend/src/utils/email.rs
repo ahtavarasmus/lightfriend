@@ -359,12 +359,16 @@ pub async fn send_sms_failure_admin_email(
     };
 
     // Get admin email from env, default to rasmus@lightfriend.ai
-    let admin_email = std::env::var("ADMIN_EMAIL")
-        .unwrap_or_else(|_| "rasmus@lightfriend.ai".to_string());
+    let admin_email =
+        std::env::var("ADMIN_EMAIL").unwrap_or_else(|_| "rasmus@lightfriend.ai".to_string());
 
     // Mask the phone number for privacy (show only last 4 digits)
     let masked_number = if to_number.len() > 4 {
-        format!("{}****{}", &to_number[..3], &to_number[to_number.len()-4..])
+        format!(
+            "{}****{}",
+            &to_number[..3],
+            &to_number[to_number.len() - 4..]
+        )
     } else {
         "****".to_string()
     };
@@ -417,7 +421,7 @@ pub async fn send_sms_failure_admin_email(
     let email_body = wrap_email_body(
         &format!("SMS Delivery Failed - User {} to {}", user_id, country),
         &content,
-        "Lightfriend System"
+        "Lightfriend System",
     );
 
     let from_with_name = format!("Lightfriend Alerts <{}>", from_email);
@@ -427,7 +431,11 @@ pub async fn send_sms_failure_admin_email(
 
     resend.emails.send(email).await?;
 
-    tracing::info!("SMS failure admin email sent for user {} to {}", user_id, country);
+    tracing::info!(
+        "SMS failure admin email sent for user {} to {}",
+        user_id,
+        country
+    );
 
     Ok(())
 }

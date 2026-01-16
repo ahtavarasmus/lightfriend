@@ -769,7 +769,10 @@ pub async fn get_user_message_stats(
 
     let conn = &mut state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database connection error"})),
+        )
     })?;
 
     // Get recent messages (last 50)
@@ -780,24 +783,58 @@ pub async fn get_user_message_stats(
         .load(conn)
         .map_err(|e| {
             tracing::error!("Failed to get message stats: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get message stats"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get message stats"})),
+            )
         })?;
 
-    tracing::info!("Found {} messages for user_id={}", recent_messages.len(), user_id);
+    tracing::info!(
+        "Found {} messages for user_id={}",
+        recent_messages.len(),
+        user_id
+    );
     for msg in &recent_messages {
-        tracing::info!("  Message: sid={}, status={}, to={}", msg.message_sid, msg.status, msg.to_number);
+        tracing::info!(
+            "  Message: sid={}, status={}, to={}",
+            msg.message_sid,
+            msg.status,
+            msg.to_number
+        );
     }
 
     // Count by status
     let total_messages = recent_messages.len() as i64;
-    let delivered = recent_messages.iter().filter(|m| m.status == "delivered").count() as i64;
-    let failed = recent_messages.iter().filter(|m| m.status == "failed").count() as i64;
-    let undelivered = recent_messages.iter().filter(|m| m.status == "undelivered").count() as i64;
-    let queued = recent_messages.iter().filter(|m| m.status == "queued").count() as i64;
-    let sent = recent_messages.iter().filter(|m| m.status == "sent").count() as i64;
+    let delivered = recent_messages
+        .iter()
+        .filter(|m| m.status == "delivered")
+        .count() as i64;
+    let failed = recent_messages
+        .iter()
+        .filter(|m| m.status == "failed")
+        .count() as i64;
+    let undelivered = recent_messages
+        .iter()
+        .filter(|m| m.status == "undelivered")
+        .count() as i64;
+    let queued = recent_messages
+        .iter()
+        .filter(|m| m.status == "queued")
+        .count() as i64;
+    let sent = recent_messages
+        .iter()
+        .filter(|m| m.status == "sent")
+        .count() as i64;
 
-    tracing::info!("Stats: total={}, delivered={}, failed={}, undelivered={}, queued={}, sent={}",
-        total_messages, delivered, failed, undelivered, queued, sent);
+    tracing::info!(
+        "Stats: total={}, delivered={}, failed={}, undelivered={}, queued={}, sent={}",
+        total_messages,
+        delivered,
+        failed,
+        undelivered,
+        queued,
+        sent
+    );
 
     Ok(Json(MessageStatsResponse {
         user_id,
@@ -852,7 +889,10 @@ pub async fn get_global_message_stats(
 
     let conn = &mut state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database connection error"})),
+        )
     })?;
 
     // Get all messages (last 1000 for stats)
@@ -862,14 +902,23 @@ pub async fn get_global_message_stats(
         .load(conn)
         .map_err(|e| {
             tracing::error!("Failed to get global message stats: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get message stats"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get message stats"})),
+            )
         })?;
 
     // Count by status
     let total_messages = all_messages.len() as i64;
-    let delivered = all_messages.iter().filter(|m| m.status == "delivered").count() as i64;
+    let delivered = all_messages
+        .iter()
+        .filter(|m| m.status == "delivered")
+        .count() as i64;
     let failed = all_messages.iter().filter(|m| m.status == "failed").count() as i64;
-    let undelivered = all_messages.iter().filter(|m| m.status == "undelivered").count() as i64;
+    let undelivered = all_messages
+        .iter()
+        .filter(|m| m.status == "undelivered")
+        .count() as i64;
     let queued = all_messages.iter().filter(|m| m.status == "queued").count() as i64;
     let sent = all_messages.iter().filter(|m| m.status == "sent").count() as i64;
 
@@ -924,7 +973,12 @@ pub async fn get_global_message_stats(
 
     tracing::info!(
         "Global stats: total={}, delivered={}, failed={}, undelivered={}, queued={}, sent={}",
-        total_messages, delivered, failed, undelivered, queued, sent
+        total_messages,
+        delivered,
+        failed,
+        undelivered,
+        queued,
+        sent
     );
 
     Ok(Json(GlobalMessageStatsResponse {

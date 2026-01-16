@@ -20,7 +20,6 @@ use std::env;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::spawn;
 use tracing;
 use url::form_urlencoded;
 
@@ -905,13 +904,17 @@ pub async fn send_conversation_message(
             user_id: user.id,
             direction: "outbound".to_string(),
             to_number: user.phone_number.clone(),
-            from_number: if from_number.is_empty() { None } else { Some(from_number.clone()) },
+            from_number: if from_number.is_empty() {
+                None
+            } else {
+                Some(from_number.clone())
+            },
             status: "queued".to_string(),
             error_code: None,
             error_message: None,
             created_at: now,
             updated_at: now,
-            price: None,        // Price comes from Twilio callback after delivery
+            price: None, // Price comes from Twilio callback after delivery
             price_unit: None,
         };
 
@@ -919,7 +922,11 @@ pub async fn send_conversation_message(
             .values(&new_status)
             .execute(&mut conn)
         {
-            tracing::error!("Failed to log message status for SID {}: {}", response.sid, e);
+            tracing::error!(
+                "Failed to log message status for SID {}: {}",
+                response.sid,
+                e
+            );
         } else {
             tracing::info!("Logged initial message status for SID {}", response.sid);
         }

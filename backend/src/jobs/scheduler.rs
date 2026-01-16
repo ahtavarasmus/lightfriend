@@ -858,9 +858,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             let message_log_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i32 - (30 * 24 * 60 * 60); // 30 days ago
+                .as_secs() as i32
+                - (30 * 24 * 60 * 60); // 30 days ago
 
-            match state.user_repository.delete_old_message_status_logs(message_log_cutoff) {
+            match state
+                .user_repository
+                .delete_old_message_status_logs(message_log_cutoff)
+            {
                 Ok(count) => debug!("Cleaned up {} old message status logs", count),
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
             }
