@@ -1,23 +1,23 @@
-use axum::{extract::State, Json};
-use axum::extract::Path;
-use serde::Serialize;
-use std::sync::Arc;
-use crate::AppState;
-use crate::api::twilio_pricing::{get_notification_only_pricing, get_euro_country_pricing};
 use crate::api::twilio_availability::get_byot_pricing;
-use crate::utils::country::{NOTIFICATION_ONLY_COUNTRIES, LOCAL_NUMBER_COUNTRIES};
+use crate::api::twilio_pricing::{get_euro_country_pricing, get_notification_only_pricing};
 use crate::handlers::auth_middleware::AuthUser;
 use crate::schema::usage_logs;
-use diesel::prelude::*;
+use crate::utils::country::{LOCAL_NUMBER_COUNTRIES, NOTIFICATION_ONLY_COUNTRIES};
+use crate::AppState;
+use axum::extract::Path;
+use axum::{extract::State, Json};
 use diesel::dsl::sql;
+use diesel::prelude::*;
 use diesel::sql_types::BigInt;
+use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct CountryPricing {
     pub country_code: String,
     pub country_name: String,
-    pub sms_price: f32,      // Final price after formula
-    pub voice_price: f32,    // Final price per minute
+    pub sms_price: f32,   // Final price after formula
+    pub voice_price: f32, // Final price per minute
 }
 
 #[derive(Serialize)]
@@ -161,7 +161,8 @@ fn get_country_name(code: &str) -> String {
         "IN" => "India",
         "ZA" => "South Africa",
         _ => code,
-    }.to_string()
+    }
+    .to_string()
 }
 
 /// Response for BYOT pricing endpoint
@@ -203,7 +204,9 @@ pub async fn get_byot_country_pricing(
         .map_err(|e| (axum::http::StatusCode::NOT_FOUND, e))?;
 
     // Use local price if available, otherwise mobile
-    let monthly_number_cost = pricing.local_number_monthly.or(pricing.mobile_number_monthly);
+    let monthly_number_cost = pricing
+        .local_number_monthly
+        .or(pricing.mobile_number_monthly);
 
     let sms_price = pricing.sms_price_per_segment;
 
@@ -221,8 +224,12 @@ pub async fn get_byot_country_pricing(
             normal_response: sms_price.map(|p| p * 3.0),
             digest: sms_price.map(|p| p * 3.0),
             // Add ElevenLabs cost to voice (AI voice generation)
-            voice_outbound_per_min: pricing.voice_price_per_minute.map(|p| p + ELEVENLABS_COST_PER_MIN),
-            voice_inbound_per_min: pricing.inbound_voice_price_per_minute.map(|p| p + ELEVENLABS_COST_PER_MIN),
+            voice_outbound_per_min: pricing
+                .voice_price_per_minute
+                .map(|p| p + ELEVENLABS_COST_PER_MIN),
+            voice_inbound_per_min: pricing
+                .inbound_voice_price_per_minute
+                .map(|p| p + ELEVENLABS_COST_PER_MIN),
         },
     }))
 }
@@ -273,7 +280,9 @@ fn is_us_or_ca(country: &str) -> bool {
 
 /// Check if country code is notification-only
 fn is_notification_only_code(country: &str) -> bool {
-    NOTIFICATION_ONLY_COUNTRIES.iter().any(|(_, c)| *c == country)
+    NOTIFICATION_ONLY_COUNTRIES
+        .iter()
+        .any(|(_, c)| *c == country)
 }
 
 /// Check if country code has local numbers
@@ -288,12 +297,20 @@ pub async fn get_dashboard_credits(
     auth_user: AuthUser,
 ) -> Result<Json<DashboardCreditsResponse>, (axum::http::StatusCode, String)> {
     // Get user from database
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((axum::http::StatusCode::NOT_FOUND, "User not found".to_string()))?;
+        .ok_or((
+            axum::http::StatusCode::NOT_FOUND,
+            "User not found".to_string(),
+        ))?;
 
     // Determine country
-    let country_code = user.phone_number_country.clone().unwrap_or_else(|| "US".to_string());
+    let country_code = user
+        .phone_number_country
+        .clone()
+        .unwrap_or_else(|| "US".to_string());
     let is_us_ca = is_us_or_ca(&country_code);
     let is_notification_only = is_notification_only_code(&country_code);
     let has_local_numbers = has_local_numbers_code(&country_code);
@@ -315,8 +332,8 @@ pub async fn get_dashboard_credits(
             let notifications = (credit_value * 2.0).floor() as i32; // 2 notifications per message
             let responses = (credit_value).floor() as i32; // 1 response per message
             let digests = (credit_value).floor() as i32; // 1 digest per message
-            // Voice: ~$0.185 per min total (Twilio $0.075 + ElevenLabs $0.11)
-            // Each message credit is worth ~$0.075, so voice_mins = (credits * $0.075) / $0.185
+                                                         // Voice: ~$0.185 per min total (Twilio $0.075 + ElevenLabs $0.11)
+                                                         // Each message credit is worth ~$0.075, so voice_mins = (credits * $0.075) / $0.185
             let voice_mins = (credit_value * 0.075 / 0.185).floor() as i32;
 
             CreditEquivalents {
@@ -326,7 +343,11 @@ pub async fn get_dashboard_credits(
                 digests,
                 responses: Some(responses),
                 voice_mins_out: Some(voice_mins),
-                voice_mins_in: if has_local_numbers { Some(voice_mins) } else { None },
+                voice_mins_in: if has_local_numbers {
+                    Some(voice_mins)
+                } else {
+                    None
+                },
             }
         } else if let Some(ref p) = pricing {
             // Euro: credit_value is € amount
@@ -339,7 +360,8 @@ pub async fn get_dashboard_credits(
             // Digest = 3 segments
             let digests = (credit_value / (3.0 * sms_price)).floor() as i32;
             // Voice outbound
-            let voice_out = p.voice_price_per_minute
+            let voice_out = p
+                .voice_price_per_minute
                 .map(|v| (credit_value / (v + ELEVENLABS_COST_PER_MIN)).floor() as i32);
             // Voice inbound (only for local number countries)
             let voice_in = if has_local_numbers {
@@ -354,7 +376,11 @@ pub async fn get_dashboard_credits(
                 display_value: format!("{:.2}€", credit_value),
                 notifications,
                 digests,
-                responses: if is_notification_only { None } else { Some(responses) },
+                responses: if is_notification_only {
+                    None
+                } else {
+                    Some(responses)
+                },
                 voice_mins_out: voice_out,
                 voice_mins_in: voice_in,
             }
@@ -362,7 +388,11 @@ pub async fn get_dashboard_credits(
             // Fallback if no pricing available
             CreditEquivalents {
                 raw_value: credit_value,
-                display_value: if is_euro { format!("{:.2}€", credit_value) } else { format!("{} messages", credit_value as i32) },
+                display_value: if is_euro {
+                    format!("{:.2}€", credit_value)
+                } else {
+                    format!("{} messages", credit_value as i32)
+                },
                 notifications: 0,
                 digests: 0,
                 responses: None,
@@ -527,29 +557,43 @@ pub async fn get_usage_projection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<UsageProjectionResponse>, (axum::http::StatusCode, String)> {
-    use std::time::{SystemTime, UNIX_EPOCH};
     use diesel::sql_types::Float;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get user from database
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((axum::http::StatusCode::NOT_FOUND, "User not found".to_string()))?;
+        .ok_or((
+            axum::http::StatusCode::NOT_FOUND,
+            "User not found".to_string(),
+        ))?;
 
     // Get user settings for digest info
-    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(auth_user.user_id)
+    let (morning_digest, day_digest, evening_digest) = state
+        .user_core
+        .get_digests(auth_user.user_id)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Count active digests
-    let digest_count = [morning_digest.as_ref(), day_digest.as_ref(), evening_digest.as_ref()]
-        .iter()
-        .filter(|&&x| x.is_some())
-        .count() as i32;
+    let digest_count = [
+        morning_digest.as_ref(),
+        day_digest.as_ref(),
+        evening_digest.as_ref(),
+    ]
+    .iter()
+    .filter(|&&x| x.is_some())
+    .count() as i32;
 
     // Get plan capacity based on country and plan type
     // US/CA: always 400 messages (hosted plan)
     // Other countries: monitor=40, digest=120
     let plan_type = user.plan_type.clone();
-    let is_us_ca = matches!(user.phone_number_country.as_deref(), Some("US") | Some("CA"));
+    let is_us_ca = matches!(
+        user.phone_number_country.as_deref(),
+        Some("US") | Some("CA")
+    );
     let plan_capacity = if is_us_ca {
         400 // US/CA hosted plan
     } else {
@@ -563,8 +607,13 @@ pub async fn get_usage_projection(
     let digests_per_month = digest_count * 30;
 
     // Get detailed usage breakdown from usage_logs
-    let (is_example_data, avg_sms_notifications_per_day, avg_call_notifications_per_day,
-         avg_messages_per_day, avg_voice_mins_per_day) = {
+    let (
+        is_example_data,
+        avg_sms_notifications_per_day,
+        avg_call_notifications_per_day,
+        avg_messages_per_day,
+        avg_voice_mins_per_day,
+    ) = {
         let mut conn = state.db_pool.get().expect("Failed to get DB connection");
         let now: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -586,10 +635,20 @@ pub async fn get_usage_projection(
             // Digest plan: typically 2 digests (already counted), ~0.5 critical notis/day, ~0.3 messages/day
             let example_sms_notis = 0.5_f32;
             let example_call_notis = 0.0_f32;
-            let example_messages = if plan_type.as_deref() == Some("digest") { 0.3_f32 } else { 0.0_f32 };
+            let example_messages = if plan_type.as_deref() == Some("digest") {
+                0.3_f32
+            } else {
+                0.0_f32
+            };
             let example_voice_mins = 0.0_f32;
 
-            (true, example_sms_notis, example_call_notis, example_messages, example_voice_mins)
+            (
+                true,
+                example_sms_notis,
+                example_call_notis,
+                example_messages,
+                example_voice_mins,
+            )
         } else {
             // Get oldest day in the period
             let oldest_day: i64 = usage_logs::table
@@ -609,9 +668,10 @@ pub async fn get_usage_projection(
             let sms_notifications: i64 = usage_logs::table
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(
-                    usage_logs::activity_type.like("%_critical")
+                    usage_logs::activity_type
+                        .like("%_critical")
                         .or(usage_logs::activity_type.like("%_priority_sms"))
-                        .or(usage_logs::activity_type.eq("noti_msg"))
+                        .or(usage_logs::activity_type.eq("noti_msg")),
                 )
                 .filter(usage_logs::activity_type.not_like("%_priority_call"))
                 .filter(usage_logs::created_at.ge(start_timestamp as i32))
@@ -624,8 +684,9 @@ pub async fn get_usage_projection(
             let call_notifications: i64 = usage_logs::table
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(
-                    usage_logs::activity_type.like("%_priority_call")
-                        .or(usage_logs::activity_type.eq("noti_call"))
+                    usage_logs::activity_type
+                        .like("%_priority_call")
+                        .or(usage_logs::activity_type.eq("noti_call")),
                 )
                 .filter(usage_logs::created_at.ge(start_timestamp as i32))
                 .filter(usage_logs::created_at.lt(end_timestamp as i32))
@@ -637,8 +698,9 @@ pub async fn get_usage_projection(
             let messages: i64 = usage_logs::table
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(
-                    usage_logs::activity_type.eq("sms")
-                        .or(usage_logs::activity_type.eq("message"))
+                    usage_logs::activity_type
+                        .eq("sms")
+                        .or(usage_logs::activity_type.eq("message")),
                 )
                 .filter(usage_logs::created_at.ge(start_timestamp as i32))
                 .filter(usage_logs::created_at.lt(end_timestamp as i32))
@@ -648,11 +710,14 @@ pub async fn get_usage_projection(
 
             // Voice minutes: sum of call_duration for voice/call activities
             let voice_seconds: Option<f32> = usage_logs::table
-                .select(sql::<diesel::sql_types::Nullable<Float>>("SUM(COALESCE(call_duration, 0))"))
+                .select(sql::<diesel::sql_types::Nullable<Float>>(
+                    "SUM(COALESCE(call_duration, 0))",
+                ))
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(
-                    usage_logs::activity_type.like("%voice%")
-                        .or(usage_logs::activity_type.like("%call%"))
+                    usage_logs::activity_type
+                        .like("%voice%")
+                        .or(usage_logs::activity_type.like("%call%")),
                 )
                 .filter(usage_logs::created_at.ge(start_timestamp as i32))
                 .filter(usage_logs::created_at.lt(end_timestamp as i32))
@@ -677,7 +742,12 @@ pub async fn get_usage_projection(
     let messages_per_month = (avg_messages_per_day * 30.0).round() as i32;
 
     // === CALCULATE ACTUAL USAGE THIS BILLING PERIOD ===
-    let (actual_notifications_used, actual_voice_mins_used, actual_messages_used, actual_digests_used) = {
+    let (
+        actual_notifications_used,
+        actual_voice_mins_used,
+        actual_messages_used,
+        actual_digests_used,
+    ) = {
         let mut conn = state.db_pool.get().expect("Failed to get DB connection");
         let now: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -685,7 +755,8 @@ pub async fn get_usage_projection(
             .as_secs() as i64;
 
         // Calculate billing period start
-        let billing_period_start: i64 = if let Some(next_billing) = user.next_billing_date_timestamp {
+        let billing_period_start: i64 = if let Some(next_billing) = user.next_billing_date_timestamp
+        {
             // Billing period started 30 days before next billing date
             (next_billing as i64) - 2_592_000 // 30 days in seconds
         } else {
@@ -697,9 +768,10 @@ pub async fn get_usage_projection(
         let actual_sms_notis: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
-                usage_logs::activity_type.like("%_critical")
+                usage_logs::activity_type
+                    .like("%_critical")
                     .or(usage_logs::activity_type.like("%_priority_sms"))
-                    .or(usage_logs::activity_type.eq("noti_msg"))
+                    .or(usage_logs::activity_type.eq("noti_msg")),
             )
             .filter(usage_logs::activity_type.not_like("%_priority_call"))
             .filter(usage_logs::created_at.ge(billing_period_start as i32))
@@ -711,8 +783,9 @@ pub async fn get_usage_projection(
         let actual_call_notis: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
-                usage_logs::activity_type.like("%_priority_call")
-                    .or(usage_logs::activity_type.eq("noti_call"))
+                usage_logs::activity_type
+                    .like("%_priority_call")
+                    .or(usage_logs::activity_type.eq("noti_call")),
             )
             .filter(usage_logs::created_at.ge(billing_period_start as i32))
             .count()
@@ -723,8 +796,9 @@ pub async fn get_usage_projection(
         let actual_msgs: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
-                usage_logs::activity_type.eq("sms")
-                    .or(usage_logs::activity_type.eq("message"))
+                usage_logs::activity_type
+                    .eq("sms")
+                    .or(usage_logs::activity_type.eq("message")),
             )
             .filter(usage_logs::created_at.ge(billing_period_start as i32))
             .count()
@@ -733,11 +807,14 @@ pub async fn get_usage_projection(
 
         // Actual voice minutes this billing period
         let actual_voice_secs: Option<f32> = usage_logs::table
-            .select(sql::<diesel::sql_types::Nullable<Float>>("SUM(COALESCE(call_duration, 0))"))
+            .select(sql::<diesel::sql_types::Nullable<Float>>(
+                "SUM(COALESCE(call_duration, 0))",
+            ))
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
-                usage_logs::activity_type.like("%voice%")
-                    .or(usage_logs::activity_type.like("%call%"))
+                usage_logs::activity_type
+                    .like("%voice%")
+                    .or(usage_logs::activity_type.like("%call%")),
             )
             .filter(usage_logs::created_at.ge(billing_period_start as i32))
             .first(&mut conn)
@@ -794,7 +871,10 @@ pub async fn get_usage_projection(
         let notifications_over = (total_usage_per_month - plan_capacity) * 3;
 
         // Get country for pricing
-        let country_code = user.phone_number_country.clone().unwrap_or_else(|| "US".to_string());
+        let country_code = user
+            .phone_number_country
+            .clone()
+            .unwrap_or_else(|| "US".to_string());
 
         // Calculate euro cost for overage (weighted by SMS vs call ratio)
         let estimated_cost_euros = if is_us_or_ca(&country_code) {
@@ -854,7 +934,8 @@ pub async fn get_usage_projection(
     };
 
     // Display string for percentage
-    let usage_percentage_display = format!("{}% of monthly quota used", usage_percentage.round() as i32);
+    let usage_percentage_display =
+        format!("{}% of monthly quota used", usage_percentage.round() as i32);
 
     // Get overage credits from user
     let overage_credits = user.credits;
@@ -868,11 +949,12 @@ pub async fn get_usage_projection(
     };
 
     // Overage days remaining (if no auto top-up and has credits and is over quota)
-    let overage_days_remaining = if !has_auto_topup && overage_credits > 0.0 && daily_overage_cost > 0.0 {
-        Some((overage_credits / daily_overage_cost).floor() as i32)
-    } else {
-        None
-    };
+    let overage_days_remaining =
+        if !has_auto_topup && overage_credits > 0.0 && daily_overage_cost > 0.0 {
+            Some((overage_credits / daily_overage_cost).floor() as i32)
+        } else {
+            None
+        };
 
     // Estimated monthly extra cost (if auto top-up enabled and over quota)
     let estimated_monthly_extra_cost = if has_auto_topup && overage.is_some() {
@@ -920,7 +1002,10 @@ pub async fn get_usage_projection(
     };
 
     // === CALCULATE SEGMENTED BAR FIELDS ===
-    let country_code = user.phone_number_country.clone().unwrap_or_else(|| "US".to_string());
+    let country_code = user
+        .phone_number_country
+        .clone()
+        .unwrap_or_else(|| "US".to_string());
     let is_notification_only = is_notification_only_code(&country_code);
 
     // Calculate percentages as share of plan capacity
@@ -1043,33 +1128,46 @@ pub async fn get_byot_usage(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<ByotUsageResponse>, (axum::http::StatusCode, String)> {
-    use std::time::{SystemTime, UNIX_EPOCH};
     use diesel::sql_types::Float;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get user from database
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((axum::http::StatusCode::NOT_FOUND, "User not found".to_string()))?;
+        .ok_or((
+            axum::http::StatusCode::NOT_FOUND,
+            "User not found".to_string(),
+        ))?;
 
     // Verify this is a BYOT user
     if user.plan_type.as_deref() != Some("byot") {
-        return Err((axum::http::StatusCode::BAD_REQUEST, "This endpoint is only for BYOT users".to_string()));
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "This endpoint is only for BYOT users".to_string(),
+        ));
     }
 
     // Get user's country for pricing
-    let country_code = user.phone_number_country.clone()
-        .ok_or((axum::http::StatusCode::BAD_REQUEST, "Country not set. Please update your profile.".to_string()))?;
+    let country_code = user.phone_number_country.clone().ok_or((
+        axum::http::StatusCode::BAD_REQUEST,
+        "Country not set. Please update your profile.".to_string(),
+    ))?;
 
     // Fetch BYOT pricing for user's country
-    let pricing = get_byot_pricing(&state, &country_code)
-        .await
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get pricing: {}", e)))?;
+    let pricing = get_byot_pricing(&state, &country_code).await.map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get pricing: {}", e),
+        )
+    })?;
 
     // Get pricing rates
     let sms_per_segment = pricing.sms_price_per_segment.unwrap_or(0.0);
-    let notification_cost = sms_per_segment * 1.5;  // 1.5 segments per notification
-    let message_cost = sms_per_segment * 3.0;       // 3 segments per message
-    let digest_cost = sms_per_segment * 3.0;        // 3 segments per digest
+    let notification_cost = sms_per_segment * 1.5; // 1.5 segments per notification
+    let message_cost = sms_per_segment * 3.0; // 3 segments per message
+    let digest_cost = sms_per_segment * 3.0; // 3 segments per digest
 
     // Voice cost includes ElevenLabs AI ($0.11/min)
     const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
@@ -1087,9 +1185,9 @@ pub async fn get_byot_usage(
         now - 2_592_000 // Default to 30 days ago
     };
 
-    let days_until_billing = user.next_billing_date_timestamp.map(|ts| {
-        ((ts as i64 - now) / 86_400).max(0) as i32
-    });
+    let days_until_billing = user
+        .next_billing_date_timestamp
+        .map(|ts| ((ts as i64 - now) / 86_400).max(0) as i32);
 
     // Query usage from database
     let mut conn = state.db_pool.get().expect("Failed to get DB connection");
@@ -1107,9 +1205,10 @@ pub async fn get_byot_usage(
     let sms_noti_count: i64 = usage_logs::table
         .filter(usage_logs::user_id.eq(auth_user.user_id))
         .filter(
-            usage_logs::activity_type.like("%_critical")
+            usage_logs::activity_type
+                .like("%_critical")
                 .or(usage_logs::activity_type.like("%_priority_sms"))
-                .or(usage_logs::activity_type.eq("noti_msg"))
+                .or(usage_logs::activity_type.eq("noti_msg")),
         )
         .filter(usage_logs::activity_type.not_like("%_priority_call"))
         .filter(usage_logs::created_at.ge(billing_period_start as i32))
@@ -1121,8 +1220,9 @@ pub async fn get_byot_usage(
     let call_noti_count: i64 = usage_logs::table
         .filter(usage_logs::user_id.eq(auth_user.user_id))
         .filter(
-            usage_logs::activity_type.like("%_priority_call")
-                .or(usage_logs::activity_type.eq("noti_call"))
+            usage_logs::activity_type
+                .like("%_priority_call")
+                .or(usage_logs::activity_type.eq("noti_call")),
         )
         .filter(usage_logs::created_at.ge(billing_period_start as i32))
         .count()
@@ -1133,8 +1233,9 @@ pub async fn get_byot_usage(
     let message_count: i64 = usage_logs::table
         .filter(usage_logs::user_id.eq(auth_user.user_id))
         .filter(
-            usage_logs::activity_type.eq("sms")
-                .or(usage_logs::activity_type.eq("message"))
+            usage_logs::activity_type
+                .eq("sms")
+                .or(usage_logs::activity_type.eq("message")),
         )
         .filter(usage_logs::created_at.ge(billing_period_start as i32))
         .count()
@@ -1143,11 +1244,14 @@ pub async fn get_byot_usage(
 
     // Voice minutes
     let voice_seconds: Option<f32> = usage_logs::table
-        .select(sql::<diesel::sql_types::Nullable<Float>>("SUM(COALESCE(call_duration, 0))"))
+        .select(sql::<diesel::sql_types::Nullable<Float>>(
+            "SUM(COALESCE(call_duration, 0))",
+        ))
         .filter(usage_logs::user_id.eq(auth_user.user_id))
         .filter(
-            usage_logs::activity_type.like("%voice%")
-                .or(usage_logs::activity_type.like("%call%"))
+            usage_logs::activity_type
+                .like("%voice%")
+                .or(usage_logs::activity_type.like("%call%")),
         )
         .filter(usage_logs::created_at.ge(billing_period_start as i32))
         .first(&mut conn)

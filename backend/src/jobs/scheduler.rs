@@ -1,21 +1,22 @@
-use tokio_cron_scheduler::{JobScheduler, Job};
-use std::sync::Arc;
-use tracing::{debug, error};
 use crate::AppState;
-
-
+use std::sync::Arc;
+use tokio_cron_scheduler::{Job, JobScheduler};
+use tracing::{debug, error};
 
 use crate::handlers::imap_handlers;
 
 async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
-    
+
     // Get all users with active WhatsApp connection
-    match state.user_repository.get_users_with_matrix_bridge_connections() {
+    match state
+        .user_repository
+        .get_users_with_matrix_bridge_connections()
+    {
         Ok(users) => {
             let mut matrix_clients = state.matrix_clients.lock().await;
             let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-            
+
             // Remove any existing clients and sync tasks
             for (_, task) in sync_tasks.drain() {
                 task.abort();
@@ -25,22 +26,31 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
             // Setup clients and sync tasks for active users
             for user_id in users {
                 tracing::debug!("Setting up new Matrix client for user {}", user_id);
-                
+
                 // Create and initialize client
                 match crate::utils::matrix_auth::get_client(user_id, &state).await {
                     Ok(client) => {
                         // Add event handlers before storing/cloning the client
-                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
                         use matrix_sdk::room::Room;
-                        
+                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+
                         let state_for_handler = Arc::clone(&state);
-                        client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                            let state = Arc::clone(&state_for_handler);
-                            async move {
-                                tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
-                            }
-                        });
+                        client.add_event_handler(
+                            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                let state = Arc::clone(&state_for_handler);
+                                async move {
+                                    tracing::debug!(
+                                        "📨 Received message in room {}: {:?}",
+                                        room.room_id(),
+                                        ev
+                                    );
+                                    crate::utils::bridge::handle_bridge_message(
+                                        ev, room, client, state,
+                                    )
+                                    .await;
+                                }
+                            },
+                        );
 
                         // Store the client
                         let client = Arc::new(client);
@@ -55,52 +65,79 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                             loop {
                                 match client.sync(sync_settings.clone()).await {
                                     Ok(_) => {
-                                        tracing::debug!("Sync completed normally for user {}", user_id);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                    },
+                                        tracing::debug!(
+                                            "Sync completed normally for user {}",
+                                            user_id
+                                        );
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(1))
+                                            .await;
+                                    }
                                     Err(e) => {
                                         error!("Matrix sync error for user {}: {}", user_id, e);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(30))
+                                            .await;
                                     }
                                 }
                             }
                         });
 
                         sync_tasks.insert(user_id, handle);
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to create Matrix client for user {}: {}", user_id, e);
                     }
                 }
             }
-        },
+        }
         Err(e) => error!("Failed to get active WhatsApp users: {}", e),
     }
 }
 
 /// Checks all bridges for all users and deletes any that are unhealthy
-pub async fn check_all_bridges_health(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn check_all_bridges_health(
+    state: &Arc<AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     debug!("Starting bridge health check for all users...");
 
     let users_with_bridges = state.user_repository.get_users_with_active_bridges()?;
-    debug!("Found {} users with active bridges", users_with_bridges.len());
+    debug!(
+        "Found {} users with active bridges",
+        users_with_bridges.len()
+    );
 
     for (user_id, bridges) in users_with_bridges {
         for bridge in bridges {
             if !is_bridge_healthy(state, user_id, &bridge).await {
-                tracing::info!("Bridge {} for user {} is unhealthy, deleting", bridge.bridge_type, user_id);
+                tracing::info!(
+                    "Bridge {} for user {} is unhealthy, deleting",
+                    bridge.bridge_type,
+                    user_id
+                );
 
                 // Record disconnection event for digest notification
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i32;
-                if let Err(e) = state.user_repository.record_bridge_disconnection(user_id, &bridge.bridge_type, current_time) {
-                    error!("Failed to record disconnection event for user {}: {}", user_id, e);
+                if let Err(e) = state.user_repository.record_bridge_disconnection(
+                    user_id,
+                    &bridge.bridge_type,
+                    current_time,
+                ) {
+                    error!(
+                        "Failed to record disconnection event for user {}: {}",
+                        user_id, e
+                    );
                 }
 
-                if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
-                    error!("Failed to delete unhealthy bridge {} for user {}: {}", bridge.bridge_type, user_id, e);
+                if let Err(e) = state
+                    .user_repository
+                    .delete_bridge(user_id, &bridge.bridge_type)
+                {
+                    error!(
+                        "Failed to delete unhealthy bridge {} for user {}: {}",
+                        bridge.bridge_type, user_id, e
+                    );
                 }
             }
         }
@@ -121,16 +158,25 @@ pub async fn check_all_bridges_health(state: &Arc<AppState>) -> Result<(), Box<d
     Ok(())
 }
 
-async fn is_bridge_healthy(state: &Arc<AppState>, user_id: i32, bridge: &crate::models::user_models::Bridge) -> bool {
+async fn is_bridge_healthy(
+    state: &Arc<AppState>,
+    user_id: i32,
+    bridge: &crate::models::user_models::Bridge,
+) -> bool {
     // Try to get Matrix client and fetch rooms for this bridge type
     // Note: Empty rooms is OK (user might not have any chats yet)
     // We only consider it unhealthy if we get an actual error
     match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
         Ok(client) => {
             match crate::utils::bridge::get_service_rooms(&client, &bridge.bridge_type).await {
-                Ok(_) => true,  // Successfully fetched rooms (even if empty) = healthy
+                Ok(_) => true, // Successfully fetched rooms (even if empty) = healthy
                 Err(e) => {
-                    tracing::warn!("Failed to fetch {} rooms for user {}: {}", bridge.bridge_type, user_id, e);
+                    tracing::warn!(
+                        "Failed to fetch {} rooms for user {}: {}",
+                        bridge.bridge_type,
+                        user_id,
+                        e
+                    );
                     false
                 }
             }
@@ -159,7 +205,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     tracing::debug!("Initializing Matrix clients and sync tasks...");
     initialize_matrix_clients(Arc::clone(&state)).await;
 
-    let sched = JobScheduler::new().await.expect("Failed to create scheduler");
+    let sched = JobScheduler::new()
+        .await
+        .expect("Failed to create scheduler");
 
     // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
@@ -167,7 +215,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     //let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            
+
             // Process each subscribed user
             for user in state.user_core.get_users_by_tier("tier 2").unwrap_or_default(){
 
@@ -185,10 +233,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         if processed_emails.len() > cleanup_threshold {
                                             // Sort by processed_at timestamp (newest first)
                                             processed_emails.sort_by(|a, b| b.processed_at.cmp(&a.processed_at));
-                                            
+
                                             // Keep at least fetch_window emails plus some buffer
                                             let keep_count = fetch_window * 2;  // Keep 20 emails (double the fetch window)
-                                            
+
                                             // Get emails to delete (older than our keep_count)
                                             let emails_to_delete: Vec<_> = processed_emails
                                                 .iter()
@@ -217,7 +265,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     }
                                     Err(e) => error!("Failed to fetch processed emails for garbage collection: {}", e),
                                 }
-                                
+
                                 if !emails.is_empty() {
                                     // Sort emails by date in descending order (most recent first)
                                     let mut sorted_emails = emails;
@@ -247,7 +295,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             from_matches || from_email_matches
                                         }) {
                                             tracing::info!("Fast check: Priority sender matched for user {}", user.id);
-                                           
+
                                             // Determine suffix based on noti_type
                                             let suffix = match matched_sender.noti_type.as_deref() {
                                                 Some("call") => "_call",
@@ -255,7 +303,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 _ => "_sms",
                                             };
                                             let notification_type = format!("email_priority{}", suffix);
-                                           
+
                                             // Format the notification message with sender and content
                                             let message = format!(
                                                 "Email from: {}\nSubject: {}\nContent: {}",
@@ -267,7 +315,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 email.from.as_deref().unwrap_or("Unknown"),
                                                 email.subject.as_deref().unwrap_or("No subject")
                                             );
-                                           
+
                                             // Spawn a new task for sending notification
                                             let state_clone = state.clone();
                                             tokio::spawn(async move {
@@ -381,7 +429,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     "Email critical check passed for user {}: {}",
                                                     user.id, message
                                                 );
-                                                                
+
                                                 // Spawn a new task for sending critical message notification
                                                 let state_clone = state.clone();
                                                 let message_clone= message.clone();
@@ -419,7 +467,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         })
     }).expect("Failed to create message monitor job");
 
-    sched.add(message_monitor_job).await.expect("Failed to add message monitor job to scheduler");
+    sched
+        .add(message_monitor_job)
+        .await
+        .expect("Failed to add message monitor job to scheduler");
 
     // Create a job that runs every hour to check morning digests
     let state_clone = Arc::clone(&state);
@@ -427,28 +478,55 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         let state = state_clone.clone();
         Box::pin(async move {
             debug!("Running hourly morning digest check...");
-            
+
             // Get all users with tier 2 subscription
             match state.user_core.get_all_users() {
                 Ok(users) => {
                     for user in users {
                         // Check if user has a tier 2 subscription
-                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
-
-                            if !state.user_core.get_proactive_agent_on(user.id).unwrap_or(true) {
-                                tracing::debug!("User {} does not have monitoring enabled", user.id);
+                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id)
+                        {
+                            if !state
+                                .user_core
+                                .get_proactive_agent_on(user.id)
+                                .unwrap_or(true)
+                            {
+                                tracing::debug!(
+                                    "User {} does not have monitoring enabled",
+                                    user.id
+                                );
                                 continue;
                             }
                             if tier == "tier 2" {
-                                debug!("Checking morning digest for user {} with tier 2 subscription", user.id);
-                                if let Err(e) = crate::proactive::utils::check_morning_digest(&state, user.id).await {
-                                    error!("Failed to check morning digest for user {}: {}", user.id, e);
+                                debug!(
+                                    "Checking morning digest for user {} with tier 2 subscription",
+                                    user.id
+                                );
+                                if let Err(e) =
+                                    crate::proactive::utils::check_morning_digest(&state, user.id)
+                                        .await
+                                {
+                                    error!(
+                                        "Failed to check morning digest for user {}: {}",
+                                        user.id, e
+                                    );
                                 }
-                                if let Err(e) = crate::proactive::utils::check_day_digest(&state, user.id).await {
-                                    error!("Failed to check day digest for user {}: {}", user.id, e);
+                                if let Err(e) =
+                                    crate::proactive::utils::check_day_digest(&state, user.id).await
+                                {
+                                    error!(
+                                        "Failed to check day digest for user {}: {}",
+                                        user.id, e
+                                    );
                                 }
-                                if let Err(e) = crate::proactive::utils::check_evening_digest(&state, user.id).await {
-                                    error!("Failed to check evening digest for user {}: {}", user.id, e);
+                                if let Err(e) =
+                                    crate::proactive::utils::check_evening_digest(&state, user.id)
+                                        .await
+                                {
+                                    error!(
+                                        "Failed to check evening digest for user {}: {}",
+                                        user.id, e
+                                    );
                                 }
                             }
                         }
@@ -457,13 +535,18 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Err(e) => error!("Failed to fetch users for morning digest check: {}", e),
             }
         })
-    }).expect("Failed to create digest check job");
+    })
+    .expect("Failed to create digest check job");
 
-    sched.add(digest_check_job).await.expect("Failed to add digest check job to scheduler");
+    sched
+        .add(digest_check_job)
+        .await
+        .expect("Failed to add digest check job to scheduler");
 
     // Create a job that runs every 5 minutes to check for upcoming calendar events
     let state_clone = Arc::clone(&state);
-    let calendar_notification_job = Job::new_async("0 */5 * * * *", move |_, _| {  // Run every 5 minutes
+    let calendar_notification_job = Job::new_async("0 */5 * * * *", move |_, _| {
+        // Run every 5 minutes
         let state = state_clone.clone();
         Box::pin(async move {
             // Use a mutex to ensure only one instance runs at a time
@@ -475,14 +558,24 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             }
 
             // Clean up old notifications (older than 24 hours) with retry logic
-            let cleanup_threshold = (chrono::Utc::now() - chrono::Duration::hours(24)).timestamp() as i32;
+            let cleanup_threshold =
+                (chrono::Utc::now() - chrono::Duration::hours(24)).timestamp() as i32;
             for attempt in 1..=3 {
-                match state.user_repository.cleanup_old_calendar_notifications(cleanup_threshold) {
+                match state
+                    .user_repository
+                    .cleanup_old_calendar_notifications(cleanup_threshold)
+                {
                     Ok(_) => break,
                     Err(e) => {
-                        error!("Attempt {} to clean up old calendar notifications failed: {}", attempt, e);
+                        error!(
+                            "Attempt {} to clean up old calendar notifications failed: {}",
+                            attempt, e
+                        );
                         if attempt < 3 {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100 * attempt as u64)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                100 * attempt as u64,
+                            ))
+                            .await;
                         }
                     }
                 }
@@ -490,12 +583,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
             // Get all users with valid Google Calendar connection and subscription
             let users = match state.user_core.get_all_users() {
-                Ok(users) => users.into_iter().filter(|user| {
-                    // Check subscription and calendar status
-                    matches!(state.user_repository.has_valid_subscription_tier(user.id, "tier 2"), Ok(true)) &&
-                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true)) &&
-                    matches!(state.user_core.get_proactive_agent_on(user.id), Ok(true))
-                }).collect::<Vec<_>>(),
+                Ok(users) => users
+                    .into_iter()
+                    .filter(|user| {
+                        // Check subscription and calendar status
+                        matches!(
+                            state
+                                .user_repository
+                                .has_valid_subscription_tier(user.id, "tier 2"),
+                            Ok(true)
+                        ) && matches!(
+                            state.user_repository.has_active_google_calendar(user.id),
+                            Ok(true)
+                        ) && matches!(state.user_core.get_proactive_agent_on(user.id), Ok(true))
+                    })
+                    .collect::<Vec<_>>(),
                 Err(e) => {
                     error!("Failed to fetch users: {}", e);
                     return;
@@ -504,7 +606,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             let now = chrono::Utc::now();
             let window_end = now + chrono::Duration::minutes(30);
 
-            debug!("🗓️ Calendar check: Starting check for {} users at {}", 
+            debug!(
+                "🗓️ Calendar check: Starting check for {} users at {}",
                 users.len(),
                 now.format("%Y-%m-%d %H:%M:%S UTC")
             );
@@ -516,9 +619,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
 
-                debug!("🗓️ Calendar check: Processing user {} ({}/{})", 
-                    user.id, 
-                    index + 1, 
+                debug!(
+                    "🗓️ Calendar check: Processing user {} ({}/{})",
+                    user.id,
+                    index + 1,
                     users.len()
                 );
 
@@ -529,37 +633,62 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     crate::handlers::google_calendar::TimeframeQuery {
                         start: now,
                         end: window_end,
-                    }
-                ).await {
+                    },
+                )
+                .await
+                {
                     Ok(events) => {
-                        debug!("🗓️ Calendar check: Found {} events for user {}", events.len(), user.id);
+                        debug!(
+                            "🗓️ Calendar check: Found {} events for user {}",
+                            events.len(),
+                            user.id
+                        );
                         for event in events {
-                            if let (Some(reminders), Some(_start_time)) = (&event.reminders, event.start.date_time) {
+                            if let (Some(reminders), Some(_start_time)) =
+                                (&event.reminders, event.start.date_time)
+                            {
                                 for reminder in &reminders.overrides {
                                     let reminder_key = format!("{}_{}", event.id, reminder.minutes);
-                                    
+
                                     // Check if notification was already sent
-                                    if state.user_repository.check_calendar_notification_exists(user.id, &reminder_key).unwrap_or(true) {
+                                    if state
+                                        .user_repository
+                                        .check_calendar_notification_exists(user.id, &reminder_key)
+                                        .unwrap_or(true)
+                                    {
                                         continue;
                                     }
 
                                     // Record notification before sending
-                                    let new_notification = crate::models::user_models::NewCalendarNotification {
-                                        user_id: user.id,
-                                        event_id: reminder_key.clone(),
-                                        notification_time: now.timestamp() as i32,
-                                    };
-                                    
-                                    if let Err(e) = state.user_repository.create_calendar_notification(&new_notification) {
+                                    let new_notification =
+                                        crate::models::user_models::NewCalendarNotification {
+                                            user_id: user.id,
+                                            event_id: reminder_key.clone(),
+                                            notification_time: now.timestamp() as i32,
+                                        };
+
+                                    if let Err(e) = state
+                                        .user_repository
+                                        .create_calendar_notification(&new_notification)
+                                    {
                                         error!("Failed to record calendar notification: {}", e);
                                         continue;
                                     }
 
-                                    let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
-                                    let notification = format!("Calendar: {} in {} mins", event_summary, reminder.minutes);
+                                    let event_summary = event
+                                        .summary
+                                        .clone()
+                                        .unwrap_or_else(|| "Untitled Event".to_string());
+                                    let notification = format!(
+                                        "Calendar: {} in {} mins",
+                                        event_summary, reminder.minutes
+                                    );
 
                                     let state_clone = state.clone();
-                                    let first_message = format!("Hello, you have a calendar event starting in {}.", reminder.minutes);
+                                    let first_message = format!(
+                                        "Hello, you have a calendar event starting in {}.",
+                                        reminder.minutes
+                                    );
                                     let user_id = user.id;
                                     tokio::spawn(async move {
                                         crate::proactive::utils::send_notification(
@@ -568,19 +697,27 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             &notification,
                                             "calendar_notification".to_string(),
                                             Some(first_message),
-                                        ).await;
+                                        )
+                                        .await;
                                     });
                                 }
                             }
                         }
-                    },
-                    Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
+                    }
+                    Err(e) => error!(
+                        "Failed to fetch calendar events for user {}: {}",
+                        user.id, e
+                    ),
                 }
             }
         })
-    }).expect("Failed to create calendar notification job");
+    })
+    .expect("Failed to create calendar notification job");
 
-    sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
+    sched
+        .add(calendar_notification_job)
+        .await
+        .expect("Failed to add calendar notification job to scheduler");
 
     // Bridge health check - runs daily at midnight UTC
     let state_clone = Arc::clone(&state);
@@ -592,9 +729,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 error!("Bridge health check failed: {}", e);
             }
         })
-    }).expect("Failed to create bridge health check job");
+    })
+    .expect("Failed to create bridge health check job");
 
-    sched.add(bridge_health_job).await.expect("Failed to add bridge health check job to scheduler");
+    sched
+        .add(bridge_health_job)
+        .await
+        .expect("Failed to add bridge health check job to scheduler");
 
     // Time-triggered tasks - runs every 5 minutes to execute due "once_*" tasks
     let state_clone = Arc::clone(&state);
@@ -616,10 +757,16 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         let task_id = task.id.unwrap_or(0);
                         let user_id = task.user_id;
                         let action = task.action.clone();
-                        let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
+                        let notification_type = task
+                            .notification_type
+                            .clone()
+                            .unwrap_or_else(|| "sms".to_string());
 
                         tokio::spawn(async move {
-                            debug!("Executing scheduled task {} for user {}: {}", task_id, user_id, action);
+                            debug!(
+                                "Executing scheduled task {} for user {}: {}",
+                                task_id, user_id, action
+                            );
 
                             // Execute the action_spec through AI + tools (no trigger context for time-based tasks)
                             match crate::utils::action_executor::execute_action_spec(
@@ -628,8 +775,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 &action,
                                 &notification_type,
                                 None, // No trigger context for scheduled tasks
-                            ).await {
-                                crate::utils::action_executor::ActionResult::Success { message } => {
+                            )
+                            .await
+                            {
+                                crate::utils::action_executor::ActionResult::Success {
+                                    message,
+                                } => {
                                     debug!("Task {} completed successfully: {}", task_id, message);
                                 }
                                 crate::utils::action_executor::ActionResult::Failed { error } => {
@@ -641,17 +792,26 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         user_id,
                                         &format!("Your scheduled task failed: {}", error),
                                         noti_type,
-                                        Some("Sorry, your scheduled task encountered an error.".to_string()),
-                                    ).await;
+                                        Some(
+                                            "Sorry, your scheduled task encountered an error."
+                                                .to_string(),
+                                        ),
+                                    )
+                                    .await;
                                 }
                             }
 
                             // Complete or reschedule the task (for permanent recurring tasks)
-                            let user_tz = state.user_core.get_user_info(user_id)
+                            let user_tz = state
+                                .user_core
+                                .get_user_info(user_id)
                                 .ok()
                                 .and_then(|info| info.timezone)
                                 .unwrap_or_else(|| "UTC".to_string());
-                            match state.user_repository.complete_or_reschedule_task(&task_clone, &user_tz) {
+                            match state
+                                .user_repository
+                                .complete_or_reschedule_task(&task_clone, &user_tz)
+                            {
                                 Ok(rescheduled) => {
                                     if rescheduled {
                                         debug!("Rescheduled permanent task {}", task_id);
@@ -667,9 +827,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Err(e) => error!("Failed to get due scheduled tasks: {}", e),
             }
         })
-    }).expect("Failed to create once tasks job");
+    })
+    .expect("Failed to create once tasks job");
 
-    sched.add(once_tasks_job).await.expect("Failed to add once tasks job to scheduler");
+    sched
+        .add(once_tasks_job)
+        .await
+        .expect("Failed to add once tasks job to scheduler");
 
     // Task cleanup - runs daily at 3am UTC to remove old completed/cancelled tasks
     let state_clone = Arc::clone(&state);
@@ -682,7 +846,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             let task_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i32 - (7 * 24 * 60 * 60); // 7 days ago
+                .as_secs() as i32
+                - (7 * 24 * 60 * 60); // 7 days ago
 
             match state.user_repository.delete_old_tasks(task_cutoff) {
                 Ok(count) => debug!("Cleaned up {} old tasks", count),
@@ -693,16 +858,24 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             let message_log_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i32 - (30 * 24 * 60 * 60); // 30 days ago
+                .as_secs() as i32
+                - (30 * 24 * 60 * 60); // 30 days ago
 
-            match state.user_repository.delete_old_message_status_logs(message_log_cutoff) {
+            match state
+                .user_repository
+                .delete_old_message_status_logs(message_log_cutoff)
+            {
                 Ok(count) => debug!("Cleaned up {} old message status logs", count),
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
             }
         })
-    }).expect("Failed to create task cleanup job");
+    })
+    .expect("Failed to create task cleanup job");
 
-    sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
+    sched
+        .add(task_cleanup_job)
+        .await
+        .expect("Failed to add task cleanup job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
@@ -710,7 +883,4 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     // TODO we should add another scheduled call that just checks if there are items that are 'done' or not found in the elevenlabs
     // but are still 'ongoing' in our db. we don't want to be accidentally charging users.
     // and if that happens make error visible
-
 }
-
-

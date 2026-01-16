@@ -1,19 +1,18 @@
-use crate::AppState;
-use std::sync::Arc;
-use reqwest::Client;
 use crate::models::user_models::NewSubaccount;
+use crate::AppState;
+use reqwest::Client;
+use std::sync::Arc;
 
 // Helper to check mock mode
 fn is_mock_mode() -> bool {
     std::env::var("TWILIO_MOCK_MODE")
         .unwrap_or_default()
-        .to_lowercase() == "true"
+        .to_lowercase()
+        == "true"
 }
 
 /// Buy a single US TollFree number and create subaccount for the pool
-async fn buy_us_number_for_pool(
-    state: &Arc<AppState>,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn buy_us_number_for_pool(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
     let main_account_sid = std::env::var("TWILIO_ACCOUNT_SID")?;
     let main_auth_token = std::env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
@@ -21,8 +20,14 @@ async fn buy_us_number_for_pool(
     // Mock mode: Create fake subaccount
     if is_mock_mode() {
         use uuid::Uuid;
-        let mock_sid = format!("AC_pool_mock_{}", &Uuid::new_v4().to_string().replace("-", "")[..16]);
-        let mock_token = format!("mock_token_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
+        let mock_sid = format!(
+            "AC_pool_mock_{}",
+            &Uuid::new_v4().to_string().replace("-", "")[..16]
+        );
+        let mock_token = format!(
+            "mock_token_{}",
+            &Uuid::new_v4().to_string().replace("-", "")[..24]
+        );
         let mock_phone = format!("+1555POOL{:04}", rand::random::<u16>() % 10000);
 
         let created_at = Some(
@@ -48,7 +53,11 @@ async fn buy_us_number_for_pool(
         };
 
         state.user_core.insert_subaccount(&new_subaccount)?;
-        tracing::info!("MOCK MODE: Created pool subaccount {} with number {}", mock_sid, mock_phone);
+        tracing::info!(
+            "MOCK MODE: Created pool subaccount {} with number {}",
+            mock_sid,
+            mock_phone
+        );
         return Ok(());
     }
 
@@ -57,7 +66,10 @@ async fn buy_us_number_for_pool(
     let subaccount_response = client
         .post("https://api.twilio.com/2010-04-01/Accounts.json")
         .basic_auth(&main_account_sid, Some(&main_auth_token))
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .form(&[("FriendlyName", "US Pool Number")])
         .send()
         .await?;
@@ -104,7 +116,10 @@ async fn buy_us_number_for_pool(
     let buy_response = client
         .post(&buy_url)
         .basic_auth(&main_account_sid, Some(&main_auth_token))
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .form(&[("PhoneNumber", phone_number.as_str())])
         .send()
         .await?;
@@ -124,7 +139,10 @@ async fn buy_us_number_for_pool(
     client
         .post(&transfer_url)
         .basic_auth(&main_account_sid, Some(&main_auth_token))
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .form(&[("AccountSid", subaccount_sid.as_str())])
         .send()
         .await?;
@@ -159,7 +177,9 @@ async fn buy_us_number_for_pool(
 }
 
 /// Maintain US buffer pool - ensure we have 3 free US numbers
-pub async fn maintain_us_buffer_pool(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn maintain_us_buffer_pool(
+    state: &Arc<AppState>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let free_count = state.user_core.count_free_us_subaccounts()? as usize;
     tracing::info!("US pool currently has {} free numbers", free_count);
 
@@ -179,22 +199,33 @@ pub async fn maintain_us_buffer_pool(state: &Arc<AppState>) -> Result<(), Box<dy
             }
         }
     } else {
-        tracing::info!("US pool buffer is sufficient ({} >= 3), no action needed", free_count);
+        tracing::info!(
+            "US pool buffer is sufficient ({} >= 3), no action needed",
+            free_count
+        );
     }
 
     Ok(())
 }
 
 /// Release oldest US numbers if pool exceeds 10
-pub async fn cleanup_excess_us_numbers(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn cleanup_excess_us_numbers(
+    state: &Arc<AppState>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let free_count = state.user_core.count_free_us_subaccounts()? as usize;
 
     if free_count > 10 {
         let to_release = free_count - 3; // Release down to 3
-        tracing::info!("US pool has {} numbers, releasing {} oldest to reach buffer of 3", free_count, to_release);
+        tracing::info!(
+            "US pool has {} numbers, releasing {} oldest to reach buffer of 3",
+            free_count,
+            to_release
+        );
 
         // Get oldest free US subaccounts using repository
-        let oldest_subs = state.user_core.get_oldest_free_us_subaccounts(to_release as i64)?;
+        let oldest_subs = state
+            .user_core
+            .get_oldest_free_us_subaccounts(to_release as i64)?;
 
         let main_account_sid = std::env::var("TWILIO_ACCOUNT_SID")?;
         let main_auth_token = std::env::var("TWILIO_AUTH_TOKEN")?;
@@ -204,7 +235,10 @@ pub async fn cleanup_excess_us_numbers(state: &Arc<AppState>) -> Result<(), Box<
             // Mock mode: Just delete from DB
             if is_mock_mode() {
                 state.user_core.delete_subaccount(sub.id)?;
-                tracing::info!("MOCK MODE: Deleted pool subaccount {} from database", sub.subaccount_sid);
+                tracing::info!(
+                    "MOCK MODE: Deleted pool subaccount {} from database",
+                    sub.subaccount_sid
+                );
                 continue;
             }
 
@@ -228,10 +262,17 @@ pub async fn cleanup_excess_us_numbers(state: &Arc<AppState>) -> Result<(), Box<
                 Ok(_) => {
                     // Delete from database using repository
                     state.user_core.delete_subaccount(sub.id)?;
-                    tracing::info!("Successfully released pool subaccount {}", sub.subaccount_sid);
+                    tracing::info!(
+                        "Successfully released pool subaccount {}",
+                        sub.subaccount_sid
+                    );
                 }
                 Err(e) => {
-                    tracing::error!("Failed to delete pool subaccount {} from Twilio: {}", sub.subaccount_sid, e);
+                    tracing::error!(
+                        "Failed to delete pool subaccount {} from Twilio: {}",
+                        sub.subaccount_sid,
+                        e
+                    );
                 }
             }
         }

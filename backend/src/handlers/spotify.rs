@@ -1,13 +1,9 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    extract::State,
-    response::Json,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, response::Json};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -39,7 +35,7 @@ pub async fn resolve_spotify_url(
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Could not extract content from Spotify URL"}))
+                Json(json!({"error": "Could not extract content from Spotify URL"})),
             ));
         }
     };
@@ -67,7 +63,9 @@ pub async fn resolve_spotify_url(
 /// - spotify:track:4iV5W9uYEdYUVa79Axb7Rh (URI format)
 fn extract_spotify_info(url: &str) -> Option<(String, String)> {
     // URL format: open.spotify.com/{type}/{id}
-    let re_url = Regex::new(r"open\.spotify\.com/(track|episode|playlist|album|artist|show)/([a-zA-Z0-9]+)").ok()?;
+    let re_url =
+        Regex::new(r"open\.spotify\.com/(track|episode|playlist|album|artist|show)/([a-zA-Z0-9]+)")
+            .ok()?;
 
     if let Some(caps) = re_url.captures(url) {
         let content_type = caps.get(1).map(|m| m.as_str().to_string())?;
@@ -76,7 +74,8 @@ fn extract_spotify_info(url: &str) -> Option<(String, String)> {
     }
 
     // URI format: spotify:{type}:{id}
-    let re_uri = Regex::new(r"spotify:(track|episode|playlist|album|artist|show):([a-zA-Z0-9]+)").ok()?;
+    let re_uri =
+        Regex::new(r"spotify:(track|episode|playlist|album|artist|show):([a-zA-Z0-9]+)").ok()?;
 
     if let Some(caps) = re_uri.captures(url) {
         let content_type = caps.get(1).map(|m| m.as_str().to_string())?;

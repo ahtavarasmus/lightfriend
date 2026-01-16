@@ -55,11 +55,7 @@ pub trait SignupRepository: Send + Sync {
     ) -> Result<(), SignupRepositoryError>;
 
     /// Update user's phone number
-    fn update_phone_number(
-        &self,
-        user_id: i32,
-        phone: &str,
-    ) -> Result<(), SignupRepositoryError>;
+    fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), SignupRepositoryError>;
 
     /// Update user's phone number country
     fn update_phone_number_country(

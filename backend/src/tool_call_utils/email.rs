@@ -148,7 +148,14 @@ pub async fn handle_send_email(
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
-) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
+) -> Result<
+    (
+        axum::http::StatusCode,
+        [(axum::http::HeaderName, &'static str); 1],
+        axum::Json<crate::api::twilio_sms::TwilioResponse>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let args: SendEmailArgs = serde_json::from_str(args)?;
 
     // Check if 'to' is a contact profile nickname and resolve to email address
@@ -157,7 +164,10 @@ pub async fn handle_send_email(
         args.to.clone()
     } else {
         // Try to find a matching contact profile
-        let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
+        let profiles = state
+            .user_repository
+            .get_contact_profiles(user_id)
+            .unwrap_or_default();
         let matching_profile = profiles.iter().find(|p| {
             let nickname_lower = p.nickname.to_lowercase();
             let to_lower = args.to.to_lowercase();
@@ -167,14 +177,21 @@ pub async fn handle_send_email(
         if let Some(profile) = matching_profile {
             if let Some(ref emails) = profile.email_addresses {
                 // Use the first email address from the profile
-                emails.split(',').next().map(|e| e.trim().to_string()).unwrap_or(args.to.clone())
+                emails
+                    .split(',')
+                    .next()
+                    .map(|e| e.trim().to_string())
+                    .unwrap_or(args.to.clone())
             } else {
                 return Ok((
                     axum::http::StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: format!("Contact '{}' doesn't have an email address in their profile.", args.to),
-                    })
+                        message: format!(
+                            "Contact '{}' doesn't have an email address in their profile.",
+                            args.to
+                        ),
+                    }),
                 ));
             }
         } else {
@@ -195,15 +212,13 @@ pub async fn handle_send_email(
         recipient_email, args.subject, args.body
     );
     // Send the queued message
-    match crate::api::twilio_utils::send_conversation_message(
-        state,
-        &queued_msg,
-        None,
-        user,
-    ).await {
+    match crate::api::twilio_utils::send_conversation_message(state, &queued_msg, None, user).await
+    {
         Ok(_) => {
             // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
+            if let Err(e) =
+                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
+            {
                 tracing::error!("Failed to deduct user credits: {}", e);
             }
         }
@@ -214,7 +229,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                })
+                }),
             ));
         }
     }
@@ -240,20 +255,34 @@ pub async fn handle_send_email(
             };
             match crate::handlers::imap_handlers::send_email(
                 axum::extract::State(cloned_state.clone()),
-                crate::handlers::auth_middleware::AuthUser { user_id: cloned_user_id, is_admin: false },
-                axum::Json(email_request)
-            ).await {
+                crate::handlers::auth_middleware::AuthUser {
+                    user_id: cloned_user_id,
+                    is_admin: false,
+                },
+                axum::Json(email_request),
+            )
+            .await
+            {
                 Ok(_) => {
                     // No need to send success message
                 }
                 Err((_, error_json)) => {
-                    let error_msg = format!("Failed to send email: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
+                    let error_msg = format!(
+                        "Failed to send email: {}",
+                        error_json
+                            .0
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown error")
+                    );
                     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                         &cloned_state,
                         &error_msg,
                         None,
                         &cloned_user,
-                    ).await {
+                    )
+                    .await
+                    {
                         eprintln!("Failed to send error message: {}", e);
                     }
                 }
@@ -273,7 +302,7 @@ pub async fn handle_send_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email queued".to_string(),
-        })
+        }),
     ))
 }
 
@@ -289,28 +318,45 @@ pub async fn handle_fetch_emails(state: &Arc<AppState>, user_id: i32) -> String 
         axum::extract::State(state.clone()),
         auth_user,
         axum::extract::Query(query_obj),
-    ).await {
+    )
+    .await
+    {
         Ok(axum::Json(response)) => {
             if let Some(emails) = response.get("emails") {
                 if let Some(emails_array) = emails.as_array() {
                     let mut parts: Vec<String> = Vec::new();
                     for email in emails_array.iter().rev().take(5) {
-                        let id = email.get("id").and_then(|i| i.as_str()).unwrap_or("Unknown ID");
-                        let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
-                        let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
-                        let date_formatted = email.get("date_formatted")
+                        let id = email
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("Unknown ID");
+                        let subject = email
+                            .get("subject")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("No subject");
+                        let from = email
+                            .get("from")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("Unknown sender");
+                        let date_formatted = email
+                            .get("date_formatted")
                             .and_then(|d| d.as_str())
                             .unwrap_or("Unknown date");
-                        let snippet = email.get("snippet").and_then(|s| s.as_str()).unwrap_or("No snippet");
-                        parts.push(format!("Email ID: {}:\nSubject: {}\nFrom: {}\nDate: {}\nSnippet: {}", id, subject, from, date_formatted, snippet));
+                        let snippet = email
+                            .get("snippet")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("No snippet");
+                        parts.push(format!(
+                            "Email ID: {}:\nSubject: {}\nFrom: {}\nDate: {}\nSnippet: {}",
+                            id, subject, from, date_formatted, snippet
+                        ));
                     }
                     let mut response = parts.join("\n\n");
 
-                    
                     if emails_array.is_empty() {
                         response = "No recent emails found.".to_string();
                     }
-                    
+
                     response
                 } else {
                     "Failed to parse emails.".to_string()
@@ -321,11 +367,16 @@ pub async fn handle_fetch_emails(state: &Arc<AppState>, user_id: i32) -> String 
         }
         Err((status, axum::Json(error))) => {
             // Extract the actual error message from the JSON response
-            let error_detail = error.get("error")
+            let error_detail = error
+                .get("error")
                 .and_then(|e| e.as_str())
                 .unwrap_or("Unknown error");
 
-            tracing::error!("Email fetch failed with status {}: {}", status, error_detail);
+            tracing::error!(
+                "Email fetch failed with status {}: {}",
+                status,
+                error_detail
+            );
 
             let error_message = match status {
                 axum::http::StatusCode::BAD_REQUEST => {
@@ -343,13 +394,8 @@ pub async fn handle_fetch_emails(state: &Arc<AppState>, user_id: i32) -> String 
     }
 }
 
-
-use axum::{
-    extract::{State, Json},
-};
-use crate::{
-    handlers::auth_middleware::AuthUser,
-};
+use crate::handlers::auth_middleware::AuthUser;
+use axum::extract::{Json, State};
 
 #[derive(Debug, Deserialize)]
 pub struct RespondToEmailArgs {
@@ -361,35 +407,52 @@ pub async fn handle_respond_to_email(
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
-) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
+) -> Result<
+    (
+        axum::http::StatusCode,
+        [(axum::http::HeaderName, &'static str); 1],
+        axum::Json<crate::api::twilio_sms::TwilioResponse>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let args: RespondToEmailArgs = serde_json::from_str(args)?;
     // Fetch the email details to get the subject
     let email_details = match crate::handlers::imap_handlers::fetch_single_imap_email(
         State(state.clone()),
-        AuthUser { user_id, is_admin: false },
+        AuthUser {
+            user_id,
+            is_admin: false,
+        },
         axum::extract::Path(args.email_id.clone()),
-    ).await {
+    )
+    .await
+    {
         Ok(details) => details,
         Err((_, error_json)) => {
-            let error_msg = format!("Failed to fetch email details: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                &error_msg,
-                None,
-                user,
-            ).await {
+            let error_msg = format!(
+                "Failed to fetch email details: {}",
+                error_json
+                    .0
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error")
+            );
+            if let Err(e) =
+                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
+                    .await
+            {
                 eprintln!("Failed to send error message: {}", e);
             }
             return Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: error_msg,
-                })
+                axum::Json(crate::api::twilio_sms::TwilioResponse { message: error_msg }),
             ));
         }
     };
-    let subject = email_details.0.get("email")
+    let subject = email_details
+        .0
+        .get("email")
         .and_then(|e| e.get("subject"))
         .and_then(|s| s.as_str())
         .unwrap_or("Unknown subject")
@@ -400,15 +463,13 @@ pub async fn handle_respond_to_email(
         subject, args.response_text
     );
     // Send the queued message
-    match crate::api::twilio_utils::send_conversation_message(
-        state,
-        &queued_msg,
-        None,
-        user,
-    ).await {
+    match crate::api::twilio_utils::send_conversation_message(state, &queued_msg, None, user).await
+    {
         Ok(_) => {
             // Deduct credits for the queued message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
+            if let Err(e) =
+                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
+            {
                 tracing::error!("Failed to deduct user credits: {}", e);
             }
         }
@@ -419,7 +480,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                })
+                }),
             ));
         }
     }
@@ -443,20 +504,34 @@ pub async fn handle_respond_to_email(
             };
             match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),
-                AuthUser { user_id: cloned_user_id, is_admin: false },
-                Json(request)
-            ).await {
+                AuthUser {
+                    user_id: cloned_user_id,
+                    is_admin: false,
+                },
+                Json(request),
+            )
+            .await
+            {
                 Ok(_) => {
                     // No need to send success message
                 }
                 Err((_, error_json)) => {
-                    let error_msg = format!("Failed to respond to email: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
+                    let error_msg = format!(
+                        "Failed to respond to email: {}",
+                        error_json
+                            .0
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown error")
+                    );
                     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                         &cloned_state,
                         &error_msg,
                         None,
                         &cloned_user,
-                    ).await {
+                    )
+                    .await
+                    {
                         eprintln!("Failed to send error message: {}", e);
                     }
                 }
@@ -476,22 +551,30 @@ pub async fn handle_respond_to_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email response queued".to_string(),
-        })
+        }),
     ))
 }
 
-pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, query: &str) -> String {
+pub async fn handle_fetch_specific_email(
+    state: &Arc<AppState>,
+    user_id: i32,
+    query: &str,
+) -> String {
     // Create OpenAI client for email selection (user-based routing)
-    let (client, provider) = match crate::tool_call_utils::utils::create_openai_client_for_user(state, user_id) {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("Failed to create OpenAI client: {}", e);
-            return "Failed to process email search".to_string();
-        }
-    };
+    let (client, provider) =
+        match crate::tool_call_utils::utils::create_openai_client_for_user(state, user_id) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Failed to create OpenAI client: {}", e);
+                return "Failed to process email search".to_string();
+            }
+        };
 
     // Check if query matches a contact profile nickname and get their email addresses
-    let profiles = state.user_repository.get_contact_profiles(user_id).unwrap_or_default();
+    let profiles = state
+        .user_repository
+        .get_contact_profiles(user_id)
+        .unwrap_or_default();
     let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let query_lower = query.to_lowercase();
@@ -513,7 +596,16 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
     let user_id_clone = user_id;
 
     // Fetch the latest 20 emails with full content
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false, false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(
+        &state_clone,
+        user_id_clone,
+        true,
+        Some(20),
+        false,
+        false,
+    )
+    .await
+    {
         Ok(emails) => {
             if emails.is_empty() {
                 return "No emails found".to_string();
@@ -534,10 +626,18 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
             }
 
             // Use LLM to select the most relevant email (user-based routing)
-            let model = state.ai_config.model(provider, ModelPurpose::Default).to_string();
-            match crate::tool_call_utils::utils::select_most_relevant_email(&client,
+            let model = state
+                .ai_config
+                .model(provider, ModelPurpose::Default)
+                .to_string();
+            match crate::tool_call_utils::utils::select_most_relevant_email(
+                &client,
                 model,
-                &enhanced_query, &formatted_emails).await {
+                &enhanced_query,
+                &formatted_emails,
+            )
+            .await
+            {
                 Ok((selected_email_id, _)) => selected_email_id,
                 Err(e) => {
                     eprintln!("Failed to select relevant email: {}", e);
@@ -549,7 +649,9 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
             let error_message = match e {
                 ImapError::NoConnection => "No IMAP connection found",
                 ImapError::CredentialsError(_) => "Invalid credentials",
-                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
+                ImapError::ConnectionError(msg)
+                | ImapError::FetchError(msg)
+                | ImapError::ParseError(msg) => {
                     eprintln!("Failed to fetch emails: {}", msg);
                     "Failed to fetch emails"
                 }
@@ -558,4 +660,3 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
         }
     }
 }
-

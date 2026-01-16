@@ -1,27 +1,27 @@
-use reqwest::Client;
-use serde_json::json;
-use std::sync::Arc;
-use crate::AppState;
-use serde::Deserialize;
-use std::env;
-use crate::models::user_models::{User, NewMessageStatusLog};
-use std::error::Error;
-use std::time::{SystemTime, UNIX_EPOCH};
-use diesel::prelude::*;
+use crate::models::user_models::{NewMessageStatusLog, User};
 use crate::schema::message_status_log;
+use crate::AppState;
 use axum::{
-    http::{Request, StatusCode},
+    body::{to_bytes, Body},
     extract::State,
+    http::{Request, StatusCode},
     middleware,
     response::Response,
-    body::{Body, to_bytes},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use diesel::prelude::*;
 use hmac::{Hmac, Mac};
+use reqwest::Client;
+use serde::Deserialize;
+use serde_json::json;
 use sha1::Sha1;
 use std::collections::BTreeMap;
-use url::form_urlencoded;
+use std::env;
+use std::error::Error;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing;
+use url::form_urlencoded;
 
 #[derive(Deserialize)]
 pub struct MessageResponse {
@@ -70,13 +70,15 @@ pub async fn set_twilio_webhook(
     }
 
     let data: PhoneNumbersResponse = response.json().await?;
-    let phone_sid = data.incoming_phone_numbers.first().ok_or("No matching phone number found")?.sid.clone();
+    let phone_sid = data
+        .incoming_phone_numbers
+        .first()
+        .ok_or("No matching phone number found")?
+        .sid
+        .clone();
 
     // Update the webhook
-    let update_params = [
-        ("SmsUrl", webhook_url.as_str()),
-        ("SmsMethod", "POST"),
-    ];
+    let update_params = [("SmsUrl", webhook_url.as_str()), ("SmsMethod", "POST")];
     let update_response = client
         .post(format!(
             "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers/{}.json",
@@ -107,7 +109,11 @@ pub async fn set_twilio_webhook(
         let delete_status = delete_response.status();
         if !delete_status.is_success() {
             let error_text = delete_response.text().await.unwrap_or_default();
-            tracing::error!("Failed to delete existing phone number from ElevenLabs: {} - {}", delete_status, error_text);
+            tracing::error!(
+                "Failed to delete existing phone number from ElevenLabs: {} - {}",
+                delete_status,
+                error_text
+            );
             // Proceed anyway
         } else {
             tracing::debug!("Successfully deleted existing phone number from ElevenLabs");
@@ -134,11 +140,18 @@ pub async fn set_twilio_webhook(
     let status = el_response.status();
     if !status.is_success() {
         let error_text = el_response.text().await.unwrap_or_default();
-        tracing::error!("Failed to add phone number to ElevenLabs: {} - {}", status, error_text);
+        tracing::error!(
+            "Failed to add phone number to ElevenLabs: {} - {}",
+            status,
+            error_text
+        );
         // Proceed anyway, as per requirements
     } else {
         let el_data: ElevenLabsResponse = el_response.json().await?;
-        if let Err(e) = state.user_core.set_elevenlabs_phone_number_id(user_id, &el_data.phone_number_id) {
+        if let Err(e) = state
+            .user_core
+            .set_elevenlabs_phone_number_id(user_id, &el_data.phone_number_id)
+        {
             tracing::error!("Failed to set ElevenLabs phone number ID: {}", e);
         }
         tracing::debug!("Successfully added phone number to ElevenLabs");
@@ -149,7 +162,10 @@ pub async fn set_twilio_webhook(
         });
 
         let assign_response = client
-            .patch(format!("https://api.elevenlabs.io/v1/convai/phone-numbers/{}", el_data.phone_number_id))
+            .patch(format!(
+                "https://api.elevenlabs.io/v1/convai/phone-numbers/{}",
+                el_data.phone_number_id
+            ))
             .header("xi-api-key", eleven_key)
             .header("Content-Type", "application/json")
             .json(&assign_body)
@@ -159,7 +175,11 @@ pub async fn set_twilio_webhook(
         let assign_status = assign_response.status();
         if !assign_status.is_success() {
             let error_text = assign_response.text().await.unwrap_or_default();
-            tracing::error!("Failed to assign agent to phone number in ElevenLabs: {} - {}", assign_status, error_text);
+            tracing::error!(
+                "Failed to assign agent to phone number in ElevenLabs: {} - {}",
+                assign_status,
+                error_text
+            );
             // Proceed anyway
         } else {
             tracing::debug!("Successfully assigned agent to phone number in ElevenLabs");
@@ -182,7 +202,7 @@ pub async fn validate_user_twilio_signature(
             Ok(id) => {
                 tracing::info!("✅ Successfully extracted user_id: {}", id);
                 id
-            },
+            }
             Err(e) => {
                 tracing::error!("❌ Failed to parse user_id: {}", e);
                 return Err(StatusCode::BAD_REQUEST);
@@ -200,7 +220,7 @@ pub async fn validate_user_twilio_signature(
             Ok(s) => {
                 tracing::info!("✅ Successfully retrieved X-Twilio-Signature");
                 s.to_string()
-            },
+            }
             Err(e) => {
                 tracing::error!("❌ Error converting X-Twilio-Signature to string: {}", e);
                 return Err(StatusCode::UNAUTHORIZED);
@@ -217,7 +237,7 @@ pub async fn validate_user_twilio_signature(
         Ok(token) => {
             tracing::info!("✅ Successfully retrieved user-specific TWILIO_AUTH_TOKEN");
             token
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to get user-specific TWILIO_AUTH_TOKEN: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -229,7 +249,7 @@ pub async fn validate_user_twilio_signature(
         Ok(url) => {
             tracing::info!("✅ Successfully retrieved SERVER_URL");
             format!("{}/api/sms/server/{}", url, user_id)
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to get SERVER_URL: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -238,11 +258,12 @@ pub async fn validate_user_twilio_signature(
 
     // Get request body for validation
     let (parts, body) = request.into_parts();
-    let body_bytes = match to_bytes(body, 1024 * 1024).await {  // 1MB limit
+    let body_bytes = match to_bytes(body, 1024 * 1024).await {
+        // 1MB limit
         Ok(bytes) => {
             tracing::info!("✅ Successfully read request body");
             bytes
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to read request body: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -311,7 +332,7 @@ pub async fn validate_twilio_signature(
             Ok(s) => {
                 tracing::info!("✅ Successfully retrieved X-Twilio-Signature");
                 s.to_string()
-            },
+            }
             Err(e) => {
                 tracing::error!("❌ Error converting X-Twilio-Signature to string: {}", e);
                 return Err(StatusCode::UNAUTHORIZED);
@@ -323,14 +344,14 @@ pub async fn validate_twilio_signature(
         }
     };
 
-
     // Get request body for validation
     let (parts, body) = request.into_parts();
-    let body_bytes = match to_bytes(body, 1024 * 1024).await {  // 1MB limit
+    let body_bytes = match to_bytes(body, 1024 * 1024).await {
+        // 1MB limit
         Ok(bytes) => {
             tracing::info!("✅ Successfully read request body");
             bytes
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to read request body: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -355,7 +376,7 @@ pub async fn validate_twilio_signature(
         Some(phone) => {
             tracing::info!("✅ Found From phone number: {}", phone);
             phone
-        },
+        }
         None => {
             tracing::error!("❌ No From phone number found in payload");
             return Err(StatusCode::BAD_REQUEST);
@@ -365,11 +386,11 @@ pub async fn validate_twilio_signature(
         Ok(Some(user)) => {
             tracing::info!("✅ Found user {} for phone {}", user.id, from_phone);
             user
-        },
+        }
         Ok(None) => {
             tracing::error!("❌ No user found for phone {}", from_phone);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to query user by phone {}: {}", from_phone, e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -380,16 +401,16 @@ pub async fn validate_twilio_signature(
     let auth_token = if state.user_core.is_byot_user(user.id) {
         match state.user_core.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
-        || crate::utils::country::is_notification_only_country(&user.phone_number) {
-        std::env::var("TWILIO_AUTH_TOKEN")
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        || crate::utils::country::is_notification_only_country(&user.phone_number)
+    {
+        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
         match state.user_core.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED)
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
     };
 
@@ -397,7 +418,7 @@ pub async fn validate_twilio_signature(
         Ok(url) => {
             tracing::info!("✅ Successfully retrieved SERVER_URL");
             url + "/api/sms/server"
-        },
+        }
         Err(e) => {
             tracing::error!("❌ Failed to get SERVER_URL: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -438,7 +459,6 @@ pub async fn validate_twilio_signature(
 
     Ok(next.run(request).await)
 }
-
 
 /// Validate Twilio signature for status callbacks
 ///
@@ -548,7 +568,8 @@ pub async fn delete_twilio_message_media(
     let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
-        || crate::utils::country::is_notification_only_country(&user.phone_number) {
+        || crate::utils::country::is_notification_only_country(&user.phone_number)
+    {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
@@ -568,8 +589,12 @@ pub async fn delete_twilio_message_media(
         .await?;
 
     if !response.status().is_success() {
-        return Err(format!("Failed to delete message media: {} - {}", 
-            response.status(), response.text().await?).into());
+        return Err(format!(
+            "Failed to delete message media: {} - {}",
+            response.status(),
+            response.text().await?
+        )
+        .into());
     }
 
     tracing::debug!("Successfully deleted message media: {}", media_sid);
@@ -590,7 +615,8 @@ pub async fn delete_twilio_message(
     let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
-        || crate::utils::country::is_notification_only_country(&user.phone_number) {
+        || crate::utils::country::is_notification_only_country(&user.phone_number)
+    {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
@@ -629,7 +655,6 @@ pub async fn delete_twilio_message(
     }
 }
 
-
 pub async fn send_conversation_message(
     state: &Arc<AppState>,
     body: &str,
@@ -648,11 +673,13 @@ pub async fn send_conversation_message(
     };
 
     if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-        tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
+        tracing::error!(
+            "Failed to store WhatsApp confirmation message in history: {}",
+            e
+        );
     }
 
-    let running_environment= env::var("ENVIRONMENT")
-            .map_err(|_| "ENVIRONMENT not set")?;
+    let running_environment = env::var("ENVIRONMENT").map_err(|_| "ENVIRONMENT not set")?;
     if running_environment == "development" {
         tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
@@ -665,7 +692,8 @@ pub async fn send_conversation_message(
         // BYOT user - use their own Twilio account
         state.user_core.get_twilio_credentials(user.id)?
     } else if crate::utils::country::is_local_number_country(&user.phone_number)
-        || crate::utils::country::is_notification_only_country(&user.phone_number) {
+        || crate::utils::country::is_notification_only_country(&user.phone_number)
+    {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
             env::var("TWILIO_AUTH_TOKEN")?,
@@ -680,7 +708,13 @@ pub async fn send_conversation_message(
     // Get or set country
     let mut country = user.phone_number_country.clone();
     if country.is_none() {
-        match crate::handlers::profile_handlers::set_user_phone_country(state, user.id, &user.phone_number).await {
+        match crate::handlers::profile_handlers::set_user_phone_country(
+            state,
+            user.id,
+            &user.phone_number,
+        )
+        .await
+        {
             Ok(c) => country = c,
             Err(e) => {
                 tracing::error!("Failed to set phone country: {}", e);
@@ -695,7 +729,8 @@ pub async fn send_conversation_message(
     // we must ALWAYS use messaging service - never send from US number directly
     let preferred = user.preferred_number.as_deref().unwrap_or("");
     let has_byot_credentials = state.user_core.is_byot_user(user.id);
-    let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
+    let is_notification_only =
+        crate::utils::country::is_notification_only_country(&user.phone_number);
 
     let mut from_number = String::new();
     let mut use_messaging_service = false;
@@ -707,11 +742,18 @@ pub async fn send_conversation_message(
         // If preferred is US number or empty, use messaging service. Otherwise use selected local number.
         if preferred.is_empty() || us_phone.as_deref() == Some(preferred) {
             use_messaging_service = true;
-            tracing::info!("Using US messaging service for notification-only country user {}", user.id);
+            tracing::info!(
+                "Using US messaging service for notification-only country user {}",
+                user.id
+            );
         } else {
             // User selected a non-US local number (FI, NL, GB, AU)
             from_number = preferred.to_string();
-            tracing::info!("Using selected local number {} for notification-only user {}", from_number, user.id);
+            tracing::info!(
+                "Using selected local number {} for notification-only user {}",
+                from_number,
+                user.id
+            );
         }
     } else if let Some(c) = country.clone() {
         match c.as_str() {
@@ -770,12 +812,22 @@ pub async fn send_conversation_message(
     }
 
     if update_preferred && !from_number.is_empty() {
-        let _ = state.user_core.update_preferred_number(user.id, &from_number).map_err(|e| tracing::error!("Failed to update preferred_number for user {}: {:?}", user.id, e));
+        let _ = state
+            .user_core
+            .update_preferred_number(user.id, &from_number)
+            .map_err(|e| {
+                tracing::error!(
+                    "Failed to update preferred_number for user {}: {:?}",
+                    user.id,
+                    e
+                )
+            });
     }
 
     // Build form_data
     let mut form_data = vec![("To", user.phone_number.as_str()), ("Body", body)];
-    let sid = env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
+    let sid =
+        env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
 
     // Add StatusCallback URL for delivery status tracking
     let server_url = env::var("SERVER_URL").unwrap_or_default();
@@ -786,7 +838,11 @@ pub async fn send_conversation_message(
     } else if !from_number.is_empty() {
         form_data.push(("From", from_number.as_str()));
     } else {
-        tracing::warn!("No valid From available for user {} and country {:?}", user.id, country);
+        tracing::warn!(
+            "No valid From available for user {} and country {:?}",
+            user.id,
+            country
+        );
         // Fallback or error as needed
     }
 
@@ -794,7 +850,6 @@ pub async fn send_conversation_message(
     if !server_url.is_empty() {
         form_data.push(("StatusCallback", status_callback_url.as_str()));
     }
-
 
     // Handle media_sid if provided
     let media_url: String;
@@ -819,7 +874,6 @@ pub async fn send_conversation_message(
         .send()
         .await?;
 
-
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
@@ -829,9 +883,15 @@ pub async fn send_conversation_message(
 
     let response: MessageResponse = resp.json().await?;
 
-    tracing::debug!("Successfully sent message{} with SID: {}",
-        if media_sid.is_some() { " with media" } else { "" },
-        response.sid);
+    tracing::debug!(
+        "Successfully sent message{} with SID: {}",
+        if media_sid.is_some() {
+            " with media"
+        } else {
+            ""
+        },
+        response.sid
+    );
 
     // Log initial message status to database for tracking
     if let Ok(mut conn) = state.db_pool.get() {
@@ -844,13 +904,17 @@ pub async fn send_conversation_message(
             user_id: user.id,
             direction: "outbound".to_string(),
             to_number: user.phone_number.clone(),
-            from_number: if from_number.is_empty() { None } else { Some(from_number.clone()) },
+            from_number: if from_number.is_empty() {
+                None
+            } else {
+                Some(from_number.clone())
+            },
             status: "queued".to_string(),
             error_code: None,
             error_message: None,
             created_at: now,
             updated_at: now,
-            price: None,        // Price comes from Twilio callback after delivery
+            price: None, // Price comes from Twilio callback after delivery
             price_unit: None,
         };
 
@@ -858,7 +922,11 @@ pub async fn send_conversation_message(
             .values(&new_status)
             .execute(&mut conn)
         {
-            tracing::error!("Failed to log message status for SID {}: {}", response.sid, e);
+            tracing::error!(
+                "Failed to log message status for SID {}: {}",
+                response.sid,
+                e
+            );
         } else {
             tracing::info!("Logged initial message status for SID {}", response.sid);
         }

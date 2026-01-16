@@ -1,5 +1,1 @@
-
-impl crate::repositories::user_repository::UserRepository {
-
-}
-
+impl crate::repositories::user_repository::UserRepository {}

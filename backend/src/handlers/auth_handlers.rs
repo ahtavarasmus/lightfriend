@@ -1,26 +1,20 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
-use axum::{
-    Json,
-    extract::State,
-    response::Response,
-    http::StatusCode,
-};
-use rand::Rng;
-use std::time::{SystemTime, UNIX_EPOCH};
-use serde_json::json;
-use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
+use axum::{extract::State, http::StatusCode, response::Response, Json};
 use chrono::{Duration, Utc};
-use serde::Deserialize;
-use std::num::NonZeroU32;
 use governor::{Quota, RateLimiter};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use rand::Rng;
+use serde::Deserialize;
+use serde_json::json;
 use std::env;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    handlers::auth_dtos::{LoginRequest, RegisterRequest, UserResponse, NewUser},
-    AppState
+    handlers::auth_dtos::{LoginRequest, NewUser, RegisterRequest, UserResponse},
+    AppState,
 };
-
 
 #[derive(Deserialize)]
 pub struct CompletePasswordResetRequest {
@@ -43,20 +37,20 @@ pub async fn get_users(
         tracing::error!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Database error"}))
+            Json(json!({"error": "Database error"})),
         )
     })?;
-    
+
     tracing::debug!("Converting users to response format");
     let mut users_response = Vec::with_capacity(users_list.len());
-    
+
     for user in users_list {
         // Get user settings, providing defaults if not found
         let settings = state.user_core.get_user_settings(user.id).map_err(|e| {
             tracing::error!("Database error while fetching user settings: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                Json(json!({"error": "Database error"})),
             )
         })?;
 
@@ -86,7 +80,6 @@ pub async fn get_users(
     Ok(Json(users_response))
 }
 
-
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(login_req): Json<LoginRequest>,
@@ -98,7 +91,8 @@ pub async fn login(
     let limiter_key = login_req.email.clone(); // Use email as the key
 
     // Get or create a keyed rate limiter for this email
-    let entry = state.login_limiter
+    let entry = state
+        .login_limiter
         .entry(limiter_key.clone())
         .or_insert_with(|| RateLimiter::keyed(quota)); // Bind the Entry here
     let limiter = entry.value(); // Now borrow from the bound value
@@ -125,7 +119,7 @@ pub async fn login(
         Err(_) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                Json(json!({"error": "Database error"})),
             ));
         }
     };
@@ -140,16 +134,20 @@ pub async fn login(
             // Generic error message to not reveal whether user exists
             return Err((
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid credentials"}))
+                Json(json!({"error": "Invalid credentials"})),
             ));
         }
     };
 
     // Password is valid, proceed with 2FA check
     // Check if 2FA methods are enabled for this user
-    let totp_enabled = state.totp_repository.is_totp_enabled(user.id)
+    let totp_enabled = state
+        .totp_repository
+        .is_totp_enabled(user.id)
         .unwrap_or(false);
-    let webauthn_enabled = state.webauthn_repository.has_passkeys(user.id)
+    let webauthn_enabled = state
+        .webauthn_repository
+        .has_passkeys(user.id)
         .unwrap_or(false);
 
     if totp_enabled || webauthn_enabled {
@@ -164,10 +162,13 @@ pub async fn login(
         let expiry = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64 + 300; // 5 minutes
+            .as_secs() as i64
+            + 300; // 5 minutes
 
         // Store the pending login (used by both TOTP and WebAuthn)
-        state.pending_totp_logins.insert(login_token.clone(), (user.id, expiry));
+        state
+            .pending_totp_logins
+            .insert(login_token.clone(), (user.id, expiry));
 
         // Return response indicating 2FA is required with available methods
         let mut response = Response::new(axum::body::Body::from(
@@ -177,20 +178,18 @@ pub async fn login(
                 "webauthn_enabled": webauthn_enabled,
                 "login_token": login_token,
                 "message": "Please complete 2FA verification"
-            })).unwrap()
+            }))
+            .unwrap(),
         ));
         *response.status_mut() = StatusCode::OK;
-        response.headers_mut().insert(
-            "Content-Type",
-            "application/json".parse().unwrap()
-        );
+        response
+            .headers_mut()
+            .insert("Content-Type", "application/json".parse().unwrap());
         return Ok(response);
     }
 
     generate_tokens_and_response(user.id)
 }
-
-
 
 #[derive(serde::Deserialize)]
 pub struct SendOtpRequest {
@@ -211,7 +210,8 @@ pub async fn request_phone_verify(
     let quota = Quota::per_hour(NonZeroU32::new(3).unwrap());
     let limiter_key = reset_req.phone_number.clone();
     // Get or create a rate limiter for this phone_number
-    let entry = state.phone_verify_limiter
+    let entry = state
+        .phone_verify_limiter
         .entry(limiter_key.clone())
         .or_insert_with(|| RateLimiter::keyed(quota));
     let limiter = entry.value();
@@ -220,22 +220,25 @@ pub async fn request_phone_verify(
         tracing::warn!("Rate limit exceeded for phone verify request: [redacted phone]");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+            Json(json!({"error": "Too many verification attempts. Please try again later."})),
         ));
     }
     // Find user by phone_number
-    let user = match state.user_core.find_by_phone_number(&reset_req.phone_number) {
+    let user = match state
+        .user_core
+        .find_by_phone_number(&reset_req.phone_number)
+    {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "No user found with this phone number"}))
+                Json(json!({"error": "No user found with this phone number"})),
             ));
         }
         Err(_) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                Json(json!({"error": "Database error"})),
             ));
         }
     };
@@ -249,29 +252,35 @@ pub async fn request_phone_verify(
     let expiration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() + 300; // 5 minutes
-    // Remove any existing OTP for this phone_number first
+        .as_secs()
+        + 300; // 5 minutes
+               // Remove any existing OTP for this phone_number first
     state.phone_verify_otps.remove(&reset_req.phone_number);
     // Insert the new OTP
-    state.phone_verify_otps.insert(
-        reset_req.phone_number.clone(),
-        (otp.clone(), expiration)
+    state
+        .phone_verify_otps
+        .insert(reset_req.phone_number.clone(), (otp.clone(), expiration));
+    tracing::debug!(
+        "Stored OTP {} for phone {} with expiration {}",
+        otp,
+        reset_req.phone_number,
+        expiration
     );
-    tracing::debug!("Stored OTP {} for phone {} with expiration {}", otp, reset_req.phone_number, expiration);
-    let message = format!("Your Lightfriend verification code is: {}. Valid for 5 minutes.", otp);
-    if crate::api::twilio_utils::send_conversation_message(
-        &state,
-        &message,
-        None,
-        &user
-    ).await.is_err() {
+    let message = format!(
+        "Your Lightfriend verification code is: {}. Valid for 5 minutes.",
+        otp
+    );
+    if crate::api::twilio_utils::send_conversation_message(&state, &message, None, &user)
+        .await
+        .is_err()
+    {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to send OTP"}))
+            Json(json!({"error": "Failed to send OTP"})),
         ));
     }
     Ok(Json(PasswordResetResponse {
-        message: "Verification code sent to your phone".to_string()
+        message: "Verification code sent to your phone".to_string(),
     }))
 }
 
@@ -285,7 +294,8 @@ pub async fn verify_phone_verify(
         .allow_burst(NonZeroU32::new(3).unwrap());
     let limiter_key = verify_req.phone_number.clone();
     // Get or create a rate limiter for this phone_number
-    let entry = state.phone_verify_verify_limiter
+    let entry = state
+        .phone_verify_verify_limiter
         .entry(limiter_key.clone())
         .or_insert_with(|| RateLimiter::keyed(quota));
     let limiter = entry.value();
@@ -294,18 +304,22 @@ pub async fn verify_phone_verify(
         tracing::warn!("Rate limit exceeded for phone verify verification: [redacted phone]");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+            Json(json!({"error": "Too many verification attempts. Please try again later."})),
         ));
     }
-    tracing::debug!("Verifying OTP {} for phone {}", verify_req.otp, verify_req.phone_number);
-   
+    tracing::debug!(
+        "Verifying OTP {} for phone {}",
+        verify_req.otp,
+        verify_req.phone_number
+    );
+
     // Remove the OTP data immediately to prevent any hanging references
     let otp_data = match state.phone_verify_otps.remove(&verify_req.phone_number) {
         Some((_, data)) => data, // The first element is the key (phone), second is the value tuple
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "No valid OTP found for this phone number"}))
+                Json(json!({"error": "No valid OTP found for this phone number"})),
             ));
         }
     };
@@ -315,32 +329,43 @@ pub async fn verify_phone_verify(
         .unwrap()
         .as_secs();
     if current_time > expiration_time {
-        tracing::debug!("OTP expired: current_time {} > expiration {}", current_time, expiration_time);
+        tracing::debug!(
+            "OTP expired: current_time {} > expiration {}",
+            current_time,
+            expiration_time
+        );
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "OTP has expired"}))
+            Json(json!({"error": "OTP has expired"})),
         ));
     }
     if verify_req.otp != stored_otp {
-        tracing::debug!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
+        tracing::debug!(
+            "OTP mismatch: provided {} != stored {}",
+            verify_req.otp,
+            stored_otp
+        );
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid OTP"}))
+            Json(json!({"error": "Invalid OTP"})),
         ));
     }
     // Find user by phone_number to verify
-    let user = match state.user_core.find_by_phone_number(&verify_req.phone_number) {
+    let user = match state
+        .user_core
+        .find_by_phone_number(&verify_req.phone_number)
+    {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "No user found with this phone number"}))
+                Json(json!({"error": "No user found with this phone number"})),
             ));
         }
         Err(_) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Database error"}))
+                Json(json!({"error": "Database error"})),
             ));
         }
     };
@@ -349,16 +374,16 @@ pub async fn verify_phone_verify(
         tracing::error!("Error verifying user: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to verify user"}))
+            Json(json!({"error": "Failed to verify user"})),
         ));
     }
     tracing::info!("User verified successfully");
-   
+
     // Create success response
     let response = PasswordResetResponse {
-        message: "Phone number has been verified successfully.".to_string()
+        message: "Phone number has been verified successfully.".to_string(),
     };
-   
+
     Ok(Json(response))
 }
 
@@ -366,7 +391,6 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-   
     tracing::debug!("Registration attempt for email: {}", reg_req.email);
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
@@ -374,7 +398,7 @@ pub async fn register(
         tracing::debug!("Invalid email format: {}", reg_req.email);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid email format"}))
+            Json(json!({"error": "Invalid email format"})),
         ));
     }
     // Check if email exists
@@ -383,7 +407,7 @@ pub async fn register(
         tracing::error!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Database error") }))
+            Json(json!({ "error": format!("Database error") })),
         )
     })? {
         tracing::debug!("Email {} already exists", reg_req.email);
@@ -398,7 +422,7 @@ pub async fn register(
         tracing::debug!("Invalid phone number format: {}", reg_req.phone_number);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"})),
         ));
     }
     if reg_req.password.len() < 8 {
@@ -409,13 +433,17 @@ pub async fn register(
     }
     // Check if phone number exists
     tracing::debug!("Checking if phone number exists...");
-    if state.user_core.phone_number_exists(&reg_req.phone_number).map_err(|e| {
-        tracing::error!("Database error while checking phone number: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Database error") }))
-        )
-    })? {
+    if state
+        .user_core
+        .phone_number_exists(&reg_req.phone_number)
+        .map_err(|e| {
+            tracing::error!("Database error while checking phone number: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Database error") })),
+            )
+        })?
+    {
         tracing::debug!("Phone number {} already exists", reg_req.phone_number);
         return Err((
             StatusCode::CONFLICT,
@@ -425,14 +453,13 @@ pub async fn register(
     tracing::debug!("Phone number is available");
     // Hash password
     tracing::debug!("Hashing password...");
-    let password_hash = bcrypt::hash(&reg_req.password, bcrypt::DEFAULT_COST)
-        .map_err(|e| {
-            tracing::error!("Password hashing failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Password hashing failed") })),
-            )
-        })?;
+    let password_hash = bcrypt::hash(&reg_req.password, bcrypt::DEFAULT_COST).map_err(|e| {
+        tracing::error!("Password hashing failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Password hashing failed") })),
+        )
+    })?;
     tracing::debug!("Password hashed successfully");
     // Create and insert user
     tracing::debug!("Creating new user...");
@@ -464,32 +491,46 @@ pub async fn register(
         )
     })?;
     tracing::info!("User registered successfully, setting preferred number");
-   
+
     // Get the newly created user to get their ID
-    let user = state.user_core.find_by_email(&reg_req.email)
-        .map_err(|_e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to retrieve user")}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "User not found after registration"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_email(&reg_req.email)
+        .map_err(|_e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to retrieve user")})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "User not found after registration"})),
+            )
+        })?;
     // Set phone number country
-    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &reg_req.phone_number).await {
+    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(
+        &state,
+        user.id,
+        &reg_req.phone_number,
+    )
+    .await
+    {
         tracing::error!("Failed to set phone country during registration: {}", e);
         // Continue without failing registration
     }
     // Set preferred number if user has US number
     if reg_req.phone_number.starts_with("+1") {
-        state.user_core.set_preferred_number_to_us_default(user.id)
-        .map_err(|e| {
-            tracing::error!("Failed to set preferred number: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to set preferred number") })),
-            )
-        })?;
+        state
+            .user_core
+            .set_preferred_number_to_us_default(user.id)
+            .map_err(|e| {
+                tracing::error!("Failed to set preferred number: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Failed to set preferred number") })),
+                )
+            })?;
         tracing::debug!("Preferred number set successfully, generating tokens");
     }
     generate_tokens_and_response(user.id)
@@ -502,18 +543,20 @@ pub async fn refresh_token(
     let refresh_token = match headers.get("cookie") {
         Some(cookie_header) => {
             let cookies = cookie_header.to_str().unwrap_or("");
-            cookies.split(';').find(|c| c.trim().starts_with("refresh_token="))
+            cookies
+                .split(';')
+                .find(|c| c.trim().starts_with("refresh_token="))
                 .and_then(|c| c.split('=').nth(1))
                 .map(|t| t.to_string())
                 .ok_or((
                     StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Missing refresh token"}))
+                    Json(json!({"error": "Missing refresh token"})),
                 ))?
         }
         None => {
             return Err((
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Missing cookies"}))
+                Json(json!({"error": "Missing cookies"})),
             ));
         }
     };
@@ -522,18 +565,25 @@ pub async fn refresh_token(
     let validation = Validation::default();
     let token_data = decode::<serde_json::Value>(
         &refresh_token,
-        &DecodingKey::from_secret(env::var("JWT_REFRESH_KEY").expect("JWT_REFRESH_KEY must be set").as_ref()),
+        &DecodingKey::from_secret(
+            env::var("JWT_REFRESH_KEY")
+                .expect("JWT_REFRESH_KEY must be set")
+                .as_ref(),
+        ),
         &validation,
-    ).map_err(|_| (
-        StatusCode::UNAUTHORIZED,
-        Json(json!({"error": "Invalid refresh token"}))
-    ))?;
+    )
+    .map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid refresh token"})),
+        )
+    })?;
 
     let user_id: i32 = token_data.claims["sub"].as_i64().unwrap_or(0) as i32;
     if user_id == 0 {
         return Err((
             StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid user in token"}))
+            Json(json!({"error": "Invalid user in token"})),
         ));
     }
 
@@ -561,13 +611,15 @@ pub async fn testing_handler(
             tracing::error!("Error in get_nearby_towns: {:?}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get nearby towns: {}", e)}))
+                Json(json!({"error": format!("Failed to get nearby towns: {}", e)})),
             ))
         }
     }
 }
 
-pub fn generate_tokens_and_response(user_id: i32) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+pub fn generate_tokens_and_response(
+    user_id: i32,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Generate access token (1 hour)
     let access_token = encode(
         &Header::default(),
@@ -576,13 +628,18 @@ pub fn generate_tokens_and_response(user_id: i32) -> Result<Response, (StatusCod
             "exp": (Utc::now() + Duration::hours(1)).timestamp(),
             "type": "access"
         }),
-        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-    ).map_err(|_| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": "Token generation failed"}))
-    ))?;
+        &EncodingKey::from_secret(
+            std::env::var("JWT_SECRET_KEY")
+                .expect("JWT_SECRET_KEY must be set in environment")
+                .as_bytes(),
+        ),
+    )
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Token generation failed"})),
+        )
+    })?;
 
     // Generate refresh token (90 days)
     let refresh_token = encode(
@@ -592,23 +649,27 @@ pub fn generate_tokens_and_response(user_id: i32) -> Result<Response, (StatusCod
             "exp": (Utc::now() + Duration::days(90)).timestamp(),
             "type": "refresh"
         }),
-        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
-            .expect("JWT_REFRESH_KEY must be set in environment")
-            .as_bytes()),
-    ).map_err(|_| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": "Token generation failed"}))
-    ))?;
+        &EncodingKey::from_secret(
+            std::env::var("JWT_REFRESH_KEY")
+                .expect("JWT_REFRESH_KEY must be set in environment")
+                .as_bytes(),
+        ),
+    )
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Token generation failed"})),
+        )
+    })?;
 
     // Create response with HttpOnly cookies
-    let mut response = Response::new(
-        axum::body::Body::from(
-            Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string()
-        )
-    );
+    let mut response = Response::new(axum::body::Body::from(
+        Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string(),
+    ));
     // Don't use Secure flag in development (HTTP), only in production (HTTPS)
     // Use SameSite=Lax to allow cookies on redirects (Strict blocks them)
-    let is_development = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
+    let is_development =
+        std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
     let cookie_options = if is_development {
         "; HttpOnly; SameSite=Lax; Path=/"
     } else {
@@ -617,20 +678,25 @@ pub fn generate_tokens_and_response(user_id: i32) -> Result<Response, (StatusCod
 
     response.headers_mut().insert(
         "Set-Cookie",
-        format!("access_token={}{}; Max-Age=3600", access_token, cookie_options)
-            .parse()
-            .unwrap(),
+        format!(
+            "access_token={}{}; Max-Age=3600",
+            access_token, cookie_options
+        )
+        .parse()
+        .unwrap(),
     );
     response.headers_mut().append(
         "Set-Cookie",
-        format!("refresh_token={}{}; Max-Age=7776000", refresh_token, cookie_options)
-            .parse()
-            .unwrap(),
+        format!(
+            "refresh_token={}{}; Max-Age=7776000",
+            refresh_token, cookie_options
+        )
+        .parse()
+        .unwrap(),
     );
-    response.headers_mut().insert(
-        "Content-Type",
-        "application/json".parse().unwrap()
-    );
+    response
+        .headers_mut()
+        .insert("Content-Type", "application/json".parse().unwrap());
     Ok(response)
 }
 
@@ -646,13 +712,12 @@ pub async fn auth_status(
 
 pub async fn logout() -> Result<Response, StatusCode> {
     // Create response that clears both authentication cookies
-    let mut response = Response::new(
-        axum::body::Body::from(
-            Json(json!({"message": "Logged out successfully"})).to_string()
-        )
-    );
+    let mut response = Response::new(axum::body::Body::from(
+        Json(json!({"message": "Logged out successfully"})).to_string(),
+    ));
 
-    let is_development = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
+    let is_development =
+        std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
     let cookie_clear_options = if is_development {
         "; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
     } else {
@@ -674,7 +739,9 @@ pub async fn logout() -> Result<Response, StatusCode> {
     );
     response.headers_mut().insert(
         "Content-Type",
-        "application/json".parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        "application/json"
+            .parse()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     );
 
     Ok(response)
@@ -697,13 +764,21 @@ pub async fn validate_magic_link(
     Path(token): Path<String>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Find user by magic_token
-    let user = state.user_core.find_by_magic_token(&token)
+    let user = state
+        .user_core
+        .find_by_magic_token(&token)
         .map_err(|e| {
             tracing::error!("Database error finding user by magic token: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"})),
+            )
         })?
         .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, Json(json!({"error": "Invalid or expired magic link"})))
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Invalid or expired magic link"})),
+            )
         })?;
 
     // Check if password is set (password_hash is not empty/placeholder)
@@ -736,31 +811,46 @@ pub async fn set_password_from_magic_link(
     if req.password.len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Password must be at least 8 characters"}))
+            Json(json!({"error": "Password must be at least 8 characters"})),
         ));
     }
 
     // Find user by magic_token
-    let user = state.user_core.find_by_magic_token(&req.token)
+    let user = state
+        .user_core
+        .find_by_magic_token(&req.token)
         .map_err(|e| {
             tracing::error!("Database error finding user by magic token: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"})),
+            )
         })?
         .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, Json(json!({"error": "Invalid or expired token"})))
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Invalid or expired token"})),
+            )
         })?;
 
     // Hash the new password
-    let password_hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST)
-        .map_err(|_| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to hash password"})))
-        })?;
+    let password_hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to hash password"})),
+        )
+    })?;
 
     // Update the password
-    state.user_core.update_password(user.id, &password_hash)
+    state
+        .user_core
+        .update_password(user.id, &password_hash)
         .map_err(|e| {
             tracing::error!("Failed to update password: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to update password"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update password"})),
+            )
         })?;
 
     tracing::info!("User {} set their password via magic link", user.id);
@@ -776,10 +866,15 @@ pub async fn get_token_from_session(
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Look up the token from the session_to_token map
-    let token = state.session_to_token.get(&session_id)
+    let token = state
+        .session_to_token
+        .get(&session_id)
         .map(|v| v.clone())
         .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, Json(json!({"error": "Session not found or expired"})))
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Session not found or expired"})),
+            )
         })?;
 
     // Remove the mapping (single use)
@@ -828,7 +923,7 @@ pub async fn add_to_waitlist(
     if !email_regex.is_match(&req.email) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid email format"}))
+            Json(json!({"error": "Invalid email format"})),
         ));
     }
 
@@ -845,7 +940,10 @@ pub async fn add_to_waitlist(
 
     let mut conn = state.db_pool.get().map_err(|e| {
         tracing::error!("Failed to get DB connection: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database error"})),
+        )
     })?;
 
     // Insert, ignoring if already exists
@@ -856,7 +954,10 @@ pub async fn add_to_waitlist(
         .execute(&mut conn)
         .map_err(|e| {
             tracing::error!("Failed to insert waitlist entry: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to add to waitlist"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to add to waitlist"})),
+            )
         })?;
 
     tracing::info!("Added {} to waitlist", email);
@@ -892,7 +993,7 @@ pub async fn validate_reset_token(
                 state.pending_password_resets.remove(&token);
                 return Err((
                     StatusCode::GONE,
-                    Json(json!({"error": "Reset link has expired. Please request a new one."}))
+                    Json(json!({"error": "Reset link has expired. Please request a new one."})),
                 ));
             }
 
@@ -902,12 +1003,10 @@ pub async fn validate_reset_token(
                 "message": "Token is valid"
             })))
         }
-        None => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Invalid or expired reset link."}))
-            ))
-        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Invalid or expired reset link."})),
+        )),
     }
 }
 
@@ -922,7 +1021,7 @@ pub async fn complete_password_reset(
     if req.new_password.len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Password must be at least 8 characters long"}))
+            Json(json!({"error": "Password must be at least 8 characters long"})),
         ));
     }
 
@@ -939,27 +1038,29 @@ pub async fn complete_password_reset(
             if now > expiry {
                 return Err((
                     StatusCode::GONE,
-                    Json(json!({"error": "Reset link has expired. Please request a new one."}))
+                    Json(json!({"error": "Reset link has expired. Please request a new one."})),
                 ));
             }
 
             // Hash the new password
-            let password_hash = bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST)
-                .map_err(|e| {
+            let password_hash =
+                bcrypt::hash(&req.new_password, bcrypt::DEFAULT_COST).map_err(|e| {
                     tracing::error!("Failed to hash password: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "Failed to process password"}))
+                        Json(json!({"error": "Failed to process password"})),
                     )
                 })?;
 
             // Update the user's password
-            state.user_core.update_password(user_id, &password_hash)
+            state
+                .user_core
+                .update_password(user_id, &password_hash)
                 .map_err(|e| {
                     tracing::error!("Failed to update password for user {}: {}", user_id, e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "Failed to update password"}))
+                        Json(json!({"error": "Failed to update password"})),
                     )
                 })?;
 
@@ -969,11 +1070,9 @@ pub async fn complete_password_reset(
                 "message": "Password has been reset successfully. You can now log in with your new password."
             })))
         }
-        None => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Invalid or expired reset link."}))
-            ))
-        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Invalid or expired reset link."})),
+        )),
     }
 }

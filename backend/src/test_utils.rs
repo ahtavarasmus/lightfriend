@@ -2,14 +2,14 @@
 //!
 //! Provides mock LLM responses and test state setup for integration tests.
 
-use openai_api_rs::v1::chat_completion;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use std::sync::Arc;
-use std::collections::HashMap;
 use dashmap::DashMap;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use openai_api_rs::v1::chat_completion;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_sessions::MemoryStore;
-use oauth2::{basic::BasicClient, AuthUrl, TokenUrl, ClientId, ClientSecret};
 
 /// Embedded migrations for in-memory test database
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
@@ -31,14 +31,15 @@ pub fn create_test_pool() -> crate::DbPool {
 
     let manager = ConnectionManager::<SqliteConnection>::new(&db_url);
     let pool = r2d2::Pool::builder()
-        .max_size(5)  // Allow multiple connections with shared cache
+        .max_size(5) // Allow multiple connections with shared cache
         .connection_customizer(Box::new(crate::SqliteConnectionCustomizer))
         .build(manager)
         .expect("Failed to create test pool");
 
     // Run migrations
     let mut conn = pool.get().expect("Failed to get connection");
-    conn.run_pending_migrations(MIGRATIONS).expect("Failed to run migrations");
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("Failed to run migrations");
 
     pool
 }
@@ -68,8 +69,11 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 
     let user_core = Arc::new(crate::UserCore::new(pool.clone()));
     let user_repository = Arc::new(crate::UserRepository::new(pool.clone()));
-    let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(pool.clone()));
-    let webauthn_repository = Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
+    let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
+        pool.clone(),
+    ));
+    let webauthn_repository =
+        Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -108,11 +112,14 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 }
 
 /// Create a test user in the database from TestUserParams
-pub fn create_test_user(state: &Arc<crate::AppState>, params: &TestUserParams) -> crate::models::user_models::User {
+pub fn create_test_user(
+    state: &Arc<crate::AppState>,
+    params: &TestUserParams,
+) -> crate::models::user_models::User {
     use crate::handlers::auth_dtos::NewUser;
 
-    let password_hash = bcrypt::hash("test123", bcrypt::DEFAULT_COST)
-        .expect("Failed to hash password");
+    let password_hash =
+        bcrypt::hash("test123", bcrypt::DEFAULT_COST).expect("Failed to hash password");
 
     let new_user = NewUser {
         email: params.email.clone(),
@@ -128,8 +135,13 @@ pub fn create_test_user(state: &Arc<crate::AppState>, params: &TestUserParams) -
         sub_tier: params.sub_tier.clone(),
     };
 
-    state.user_core.create_user(new_user).expect("Failed to create test user");
-    state.user_core.find_by_email(&params.email)
+    state
+        .user_core
+        .create_user(new_user)
+        .expect("Failed to create test user");
+    state
+        .user_core
+        .find_by_email(&params.email)
         .expect("Failed to find created user")
         .expect("User not found after creation")
 }
@@ -149,18 +161,19 @@ impl MockLlmResponse {
     pub fn with_direct_response(response: &str) -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_123".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some("direct_response".to_string()),
-                        arguments: Some(serde_json::json!({
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_123".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some("direct_response".to_string()),
+                    arguments: Some(
+                        serde_json::json!({
                             "response": response
-                        }).to_string()),
-                    },
-                }
-            ]),
+                        })
+                        .to_string(),
+                    ),
+                },
+            }]),
         }
     }
 
@@ -168,18 +181,19 @@ impl MockLlmResponse {
     pub fn with_perplexity_query(query: &str) -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_perplexity".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some("ask_perplexity".to_string()),
-                        arguments: Some(serde_json::json!({
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_perplexity".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some("ask_perplexity".to_string()),
+                    arguments: Some(
+                        serde_json::json!({
                             "query": query
-                        }).to_string()),
-                    },
-                }
-            ]),
+                        })
+                        .to_string(),
+                    ),
+                },
+            }]),
         }
     }
 
@@ -187,20 +201,21 @@ impl MockLlmResponse {
     pub fn with_weather_query(location: &str, units: &str) -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_weather".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some("get_weather".to_string()),
-                        arguments: Some(serde_json::json!({
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_weather".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some("get_weather".to_string()),
+                    arguments: Some(
+                        serde_json::json!({
                             "location": location,
                             "units": units,
                             "forecast_type": "current"
-                        }).to_string()),
-                    },
-                }
-            ]),
+                        })
+                        .to_string(),
+                    ),
+                },
+            }]),
         }
     }
 
@@ -222,16 +237,14 @@ impl MockLlmResponse {
     pub fn with_invalid_tool_call() -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_invalid".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some("nonexistent_tool".to_string()),
-                        arguments: Some("invalid json {{{".to_string()),
-                    },
-                }
-            ]),
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_invalid".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some("nonexistent_tool".to_string()),
+                    arguments: Some("invalid json {{{".to_string()),
+                },
+            }]),
         }
     }
 
@@ -239,16 +252,14 @@ impl MockLlmResponse {
     pub fn with_missing_function_name() -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_no_name".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: None,  // Missing function name
-                        arguments: Some("{}".to_string()),
-                    },
-                }
-            ]),
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_no_name".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: None, // Missing function name
+                    arguments: Some("{}".to_string()),
+                },
+            }]),
         }
     }
 
@@ -256,16 +267,14 @@ impl MockLlmResponse {
     pub fn with_missing_arguments() -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_no_args".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some("ask_perplexity".to_string()),
-                        arguments: None,  // Missing arguments
-                    },
-                }
-            ]),
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_no_args".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some("ask_perplexity".to_string()),
+                    arguments: None, // Missing arguments
+                },
+            }]),
         }
     }
 
@@ -273,16 +282,14 @@ impl MockLlmResponse {
     pub fn with_malformed_json_arguments(tool_name: &str) -> Self {
         Self {
             content: None,
-            tool_calls: Some(vec![
-                chat_completion::ToolCall {
-                    id: "call_test_bad_json".to_string(),
-                    r#type: "function".to_string(),
-                    function: chat_completion::ToolCallFunction {
-                        name: Some(tool_name.to_string()),
-                        arguments: Some("{invalid json".to_string()),
-                    },
-                }
-            ]),
+            tool_calls: Some(vec![chat_completion::ToolCall {
+                id: "call_test_bad_json".to_string(),
+                r#type: "function".to_string(),
+                function: chat_completion::ToolCallFunction {
+                    name: Some(tool_name.to_string()),
+                    arguments: Some("{invalid json".to_string()),
+                },
+            }]),
         }
     }
 
@@ -294,19 +301,17 @@ impl MockLlmResponse {
             object: "chat.completion".to_string(),
             created: 0,
             model: "test-model".to_string(),
-            choices: vec![
-                chat_completion::ChatCompletionChoice {
-                    index: 0,
-                    message: chat_completion::ChatCompletionMessageForResponse {
-                        role: chat_completion::MessageRole::assistant,
-                        content: self.content.clone(),
-                        name: None,
-                        tool_calls: self.tool_calls.clone(),
-                    },
-                    finish_reason: Some(chat_completion::FinishReason::tool_calls),
-                    finish_details: None,
-                }
-            ],
+            choices: vec![chat_completion::ChatCompletionChoice {
+                index: 0,
+                message: chat_completion::ChatCompletionMessageForResponse {
+                    role: chat_completion::MessageRole::assistant,
+                    content: self.content.clone(),
+                    name: None,
+                    tool_calls: self.tool_calls.clone(),
+                },
+                finish_reason: Some(chat_completion::FinishReason::tool_calls),
+                finish_details: None,
+            }],
             usage: common::Usage {
                 prompt_tokens: 100,
                 completion_tokens: 50,
@@ -399,7 +404,9 @@ impl TestUserParams {
 
 /// Deactivate phone service for a user (for testing stolen phone scenario)
 pub fn deactivate_phone_service(state: &Arc<crate::AppState>, user_id: i32) {
-    state.user_core.update_phone_service_active(user_id, false)
+    state
+        .user_core
+        .update_phone_service_active(user_id, false)
         .expect("Failed to deactivate phone service");
 }
 
@@ -409,14 +416,19 @@ pub fn setup_test_encryption() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         // 32-byte key base64-encoded for AES-256: "12345678901234567890123456789012"
-        std::env::set_var("ENCRYPTION_KEY", "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=");
+        std::env::set_var(
+            "ENCRYPTION_KEY",
+            "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
+        );
     });
 }
 
 /// Set BYOT credentials for a user (user pays Twilio directly, skips credit check)
 pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
     setup_test_encryption();
-    state.user_core.update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
+    state
+        .user_core
+        .update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
         .expect("Failed to set BYOT credentials");
 }
 
@@ -426,34 +438,51 @@ pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
 
 /// Assert response is SMS-deliverable (length and non-empty)
 pub fn assert_sms_deliverable(body: &str) {
-    assert!(body.len() <= 480, "Response exceeds SMS limit: {} chars", body.len());
+    assert!(
+        body.len() <= 480,
+        "Response exceeds SMS limit: {} chars",
+        body.len()
+    );
     assert!(!body.is_empty(), "Response is empty");
 }
 
 /// Assert user was charged (credits decreased)
 pub fn assert_charged(before_credits: f32, after_credits: f32) {
-    assert!(after_credits < before_credits,
-        "Expected credits to decrease: before={}, after={}", before_credits, after_credits);
+    assert!(
+        after_credits < before_credits,
+        "Expected credits to decrease: before={}, after={}",
+        before_credits,
+        after_credits
+    );
 }
 
 /// Assert user was NOT charged (credits unchanged)
 pub fn assert_not_charged(before_credits: f32, after_credits: f32) {
-    assert!((before_credits - after_credits).abs() < 0.001,
-        "Expected credits unchanged: before={}, after={}", before_credits, after_credits);
+    assert!(
+        (before_credits - after_credits).abs() < 0.001,
+        "Expected credits unchanged: before={}, after={}",
+        before_credits,
+        after_credits
+    );
 }
 
 /// Assert no user content leaked in response
 pub fn assert_no_content_leak(user_input: &str, response_body: &str) {
     // Only check if user input is substantial enough to be a leak
     if user_input.len() > 3 {
-        assert!(!response_body.contains(user_input),
-            "Response leaked user content: found '{}' in response", user_input);
+        assert!(
+            !response_body.contains(user_input),
+            "Response leaked user content: found '{}' in response",
+            user_input
+        );
     }
 }
 
 /// Get total credits for a user (credits + credits_left)
 pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
-    let user = state.user_core.find_by_id(user_id)
+    let user = state
+        .user_core
+        .find_by_id(user_id)
         .expect("Failed to get user")
         .expect("User not found");
     user.credits + user.credits_left
@@ -470,7 +499,10 @@ mod tests {
 
         let tool_calls = mock.tool_calls.as_ref().unwrap();
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].function.name, Some("direct_response".to_string()));
+        assert_eq!(
+            tool_calls[0].function.name,
+            Some("direct_response".to_string())
+        );
     }
 
     #[test]
@@ -480,7 +512,10 @@ mod tests {
 
         assert_eq!(response.choices.len(), 1);
         assert!(response.choices[0].message.tool_calls.is_some());
-        assert_eq!(response.choices[0].finish_reason, Some(chat_completion::FinishReason::tool_calls));
+        assert_eq!(
+            response.choices[0].finish_reason,
+            Some(chat_completion::FinishReason::tool_calls)
+        );
     }
 
     #[test]

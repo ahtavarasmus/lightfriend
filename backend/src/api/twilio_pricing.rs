@@ -11,9 +11,9 @@ use crate::AppState;
 use std::sync::Arc;
 
 /// Segment multipliers for different message types
-const NOTIFICATION_SEGMENT_MULTIPLIER: f32 = 1.5;  // Notifications: 1.5 segments avg
-const REGULAR_MSG_SEGMENT_MULTIPLIER: f32 = 3.0;   // Typical messages: 3 segments
-const DIGEST_SEGMENT_MULTIPLIER: f32 = 3.0;        // Digests: 3 segments avg
+const NOTIFICATION_SEGMENT_MULTIPLIER: f32 = 1.5; // Notifications: 1.5 segments avg
+const REGULAR_MSG_SEGMENT_MULTIPLIER: f32 = 3.0; // Typical messages: 3 segments
+const DIGEST_SEGMENT_MULTIPLIER: f32 = 3.0; // Digests: 3 segments avg
 
 /// VAT/margin multiplier: 30%
 const VAT_MARGIN_MULTIPLIER: f32 = 1.3;
@@ -108,10 +108,10 @@ pub fn get_cached_notification_pricing_sync(
     state: &Arc<AppState>,
     country_code: &str,
 ) -> Option<NotificationPricing> {
-    use crate::schema::country_availability;
     use crate::models::user_models::CountryAvailability;
-    use diesel::prelude::*;
+    use crate::schema::country_availability;
     use chrono::Utc;
+    use diesel::prelude::*;
 
     let now = Utc::now().timestamp() as i32;
     let cache_duration = 86400; // 24 hours
@@ -185,7 +185,7 @@ mod tests {
         let digests = (allocation / pricing.digest_price).floor();
 
         assert_eq!(notifications, 100.0); // 15.6 / 0.156 = 100
-        assert_eq!(regular, 50.0);        // 15.6 / 0.312 = 50
-        assert_eq!(digests, 50.0);        // 15.6 / 0.312 = 50 (same as regular now)
+        assert_eq!(regular, 50.0); // 15.6 / 0.312 = 50
+        assert_eq!(digests, 50.0); // 15.6 / 0.312 = 50 (same as regular now)
     }
 }

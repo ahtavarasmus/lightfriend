@@ -1,11 +1,7 @@
-use std::sync::Arc;
+use axum::{extract::State, http::StatusCode, Json};
 use diesel::result::Error as DieselError;
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct ProactiveAgentEnabledRequest {
@@ -17,7 +13,6 @@ pub struct ProactiveAgentEnabledResponse {
     enabled: bool,
 }
 
-
 #[derive(Deserialize)]
 pub struct TimezoneUpdateRequest {
     timezone: String,
@@ -25,10 +20,10 @@ pub struct TimezoneUpdateRequest {
 use axum::extract::Path;
 use serde_json::json;
 
-use crate::AppState;
 use crate::repositories::user_core::UpdateProfileParams;
 use crate::repositories::user_repository::LogUsageParams;
 use crate::utils::country::get_country_code_from_phone;
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
@@ -90,23 +85,24 @@ pub struct ProfileResponse {
     location: Option<String>,
     nearby_places: Option<String>,
     phone_number_country: Option<String>,
-    plan_type: Option<String>, // "monitor" or "digest"
-    phone_service_active: bool, // whether phone service is active - can be disabled for security
+    plan_type: Option<String>,    // "monitor" or "digest"
+    phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
-
 
 pub async fn get_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get user profile and settings from database
-    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
     match user {
         Some(user) => {
             // TODO can be removed in the future
@@ -119,28 +115,44 @@ pub async fn get_profile(
                     }
                 }
             }
-            let user_settings = state.user_core.get_user_settings(auth_user.user_id).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
-            let user_info = state.user_core.get_user_info(auth_user.user_id).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let user_settings = state
+                .user_core
+                .get_user_settings(auth_user.user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+            let user_info = state
+                .user_core
+                .get_user_info(auth_user.user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
             // Get current digest settings
-            let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+            let (morning_digest_time, day_digest_time, evening_digest_time) = state
+                .user_core
+                .get_digests(auth_user.user_id)
                 .map_err(|e| {
                     tracing::error!("Failed to get digest settings: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
+                        Json(json!({"error": format!("Failed to get digest settings: {}", e)})),
                     )
                 })?;
             // Count current active digests
-            let current_count: i32 = [morning_digest_time.as_ref(), day_digest_time.as_ref(), evening_digest_time.as_ref()]
-                .iter()
-                .filter(|&&x| x.is_some())
-                .count() as i32;
+            let current_count: i32 = [
+                morning_digest_time.as_ref(),
+                day_digest_time.as_ref(),
+                evening_digest_time.as_ref(),
+            ]
+            .iter()
+            .filter(|&&x| x.is_some())
+            .count() as i32;
             let days_until_billing: Option<i32> = user.next_billing_date_timestamp.map(|date| {
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -149,63 +161,76 @@ pub async fn get_profile(
                 (date - current_time) / (24 * 60 * 60)
             });
             // Fetch Twilio credentials and mask them
-            let (twilio_sid, twilio_token) = match state.user_core.get_twilio_credentials(auth_user.user_id) {
-                Ok((sid, token)) => {
-                    let masked_sid = if sid.len() >= 4 {
-                        format!("...{}", &sid[sid.len() - 4..])
-                    } else {
-                        "...".to_string()
-                    };
-                    let masked_token = if token.len() >= 4 {
-                        format!("...{}", &token[token.len() - 4..])
-                    } else {
-                        "...".to_string()
-                    };
-                    (Some(masked_sid), Some(masked_token))
-                },
-                Err(_) => (None, None),
-            };
+            let (twilio_sid, twilio_token) =
+                match state.user_core.get_twilio_credentials(auth_user.user_id) {
+                    Ok((sid, token)) => {
+                        let masked_sid = if sid.len() >= 4 {
+                            format!("...{}", &sid[sid.len() - 4..])
+                        } else {
+                            "...".to_string()
+                        };
+                        let masked_token = if token.len() >= 4 {
+                            format!("...{}", &token[token.len() - 4..])
+                        } else {
+                            "...".to_string()
+                        };
+                        (Some(masked_sid), Some(masked_token))
+                    }
+                    Err(_) => (None, None),
+                };
             // Fetch Textbee credentials and mask them
-            let (textbee_device_id, textbee_api_key) = match state.user_core.get_textbee_credentials(auth_user.user_id) {
-                Ok((id, key)) => {
-                    let masked_key= if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
-                    } else {
-                        "...".to_string()
-                    };
-                    let masked_id= if id.len() >= 4 {
-                        format!("...{}", &id[id.len() - 4..])
-                    } else {
-                        "...".to_string()
-                    };
-                    (Some(masked_id), Some(masked_key))
-                },
-                Err(_) => (None, None),
-            };
-            let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id) {
+            let (textbee_device_id, textbee_api_key) =
+                match state.user_core.get_textbee_credentials(auth_user.user_id) {
+                    Ok((id, key)) => {
+                        let masked_key = if key.len() >= 4 {
+                            format!("...{}", &key[key.len() - 4..])
+                        } else {
+                            "...".to_string()
+                        };
+                        let masked_id = if id.len() >= 4 {
+                            format!("...{}", &id[id.len() - 4..])
+                        } else {
+                            "...".to_string()
+                        };
+                        (Some(masked_id), Some(masked_key))
+                    }
+                    Err(_) => (None, None),
+                };
+            let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id)
+            {
                 Ok(key) => {
-                    let masked_key= if key.len() >= 4 {
+                    let masked_key = if key.len() >= 4 {
                         format!("...{}", &key[key.len() - 4..])
                     } else {
                         "...".to_string()
                     };
                     Some(masked_key)
-                },
+                }
                 Err(_) => None,
             };
             // Determine country based on phone number (default to "US" if unknown)
             let country = phone_country.clone().unwrap_or_else(|| "US".to_string());
             // Get critical notification info
-            let critical_info = state.user_core.get_critical_notification_info(auth_user.user_id).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let critical_info = state
+                .user_core
+                .get_critical_notification_info(auth_user.user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
             let estimated_critical_monthly = critical_info.estimated_monthly_price;
             // Get priority notification info
-            let priority_info = state.user_core.get_priority_notification_info(auth_user.user_id).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let priority_info = state
+                .user_core
+                .get_priority_notification_info(auth_user.user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
             let estimated_priority_monthly = priority_info.estimated_monthly_price;
             // Calculate digest estimated monthly cost
             let estimated_digest_monthly = if current_count > 0 {
@@ -222,14 +247,37 @@ pub async fn get_profile(
                 0.0
             };
             // Calculate total estimated monitoring cost
-            let estimated_monitoring_cost = estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
+            let estimated_monitoring_cost =
+                estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
             // Check if user has any connected services (for onboarding modal)
-            let has_any_connection =
-                state.user_repository.has_active_google_calendar(auth_user.user_id).unwrap_or(false) ||
-                state.user_repository.get_imap_credentials(auth_user.user_id).ok().flatten().is_some() ||
-                state.user_repository.get_bridge(auth_user.user_id, "whatsapp").ok().flatten().is_some() ||
-                state.user_repository.get_bridge(auth_user.user_id, "telegram").ok().flatten().is_some() ||
-                state.user_repository.get_bridge(auth_user.user_id, "signal").ok().flatten().is_some();
+            let has_any_connection = state
+                .user_repository
+                .has_active_google_calendar(auth_user.user_id)
+                .unwrap_or(false)
+                || state
+                    .user_repository
+                    .get_imap_credentials(auth_user.user_id)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                || state
+                    .user_repository
+                    .get_bridge(auth_user.user_id, "whatsapp")
+                    .ok()
+                    .flatten()
+                    .is_some()
+                || state
+                    .user_repository
+                    .get_bridge(auth_user.user_id, "telegram")
+                    .ok()
+                    .flatten()
+                    .is_some()
+                || state
+                    .user_repository
+                    .get_bridge(auth_user.user_id, "signal")
+                    .ok()
+                    .flatten()
+                    .is_some();
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -270,7 +318,7 @@ pub async fn get_profile(
         }
         None => Err((
             StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
+            Json(json!({"error": "User not found"})),
         )),
     }
 }
@@ -281,15 +329,24 @@ pub async fn get_available_sending_numbers(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?.ok_or_else(|| (
-        StatusCode::NOT_FOUND,
-        Json(json!({"error": "User not found"}))
-    ))?;
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
-    let is_notification_only = crate::utils::country::is_notification_only_country(&user.phone_number);
+    let is_notification_only =
+        crate::utils::country::is_notification_only_country(&user.phone_number);
     let has_byot = state.user_core.is_byot_user(auth_user.user_id);
 
     // Only show selector for notification-only users without BYOT
@@ -362,21 +419,24 @@ pub async fn update_notify(
     Path(user_id): Path<i32>,
     Json(request): Json<NotifyCreditsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
     // Check if user is modifying their own settings or is an admin
     if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "You can only modify your own settings unless you're an admin"}))
+            Json(json!({"error": "You can only modify your own settings unless you're an admin"})),
         ));
     }
 
     // Update notify preference
-    state.user_core.update_notify(user_id, request.notify)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    state
+        .user_core
+        .update_notify(user_id, request.notify)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     Ok(Json(json!({
         "message": "Notification preference updated successfully"
@@ -388,17 +448,16 @@ pub async fn update_timezone(
     auth_user: AuthUser,
     Json(request): Json<TimezoneUpdateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-    match state.user_core.update_timezone(
-        auth_user.user_id,
-        &request.timezone,
-    ) {
+    match state
+        .user_core
+        .update_timezone(auth_user.user_id, &request.timezone)
+    {
         Ok(_) => Ok(Json(json!({
             "message": "Timezone updated successfully"
         }))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
+            Json(json!({"error": format!("Database error: {}", e)})),
         )),
     }
 }
@@ -420,181 +479,269 @@ pub async fn patch_profile_field(
 
     match request.field.as_str() {
         "nickname" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "nickname must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "nickname must be a string"})),
+                )
+            })?;
             if value.len() > 30 {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Nickname must be 30 characters or less"}))
+                    Json(json!({"error": "Nickname must be 30 characters or less"})),
                 ));
             }
-            state.user_core.update_nickname(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_nickname(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "info" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "info must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "info must be a string"})),
+                )
+            })?;
             if value.len() > 500 {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Info must be 500 characters or less"}))
+                    Json(json!({"error": "Info must be 500 characters or less"})),
                 ));
             }
-            state.user_core.update_info(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state.user_core.update_info(user_id, value).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Database error: {}", e)})),
+                )
+            })?;
         }
         "location" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "location must be a string"}))
-            ))?;
-            state.user_core.update_location(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "location must be a string"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_location(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "nearby_places" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "nearby_places must be a string"}))
-            ))?;
-            state.user_core.update_nearby_places(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "nearby_places must be a string"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_nearby_places(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "timezone" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "timezone must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "timezone must be a string"})),
+                )
+            })?;
             // Validate timezone
             if value.parse::<chrono_tz::Tz>().is_err() {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid timezone"}))
+                    Json(json!({"error": "Invalid timezone"})),
                 ));
             }
-            state.user_core.update_timezone(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_timezone(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "timezone_auto" => {
-            let value = request.value.as_bool().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "timezone_auto must be a boolean"}))
-            ))?;
-            state.user_core.update_timezone_auto(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "timezone_auto must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_timezone_auto(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "agent_language" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "agent_language must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "agent_language must be a string"})),
+                )
+            })?;
             let allowed_languages = ["en", "fi", "de"];
             if !allowed_languages.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"}))
+                    Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"})),
                 ));
             }
-            state.user_core.update_agent_language(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_agent_language(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "notification_type" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "notification_type must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "notification_type must be a string"})),
+                )
+            })?;
             let allowed_types = ["sms", "call", "call_sms"];
             if !allowed_types.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid notification type. Must be 'sms', 'call', or 'call_sms'"}))
+                    Json(
+                        json!({"error": "Invalid notification type. Must be 'sms', 'call', or 'call_sms'"}),
+                    ),
                 ));
             }
-            state.user_core.update_notification_type(user_id, Some(value)).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_notification_type(user_id, Some(value))
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "save_context" => {
-            let value = request.value.as_i64().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "save_context must be an integer"}))
-            ))? as i32;
+            let value = request.value.as_i64().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "save_context must be an integer"})),
+                )
+            })? as i32;
             if !(0..=10).contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "save_context must be between 0 and 10"}))
+                    Json(json!({"error": "save_context must be between 0 and 10"})),
                 ));
             }
-            state.user_core.update_save_context(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_save_context(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "phone_service_active" => {
-            let value = request.value.as_bool().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "phone_service_active must be a boolean"}))
-            ))?;
-            state.user_core.update_phone_service_active(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "phone_service_active must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_phone_service_active(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "llm_provider" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "llm_provider must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "llm_provider must be a string"})),
+                )
+            })?;
             // Validate the value is either "openai" or "tinfoil"
             if value != "openai" && value != "tinfoil" {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "llm_provider must be 'openai' or 'tinfoil'"}))
+                    Json(json!({"error": "llm_provider must be 'openai' or 'tinfoil'"})),
                 ));
             }
-            state.user_core.update_llm_provider(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_llm_provider(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "preferred_number" => {
-            let value = request.value.as_str().ok_or_else(|| (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "preferred_number must be a string"}))
-            ))?;
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "preferred_number must be a string"})),
+                )
+            })?;
 
             // Get user to check if they're in a notification-only country
-            let user = state.user_core.find_by_id(user_id).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?.ok_or_else(|| (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ))?;
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": "User not found"})),
+                    )
+                })?;
 
             // Only allow notification-only country users to change this setting
             if !crate::utils::country::is_notification_only_country(&user.phone_number) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "This setting is only available for notification-only countries"}))
+                    Json(
+                        json!({"error": "This setting is only available for notification-only countries"}),
+                    ),
                 ));
             }
 
@@ -611,19 +758,26 @@ pub async fn patch_profile_field(
             if !allowed_numbers.contains(&value.to_string()) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid preferred number. Must be one of the available local numbers."}))
+                    Json(
+                        json!({"error": "Invalid preferred number. Must be one of the available local numbers."}),
+                    ),
                 ));
             }
 
-            state.user_core.update_preferred_number(user_id, value).map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+            state
+                .user_core
+                .update_preferred_number(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Unknown field: {}", request.field)}))
+                Json(json!({"error": format!("Unknown field: {}", request.field)})),
             ));
         }
     }
@@ -631,7 +785,11 @@ pub async fn patch_profile_field(
     Ok(Json(json!({"success": true})))
 }
 
-pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_number: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+pub async fn set_user_phone_country(
+    state: &Arc<AppState>,
+    user_id: i32,
+    phone_number: &str,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let ca_area_codes: Vec<String> = vec![
         "+1204".to_string(),
         "+1226".to_string(),
@@ -988,7 +1146,11 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
     ];
     let mut country: Option<String> = None;
 
-    tracing::debug!("phone_number: {}, len: {}", phone_number, phone_number.len());
+    tracing::debug!(
+        "phone_number: {}, len: {}",
+        phone_number,
+        phone_number.len()
+    );
     if phone_number.starts_with("+1") {
         // US/CA need special handling due to shared +1 prefix
         let area_code = phone_number.get(0..5).unwrap_or_default();
@@ -1011,7 +1173,9 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
     tracing::debug!("country: {:#?}", country);
 
     if let Some(ref c) = country {
-        state.user_core.update_phone_number_country(user_id, Some(c))?;
+        state
+            .user_core
+            .update_phone_number_country(user_id, Some(c))?;
     } else {
         state.user_core.update_phone_number_country(user_id, None)?;
     }
@@ -1077,11 +1241,19 @@ async fn recalculate_credits_for_country_change(
     tracing::info!(
         "Credit recalculation: user={}, old_country={:?}, new_country={:?}, \
          old_credits={:.2}, old_max={:.2}, ratio={:.2}, new_credits={:.2}",
-        user_id, old_country, new_country, old_credits_left, old_max, ratio, new_credits_left
+        user_id,
+        old_country,
+        new_country,
+        old_credits_left,
+        old_max,
+        ratio,
+        new_credits_left
     );
 
     // Update credits_left
-    state.user_repository.update_user_credits_left(user_id, new_credits_left)?;
+    state
+        .user_repository
+        .update_user_credits_left(user_id, new_credits_left)?;
 
     Ok(())
 }
@@ -1093,12 +1265,14 @@ pub async fn check_sensitive_change_requirements(
     auth_user: AuthUser,
 ) -> Result<Json<SensitiveChangeRequirements>, (StatusCode, Json<serde_json::Value>)> {
     // Check if user has TOTP enabled
-    let has_totp = state.totp_repository
+    let has_totp = state
+        .totp_repository
         .is_totp_enabled(auth_user.user_id)
         .unwrap_or(false);
 
     // Check if user has passkeys
-    let passkey_count = state.webauthn_repository
+    let passkey_count = state
+        .webauthn_repository
         .get_passkey_count(auth_user.user_id)
         .unwrap_or(0);
     let has_passkeys = passkey_count > 0;
@@ -1132,7 +1306,8 @@ async fn prepare_passkey_auth_options(
     use crate::utils::webauthn_config::get_webauthn;
     use webauthn_rs::prelude::*;
 
-    let credentials = state.webauthn_repository
+    let credentials = state
+        .webauthn_repository
         .get_credentials_by_user(user_id)
         .map_err(|e| format!("Failed to get credentials: {:?}", e))?;
 
@@ -1164,7 +1339,8 @@ async fn prepare_passkey_auth_options(
     let state_json = serde_json::to_string(&auth_state)
         .map_err(|e| format!("Failed to serialize auth state: {:?}", e))?;
 
-    state.webauthn_repository
+    state
+        .webauthn_repository
         .create_challenge(
             user_id,
             &state_json,
@@ -1180,16 +1356,18 @@ async fn prepare_passkey_auth_options(
 
 /// Verify TOTP code for sensitive changes
 fn verify_totp_code(state: &Arc<AppState>, user_id: i32, code: &str) -> Result<bool, String> {
-    use totp_rs::{Algorithm, TOTP, Secret};
+    use totp_rs::{Algorithm, Secret, TOTP};
 
-    let secret_opt = state.totp_repository
+    let secret_opt = state
+        .totp_repository
         .get_secret(user_id)
         .map_err(|e| format!("Database error: {:?}", e))?;
 
     let secret_base32 = secret_opt.ok_or("TOTP not configured")?;
 
     // Get user email
-    let user = state.user_core
+    let user = state
+        .user_core
         .find_by_id(user_id)
         .map_err(|e| format!("Database error: {:?}", e))?
         .ok_or("User not found")?;
@@ -1203,7 +1381,8 @@ fn verify_totp_code(state: &Arc<AppState>, user_id: i32, code: &str) -> Result<b
         secret.to_bytes().unwrap(),
         Some("Lightfriend".to_string()),
         user.email,
-    ).map_err(|e| format!("TOTP creation error: {:?}", e))?;
+    )
+    .map_err(|e| format!("TOTP creation error: {:?}", e))?;
 
     Ok(totp.check_current(code).unwrap_or(false))
 }
@@ -1218,7 +1397,8 @@ async fn verify_passkey_response(
     use webauthn_rs::prelude::*;
 
     // Get the stored authentication state
-    let challenge = state.webauthn_repository
+    let challenge = state
+        .webauthn_repository
         .get_valid_challenge(user_id, "sensitive_change")
         .map_err(|e| format!("Failed to get challenge: {:?}", e))?
         .ok_or("No pending authentication")?;
@@ -1241,12 +1421,16 @@ async fn verify_passkey_response(
     // Update the credential counter
     let credential_id = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        auth_result.cred_id().as_ref()
+        auth_result.cred_id().as_ref(),
     );
-    let _ = state.webauthn_repository.update_counter(&credential_id, auth_result.counter() as i32);
+    let _ = state
+        .webauthn_repository
+        .update_counter(&credential_id, auth_result.counter() as i32);
 
     // Delete the challenge
-    let _ = state.webauthn_repository.delete_challenges_by_type(user_id, "sensitive_change");
+    let _ = state
+        .webauthn_repository
+        .delete_challenges_by_type(user_id, "sensitive_change");
 
     Ok(true)
 }
@@ -1256,14 +1440,17 @@ pub async fn update_profile(
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Updating profile with notification type: {:?}", update_req.notification_type);
+    tracing::debug!(
+        "Updating profile with notification type: {:?}",
+        update_req.notification_type
+    );
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {
         tracing::debug!("Invalid email format: {}", update_req.email);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid email format"}))
+            Json(json!({"error": "Invalid email format"})),
         ));
     }
 
@@ -1272,7 +1459,7 @@ pub async fn update_profile(
         tracing::debug!("Invalid phone number format: {}", update_req.phone_number);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"})),
         ));
     }
     // Validate agent language
@@ -1280,20 +1467,26 @@ pub async fn update_profile(
     if !allowed_languages.contains(&update_req.agent_language.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"}))
+            Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"})),
         ));
     }
 
     // Get user's current data BEFORE updating (for credit recalculation and 2FA check)
-    let current_user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let current_user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Check if email or phone is changing
     let email_changing = current_user.email != update_req.email;
@@ -1301,10 +1494,12 @@ pub async fn update_profile(
 
     // If sensitive fields are changing, verify 2FA if user has it enabled
     if email_changing || phone_changing {
-        let has_totp = state.totp_repository
+        let has_totp = state
+            .totp_repository
             .is_totp_enabled(auth_user.user_id)
             .unwrap_or(false);
-        let passkey_count = state.webauthn_repository
+        let passkey_count = state
+            .webauthn_repository
             .get_passkey_count(auth_user.user_id)
             .unwrap_or(0);
         let has_passkeys = passkey_count > 0;
@@ -1323,14 +1518,14 @@ pub async fn update_profile(
                     Ok(false) => {
                         return Err((
                             StatusCode::UNAUTHORIZED,
-                            Json(json!({"error": "Passkey verification failed"}))
+                            Json(json!({"error": "Passkey verification failed"})),
                         ));
                     }
                     Err(e) => {
                         tracing::error!("Passkey verification error: {}", e);
                         return Err((
                             StatusCode::UNAUTHORIZED,
-                            Json(json!({"error": format!("Passkey verification error: {}", e)}))
+                            Json(json!({"error": format!("Passkey verification error: {}", e)})),
                         ));
                     }
                 }
@@ -1346,16 +1541,19 @@ pub async fn update_profile(
                         }
                         Ok(false) => {
                             // Also try as backup code
-                            let backup_valid = state.totp_repository
+                            let backup_valid = state
+                                .totp_repository
                                 .verify_backup_code(auth_user.user_id, totp_code)
                                 .unwrap_or(false);
                             if backup_valid {
                                 verified = true;
-                                tracing::info!("Backup code verification successful for sensitive change");
+                                tracing::info!(
+                                    "Backup code verification successful for sensitive change"
+                                );
                             } else {
                                 return Err((
                                     StatusCode::UNAUTHORIZED,
-                                    Json(json!({"error": "Invalid verification code"}))
+                                    Json(json!({"error": "Invalid verification code"})),
                                 ));
                             }
                         }
@@ -1363,7 +1561,7 @@ pub async fn update_profile(
                             tracing::error!("TOTP verification error: {}", e);
                             return Err((
                                 StatusCode::UNAUTHORIZED,
-                                Json(json!({"error": format!("TOTP verification error: {}", e)}))
+                                Json(json!({"error": format!("TOTP verification error: {}", e)})),
                             ));
                         }
                     }
@@ -1379,22 +1577,28 @@ pub async fn update_profile(
                         "requires_2fa": true,
                         "has_passkeys": has_passkeys,
                         "has_totp": has_totp
-                    }))
+                    })),
                 ));
             }
         }
     }
 
     // Re-fetch current user for credit recalculation (already fetched above)
-    let current_user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let current_user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
     let old_country = current_user.phone_number_country.clone();
     let old_credits_left = current_user.credits_left;
 
@@ -1413,35 +1617,51 @@ pub async fn update_profile(
         preferred_number: update_req.preferred_number.as_deref(),
     }) {
         Ok(_) => {
-            if let Err(e) = state.user_core.update_agent_language(auth_user.user_id, &update_req.agent_language) {
+            if let Err(e) = state
+                .user_core
+                .update_agent_language(auth_user.user_id, &update_req.agent_language)
+            {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to update agent language: {}", e)}))
+                    Json(json!({"error": format!("Failed to update agent language: {}", e)})),
                 ));
             }
             // Set phone country after update
-            let new_country = match set_user_phone_country(&state, auth_user.user_id, &update_req.phone_number).await {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("Failed to set phone country after profile update: {}", e);
-                    None
-                }
-            };
+            let new_country =
+                match set_user_phone_country(&state, auth_user.user_id, &update_req.phone_number)
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Failed to set phone country after profile update: {}", e);
+                        None
+                    }
+                };
 
             // Update preferred Lightfriend number if country changed
             if old_country != new_country {
                 if let Some(ref country) = new_country {
                     // Only update if user doesn't have BYOT (bring your own Twilio)
                     if !state.user_core.is_byot_user(auth_user.user_id) {
-                        if let Err(e) = state.user_core.set_preferred_number_for_country(auth_user.user_id, country) {
-                            tracing::error!("Failed to update preferred number for country {}: {}", country, e);
+                        if let Err(e) = state
+                            .user_core
+                            .set_preferred_number_for_country(auth_user.user_id, country)
+                        {
+                            tracing::error!(
+                                "Failed to update preferred number for country {}: {}",
+                                country,
+                                e
+                            );
                         }
                     }
                 }
             }
 
             // Recalculate credits if country changed and user has credits_left
-            if old_country != new_country && old_credits_left > 0.0 && current_user.sub_tier.is_some() {
+            if old_country != new_country
+                && old_credits_left > 0.0
+                && current_user.sub_tier.is_some()
+            {
                 if let Err(e) = recalculate_credits_for_country_change(
                     &state,
                     auth_user.user_id,
@@ -1449,21 +1669,24 @@ pub async fn update_profile(
                     new_country.as_deref(),
                     old_credits_left,
                     current_user.plan_type.as_deref(),
-                ).await {
+                )
+                .await
+                {
                     tracing::error!("Failed to recalculate credits after country change: {}", e);
                     // Continue anyway, user keeps their credits
                 }
             }
-        }, Err(DieselError::NotFound) => {
+        }
+        Err(DieselError::NotFound) => {
             return Err((
                 StatusCode::CONFLICT,
-                Json(json!({"error": "Email already exists"}))
+                Json(json!({"error": "Email already exists"})),
             ));
         }
         Err(e) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
+                Json(json!({"error": format!("Database error: {}", e)})),
             ));
         }
     }
@@ -1472,8 +1695,8 @@ pub async fn update_profile(
     })))
 }
 
-use axum::extract::Query;
 use crate::utils::tool_exec::get_nearby_towns;
+use axum::extract::Query;
 
 #[derive(Deserialize)]
 pub struct GetNearbyPlacesQuery {
@@ -1486,10 +1709,11 @@ pub async fn get_nearby_places(
     Query(query): Query<GetNearbyPlacesQuery>,
 ) -> Result<Json<Vec<String>>, (StatusCode, Json<serde_json::Value>)> {
     match get_nearby_towns(&query.location).await {
-        Ok(places) => {
-            Ok(Json(places))
-        },
-        Err(e) => Err((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})))),
+        Ok(places) => Ok(Json(places)),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )),
     }
 }
 
@@ -1503,13 +1727,14 @@ pub struct EmailJudgmentResponse {
     pub reason: String,
 }
 
-
-
 pub async fn get_email_judgments(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<EmailJudgmentResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_user_email_judgments(auth_user.user_id) {
+    match state
+        .user_repository
+        .get_user_email_judgments(auth_user.user_id)
+    {
         Ok(judgments) => {
             let responses: Vec<EmailJudgmentResponse> = judgments
                 .into_iter()
@@ -1523,17 +1748,16 @@ pub async fn get_email_judgments(
                 })
                 .collect();
             Ok(Json(responses))
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to get email judgments: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get email judgments: {}", e)}))
+                Json(json!({"error": format!("Failed to get email judgments: {}", e)})),
             ))
         }
     }
 }
-
 
 #[derive(Serialize)]
 pub struct DigestsResponse {
@@ -1549,18 +1773,19 @@ pub struct UpdateDigestsRequest {
     evening_digest_time: Option<String>,
 }
 
-
 pub async fn get_digests(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get current digest settings
-    let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+    let (morning_digest_time, day_digest_time, evening_digest_time) = state
+        .user_core
+        .get_digests(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get digest settings: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
+                Json(json!({"error": format!("Failed to get digest settings: {}", e)})),
             )
         })?;
 
@@ -1588,10 +1813,10 @@ pub async fn update_digests(
                 "message": message,
             });
             Ok(Json(response))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update digest settings: {}", e)}))
+            Json(json!({"error": format!("Failed to update digest settings: {}", e)})),
         )),
     }
 }
@@ -1619,34 +1844,49 @@ pub async fn update_critical_settings(
     auth_user: AuthUser,
     Json(request): Json<UpdateCriticalRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received update_critical_settings request: enabled={:?}, call_notify={:?}, action={:?}",
-        request.enabled, request.call_notify, request.action_on_critical_message);
+    tracing::debug!(
+        "Received update_critical_settings request: enabled={:?}, call_notify={:?}, action={:?}",
+        request.enabled,
+        request.call_notify,
+        request.action_on_critical_message
+    );
 
     if let Some(enabled) = request.enabled {
         tracing::debug!("Updating critical_enabled to: {:?}", enabled);
-        if let Err(e) = state.user_core.update_critical_enabled(auth_user.user_id, enabled) {
+        if let Err(e) = state
+            .user_core
+            .update_critical_enabled(auth_user.user_id, enabled)
+        {
             tracing::error!("Failed to update critical enabled setting: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update critical enabled setting: {}", e)}))
+                Json(json!({"error": format!("Failed to update critical enabled setting: {}", e)})),
             ));
         }
     }
     if let Some(call_notify) = request.call_notify {
-        if let Err(e) = state.user_core.update_call_notify(auth_user.user_id, call_notify) {
+        if let Err(e) = state
+            .user_core
+            .update_call_notify(auth_user.user_id, call_notify)
+        {
             tracing::error!("Failed to update call notify setting: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update call notify setting: {}", e)}))
+                Json(json!({"error": format!("Failed to update call notify setting: {}", e)})),
             ));
         }
     }
     if let Some(action) = request.action_on_critical_message {
-        if let Err(e) = state.user_core.update_action_on_critical_message(auth_user.user_id, action) {
+        if let Err(e) = state
+            .user_core
+            .update_action_on_critical_message(auth_user.user_id, action)
+        {
             tracing::error!("Failed to update action on critical message setting: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update action on critical message setting: {}", e)}))
+                Json(
+                    json!({"error": format!("Failed to update action on critical message setting: {}", e)}),
+                ),
             ));
         }
     }
@@ -1668,7 +1908,10 @@ pub async fn get_critical_settings(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<CriticalNotificationInfo>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_critical_notification_info(auth_user.user_id) {
+    match state
+        .user_core
+        .get_critical_notification_info(auth_user.user_id)
+    {
         Ok(info) => Ok(Json(info)),
         Err(e) => {
             tracing::error!("Failed to get critical notification info: {}", e);
@@ -1680,15 +1923,16 @@ pub async fn get_critical_settings(
     }
 }
 
-
 pub async fn update_proactive_agent_on(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(request): Json<ProactiveAgentEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
     // Update critical enabled setting
-    match state.user_core.update_proactive_agent_on(auth_user.user_id, request.enabled) {
+    match state
+        .user_core
+        .update_proactive_agent_on(auth_user.user_id, request.enabled)
+    {
         Ok(_) => Ok(Json(json!({
             "message": "Proactive notifications setting updated successfully"
         }))),
@@ -1696,7 +1940,9 @@ pub async fn update_proactive_agent_on(
             tracing::error!("Failed to update proactive notifications setting: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update proactive notifications setting: {}", e)}))
+                Json(
+                    json!({"error": format!("Failed to update proactive notifications setting: {}", e)}),
+                ),
             ))
         }
     }
@@ -1707,16 +1953,12 @@ pub async fn get_proactive_agent_on(
     auth_user: AuthUser,
 ) -> Result<Json<ProactiveAgentEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
     match state.user_core.get_proactive_agent_on(auth_user.user_id) {
-        Ok(enabled) => {
-            Ok(Json(ProactiveAgentEnabledResponse{
-                enabled,
-            }))
-        },
+        Ok(enabled) => Ok(Json(ProactiveAgentEnabledResponse { enabled })),
         Err(e) => {
             tracing::error!("Failed to get critical enabled setting: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
+                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)})),
             ))
         }
     }
@@ -1732,10 +1974,10 @@ pub async fn delete_user(
     if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "You can only delete your own account unless you're an admin"}))
+            Json(json!({"error": "You can only delete your own account unless you're an admin"})),
         ));
     }
-    
+
     // First verify the user exists
     match state.user_core.find_by_id(user_id) {
         Ok(Some(_)) => {
@@ -1745,28 +1987,28 @@ pub async fn delete_user(
                 Ok(_) => {
                     tracing::info!("Successfully deleted user {}", user_id);
                     Ok(Json(json!({"message": "User deleted successfully"})))
-                },
+                }
                 Err(e) => {
                     tracing::error!("Failed to delete user {}: {}", user_id, e);
                     Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Failed to delete user: {}", e)}))
+                        Json(json!({"error": format!("Failed to delete user: {}", e)})),
                     ))
                 }
             }
-        },
+        }
         Ok(None) => {
             tracing::warn!("Attempted to delete non-existent user {}", user_id);
             Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
+                Json(json!({"error": "User not found"})),
             ))
-        },
+        }
         Err(e) => {
             tracing::error!("Database error while checking user {}: {}", user_id, e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
+                Json(json!({"error": format!("Database error: {}", e)})),
             ))
         }
     }
@@ -1793,21 +2035,27 @@ pub async fn web_chat(
     Json(request): Json<WebChatRequest>,
 ) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get the user
-    let user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Check subscription - only subscribed users can use web chat
     if user.sub_tier.is_none() {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "Please subscribe to use the web chat feature"}))
+            Json(json!({"error": "Please subscribe to use the web chat feature"})),
         ));
     }
 
@@ -1824,26 +2072,34 @@ pub async fn web_chat(
     if !has_credits {
         return Err((
             StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
         ));
     }
 
     // Deduct credits (prefer credits_left, then credits)
     let charged_amount = if user.credits_left >= credits_left_cost {
         let new_credits_left = user.credits_left - credits_left_cost;
-        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_left_cost
     } else {
         let new_credits = user.credits - credits_cost;
-        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_cost
     };
 
@@ -1864,7 +2120,9 @@ pub async fn web_chat(
     // Create a mock Twilio payload to reuse existing SMS processing logic
     let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
         from: user.phone_number.clone(),
-        to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+        to: user
+            .preferred_number
+            .unwrap_or_else(|| "+0987654321".to_string()),
         body: request.message,
         num_media: None,
         media_url0: None,
@@ -1877,7 +2135,8 @@ pub async fn web_chat(
         &state,
         mock_payload,
         crate::api::twilio_sms::ProcessSmsOptions::web_chat(),
-    ).await;
+    )
+    .await;
 
     if status == StatusCode::OK {
         Ok(Json(WebChatResponse {
@@ -1891,7 +2150,7 @@ pub async fn web_chat(
             Json(json!({
                 "error": "Failed to process message",
                 "details": response.message
-            }))
+            })),
         ))
     }
 }
@@ -1901,37 +2160,50 @@ pub async fn get_instant_digest(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::proactive::utils::{generate_digest, CalendarEvent, DigestData, MessageInfo};
     use chrono::{Duration, Utc};
     use std::collections::{HashMap, HashSet};
-    use crate::proactive::utils::{DigestData, MessageInfo, CalendarEvent, generate_digest};
 
     // Get the user
-    let user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Check subscription
     if user.sub_tier.is_none() {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "Please subscribe to use the digest feature"}))
+            Json(json!({"error": "Please subscribe to use the digest feature"})),
         ));
     }
 
     // Get user info for timezone
-    let user_info = state.user_core.get_user_info(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get user info: {}", e)}))
-        ))?;
+    let user_info = state
+        .user_core
+        .get_user_info(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get user info: {}", e)})),
+            )
+        })?;
 
-    let timezone = user_info.timezone.clone().unwrap_or_else(|| "UTC".to_string());
+    let timezone = user_info
+        .timezone
+        .clone()
+        .unwrap_or_else(|| "UTC".to_string());
     let tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
 
     // Charge same as web_chat
@@ -1946,26 +2218,34 @@ pub async fn get_instant_digest(
     if !has_credits {
         return Err((
             StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
         ));
     }
 
     // Deduct credits
     let charged_amount = if user.credits_left >= credits_left_cost {
         let new_credits_left = user.credits_left - credits_left_cost;
-        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_left_cost
     } else {
         let new_credits = user.credits - credits_cost;
-        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_cost
     };
 
@@ -1985,23 +2265,38 @@ pub async fn get_instant_digest(
 
     // Calculate cutoff time - use last instant digest time or 12 hours ago
     let now = Utc::now();
-    let last_instant_time = state.user_core.get_last_instant_digest_time(auth_user.user_id)
+    let last_instant_time = state
+        .user_core
+        .get_last_instant_digest_time(auth_user.user_id)
         .unwrap_or(None);
 
     let cutoff_timestamp = match last_instant_time {
         Some(ts) => ts as i64,
         None => (now - Duration::hours(12)).timestamp(),
     };
-    let cutoff_time = chrono::DateTime::from_timestamp(cutoff_timestamp, 0)
-        .unwrap_or(now - Duration::hours(12));
+    let cutoff_time =
+        chrono::DateTime::from_timestamp(cutoff_timestamp, 0).unwrap_or(now - Duration::hours(12));
 
     // Collect messages from all sources
     let mut messages: Vec<MessageInfo> = Vec::new();
 
     // Fetch emails if IMAP is configured
-    if let Ok(Some(_)) = state.user_repository.get_imap_credentials(auth_user.user_id) {
-        if let Ok(emails) = crate::handlers::imap_handlers::fetch_emails_imap(&state, auth_user.user_id, false, Some(50), false, true).await {
-            let email_msgs: Vec<MessageInfo> = emails.into_iter()
+    if let Ok(Some(_)) = state
+        .user_repository
+        .get_imap_credentials(auth_user.user_id)
+    {
+        if let Ok(emails) = crate::handlers::imap_handlers::fetch_emails_imap(
+            &state,
+            auth_user.user_id,
+            false,
+            Some(50),
+            false,
+            true,
+        )
+        .await
+        {
+            let email_msgs: Vec<MessageInfo> = emails
+                .into_iter()
                 .filter(|email| {
                     if let Some(date) = email.date {
                         date >= cutoff_time
@@ -2012,7 +2307,9 @@ pub async fn get_instant_digest(
                 .map(|email| MessageInfo {
                     sender: email.from.unwrap_or_else(|| "Unknown".to_string()),
                     content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                    timestamp_rfc: email.date_formatted.unwrap_or_else(|| "No timestamp".to_string()),
+                    timestamp_rfc: email
+                        .date_formatted
+                        .unwrap_or_else(|| "No timestamp".to_string()),
                     platform: "email".to_string(),
                 })
                 .collect();
@@ -2022,9 +2319,21 @@ pub async fn get_instant_digest(
 
     // Fetch bridge messages (WhatsApp, Telegram, Signal)
     for bridge_type in &["whatsapp", "telegram", "signal"] {
-        if let Ok(Some(_)) = state.user_repository.get_bridge(auth_user.user_id, bridge_type) {
-            if let Ok(bridge_msgs) = crate::utils::bridge::fetch_bridge_messages(bridge_type, &state, auth_user.user_id, cutoff_timestamp, true).await {
-                let infos: Vec<MessageInfo> = bridge_msgs.into_iter()
+        if let Ok(Some(_)) = state
+            .user_repository
+            .get_bridge(auth_user.user_id, bridge_type)
+        {
+            if let Ok(bridge_msgs) = crate::utils::bridge::fetch_bridge_messages(
+                bridge_type,
+                &state,
+                auth_user.user_id,
+                cutoff_timestamp,
+                true,
+            )
+            .await
+            {
+                let infos: Vec<MessageInfo> = bridge_msgs
+                    .into_iter()
                     .map(|msg| MessageInfo {
                         sender: msg.room_name,
                         content: msg.content,
@@ -2039,10 +2348,20 @@ pub async fn get_instant_digest(
 
     // Fetch calendar events for next 24 hours
     let mut calendar_events: Vec<CalendarEvent> = Vec::new();
-    if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
+    if let Ok(true) = state
+        .user_repository
+        .has_active_google_calendar(auth_user.user_id)
+    {
         let start_time = now.to_rfc3339();
         let end_time = (now + Duration::hours(24)).to_rfc3339();
-        if let Ok(axum::Json(value)) = crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), auth_user.user_id, &start_time, &end_time).await {
+        if let Ok(axum::Json(value)) = crate::handlers::google_calendar::handle_calendar_fetching(
+            state.as_ref(),
+            auth_user.user_id,
+            &start_time,
+            &end_time,
+        )
+        .await
+        {
             if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
                 for event in events {
                     if let (Some(summary), Some(start), Some(duration)) = (
@@ -2064,7 +2383,9 @@ pub async fn get_instant_digest(
     // Check if there's anything to report
     if messages.is_empty() && calendar_events.is_empty() {
         // Update last instant digest time even if empty
-        let _ = state.user_core.set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
+        let _ = state
+            .user_core
+            .set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
 
         return Ok(Json(WebChatResponse {
             message: "Nothing new since your last check!".to_string(),
@@ -2075,7 +2396,10 @@ pub async fn get_instant_digest(
     // Build priority map for digest generation
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     for platform in ["email", "whatsapp", "telegram", "signal"] {
-        let priors = state.user_repository.get_priority_senders(auth_user.user_id, platform).unwrap_or(Vec::new());
+        let priors = state
+            .user_repository
+            .get_priority_senders(auth_user.user_id, platform)
+            .unwrap_or(Vec::new());
         let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
         priority_map.insert(platform.to_string(), set);
     }
@@ -2084,9 +2408,15 @@ pub async fn get_instant_digest(
     messages.sort_by(|a, b| {
         let plat_cmp = a.platform.cmp(&b.platform);
         if plat_cmp == std::cmp::Ordering::Equal {
-            let a_pri = priority_map.get(&a.platform).is_some_and(|set| set.contains(&a.sender));
-            let b_pri = priority_map.get(&b.platform).is_some_and(|set| set.contains(&b.sender));
-            b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
+            let a_pri = priority_map
+                .get(&a.platform)
+                .is_some_and(|set| set.contains(&a.sender));
+            let b_pri = priority_map
+                .get(&b.platform)
+                .is_some_and(|set| set.contains(&b.sender));
+            b_pri
+                .cmp(&a_pri)
+                .then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
         } else {
             plat_cmp
         }
@@ -2108,16 +2438,19 @@ pub async fn get_instant_digest(
     };
 
     // Generate digest
-    let digest_message = match generate_digest(&state, auth_user.user_id, digest_data, priority_map).await {
-        Ok(digest) => digest,
-        Err(e) => {
-            tracing::error!("Failed to generate digest: {}", e);
-            "Failed to generate digest. Please try again.".to_string()
-        }
-    };
+    let digest_message =
+        match generate_digest(&state, auth_user.user_id, digest_data, priority_map).await {
+            Ok(digest) => digest,
+            Err(e) => {
+                tracing::error!("Failed to generate digest: {}", e);
+                "Failed to generate digest. Please try again.".to_string()
+            }
+        };
 
     // Update last instant digest time
-    let _ = state.user_core.set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
+    let _ = state
+        .user_core
+        .set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
 
     Ok(Json(WebChatResponse {
         message: digest_message,
@@ -2131,7 +2464,7 @@ pub async fn web_chat_with_image(
     auth_user: AuthUser,
     mut multipart: axum::extract::Multipart,
 ) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     // Parse multipart form data
     let mut message = String::new();
@@ -2140,23 +2473,28 @@ pub async fn web_chat_with_image(
 
     const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"error": format!("Failed to process form data: {}", e)}))
-    ))? {
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Failed to process form data: {}", e)})),
+        )
+    })? {
         let name = field.name().unwrap_or("").to_string();
 
         tracing::debug!("Processing multipart field: {}", name);
         match name.as_str() {
             "message" => {
-                message = field.text().await.map_err(|e| (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Failed to read message: {}", e)}))
-                ))?;
+                message = field.text().await.map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("Failed to read message: {}", e)})),
+                    )
+                })?;
                 tracing::debug!("Received message text: '{}'", message);
             }
             "image" => {
-                let content_type = field.content_type()
+                let content_type = field
+                    .content_type()
                     .map(|ct| ct.to_string())
                     .unwrap_or_else(|| "image/png".to_string());
 
@@ -2164,20 +2502,22 @@ pub async fn web_chat_with_image(
                 if !content_type.starts_with("image/") {
                     return Err((
                         StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "Only image files are allowed"}))
+                        Json(json!({"error": "Only image files are allowed"})),
                     ));
                 }
 
-                let data = field.bytes().await.map_err(|e| (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Failed to read image data: {}", e)}))
-                ))?;
+                let data = field.bytes().await.map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("Failed to read image data: {}", e)})),
+                    )
+                })?;
 
                 // Check file size
                 if data.len() > MAX_IMAGE_SIZE {
                     return Err((
                         StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "Image size exceeds 10MB limit"}))
+                        Json(json!({"error": "Image size exceeds 10MB limit"})),
                     ));
                 }
 
@@ -2191,21 +2531,27 @@ pub async fn web_chat_with_image(
     }
 
     // Get the user
-    let user = state.user_core.find_by_id(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
 
     // Check subscription - only subscribed users can use web chat
     if user.sub_tier.is_none() {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "Please subscribe to use the web chat feature"}))
+            Json(json!({"error": "Please subscribe to use the web chat feature"})),
         ));
     }
 
@@ -2222,26 +2568,34 @@ pub async fn web_chat_with_image(
     if !has_credits {
         return Err((
             StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."}))
+            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
         ));
     }
 
     // Deduct credits
     let charged_amount = if user.credits_left >= credits_left_cost {
         let new_credits_left = user.credits_left - credits_left_cost;
-        state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits_left(auth_user.user_id, new_credits_left)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_left_cost
     } else {
         let new_credits = user.credits - credits_cost;
-        state.user_repository.update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to charge credits: {}", e)}))
-            ))?;
+        state
+            .user_repository
+            .update_user_credits(auth_user.user_id, new_credits)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
+                )
+            })?;
         credits_cost
     };
 
@@ -2253,7 +2607,11 @@ pub async fn web_chat_with_image(
         credits: Some(charged_amount),
         time_consumed: None,
         success: Some(true),
-        reason: if image_data_url.is_some() { Some("Web chat with image".to_string()) } else { None },
+        reason: if image_data_url.is_some() {
+            Some("Web chat with image".to_string())
+        } else {
+            None
+        },
         status: None,
         recharge_threshold_timestamp: None,
         zero_credits_timestamp: None,
@@ -2261,7 +2619,11 @@ pub async fn web_chat_with_image(
 
     // Create mock Twilio payload with image support
     // If there's an image but no text, provide a default prompt
-    tracing::info!("web_chat_with_image - message: '{}', has_image: {}", message, image_data_url.is_some());
+    tracing::info!(
+        "web_chat_with_image - message: '{}', has_image: {}",
+        message,
+        image_data_url.is_some()
+    );
     let body = if message.trim().is_empty() && image_data_url.is_some() {
         "What's in this image?".to_string()
     } else {
@@ -2271,7 +2633,9 @@ pub async fn web_chat_with_image(
 
     let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
         from: user.phone_number.clone(),
-        to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+        to: user
+            .preferred_number
+            .unwrap_or_else(|| "+0987654321".to_string()),
         body,
         num_media: image_data_url.as_ref().map(|_| "1".to_string()),
         media_url0: image_data_url,
@@ -2284,7 +2648,8 @@ pub async fn web_chat_with_image(
         &state,
         mock_payload,
         crate::api::twilio_sms::ProcessSmsOptions::web_chat(),
-    ).await;
+    )
+    .await;
 
     if status == StatusCode::OK {
         Ok(Json(WebChatResponse {
@@ -2298,7 +2663,7 @@ pub async fn web_chat_with_image(
             Json(json!({
                 "error": "Failed to process message",
                 "details": response.message
-            }))
+            })),
         ))
     }
 }

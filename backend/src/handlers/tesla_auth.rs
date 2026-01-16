@@ -1,31 +1,32 @@
-use reqwest;
-use std::sync::Arc;
-use std::convert::Infallible;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{Query, State},
-    response::{Json, Redirect, sse::{Event, KeepAlive, Sse}},
     http::StatusCode,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Json, Redirect,
+    },
 };
 use futures::stream::Stream;
-use tower_sessions::{session_store::SessionStore, session::{Id, Record}};
-use oauth2::{
-    PkceCodeVerifier,
-    CsrfToken,
-    PkceCodeChallenge,
-    Scope,
-};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use oauth2::{CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
+use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use uuid::Uuid;
+use std::convert::Infallible;
+use std::sync::Arc;
 use time::OffsetDateTime;
-use tracing::{info, error, warn};
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use tower_sessions::{
+    session::{Id, Record},
+    session_store::SessionStore,
+};
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::{
-    AppState,
     models::user_models::NewTesla,
-    utils::encryption::{encrypt, decrypt},
+    utils::encryption::{decrypt, encrypt},
+    AppState,
 };
 
 /// JWT claims structure for Tesla access token
@@ -91,10 +92,13 @@ fn extract_scopes_from_jwt(access_token: &str) -> Option<String> {
 
 // Helper to create error redirect for OAuth callback failures
 fn tesla_error_redirect(error_msg: &str) -> Redirect {
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let encoded_error = urlencoding::encode(error_msg);
-    Redirect::to(&format!("{}?tesla=error&message={}", frontend_url, encoded_error))
+    Redirect::to(&format!(
+        "{}?tesla=error&message={}",
+        frontend_url, encoded_error
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,25 +127,27 @@ pub async fn tesla_login(
     info!("Tesla OAuth login initiated for user {}", auth_user.user_id);
 
     // Check if user has Tier 2 subscription
-    let user = state.user_core.find_by_id(auth_user.user_id)
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
         .map_err(|e| {
             error!("Failed to get user: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to get user information"}))
+                Json(json!({"error": "Failed to get user information"})),
             )
         })?
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
+                Json(json!({"error": "User not found"})),
             )
         })?;
 
     if user.sub_tier != Some("tier 2".to_string()) {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "Tesla integration requires a paid subscription"}))
+            Json(json!({"error": "Tesla integration requires a paid subscription"})),
         ));
     }
 
@@ -157,13 +163,27 @@ pub async fn tesla_login(
         expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
     };
 
-    record.data.insert("session_key".to_string(), json!(session_key.clone()));
-    record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
-    record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
+    record
+        .data
+        .insert("session_key".to_string(), json!(session_key.clone()));
+    record.data.insert(
+        "pkce_verifier".to_string(),
+        json!(pkce_verifier.secret().to_string()),
+    );
+    record.data.insert(
+        "csrf_token".to_string(),
+        json!(csrf_token.secret().to_string()),
+    );
+    record
+        .data
+        .insert("user_id".to_string(), json!(auth_user.user_id));
 
     // Build scopes list early so we can store it in session
-    let valid_scopes = ["vehicle_device_data", "vehicle_cmds", "vehicle_charging_cmds"];
+    let valid_scopes = [
+        "vehicle_device_data",
+        "vehicle_cmds",
+        "vehicle_charging_cmds",
+    ];
     let requested_scopes: Vec<String> = if let Some(scopes_str) = &params.scopes {
         scopes_str
             .split(',')
@@ -176,14 +196,17 @@ pub async fn tesla_login(
     };
 
     // Store requested scopes in session so callback can use them
-    record.data.insert("requested_scopes".to_string(), json!(requested_scopes.join(" ")));
+    record.data.insert(
+        "requested_scopes".to_string(),
+        json!(requested_scopes.join(" ")),
+    );
 
     // Store session
     if let Err(e) = state.session_store.create(&mut record).await {
         error!("Failed to store session record: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to store session record: {}", e)}))
+            Json(json!({"error": format!("Failed to store session record: {}", e)})),
         ));
     }
 
@@ -196,7 +219,7 @@ pub async fn tesla_login(
         .authorize_url(|| CsrfToken::new(state_token.clone()))
         .add_scope(Scope::new("openid".to_string()))
         .add_scope(Scope::new("offline_access".to_string()))
-        .add_extra_param("prompt", "consent")  // Force consent screen to show every time
+        .add_extra_param("prompt", "consent") // Force consent screen to show every time
         .set_pkce_challenge(pkce_challenge);
 
     // Add user-selected scopes (already computed above and stored in session)
@@ -206,7 +229,10 @@ pub async fn tesla_login(
 
     let (auth_url, _) = auth_url_builder.url();
 
-    info!("Tesla OAuth URL generated with state: {} and scopes: {:?}", state_token, requested_scopes);
+    info!(
+        "Tesla OAuth URL generated with state: {} and scopes: {:?}",
+        state_token, requested_scopes
+    );
 
     Ok(Json(json!({
         "auth_url": auth_url.to_string(),
@@ -255,7 +281,11 @@ pub async fn tesla_callback(
     };
 
     // Validate CSRF token
-    let stored_csrf = match session_record.data.get("csrf_token").and_then(|v| v.as_str()) {
+    let stored_csrf = match session_record
+        .data
+        .get("csrf_token")
+        .and_then(|v| v.as_str())
+    {
         Some(csrf) => csrf,
         None => {
             error!("CSRF token not found in session");
@@ -277,7 +307,11 @@ pub async fn tesla_callback(
         }
     };
 
-    let pkce_verifier_secret = match session_record.data.get("pkce_verifier").and_then(|v| v.as_str()) {
+    let pkce_verifier_secret = match session_record
+        .data
+        .get("pkce_verifier")
+        .and_then(|v| v.as_str())
+    {
         Some(secret) => secret.to_string(),
         None => {
             error!("PKCE verifier not found in session");
@@ -286,11 +320,16 @@ pub async fn tesla_callback(
     };
 
     // Get requested scopes from session (these are the scopes user selected in the UI)
-    let requested_scopes = session_record.data.get("requested_scopes")
+    let requested_scopes = session_record
+        .data
+        .get("requested_scopes")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "vehicle_device_data vehicle_cmds vehicle_charging_cmds".to_string());
-    info!("Retrieved requested scopes from session for user {}: {}", user_id, requested_scopes);
+    info!(
+        "Retrieved requested scopes from session for user {}: {}",
+        user_id, requested_scopes
+    );
 
     // Exchange authorization code for tokens
     // Note: Tesla uses a different domain for token exchange
@@ -309,10 +348,10 @@ pub async fn tesla_callback(
         .unwrap_or_else(|_| "default-tesla-client-id-for-testing".to_string());
     let client_secret = std::env::var("TESLA_CLIENT_SECRET")
         .unwrap_or_else(|_| "default-tesla-secret-for-testing".to_string());
-    let server_url = std::env::var("SERVER_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let tesla_redirect_url = std::env::var("TESLA_REDIRECT_URL")
-        .unwrap_or_else(|_| server_url.clone());
+    let server_url =
+        std::env::var("SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let tesla_redirect_url =
+        std::env::var("TESLA_REDIRECT_URL").unwrap_or_else(|_| server_url.clone());
     let redirect_uri = format!("{}/api/auth/tesla/callback", tesla_redirect_url);
 
     // Get the audience URL from env or default to EU region
@@ -333,12 +372,7 @@ pub async fn tesla_callback(
         ("audience", &audience_url),
     ];
 
-    let token_response = match http_client
-        .post(token_url)
-        .form(&token_params)
-        .send()
-        .await
-    {
+    let token_response = match http_client.post(token_url).form(&token_params).send().await {
         Ok(resp) => resp,
         Err(e) => {
             error!("Failed to send token exchange request: {}", e);
@@ -347,7 +381,10 @@ pub async fn tesla_callback(
     };
 
     if !token_response.status().is_success() {
-        let error_text = token_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = token_response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         error!("Token exchange failed for user {}: {}", user_id, error_text);
         return tesla_error_redirect("Tesla rejected the authorization. Please try again.");
     }
@@ -376,8 +413,7 @@ pub async fn tesla_callback(
         }
     };
 
-    let expires_in = token_data["expires_in"].as_i64()
-        .unwrap_or(3600) as i32;
+    let expires_in = token_data["expires_in"].as_i64().unwrap_or(3600) as i32;
 
     // Determine granted scopes - try multiple sources:
     // 1. JWT token claims (scp or scope)
@@ -387,10 +423,16 @@ pub async fn tesla_callback(
         .or_else(|| token_data["scope"].as_str().map(|s| s.to_string()))
         .or_else(|| {
             // Use the scopes user requested - Tesla approved them or would have failed
-            info!("Using requested_scopes as granted_scopes for user {}", user_id);
+            info!(
+                "Using requested_scopes as granted_scopes for user {}",
+                user_id
+            );
             Some(requested_scopes.clone())
         });
-    info!("Tesla granted scopes for user {}: {:?}", user_id, granted_scopes);
+    info!(
+        "Tesla granted scopes for user {}: {:?}",
+        user_id, granted_scopes
+    );
 
     // Encrypt tokens
     let encrypted_access_token = match encrypt(access_token) {
@@ -450,18 +492,24 @@ pub async fn tesla_callback(
     };
 
     if let Err(e) = state.user_repository.create_tesla_connection(new_tesla) {
-        error!("Failed to store Tesla connection for user {}: {}", user_id, e);
+        error!(
+            "Failed to store Tesla connection for user {}: {}",
+            user_id, e
+        );
         return tesla_error_redirect("Failed to save Tesla connection. Please try again.");
     }
 
     // Clean up session (non-critical)
     let _ = state.session_store.delete(&Id(session_id)).await;
 
-    info!("Tesla OAuth connection successfully established for user {}", user_id);
+    info!(
+        "Tesla OAuth connection successfully established for user {}",
+        user_id
+    );
 
     // Redirect to frontend home page with success query param
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
     Redirect::to(&format!("{}?tesla=success", frontend_url))
 }
@@ -474,7 +522,8 @@ pub async fn tesla_disconnect(
     info!("Disconnecting Tesla for user {}", auth_user.user_id);
 
     // Delete connection from database
-    state.user_repository
+    state
+        .user_repository
         .delete_tesla_connection(auth_user.user_id)
         .map_err(|e| {
             error!("Failed to delete Tesla connection: {}", e);
@@ -484,7 +533,10 @@ pub async fn tesla_disconnect(
             )
         })?;
 
-    info!("Tesla connection successfully removed for user {}", auth_user.user_id);
+    info!(
+        "Tesla connection successfully removed for user {}",
+        auth_user.user_id
+    );
     Ok(StatusCode::OK)
 }
 
@@ -493,7 +545,10 @@ pub async fn tesla_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<TeslaStatusResponse>, (StatusCode, String)> {
-    let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id).unwrap_or(false);
+    let has_tesla = state
+        .user_repository
+        .has_active_tesla(auth_user.user_id)
+        .unwrap_or(false);
 
     Ok(Json(TeslaStatusResponse { has_tesla }))
 }
@@ -511,7 +566,8 @@ pub async fn tesla_scopes(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<TeslaScopesResponse>, (StatusCode, String)> {
-    let scopes = state.user_repository
+    let scopes = state
+        .user_repository
         .get_tesla_granted_scopes(auth_user.user_id)
         .unwrap_or(None);
 
@@ -537,7 +593,8 @@ pub async fn tesla_refresh_scopes(
     info!("Refreshing Tesla scopes for user {}", auth_user.user_id);
 
     // Get valid access token (will refresh if expired)
-    let access_token = get_valid_tesla_access_token(&state, auth_user.user_id).await
+    let access_token = get_valid_tesla_access_token(&state, auth_user.user_id)
+        .await
         .map_err(|(status, msg)| (status, Json(json!({"error": msg}))))?;
 
     // Extract scopes from the JWT
@@ -545,22 +602,31 @@ pub async fn tesla_refresh_scopes(
 
     if let Some(ref scope_str) = scopes {
         // Update scopes in database
-        if let Err(e) = state.user_repository.update_tesla_granted_scopes(auth_user.user_id, scope_str.clone()) {
+        if let Err(e) = state
+            .user_repository
+            .update_tesla_granted_scopes(auth_user.user_id, scope_str.clone())
+        {
             error!("Failed to update Tesla scopes in DB: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to save scopes"}))
+                Json(json!({"error": "Failed to save scopes"})),
             ));
         }
-        info!("Updated Tesla scopes for user {}: {}", auth_user.user_id, scope_str);
+        info!(
+            "Updated Tesla scopes for user {}: {}",
+            auth_user.user_id, scope_str
+        );
     } else {
-        warn!("Could not extract scopes from Tesla JWT for user {}", auth_user.user_id);
+        warn!(
+            "Could not extract scopes from Tesla JWT for user {}",
+            auth_user.user_id
+        );
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
                 "error": "Could not extract scopes from token. You may need to reconnect Tesla with desired permissions.",
                 "needs_reconnect": true
-            }))
+            })),
         ));
     }
 
@@ -623,7 +689,10 @@ pub async fn get_valid_tesla_access_token(
         return Ok(access_token);
     }
 
-    info!("Tesla access token expired for user {}, refreshing...", user_id);
+    info!(
+        "Tesla access token expired for user {}, refreshing...",
+        user_id
+    );
 
     // Refresh the token using Tesla's specific token endpoint
     let http_client = reqwest::ClientBuilder::new()
@@ -638,13 +707,16 @@ pub async fn get_valid_tesla_access_token(
         .unwrap_or_else(|_| "default-tesla-secret-for-testing".to_string());
 
     // Get the user's region from the database
-    let audience_url = state.user_repository.get_tesla_region(user_id).map_err(|e| {
-        error!("Failed to get user's Tesla region: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to get Tesla region: {}", e),
-        )
-    })?;
+    let audience_url = state
+        .user_repository
+        .get_tesla_region(user_id)
+        .map_err(|e| {
+            error!("Failed to get user's Tesla region: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get Tesla region: {}", e),
+            )
+        })?;
 
     let scope = "openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds";
     let refresh_params = [
@@ -670,7 +742,10 @@ pub async fn get_valid_tesla_access_token(
         })?;
 
     if !token_response.status().is_success() {
-        let error_text = token_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = token_response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         error!("Token refresh failed: {}", error_text);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -678,29 +753,27 @@ pub async fn get_valid_tesla_access_token(
         ));
     }
 
-    let token_data: serde_json::Value = token_response.json().await
-        .map_err(|e| {
-            error!("Failed to parse refresh token response: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to parse token response: {}", e),
-            )
-        })?;
+    let token_data: serde_json::Value = token_response.json().await.map_err(|e| {
+        error!("Failed to parse refresh token response: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to parse token response: {}", e),
+        )
+    })?;
 
-    let new_access_token = token_data["access_token"].as_str()
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "No access token in refresh response".to_string(),
-            )
-        })?;
+    let new_access_token = token_data["access_token"].as_str().ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "No access token in refresh response".to_string(),
+        )
+    })?;
 
     // Tesla returns a new refresh token on refresh
-    let new_refresh_token = token_data["refresh_token"].as_str()
+    let new_refresh_token = token_data["refresh_token"]
+        .as_str()
         .unwrap_or(&refresh_token); // Keep old if not provided
 
-    let new_expires_in = token_data["expires_in"].as_i64()
-        .unwrap_or(3600) as i32;
+    let new_expires_in = token_data["expires_in"].as_i64().unwrap_or(3600) as i32;
 
     // Encrypt new tokens
     let encrypted_access_token = encrypt(new_access_token).map_err(|e| {
@@ -737,7 +810,10 @@ pub async fn get_valid_tesla_access_token(
             )
         })?;
 
-    info!("Tesla access token successfully refreshed for user {}", user_id);
+    info!(
+        "Tesla access token successfully refreshed for user {}",
+        user_id
+    );
     Ok(new_access_token.to_string())
 }
 
@@ -763,7 +839,10 @@ pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Er
         ("grant_type", "client_credentials"),
         ("client_id", &client_id),
         ("client_secret", &client_secret),
-        ("scope", "openid vehicle_device_data vehicle_cmds vehicle_charging_cmds"),
+        (
+            "scope",
+            "openid vehicle_device_data vehicle_cmds vehicle_charging_cmds",
+        ),
         ("audience", &audience_url),
     ];
 
@@ -804,7 +883,7 @@ pub async fn serve_tesla_public_key() -> Result<(StatusCode, String), (StatusCod
             error!("Failed to get Tesla public key: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to retrieve public key: {}", e)
+                format!("Failed to retrieve public key: {}", e),
             ))
         }
     }
@@ -817,17 +896,23 @@ pub async fn get_virtual_key_link(
     auth_user: AuthUser,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Generating virtual key pairing link for user {}", auth_user.user_id);
+    info!(
+        "Generating virtual key pairing link for user {}",
+        auth_user.user_id
+    );
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
     if !has_tesla {
         return Err((
             StatusCode::NOT_FOUND,
-            Json(json!({"error": "No Tesla connection found. Please connect your Tesla account first."}))
+            Json(
+                json!({"error": "No Tesla connection found. Please connect your Tesla account first."}),
+            ),
         ));
     }
 
@@ -874,7 +959,10 @@ pub async fn tesla_command(
     auth_user: AuthUser,
     Json(payload): Json<TeslaCommandRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Tesla command request from user {}: {}", auth_user.user_id, payload.command);
+    info!(
+        "Tesla command request from user {}: {}",
+        auth_user.user_id, payload.command
+    );
 
     // Wrap command in JSON format expected by handle_tesla_command
     let args_json = json!({"command": payload.command}).to_string();
@@ -885,7 +973,8 @@ pub async fn tesla_command(
         auth_user.user_id,
         &args_json,
         true, // skip notification for dashboard calls
-    ).await;
+    )
+    .await;
 
     info!("Tesla command result: {}", result);
 
@@ -899,10 +988,14 @@ pub async fn tesla_battery_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Tesla battery status request from user {}", auth_user.user_id);
+    info!(
+        "Tesla battery status request from user {}",
+        auth_user.user_id
+    );
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
@@ -922,7 +1015,8 @@ pub async fn tesla_battery_status(
     };
 
     // Get region from database
-    let region = state.user_repository
+    let region = state
+        .user_repository
         .get_tesla_region(auth_user.user_id)
         .unwrap_or_else(|_| "na".to_string());
 
@@ -949,7 +1043,8 @@ pub async fn tesla_battery_status(
     }
 
     // Try to use selected vehicle, fall back to first vehicle if none selected
-    let selected_vin = state.user_repository
+    let selected_vin = state
+        .user_repository
         .get_selected_vehicle_vin(auth_user.user_id)
         .ok()
         .flatten();
@@ -961,7 +1056,10 @@ pub async fn tesla_battery_status(
                 v
             }
             None => {
-                info!("Selected vehicle VIN {} not found, falling back to first vehicle", vin);
+                info!(
+                    "Selected vehicle VIN {} not found, falling back to first vehicle",
+                    vin
+                );
                 &vehicles[0]
             }
         }
@@ -975,7 +1073,10 @@ pub async fn tesla_battery_status(
     // Wake up vehicle if asleep (using deduplication to prevent parallel wake attempts)
     if vehicle.state != "online" {
         info!("Vehicle is asleep (state: {}), waking up...", vehicle.state);
-        match tesla_client.wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles).await {
+        match tesla_client
+            .wake_up_deduplicated(&access_token, vehicle_vin, &state.tesla_waking_vehicles)
+            .await
+        {
             Ok(true) => {
                 info!("Vehicle successfully woken up");
             }
@@ -983,14 +1084,18 @@ pub async fn tesla_battery_status(
                 error!("Vehicle wake-up returned false");
                 return Err((
                     StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({"error": "Couldn't wake vehicle. This may be a Tesla server or connectivity issue."})),
+                    Json(
+                        json!({"error": "Couldn't wake vehicle. This may be a Tesla server or connectivity issue."}),
+                    ),
                 ));
             }
             Err(e) => {
                 error!("Failed to wake up vehicle: {}", e);
                 return Err((
                     StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({"error": format!("Couldn't reach vehicle. This may be a Tesla server or connectivity issue. {}", e)})),
+                    Json(
+                        json!({"error": format!("Couldn't reach vehicle. This may be a Tesla server or connectivity issue. {}", e)}),
+                    ),
                 ));
             }
         }
@@ -999,7 +1104,10 @@ pub async fn tesla_battery_status(
     }
 
     // Get vehicle data (includes charge_state, climate_state, vehicle_state in one call)
-    let vehicle_data = match tesla_client.get_vehicle_data(&access_token, vehicle_vin).await {
+    let vehicle_data = match tesla_client
+        .get_vehicle_data(&access_token, vehicle_vin)
+        .await
+    {
         Ok(data) => data,
         Err(e) => {
             error!("Failed to get Tesla vehicle data: {}", e);
@@ -1011,41 +1119,49 @@ pub async fn tesla_battery_status(
     };
 
     // Extract charge state
-    let (battery_level, battery_range, charging_state, charge_limit_soc, charge_rate, charger_power, time_to_full_charge, charge_energy_added) =
-        if let Some(charge_state) = &vehicle_data.charge_state {
-            (
-                Some(charge_state.battery_level),
-                Some(charge_state.battery_range),
-                Some(charge_state.charging_state.clone()),
-                Some(charge_state.charge_limit_soc),
-                charge_state.charge_rate,
-                charge_state.charger_power,
-                charge_state.time_to_full_charge,
-                charge_state.charge_energy_added,
-            )
-        } else {
-            (None, None, None, None, None, None, None, None)
-        };
+    let (
+        battery_level,
+        battery_range,
+        charging_state,
+        charge_limit_soc,
+        charge_rate,
+        charger_power,
+        time_to_full_charge,
+        charge_energy_added,
+    ) = if let Some(charge_state) = &vehicle_data.charge_state {
+        (
+            Some(charge_state.battery_level),
+            Some(charge_state.battery_range),
+            Some(charge_state.charging_state.clone()),
+            Some(charge_state.charge_limit_soc),
+            charge_state.charge_rate,
+            charge_state.charger_power,
+            charge_state.time_to_full_charge,
+            charge_state.charge_energy_added,
+        )
+    } else {
+        (None, None, None, None, None, None, None, None)
+    };
 
     // Determine if region uses miles (NA) or kilometers (EU/CN)
     let uses_miles = region.contains(".na.");
 
     // Extract climate data
-    let (inside_temp, outside_temp, is_climate_on, is_front_defroster_on, is_rear_defroster_on) = if let Some(climate) = &vehicle_data.climate_state {
-        (
-            climate.inside_temp,
-            climate.outside_temp,
-            climate.is_climate_on,
-            climate.is_front_defroster_on,
-            climate.is_rear_defroster_on,
-        )
-    } else {
-        (None, None, None, None, None)
-    };
+    let (inside_temp, outside_temp, is_climate_on, is_front_defroster_on, is_rear_defroster_on) =
+        if let Some(climate) = &vehicle_data.climate_state {
+            (
+                climate.inside_temp,
+                climate.outside_temp,
+                climate.is_climate_on,
+                climate.is_front_defroster_on,
+                climate.is_rear_defroster_on,
+            )
+        } else {
+            (None, None, None, None, None)
+        };
 
     // Extract vehicle state
-    let locked = vehicle_data.vehicle_state.as_ref()
-        .and_then(|vs| vs.locked);
+    let locked = vehicle_data.vehicle_state.as_ref().and_then(|vs| vs.locked);
 
     Ok(Json(json!({
         "battery_level": battery_level,
@@ -1076,7 +1192,10 @@ pub async fn set_charge_limit(
     auth_user: AuthUser,
     Json(payload): Json<SetChargeLimitRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Set charge limit request from user {}: {}%", auth_user.user_id, payload.percent);
+    info!(
+        "Set charge limit request from user {}: {}%",
+        auth_user.user_id, payload.percent
+    );
 
     // Validate percent is within Tesla's limits (50-100)
     if payload.percent < 50 || payload.percent > 100 {
@@ -1087,7 +1206,8 @@ pub async fn set_charge_limit(
     }
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
@@ -1107,15 +1227,27 @@ pub async fn set_charge_limit(
     };
 
     // Get region from database
-    let region = state.user_repository
+    let region = state
+        .user_repository
         .get_tesla_region(auth_user.user_id)
         .unwrap_or_else(|_| "na".to_string());
 
     // Get selected vehicle
-    let vehicle_info = state.user_repository
+    let vehicle_info = state
+        .user_repository
         .get_selected_vehicle_info(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get vehicle info"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "No vehicle selected"})),
+            )
+        })?;
 
     let (vehicle_vin, _, _) = vehicle_info;
 
@@ -1123,7 +1255,10 @@ pub async fn set_charge_limit(
     let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
 
     // Wake up vehicle if needed
-    match tesla_client.wake_up_deduplicated(&access_token, &vehicle_vin, &state.tesla_waking_vehicles).await {
+    match tesla_client
+        .wake_up_deduplicated(&access_token, &vehicle_vin, &state.tesla_waking_vehicles)
+        .await
+    {
         Ok(_) => {}
         Err(e) => {
             error!("Failed to wake up vehicle for charge limit: {}", e);
@@ -1135,9 +1270,15 @@ pub async fn set_charge_limit(
     }
 
     // Set charge limit
-    match tesla_client.set_charge_limit(&access_token, &vehicle_vin, payload.percent).await {
+    match tesla_client
+        .set_charge_limit(&access_token, &vehicle_vin, payload.percent)
+        .await
+    {
         Ok(_) => {
-            info!("Successfully set charge limit to {}% for user {}", payload.percent, auth_user.user_id);
+            info!(
+                "Successfully set charge limit to {}% for user {}",
+                payload.percent, auth_user.user_id
+            );
             Ok(Json(json!({
                 "success": true,
                 "message": format!("Charge limit set to {}%", payload.percent)
@@ -1157,10 +1298,14 @@ pub async fn tesla_list_vehicles(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Tesla list vehicles request from user {}", auth_user.user_id);
+    info!(
+        "Tesla list vehicles request from user {}",
+        auth_user.user_id
+    );
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
@@ -1180,7 +1325,8 @@ pub async fn tesla_list_vehicles(
     };
 
     // Get region from database
-    let region = state.user_repository
+    let region = state
+        .user_repository
         .get_tesla_region(auth_user.user_id)
         .unwrap_or_else(|_| "na".to_string());
 
@@ -1200,7 +1346,8 @@ pub async fn tesla_list_vehicles(
     };
 
     // Get currently selected vehicle
-    let mut selected_vin = state.user_repository
+    let mut selected_vin = state
+        .user_repository
         .get_selected_vehicle_vin(auth_user.user_id)
         .ok()
         .flatten();
@@ -1209,17 +1356,24 @@ pub async fn tesla_list_vehicles(
     if selected_vin.is_none() && !vehicles.is_empty() {
         let first_vehicle = &vehicles[0];
         let vin = first_vehicle.vin.clone();
-        let name = first_vehicle.display_name.as_ref().unwrap_or(&"Unknown".to_string()).clone();
+        let name = first_vehicle
+            .display_name
+            .as_ref()
+            .unwrap_or(&"Unknown".to_string())
+            .clone();
         let vehicle_id = first_vehicle.id.to_string();
 
-        info!("Auto-selecting first vehicle for user {}: {} (VIN: {})", auth_user.user_id, name, vin);
+        info!(
+            "Auto-selecting first vehicle for user {}: {} (VIN: {})",
+            auth_user.user_id, name, vin
+        );
 
         // Save selection to database
         if let Err(e) = state.user_repository.set_selected_vehicle(
             auth_user.user_id,
             vin.clone(),
             name,
-            vehicle_id
+            vehicle_id,
         ) {
             error!("Failed to auto-select vehicle: {}", e);
         } else {
@@ -1228,22 +1382,26 @@ pub async fn tesla_list_vehicles(
     }
 
     // Get virtual key paired status
-    let is_paired = state.user_repository
+    let is_paired = state
+        .user_repository
         .get_tesla_key_paired_status(auth_user.user_id)
         .unwrap_or(false);
 
     // Format response
-    let vehicle_list: Vec<serde_json::Value> = vehicles.iter().map(|v| {
-        json!({
-            "vin": v.vin,
-            "id": v.id.to_string(),
-            "vehicle_id": v.vehicle_id.to_string(),
-            "name": v.display_name.as_ref().unwrap_or(&"Unknown".to_string()),
-            "state": v.state,
-            "selected": selected_vin.as_ref() == Some(&v.vin),
-            "paired": is_paired  // Add pairing status
+    let vehicle_list: Vec<serde_json::Value> = vehicles
+        .iter()
+        .map(|v| {
+            json!({
+                "vin": v.vin,
+                "id": v.id.to_string(),
+                "vehicle_id": v.vehicle_id.to_string(),
+                "name": v.display_name.as_ref().unwrap_or(&"Unknown".to_string()),
+                "state": v.state,
+                "selected": selected_vin.as_ref() == Some(&v.vin),
+                "paired": is_paired  // Add pairing status
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(json!({
         "vehicles": vehicle_list,
@@ -1263,10 +1421,14 @@ pub async fn tesla_select_vehicle(
     auth_user: AuthUser,
     Json(payload): Json<SelectVehicleRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Tesla select vehicle request from user {}: VIN {}", auth_user.user_id, payload.vin);
+    info!(
+        "Tesla select vehicle request from user {}: VIN {}",
+        auth_user.user_id, payload.vin
+    );
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
@@ -1285,8 +1447,10 @@ pub async fn tesla_select_vehicle(
         payload.vehicle_id.clone(),
     ) {
         Ok(_) => {
-            info!("Successfully updated selected vehicle for user {}: {} (VIN: {})",
-                  auth_user.user_id, payload.name, payload.vin);
+            info!(
+                "Successfully updated selected vehicle for user {}: {} (VIN: {})",
+                auth_user.user_id, payload.name, payload.vin
+            );
             Ok(Json(json!({
                 "success": true,
                 "message": format!("Selected vehicle: {}", payload.name)
@@ -1312,10 +1476,14 @@ pub async fn tesla_mark_paired(
     auth_user: AuthUser,
     Json(payload): Json<MarkPairedRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("Tesla mark paired request from user {}: paired={}", auth_user.user_id, payload.paired);
+    info!(
+        "Tesla mark paired request from user {}: paired={}",
+        auth_user.user_id, payload.paired
+    );
 
     // Check if user has Tesla connected
-    let has_tesla = state.user_repository
+    let has_tesla = state
+        .user_repository
         .has_active_tesla(auth_user.user_id)
         .unwrap_or(false);
 
@@ -1327,10 +1495,15 @@ pub async fn tesla_mark_paired(
     }
 
     // Update paired status in database
-    match state.user_repository.mark_tesla_key_paired(auth_user.user_id, payload.paired) {
+    match state
+        .user_repository
+        .mark_tesla_key_paired(auth_user.user_id, payload.paired)
+    {
         Ok(_) => {
-            info!("Successfully updated Tesla key paired status for user {}: {}",
-                  auth_user.user_id, payload.paired);
+            info!(
+                "Successfully updated Tesla key paired status for user {}: {}",
+                auth_user.user_id, payload.paired
+            );
             Ok(Json(json!({
                 "success": true,
                 "paired": payload.paired,
@@ -1356,7 +1529,9 @@ pub async fn get_climate_notify_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let is_active = state.tesla_monitoring_tasks.contains_key(&auth_user.user_id);
+    let is_active = state
+        .tesla_monitoring_tasks
+        .contains_key(&auth_user.user_id);
     Ok(Json(json!({ "active": is_active })))
 }
 
@@ -1366,32 +1541,74 @@ pub async fn start_climate_notify(
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Check if already monitoring
-    if state.tesla_monitoring_tasks.contains_key(&auth_user.user_id) {
-        return Ok(Json(json!({ "success": true, "message": "Already monitoring" })));
+    if state
+        .tesla_monitoring_tasks
+        .contains_key(&auth_user.user_id)
+    {
+        return Ok(Json(
+            json!({ "success": true, "message": "Already monitoring" }),
+        ));
     }
 
     // Get Tesla connection info
-    let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to check Tesla connection"}))))?;
+    let has_tesla = state
+        .user_repository
+        .has_active_tesla(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to check Tesla connection"})),
+            )
+        })?;
 
     if !has_tesla {
-        return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Tesla not connected"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Tesla not connected"})),
+        ));
     }
 
     // Get access token
-    let access_token = match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id).await {
-        Ok(token) => token,
-        Err((_, msg)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": msg})))),
-    };
+    let access_token =
+        match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id)
+            .await
+        {
+            Ok(token) => token,
+            Err((_, msg)) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": msg})),
+                ))
+            }
+        };
 
     // Get region
-    let region = state.user_repository.get_tesla_region(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get Tesla region"}))))?;
+    let region = state
+        .user_repository
+        .get_tesla_region(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get Tesla region"})),
+            )
+        })?;
 
     // Get selected vehicle
-    let vehicle_info = state.user_repository.get_selected_vehicle_info(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+    let vehicle_info = state
+        .user_repository
+        .get_selected_vehicle_info(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get vehicle info"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "No vehicle selected"})),
+            )
+        })?;
 
     let (vehicle_vin, vehicle_name, _) = vehicle_info;
 
@@ -1399,32 +1616,51 @@ pub async fn start_climate_notify(
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     let handle = tokio::spawn(async move {
-        info!("Starting UI-initiated climate monitoring for user {}", user_id);
+        info!(
+            "Starting UI-initiated climate monitoring for user {}",
+            user_id
+        );
         let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
 
-        let monitoring_result = tesla_client.monitor_climate_ready(&access_token, &vehicle_vin).await
+        let monitoring_result = tesla_client
+            .monitor_climate_ready(&access_token, &vehicle_vin)
+            .await
             .map_err(|e| e.to_string());
 
         match monitoring_result {
             Ok(Some(temp)) => {
-                let msg = format!("Your {} is ready to drive! Cabin temp is {:.1}°C.", &vehicle_name, temp);
+                let msg = format!(
+                    "Your {} is ready to drive! Cabin temp is {:.1}°C.",
+                    &vehicle_name, temp
+                );
                 crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
                     &msg,
                     "tesla_ready_to_drive".to_string(),
-                    Some(format!("Your {} is warmed up and ready to drive!", &vehicle_name)),
-                ).await;
+                    Some(format!(
+                        "Your {} is warmed up and ready to drive!",
+                        &vehicle_name
+                    )),
+                )
+                .await;
             }
             Ok(None) => {
-                let msg = format!("Your {} should be ready by now (climate running 20+ min).", &vehicle_name);
+                let msg = format!(
+                    "Your {} should be ready by now (climate running 20+ min).",
+                    &vehicle_name
+                );
                 crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
                     &msg,
                     "tesla_ready_timeout".to_string(),
-                    Some(format!("Your {} should be warmed up by now.", &vehicle_name)),
-                ).await;
+                    Some(format!(
+                        "Your {} should be warmed up by now.",
+                        &vehicle_name
+                    )),
+                )
+                .await;
             }
             Err(error_msg) => {
                 if error_msg.contains("turned off") {
@@ -1434,17 +1670,25 @@ pub async fn start_climate_notify(
                         "Tesla climate was turned off before reaching target temperature.",
                         "tesla_climate_stopped".to_string(),
                         Some(format!("Your {} climate was stopped early.", &vehicle_name)),
-                    ).await;
+                    )
+                    .await;
                 }
             }
         }
 
         state_clone.tesla_monitoring_tasks.remove(&user_id);
-        info!("UI-initiated climate monitoring completed for user {}", user_id);
+        info!(
+            "UI-initiated climate monitoring completed for user {}",
+            user_id
+        );
     });
 
-    state.tesla_monitoring_tasks.insert(auth_user.user_id, handle);
-    Ok(Json(json!({ "success": true, "message": "Climate monitoring started" })))
+    state
+        .tesla_monitoring_tasks
+        .insert(auth_user.user_id, handle);
+    Ok(Json(
+        json!({ "success": true, "message": "Climate monitoring started" }),
+    ))
 }
 
 // Cancel climate monitoring from UI
@@ -1454,10 +1698,17 @@ pub async fn cancel_climate_notify(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     if let Some((_, handle)) = state.tesla_monitoring_tasks.remove(&auth_user.user_id) {
         handle.abort();
-        info!("Cancelled climate monitoring for user {}", auth_user.user_id);
-        Ok(Json(json!({ "success": true, "message": "Climate monitoring cancelled" })))
+        info!(
+            "Cancelled climate monitoring for user {}",
+            auth_user.user_id
+        );
+        Ok(Json(
+            json!({ "success": true, "message": "Climate monitoring cancelled" }),
+        ))
     } else {
-        Ok(Json(json!({ "success": true, "message": "No monitoring was active" })))
+        Ok(Json(
+            json!({ "success": true, "message": "No monitoring was active" }),
+        ))
     }
 }
 
@@ -1466,7 +1717,9 @@ pub async fn get_charging_notify_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let is_active = state.tesla_charging_monitor_tasks.contains_key(&auth_user.user_id);
+    let is_active = state
+        .tesla_charging_monitor_tasks
+        .contains_key(&auth_user.user_id);
     Ok(Json(json!({ "active": is_active })))
 }
 
@@ -1476,32 +1729,74 @@ pub async fn start_charging_notify(
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Check if already monitoring
-    if state.tesla_charging_monitor_tasks.contains_key(&auth_user.user_id) {
-        return Ok(Json(json!({ "success": true, "message": "Already monitoring" })));
+    if state
+        .tesla_charging_monitor_tasks
+        .contains_key(&auth_user.user_id)
+    {
+        return Ok(Json(
+            json!({ "success": true, "message": "Already monitoring" }),
+        ));
     }
 
     // Get Tesla connection info
-    let has_tesla = state.user_repository.has_active_tesla(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to check Tesla connection"}))))?;
+    let has_tesla = state
+        .user_repository
+        .has_active_tesla(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to check Tesla connection"})),
+            )
+        })?;
 
     if !has_tesla {
-        return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "Tesla not connected"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Tesla not connected"})),
+        ));
     }
 
     // Get access token
-    let access_token = match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id).await {
-        Ok(token) => token,
-        Err((_, msg)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": msg})))),
-    };
+    let access_token =
+        match crate::handlers::tesla_auth::get_valid_tesla_access_token(&state, auth_user.user_id)
+            .await
+        {
+            Ok(token) => token,
+            Err((_, msg)) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": msg})),
+                ))
+            }
+        };
 
     // Get region
-    let region = state.user_repository.get_tesla_region(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get Tesla region"}))))?;
+    let region = state
+        .user_repository
+        .get_tesla_region(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get Tesla region"})),
+            )
+        })?;
 
     // Get selected vehicle
-    let vehicle_info = state.user_repository.get_selected_vehicle_info(auth_user.user_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get vehicle info"}))))?
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({"error": "No vehicle selected"}))))?;
+    let vehicle_info = state
+        .user_repository
+        .get_selected_vehicle_info(auth_user.user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get vehicle info"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "No vehicle selected"})),
+            )
+        })?;
 
     let (vehicle_vin, vehicle_name, _) = vehicle_info;
 
@@ -1509,48 +1804,76 @@ pub async fn start_charging_notify(
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     let handle = tokio::spawn(async move {
-        info!("Starting UI-initiated charging monitoring for user {}", user_id);
+        info!(
+            "Starting UI-initiated charging monitoring for user {}",
+            user_id
+        );
         let tesla_client = crate::api::tesla::TeslaClient::new_with_proxy(&region);
 
-        let monitoring_result = tesla_client.monitor_charging_complete(&access_token, &vehicle_vin).await
+        let monitoring_result = tesla_client
+            .monitor_charging_complete(&access_token, &vehicle_vin)
+            .await
             .map_err(|e| e.to_string());
 
         match monitoring_result {
             Ok(Some(battery_level)) => {
                 // Check if user is present in the vehicle before sending notification
-                let is_user_present = match tesla_client.get_vehicle_data(&access_token, &vehicle_vin).await {
-                    Ok(data) => data.vehicle_state.and_then(|vs| vs.is_user_present).unwrap_or(false),
+                let is_user_present = match tesla_client
+                    .get_vehicle_data(&access_token, &vehicle_vin)
+                    .await
+                {
+                    Ok(data) => data
+                        .vehicle_state
+                        .and_then(|vs| vs.is_user_present)
+                        .unwrap_or(false),
                     Err(_) => false,
                 };
 
                 if is_user_present {
                     info!("User is present in vehicle, skipping charging complete notification for user {}", user_id);
                 } else {
-                    let msg = format!("Your {} has finished charging! Battery is now at {}%.", &vehicle_name, battery_level);
+                    let msg = format!(
+                        "Your {} has finished charging! Battery is now at {}%.",
+                        &vehicle_name, battery_level
+                    );
                     crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
                         "tesla_charging_complete".to_string(),
                         Some(format!("Your {} is done charging!", &vehicle_name)),
-                    ).await;
+                    )
+                    .await;
                 }
             }
             Ok(None) => {
                 // Timeout or charging stopped
-                info!("Charging monitoring timed out or charging stopped for user {}", user_id);
+                info!(
+                    "Charging monitoring timed out or charging stopped for user {}",
+                    user_id
+                );
             }
             Err(error_msg) => {
-                error!("Charging monitoring error for user {}: {}", user_id, error_msg);
+                error!(
+                    "Charging monitoring error for user {}: {}",
+                    user_id, error_msg
+                );
             }
         }
 
         state_clone.tesla_charging_monitor_tasks.remove(&user_id);
-        info!("UI-initiated charging monitoring completed for user {}", user_id);
+        info!(
+            "UI-initiated charging monitoring completed for user {}",
+            user_id
+        );
     });
 
-    state.tesla_charging_monitor_tasks.insert(auth_user.user_id, handle);
-    Ok(Json(json!({ "success": true, "message": "Charging monitoring started" })))
+    state
+        .tesla_charging_monitor_tasks
+        .insert(auth_user.user_id, handle);
+    Ok(Json(
+        json!({ "success": true, "message": "Charging monitoring started" }),
+    ))
 }
 
 // Cancel charging monitoring from UI
@@ -1558,12 +1881,22 @@ pub async fn cancel_charging_notify(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    if let Some((_, handle)) = state.tesla_charging_monitor_tasks.remove(&auth_user.user_id) {
+    if let Some((_, handle)) = state
+        .tesla_charging_monitor_tasks
+        .remove(&auth_user.user_id)
+    {
         handle.abort();
-        info!("Cancelled charging monitoring for user {}", auth_user.user_id);
-        Ok(Json(json!({ "success": true, "message": "Charging monitoring cancelled" })))
+        info!(
+            "Cancelled charging monitoring for user {}",
+            auth_user.user_id
+        );
+        Ok(Json(
+            json!({ "success": true, "message": "Charging monitoring cancelled" }),
+        ))
     } else {
-        Ok(Json(json!({ "success": true, "message": "No monitoring was active" })))
+        Ok(Json(
+            json!({ "success": true, "message": "No monitoring was active" }),
+        ))
     }
 }
 
@@ -1582,7 +1915,10 @@ pub async fn tesla_command_stream(
     let user_id = auth_user.user_id;
     let command = params.command.clone();
 
-    info!("Tesla command stream started for user {}: {}", user_id, command);
+    info!(
+        "Tesla command stream started for user {}: {}",
+        user_id, command
+    );
 
     // Create the async stream that yields SSE events
     let stream = async_stream::stream! {

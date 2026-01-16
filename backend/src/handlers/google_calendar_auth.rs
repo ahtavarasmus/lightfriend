@@ -1,23 +1,21 @@
-use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{Query, State},
-    response::{Json, Redirect},
     http::StatusCode,
+    response::{Json, Redirect},
 };
-use tower_sessions::{session_store::SessionStore, session::{Id, Record}};
 use oauth2::{
-    PkceCodeVerifier,
-    AuthorizationCode,
-    CsrfToken,
-    PkceCodeChallenge,
-    Scope,
-    TokenResponse,
+    AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
 use serde::Deserialize;
 use serde_json::json;
-use uuid::Uuid;
+use std::sync::Arc;
 use time::OffsetDateTime;
+use tower_sessions::{
+    session::{Id, Record},
+    session_store::SessionStore,
+};
+use uuid::Uuid;
 
 use crate::AppState;
 
@@ -50,42 +48,61 @@ pub async fn google_login(
         data: Default::default(),
         expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
     };
-    record.data.insert("session_key".to_string(), json!(session_key.clone()));
-    record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
-    record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
-    record.data.insert("calendar_access_type".to_string(), json!(params.calendar_access_type.unwrap_or_else(|| "primary".to_string())));
+    record
+        .data
+        .insert("session_key".to_string(), json!(session_key.clone()));
+    record.data.insert(
+        "pkce_verifier".to_string(),
+        json!(pkce_verifier.secret().to_string()),
+    );
+    record.data.insert(
+        "csrf_token".to_string(),
+        json!(csrf_token.secret().to_string()),
+    );
+    record
+        .data
+        .insert("user_id".to_string(), json!(auth_user.user_id));
+    record.data.insert(
+        "calendar_access_type".to_string(),
+        json!(params
+            .calendar_access_type
+            .unwrap_or_else(|| "primary".to_string())),
+    );
 
     tracing::info!("Storing session record with ID: {}", record.id.0);
     if let Err(e) = state.session_store.create(&mut record).await {
         tracing::error!("Failed to store session record: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to store session record: {}", e)}))
+            Json(json!({"error": format!("Failed to store session record: {}", e)})),
         ));
     }
 
     let state_token = format!("{}:{}", record.id.0, csrf_token.secret());
     // Get the calendar access type from the session data
-    let calendar_access_type = record.data.get("calendar_access_type")
+    let calendar_access_type = record
+        .data
+        .get("calendar_access_type")
         .and_then(|v| v.as_str())
         .unwrap_or("primary");
 
     let mut auth_builder = state
         .google_calendar_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.events".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/calendar.events".to_string(),
+        ))
         .add_extra_param("access_type", "offline") // Add this to request offline access
         .add_extra_param("prompt", "consent"); // Optional: forces consent screen to ensure refresh token is issued
 
     // Add full calendar scope if "all" access type is requested
     if calendar_access_type == "all" {
-        auth_builder = auth_builder.add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()));
+        auth_builder = auth_builder.add_scope(Scope::new(
+            "https://www.googleapis.com/auth/calendar".to_string(),
+        ));
     }
 
-    let (auth_url, _) = auth_builder
-        .set_pkce_challenge(pkce_challenge)
-        .url();
+    let (auth_url, _) = auth_builder.set_pkce_challenge(pkce_challenge).url();
 
     tracing::info!("Generated auth_url with state: {}", state_token);
     tracing::info!("Returning successful response with auth_url: {}", auth_url);
@@ -102,19 +119,22 @@ pub async fn delete_google_calendar_connection(
     tracing::info!("Received request to delete Google Calendar connection");
 
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+    let tokens = match state
+        .user_repository
+        .get_google_calendar_tokens(auth_user.user_id)
+    {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::info!("No tokens found to revoke for user {}", auth_user.user_id);
             return Ok(Json(json!({
                 "message": "No Google Calendar connection found to delete"
             })));
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to fetch tokens for revocation: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to fetch tokens"}))
+                Json(json!({"error": "Failed to fetch tokens"})),
             ));
         }
     };
@@ -152,18 +172,24 @@ pub async fn delete_google_calendar_connection(
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_google_calendar_connection(auth_user.user_id) {
+    match state
+        .user_repository
+        .delete_google_calendar_connection(auth_user.user_id)
+    {
         Ok(_) => {
-            tracing::info!("Successfully deleted Google Calendar connection for user {}", auth_user.user_id);
+            tracing::info!(
+                "Successfully deleted Google Calendar connection for user {}",
+                auth_user.user_id
+            );
             Ok(Json(json!({
                 "message": "Google Calendar connection deleted and permissions revoked successfully"
             })))
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to delete Google Calendar connection: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to delete calendar connection"}))
+                Json(json!({"error": "Failed to delete calendar connection"})),
             ))
         }
     }
@@ -180,31 +206,29 @@ pub async fn google_callback(
         tracing::error!("Invalid state format: {}", query.state);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid state format"}))
+            Json(json!({"error": "Invalid state format"})),
         ));
     }
     let session_id_str = state_parts[0];
     let state_csrf = state_parts[1];
 
-    let session_id = session_id_str.parse::<i128>()
-        .map_err(|e| {
-            tracing::error!("Invalid session ID format: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid session ID format"}))
-            )
-        })?;
+    let session_id = session_id_str.parse::<i128>().map_err(|e| {
+        tracing::error!("Invalid session ID format: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid session ID format"})),
+        )
+    })?;
     let session_id = Id(session_id);
 
     tracing::info!("Loading session record");
-    let record = state.session_store.load(&session_id).await
-        .map_err(|e| {
-            tracing::error!("Session store error loading record: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Session store error: {}", e)}))
-            )
-        })?;
+    let record = state.session_store.load(&session_id).await.map_err(|e| {
+        tracing::error!("Session store error loading record: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Session store error: {}", e)})),
+        )
+    })?;
 
     let record = match record {
         Some(r) => r,
@@ -212,28 +236,32 @@ pub async fn google_callback(
             tracing::error!("Session record missing");
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Session record not found"}))
+                Json(json!({"error": "Session record not found"})),
             ));
-        },
+        }
     };
 
-    let _stored_session_key = record.data.get("session_key")
+    let _stored_session_key = record
+        .data
+        .get("session_key")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
             tracing::error!("Session key missing from session record ");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Session key missing from session"}))
+                Json(json!({"error": "Session key missing from session"})),
             )
         })?;
 
-    let stored_csrf_token = record.data.get("csrf_token")
+    let stored_csrf_token = record
+        .data
+        .get("csrf_token")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
             tracing::error!("CSRF token missing from session record");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "CSRF token missing from session"}))
+                Json(json!({"error": "CSRF token missing from session"})),
             )
         })?;
 
@@ -241,17 +269,19 @@ pub async fn google_callback(
         tracing::error!("CSRF token mismatch");
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "CSRF token mismatch"}))
+            Json(json!({"error": "CSRF token mismatch"})),
         ));
     }
 
-    let pkce_verifier = record.data.get("pkce_verifier")
+    let pkce_verifier = record
+        .data
+        .get("pkce_verifier")
         .and_then(|v| v.as_str().map(|s| PkceCodeVerifier::new(s.to_string())))
         .ok_or_else(|| {
-            tracing::error!("PKCE verifier missing from session record"); 
+            tracing::error!("PKCE verifier missing from session record");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "PKCE verifier missing from session"}))
+                Json(json!({"error": "PKCE verifier missing from session"})),
             )
         })?;
     let http_client = reqwest::ClientBuilder::new()
@@ -271,24 +301,23 @@ pub async fn google_callback(
             tracing::error!("Token exchange failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Token exchange failed: {}", e)}))
+                Json(json!({"error": format!("Token exchange failed: {}", e)})),
             )
         })?;
 
-
     let access_token = token_result.access_token().secret();
     let refresh_token = token_result.refresh_token().map(|rt| rt.secret());
-    let expires_in = token_result.expires_in()
-        .unwrap_or_default()
-        .as_secs() as i32;
+    let expires_in = token_result.expires_in().unwrap_or_default().as_secs() as i32;
 
-    let user_id = record.data.get("user_id")
+    let user_id = record
+        .data
+        .get("user_id")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| {
             tracing::error!("User ID not found in session");
             (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "User ID not found in session"}))
+                Json(json!({"error": "User ID not found in session"})),
             )
         })? as i32;
 
@@ -307,15 +336,19 @@ pub async fn google_callback(
         tracing::error!("Failed to store Google Calendar connection: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to store calendar connection"}))
+            Json(json!({"error": "Failed to store calendar connection"})),
         ));
     }
 
-    tracing::info!("Successfully stored Google Calendar connection for user {}", user_id);
+    tracing::info!(
+        "Successfully stored Google Calendar connection for user {}",
+        user_id
+    );
 
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .expect("FRONTEND_URL must be set");
+    let frontend_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL must be set");
     tracing::info!("Redirecting to frontend with success: {}", frontend_url);
-    Ok(Redirect::to(&format!("{}/?google_calendar=success", frontend_url)))
+    Ok(Redirect::to(&format!(
+        "{}/?google_calendar=success",
+        frontend_url
+    )))
 }
-

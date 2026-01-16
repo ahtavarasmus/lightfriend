@@ -38,8 +38,8 @@ impl AiConfig {
     }
 
     pub fn from_env() -> Self {
-        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
-            .expect("OPENROUTER_API_KEY required");
+        let openrouter_api_key =
+            std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY required");
 
         let tinfoil_api_key = std::env::var("TINFOIL_API_KEY").ok();
 
@@ -79,7 +79,9 @@ impl AiConfig {
     pub fn api_key(&self, provider: AiProvider) -> &str {
         match provider {
             AiProvider::OpenRouter => &self.openrouter_api_key,
-            AiProvider::Tinfoil => self.tinfoil_api_key.as_ref()
+            AiProvider::Tinfoil => self
+                .tinfoil_api_key
+                .as_ref()
                 .expect("Tinfoil API key not configured"),
         }
     }
@@ -106,13 +108,16 @@ impl AiConfig {
     /// (i.e., vision model can't do tool calling)
     pub fn needs_two_step_vision(&self, provider: AiProvider) -> bool {
         match provider {
-            AiProvider::OpenRouter => false,  // GPT-4o handles vision + tools together
-            AiProvider::Tinfoil => true,      // Must describe image first, then tool-call
+            AiProvider::OpenRouter => false, // GPT-4o handles vision + tools together
+            AiProvider::Tinfoil => true,     // Must describe image first, then tool-call
         }
     }
 
     /// Create an OpenAI-compatible client for a specific provider
-    pub fn create_client(&self, provider: AiProvider) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
+    pub fn create_client(
+        &self,
+        provider: AiProvider,
+    ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
         OpenAIClient::builder()
             .with_endpoint(self.endpoint(provider))
             .with_api_key(self.api_key(provider))
@@ -128,8 +133,8 @@ impl AiConfig {
         user_text: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         use openai_api_rs::v1::chat_completion::{
-            ChatCompletionMessage, ChatCompletionRequest, Content,
-            ImageUrl, ImageUrlType, ContentType, MessageRole,
+            ChatCompletionMessage, ChatCompletionRequest, Content, ContentType, ImageUrl,
+            ImageUrlType, MessageRole,
         };
 
         let client = self.create_client(provider)?;
@@ -145,35 +150,34 @@ impl AiConfig {
             )
         };
 
-        let messages = vec![
-            ChatCompletionMessage {
-                role: MessageRole::user,
-                content: Content::ImageUrl(vec![
-                    ImageUrl {
-                        r#type: ContentType::text,
-                        text: Some(prompt),
-                        image_url: None,
-                    },
-                    ImageUrl {
-                        r#type: ContentType::image_url,
-                        text: None,
-                        image_url: Some(ImageUrlType {
-                            url: image_url.to_string(),
-                        }),
-                    },
-                ]),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        ];
+        let messages = vec![ChatCompletionMessage {
+            role: MessageRole::user,
+            content: Content::ImageUrl(vec![
+                ImageUrl {
+                    r#type: ContentType::text,
+                    text: Some(prompt),
+                    image_url: None,
+                },
+                ImageUrl {
+                    r#type: ContentType::image_url,
+                    text: None,
+                    image_url: Some(ImageUrlType {
+                        url: image_url.to_string(),
+                    }),
+                },
+            ]),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }];
 
-        let request = ChatCompletionRequest::new(model.to_string(), messages)
-            .max_tokens(500);
+        let request = ChatCompletionRequest::new(model.to_string(), messages).max_tokens(500);
 
         let response = client.chat_completion(request).await?;
 
-        let content = response.choices.first()
+        let content = response
+            .choices
+            .first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_else(|| "Unable to describe image".to_string());
 

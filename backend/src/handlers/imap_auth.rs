@@ -1,28 +1,25 @@
+use crate::{handlers::auth_middleware::AuthUser, AppState};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
-    response::{Json as AxumJson},
-};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::sync::Arc;
-use crate::{
-    AppState,
-    handlers::auth_middleware::AuthUser,
+    response::Json as AxumJson,
 };
 use imap::Session;
 use native_tls::TlsConnector;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::error::Error;
+use std::sync::Arc;
 
 // Struct to deserialize the incoming IMAP credentials from the frontend
 #[derive(Deserialize)]
 pub struct ImapCredentials {
     email: String,
     password: String,
-    #[serde(default)] 
+    #[serde(default)]
     imap_server: Option<String>, // e.g., "mail.privateemail.com" or "imap.gmail.com"
     #[serde(default)]
-    imap_port: Option<u16>,      // e.g., 993
+    imap_port: Option<u16>, // e.g., 993
 }
 
 // Struct to serialize the IMAP status response
@@ -35,22 +32,21 @@ pub struct ImapStatus {
 use native_tls::TlsStream;
 
 // Function to establish an IMAP connection to Gmail for credential verification
-async fn connect_imap(email: &str, 
+async fn connect_imap(
+    email: &str,
     password: &str,
     imap_server: Option<&str>,
     imap_port: Option<u16>,
 ) -> Result<Session<TlsStream<std::net::TcpStream>>, Box<dyn Error>> {
     let tls = TlsConnector::builder().build()?;
-    
+
     let server = imap_server.unwrap_or("imap.gmail.com");
     let port = imap_port.unwrap_or(993);
     let client = imap::connect((server, port), server, &tls)?;
 
     match client.login(email, password) {
         Ok(session) => Ok(session),
-        Err((err, _orig_client)) => {
-            Err(Box::new(err))
-        }
+        Err((err, _orig_client)) => Err(Box::new(err)),
     }
 }
 
@@ -60,7 +56,10 @@ pub async fn imap_login(
     auth_user: AuthUser,
     Json(payload): Json<ImapCredentials>,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::info!("Received request to /api/auth/gmail/imap/login for user {}", auth_user.user_id);
+    tracing::info!(
+        "Received request to /api/auth/gmail/imap/login for user {}",
+        auth_user.user_id
+    );
 
     let email = payload.email;
     let password = payload.password;
@@ -89,11 +88,18 @@ pub async fn imap_login(
                 ));
             }
 
-            tracing::info!("Successfully stored IMAP credentials for user {}", auth_user.user_id);
+            tracing::info!(
+                "Successfully stored IMAP credentials for user {}",
+                auth_user.user_id
+            );
             Ok(AxumJson(json!({"message": "IMAP connected successfully"})))
         }
         Err(e) => {
-            tracing::error!("IMAP connection failed for user {}: {}", auth_user.user_id, e);
+            tracing::error!(
+                "IMAP connection failed for user {}: {}",
+                auth_user.user_id,
+                e
+            );
             Err((
                 StatusCode::UNAUTHORIZED,
                 AxumJson(json!({"error": "Invalid IMAP credentials"})),
@@ -125,21 +131,35 @@ pub async fn imap_status(
             // Actually test the connection instead of just checking if credentials exist
             tracing::debug!("Testing IMAP connection for user {}", auth_user.user_id);
 
-            match connect_imap(&email, &password, imap_server.as_deref(), imap_port.map(|val| {val as u16})).await {
+            match connect_imap(
+                &email,
+                &password,
+                imap_server.as_deref(),
+                imap_port.map(|val| val as u16),
+            )
+            .await
+            {
                 Ok(mut session) => {
                     // Logout immediately after verification
                     if let Err(e) = session.logout() {
                         tracing::warn!("Failed to logout IMAP session during status check: {}", e);
                     }
 
-                    tracing::info!("IMAP connection test successful for user {}", auth_user.user_id);
+                    tracing::info!(
+                        "IMAP connection test successful for user {}",
+                        auth_user.user_id
+                    );
                     Ok(Json(ImapStatus {
                         connected: true,
                         email: Some(email),
                     }))
                 }
                 Err(e) => {
-                    tracing::error!("IMAP connection test failed for user {}: {}", auth_user.user_id, e);
+                    tracing::error!(
+                        "IMAP connection test failed for user {}: {}",
+                        auth_user.user_id,
+                        e
+                    );
                     // Return connected: false if test fails, so frontend shows accurate status
                     Ok(Json(ImapStatus {
                         connected: false,
@@ -160,9 +180,15 @@ pub async fn delete_imap_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::info!("Received request to delete IMAP connection for user {}", auth_user.user_id);
+    tracing::info!(
+        "Received request to delete IMAP connection for user {}",
+        auth_user.user_id
+    );
 
-    if let Err(e) = state.user_repository.delete_imap_credentials(auth_user.user_id) {
+    if let Err(e) = state
+        .user_repository
+        .delete_imap_credentials(auth_user.user_id)
+    {
         tracing::error!("Failed to delete IMAP credentials: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -170,6 +196,11 @@ pub async fn delete_imap_connection(
         ));
     }
 
-    tracing::info!("Successfully deleted IMAP connection for user {}", auth_user.user_id);
-    Ok(AxumJson(json!({"message": "IMAP connection deleted successfully"})))
+    tracing::info!(
+        "Successfully deleted IMAP connection for user {}",
+        auth_user.user_id
+    );
+    Ok(AxumJson(
+        json!({"message": "IMAP connection deleted successfully"}),
+    ))
 }

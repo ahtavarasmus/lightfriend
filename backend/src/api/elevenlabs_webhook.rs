@@ -1,16 +1,15 @@
-use axum::{
-    Json,
-    extract::State,
-    response::Response,
-    http::{StatusCode, Request, HeaderMap},
-    body::{Body, to_bytes}
-};
-use axum::middleware;
-use std::sync::Arc;
 use crate::AppState;
+use axum::middleware;
+use axum::{
+    body::{to_bytes, Body},
+    extract::State,
+    http::{HeaderMap, Request, StatusCode},
+    response::Response,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
+use std::sync::Arc;
 
 // ========================================
 // Structs for post_call_transcription webhook
@@ -19,7 +18,7 @@ use serde_json::{json, Value};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WebhookPayload {
     #[serde(rename = "type")]
-    pub type_field: String,  // "type" is a reserved keyword in Rust, so we rename it
+    pub type_field: String, // "type" is a reserved keyword in Rust, so we rename it
     pub event_timestamp: u64,
     pub data: WebhookData,
 }
@@ -52,7 +51,7 @@ pub struct ConversationInitiationClientDataWebhook {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DynamicVariablesWebhook {
     #[serde(deserialize_with = "deserialize_user_id")]
-    pub user_id: Option<String>,  // Using Option since it might not always be present
+    pub user_id: Option<String>, // Using Option since it might not always be present
 }
 
 // ========================================
@@ -62,14 +61,14 @@ pub struct DynamicVariablesWebhook {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CallInitiationFailurePayload {
     #[serde(rename = "type")]
-    pub type_field: String,  // "call_initiation_failure"
+    pub type_field: String, // "call_initiation_failure"
     pub event_timestamp: u64,
     pub data: CallInitiationFailureData,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CallInitiationFailureData {
-    pub failure_reason: String,  // "busy", "no-answer", "unknown"
+    pub failure_reason: String, // "busy", "no-answer", "unknown"
     #[serde(default)]
     pub conversation_initiation_client_data: Option<ConversationInitiationClientDataWebhook>,
 }
@@ -80,10 +79,10 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::de::Error;
-    
+
     // This will accept either a number or a string
     let value = serde_json::Value::deserialize(deserializer)?;
-    
+
     match value {
         serde_json::Value::String(s) => Ok(Some(s)),
         serde_json::Value::Number(n) => Ok(Some(n.to_string())),
@@ -91,7 +90,6 @@ where
         _ => Err(D::Error::custom("user_id must be a string or number")),
     }
 }
-
 
 use tracing::error;
 
@@ -110,13 +108,12 @@ pub async fn validate_elevenlabs_hmac(
 ) -> Result<Response, StatusCode> {
     tracing::info!("\n=== Starting ElevenLabs HMAC Validation ===");
 
-
     // Get the webhook secret from environment
     let secret = match std::env::var("ELEVENLABS_WEBHOOK_SECRET") {
         Ok(key) => {
             tracing::info!("✅ Successfully retrieved ELEVENLABS_WEBHOOK_SECRET");
             key
-        },
+        }
         Err(e) => {
             tracing::info!("❌ Failed to get ELEVENLABS_WEBHOOK_SECRET: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -142,12 +139,14 @@ pub async fn validate_elevenlabs_hmac(
 
     // Parse the signature header (t=timestamp,v0=hash)
     let parts: Vec<&str> = signature_str.split(',').collect();
-    let timestamp = parts.iter()
+    let timestamp = parts
+        .iter()
         .find(|&&part| part.starts_with("t="))
         .and_then(|part| part.strip_prefix("t="))
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    
-    let signature = parts.iter()
+
+    let signature = parts
+        .iter()
         .find(|&&part| part.starts_with("v0="))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
@@ -158,7 +157,7 @@ pub async fn validate_elevenlabs_hmac(
         .unwrap()
         .as_millis() as u64;
     let tolerance = 30 * 60 * 1000; // 30 minutes in milliseconds
-    
+
     if now - (timestamp_num * 1000) > tolerance {
         tracing::info!("❌ Request timestamp expired");
         return Err(StatusCode::FORBIDDEN);
@@ -166,9 +165,10 @@ pub async fn validate_elevenlabs_hmac(
 
     // Get request body for HMAC validation
     let (parts, body) = request.into_parts();
-    let body_bytes = to_bytes(body, 1024 * 1024).await  // 1MB limit
+    let body_bytes = to_bytes(body, 1024 * 1024)
+        .await // 1MB limit
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
+
     // Construct the message to verify (timestamp.request_body)
     let message = format!("{}.{}", timestamp, String::from_utf8_lossy(&body_bytes));
 
@@ -187,13 +187,11 @@ pub async fn validate_elevenlabs_hmac(
     }
 
     tracing::info!("✅ HMAC validation successful");
-    
+
     // Reconstruct request and pass to next handler
     let request = Request::from_parts(parts, Body::from(body_bytes));
     Ok(next.run(request).await)
 }
-
-
 
 pub async fn elevenlabs_webhook(
     State(state): State<Arc<AppState>>,
@@ -203,7 +201,9 @@ pub async fn elevenlabs_webhook(
     tracing::info!("Received raw webhook payload: {}", request.0);
 
     // First, extract the webhook type to determine how to handle it
-    let webhook_type = request.0.get("type")
+    let webhook_type = request
+        .0
+        .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("unknown");
 
@@ -213,12 +213,12 @@ pub async fn elevenlabs_webhook(
         "post_call_transcription" => {
             // Call was answered - handle normally and charge for call
             handle_post_call_transcription(state, request.0).await
-        },
+        }
         "call_initiation_failure" => {
             // Call was NOT answered (busy, no-answer, declined)
             // Don't charge for call, just mark usage as failed
             handle_call_initiation_failure(state, request.0).await
-        },
+        }
         _ => {
             tracing::warn!("Unknown webhook type: {}", webhook_type);
             // Return OK to prevent ElevenLabs from retrying
@@ -245,7 +245,7 @@ async fn handle_post_call_transcription(
                 Json(json!({
                     "error": "Invalid payload format",
                     "details": e.to_string()
-                }))
+                })),
             ));
         }
     };
@@ -254,7 +254,11 @@ async fn handle_post_call_transcription(
     let call_duration_secs = payload.data.metadata.call_duration_secs;
     let call_successful = payload.data.analysis.call_successful;
     let call_summary = payload.data.analysis.transcript_summary;
-    let user_id: Option<String> = payload.data.conversation_initiation_client_data.dynamic_variables.user_id;
+    let user_id: Option<String> = payload
+        .data
+        .conversation_initiation_client_data
+        .dynamic_variables
+        .user_id;
 
     // Get user_id from dynamic variables
     let user_id_str = match user_id {
@@ -264,7 +268,7 @@ async fn handle_post_call_transcription(
                 StatusCode::BAD_REQUEST,
                 Json(json!({
                     "error": "Missing user_id in dynamic variables"
-                }))
+                })),
             ));
         }
     };
@@ -277,7 +281,7 @@ async fn handle_post_call_transcription(
                 StatusCode::BAD_REQUEST,
                 Json(json!({
                     "error": "Invalid user_id format, must be an integer"
-                }))
+                })),
             ));
         }
     };
@@ -290,7 +294,7 @@ async fn handle_post_call_transcription(
                 StatusCode::NOT_FOUND,
                 Json(json!({
                     "error": "User not found"
-                }))
+                })),
             ));
         }
         Err(e) => {
@@ -299,7 +303,7 @@ async fn handle_post_call_transcription(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to fetch user"
-                }))
+                })),
             ));
         }
     };
@@ -307,13 +311,18 @@ async fn handle_post_call_transcription(
     match state.user_repository.get_ongoing_usage(user_id) {
         Ok(Some(usage)) => {
             // Handle the ongoing usage log - CHARGE for call (it was answered)
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "voice", Some(call_duration_secs)) {
+            if let Err(e) = crate::utils::usage::deduct_user_credits(
+                &state,
+                user.id,
+                "voice",
+                Some(call_duration_secs),
+            ) {
                 eprintln!("Failed to deduct user credits: {}", e);
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
                         "error": "Failed to deduct user credits"
-                    }))
+                    })),
                 ));
             }
 
@@ -337,7 +346,7 @@ async fn handle_post_call_transcription(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
                         "error": "Failed to update usage log"
-                    }))
+                    })),
                 ));
             }
 
@@ -377,7 +386,7 @@ async fn handle_post_call_transcription(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
                         "error": "Failed to create message history"
-                    }))
+                    })),
                 ));
             }
 
@@ -387,26 +396,26 @@ async fn handle_post_call_transcription(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
                         "error": "Failed to create message history"
-                    }))
+                    })),
                 ));
             }
-        },
+        }
         Ok(None) => {
             error!("No ongoing usage found for user {}", user_id);
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({
                     "error": "No ongoing usage found"
-                }))
+                })),
             ));
-        },
+        }
         Err(e) => {
             error!("Failed to get ongoing usage: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to get ongoing usage"
-                }))
+                })),
             ));
         }
     };
@@ -439,7 +448,9 @@ async fn handle_call_initiation_failure(
     tracing::info!("Call initiation failed with reason: {}", failure_reason);
 
     // Try to get user_id from dynamic variables
-    let user_id_opt = payload.data.conversation_initiation_client_data
+    let user_id_opt = payload
+        .data
+        .conversation_initiation_client_data
         .as_ref()
         .and_then(|cicd| cicd.dynamic_variables.user_id.clone());
 
@@ -473,10 +484,10 @@ async fn handle_call_initiation_failure(
             if let Err(e) = state.user_repository.update_usage_log_fields(
                 user_id,
                 &usage.sid.unwrap_or_default(),
-                "not_answered",  // Special status for unanswered calls
-                false,           // success = false
+                "not_answered", // Special status for unanswered calls
+                false,          // success = false
                 &format!("Call not answered: {}", failure_reason),
-                Some(0),         // 0 duration since call wasn't connected
+                Some(0), // 0 duration since call wasn't connected
             ) {
                 error!("Failed to update usage log for unanswered call: {}", e);
             }
@@ -486,12 +497,18 @@ async fn handle_call_initiation_failure(
                 user_id,
                 failure_reason
             );
-        },
+        }
         Ok(None) => {
-            tracing::warn!("No ongoing usage found for user {} in call_initiation_failure", user_id);
-        },
+            tracing::warn!(
+                "No ongoing usage found for user {} in call_initiation_failure",
+                user_id
+            );
+        }
         Err(e) => {
-            error!("Failed to get ongoing usage for call_initiation_failure: {}", e);
+            error!(
+                "Failed to get ongoing usage for call_initiation_failure: {}",
+                e
+            );
         }
     };
 
@@ -500,4 +517,3 @@ async fn handle_call_initiation_failure(
         "message": format!("Call initiation failure handled: {}", failure_reason)
     })))
 }
-

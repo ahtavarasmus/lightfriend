@@ -1,18 +1,13 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-    response::Response,
-};
+use axum::{extract::State, http::StatusCode, response::Response, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webauthn_rs::prelude::*;
 
-use crate::AppState;
+use crate::handlers::auth_handlers::generate_tokens_and_response;
 use crate::handlers::auth_middleware::AuthUser;
 use crate::repositories::webauthn_repository::CreateCredentialParams;
 use crate::utils::webauthn_config::get_webauthn;
-use crate::handlers::auth_handlers::generate_tokens_and_response;
+use crate::AppState;
 
 // ============ DTOs ============
 
@@ -85,11 +80,15 @@ pub async fn get_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<StatusResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let count = state.webauthn_repository
+    let count = state
+        .webauthn_repository
         .get_passkey_count(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get passkey count: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     Ok(Json(StatusResponse {
@@ -103,11 +102,15 @@ pub async fn list_passkeys(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<PasskeyInfo>>, (StatusCode, Json<serde_json::Value>)> {
-    let credentials = state.webauthn_repository
+    let credentials = state
+        .webauthn_repository
         .get_credentials_by_user(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get credentials: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     let passkeys: Vec<PasskeyInfo> = credentials
@@ -130,7 +133,8 @@ pub async fn register_start(
     Json(req): Json<RegisterStartRequest>,
 ) -> Result<Json<RegisterStartResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Check if TOTP is enabled - required before adding passkeys
-    let totp_enabled = state.totp_repository
+    let totp_enabled = state
+        .totp_repository
         .is_totp_enabled(auth_user.user_id)
         .unwrap_or(false);
 
@@ -139,36 +143,50 @@ pub async fn register_start(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "error": "You must enable authenticator app (TOTP) before adding passkeys. This ensures you have a fallback authentication method."
-            }))
+            })),
         ));
     }
 
     // Get user email for display
-    let user = state.user_core
+    let user = state
+        .user_core
         .find_by_id(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get user: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?
         .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "User not found"})))
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
         })?;
 
     // Get existing credentials to exclude from registration
-    let existing_creds = state.webauthn_repository
+    let existing_creds = state
+        .webauthn_repository
         .get_credentials_by_user(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get existing credentials: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     // Convert existing credentials to exclude list
     let exclude_credentials: Vec<CredentialID> = existing_creds
         .iter()
         .filter_map(|c| {
-            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &c.credential_id)
-                .ok()
-                .map(CredentialID::from)
+            base64::Engine::decode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                &c.credential_id,
+            )
+            .ok()
+            .map(CredentialID::from)
         })
         .collect();
 
@@ -191,18 +209,24 @@ pub async fn register_start(
         )
         .map_err(|e| {
             tracing::error!("Failed to start registration: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "WebAuthn error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "WebAuthn error"})),
+            )
         })?;
 
     // Store registration state (serialized) in challenge table
-    let state_json = serde_json::to_string(&reg_state)
-        .map_err(|e| {
-            tracing::error!("Failed to serialize registration state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Serialization error"})))
-        })?;
+    let state_json = serde_json::to_string(&reg_state).map_err(|e| {
+        tracing::error!("Failed to serialize registration state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Serialization error"})),
+        )
+    })?;
 
     // Store challenge with device name as context
-    state.webauthn_repository
+    state
+        .webauthn_repository
         .create_challenge(
             auth_user.user_id,
             &state_json,
@@ -212,7 +236,10 @@ pub async fn register_start(
         )
         .map_err(|e| {
             tracing::error!("Failed to store challenge: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     Ok(Json(RegisterStartResponse { options: ccr }))
@@ -225,21 +252,31 @@ pub async fn register_finish(
     Json(req): Json<RegisterFinishRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get the stored registration state
-    let challenge = state.webauthn_repository
+    let challenge = state
+        .webauthn_repository
         .get_valid_challenge(auth_user.user_id, "registration")
         .map_err(|e| {
             tracing::error!("Failed to get challenge: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?
         .ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "No pending registration"})))
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "No pending registration"})),
+            )
         })?;
 
     // Deserialize registration state
-    let reg_state: PasskeyRegistration = serde_json::from_str(&challenge.challenge)
-        .map_err(|e| {
+    let reg_state: PasskeyRegistration =
+        serde_json::from_str(&challenge.challenge).map_err(|e| {
             tracing::error!("Failed to deserialize registration state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "State error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "State error"})),
+            )
         })?;
 
     let webauthn = get_webauthn();
@@ -249,43 +286,54 @@ pub async fn register_finish(
         .finish_passkey_registration(&req.response, &reg_state)
         .map_err(|e| {
             tracing::error!("Failed to finish registration: {:?}", e);
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("Registration failed: {:?}", e)})))
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Registration failed: {:?}", e)})),
+            )
         })?;
 
     // Extract credential data
     let credential_id = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        passkey.cred_id().as_ref()
+        passkey.cred_id().as_ref(),
     );
 
     // Serialize the passkey for storage
-    let passkey_json = serde_json::to_string(&passkey)
-        .map_err(|e| {
-            tracing::error!("Failed to serialize passkey: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Serialization error"})))
-        })?;
+    let passkey_json = serde_json::to_string(&passkey).map_err(|e| {
+        tracing::error!("Failed to serialize passkey: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Serialization error"})),
+        )
+    })?;
 
     // Get device name from challenge context or request
     let device_name = challenge.context.unwrap_or(req.device_name);
 
     // Store the credential
-    state.webauthn_repository
+    state
+        .webauthn_repository
         .create_credential(CreateCredentialParams {
             user_id: auth_user.user_id,
             credential_id,
             public_key: passkey_json,
             device_name: device_name.clone(),
-            counter: 0, // Initial counter
+            counter: 0,       // Initial counter
             transports: None, // Transports - could extract from passkey if needed
-            aaguid: None, // AAGUID
+            aaguid: None,     // AAGUID
         })
         .map_err(|e| {
             tracing::error!("Failed to store credential: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     // Delete the challenge
-    let _ = state.webauthn_repository.delete_challenges_by_type(auth_user.user_id, "registration");
+    let _ = state
+        .webauthn_repository
+        .delete_challenges_by_type(auth_user.user_id, "registration");
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -301,15 +349,22 @@ pub async fn authenticate_start(
     Json(req): Json<AuthStartRequest>,
 ) -> Result<Json<AuthStartResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get user's credentials
-    let credentials = state.webauthn_repository
+    let credentials = state
+        .webauthn_repository
         .get_credentials_by_user(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get credentials: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     if credentials.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "No passkeys registered"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No passkeys registered"})),
+        ));
     }
 
     // Deserialize credentials back to Passkey objects
@@ -322,7 +377,10 @@ pub async fn authenticate_start(
         .collect();
 
     if passkeys.is_empty() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load credentials"}))));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to load credentials"})),
+        ));
     }
 
     let webauthn = get_webauthn();
@@ -332,17 +390,23 @@ pub async fn authenticate_start(
         .start_passkey_authentication(&passkeys)
         .map_err(|e| {
             tracing::error!("Failed to start authentication: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "WebAuthn error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "WebAuthn error"})),
+            )
         })?;
 
     // Store authentication state
-    let state_json = serde_json::to_string(&auth_state)
-        .map_err(|e| {
-            tracing::error!("Failed to serialize auth state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Serialization error"})))
-        })?;
+    let state_json = serde_json::to_string(&auth_state).map_err(|e| {
+        tracing::error!("Failed to serialize auth state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Serialization error"})),
+        )
+    })?;
 
-    state.webauthn_repository
+    state
+        .webauthn_repository
         .create_challenge(
             auth_user.user_id,
             &state_json,
@@ -352,7 +416,10 @@ pub async fn authenticate_start(
         )
         .map_err(|e| {
             tracing::error!("Failed to store challenge: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     Ok(Json(AuthStartResponse { options: rcr }))
@@ -365,21 +432,31 @@ pub async fn authenticate_finish(
     Json(req): Json<AuthFinishRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get the stored authentication state
-    let challenge = state.webauthn_repository
+    let challenge = state
+        .webauthn_repository
         .get_valid_challenge(auth_user.user_id, "authentication")
         .map_err(|e| {
             tracing::error!("Failed to get challenge: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?
         .ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "No pending authentication"})))
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "No pending authentication"})),
+            )
         })?;
 
     // Deserialize authentication state
-    let auth_state: PasskeyAuthentication = serde_json::from_str(&challenge.challenge)
-        .map_err(|e| {
+    let auth_state: PasskeyAuthentication =
+        serde_json::from_str(&challenge.challenge).map_err(|e| {
             tracing::error!("Failed to deserialize auth state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "State error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "State error"})),
+            )
         })?;
 
     let webauthn = get_webauthn();
@@ -389,19 +466,26 @@ pub async fn authenticate_finish(
         .finish_passkey_authentication(&req.response, &auth_state)
         .map_err(|e| {
             tracing::error!("Failed to finish authentication: {:?}", e);
-            (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Authentication failed"})))
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "Authentication failed"})),
+            )
         })?;
 
     // Update the credential counter
     let credential_id = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        auth_result.cred_id().as_ref()
+        auth_result.cred_id().as_ref(),
     );
 
-    let _ = state.webauthn_repository.update_counter(&credential_id, auth_result.counter() as i32);
+    let _ = state
+        .webauthn_repository
+        .update_counter(&credential_id, auth_result.counter() as i32);
 
     // Delete the challenge
-    let _ = state.webauthn_repository.delete_challenges_by_type(auth_user.user_id, "authentication");
+    let _ = state
+        .webauthn_repository
+        .delete_challenges_by_type(auth_user.user_id, "authentication");
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -415,17 +499,26 @@ pub async fn delete_passkey(
     auth_user: AuthUser,
     Json(req): Json<DeletePasskeyRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let deleted = state.webauthn_repository
+    let deleted = state
+        .webauthn_repository
         .delete_credential(auth_user.user_id, &req.credential_id)
         .map_err(|e| {
             tracing::error!("Failed to delete credential: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     if deleted {
-        Ok(Json(serde_json::json!({"success": true, "message": "Passkey deleted"})))
+        Ok(Json(
+            serde_json::json!({"success": true, "message": "Passkey deleted"}),
+        ))
     } else {
-        Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Passkey not found"}))))
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Passkey not found"})),
+        ))
     }
 }
 
@@ -435,17 +528,26 @@ pub async fn rename_passkey(
     auth_user: AuthUser,
     Json(req): Json<RenamePasskeyRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let updated = state.webauthn_repository
+    let updated = state
+        .webauthn_repository
         .rename_credential(auth_user.user_id, &req.credential_id, &req.new_name)
         .map_err(|e| {
             tracing::error!("Failed to rename credential: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     if updated {
-        Ok(Json(serde_json::json!({"success": true, "new_name": req.new_name})))
+        Ok(Json(
+            serde_json::json!({"success": true, "new_name": req.new_name}),
+        ))
     } else {
-        Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Passkey not found"}))))
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Passkey not found"})),
+        ))
     }
 }
 
@@ -456,15 +558,16 @@ pub async fn verify_login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifyLoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use std::num::NonZeroU32;
     use governor::{Quota, RateLimiter};
+    use std::num::NonZeroU32;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Rate limiting: 5 attempts per minute per login_token
     let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
     let limiter_key = req.login_token.clone();
 
-    let entry = state.webauthn_verify_limiter
+    let entry = state
+        .webauthn_verify_limiter
         .entry(limiter_key.clone())
         .or_insert_with(|| RateLimiter::keyed(quota));
     let limiter = entry.value();
@@ -473,14 +576,21 @@ pub async fn verify_login(
         tracing::warn!("Rate limit exceeded for WebAuthn verification");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
-            Json(serde_json::json!({"error": "Too many verification attempts. Please try again later."}))
+            Json(
+                serde_json::json!({"error": "Too many verification attempts. Please try again later."}),
+            ),
         ));
     }
 
     // Get pending login from the shared map
-    let pending = state.pending_totp_logins.get(&req.login_token)
+    let pending = state
+        .pending_totp_logins
+        .get(&req.login_token)
         .ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid or expired login token"})))
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid or expired login token"})),
+            )
         })?;
 
     let (user_id, expiry) = *pending;
@@ -494,19 +604,29 @@ pub async fn verify_login(
 
     if current_time > expiry {
         state.pending_totp_logins.remove(&req.login_token);
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Login token expired"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Login token expired"})),
+        ));
     }
 
     // Get user's credentials
-    let credentials = state.webauthn_repository
+    let credentials = state
+        .webauthn_repository
         .get_credentials_by_user(user_id)
         .map_err(|e| {
             tracing::error!("Failed to get credentials: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     if credentials.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "No passkeys registered"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No passkeys registered"})),
+        ));
     }
 
     // Deserialize credentials back to Passkey objects
@@ -519,7 +639,10 @@ pub async fn verify_login(
         .collect();
 
     if passkeys.is_empty() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load credentials"}))));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to load credentials"})),
+        ));
     }
 
     // Get the stored authentication state from pending_webauthn_logins
@@ -534,10 +657,13 @@ pub async fn verify_login(
         })?;
 
     // Deserialize authentication state
-    let auth_state: PasskeyAuthentication = serde_json::from_str(&challenge.challenge)
-        .map_err(|e| {
+    let auth_state: PasskeyAuthentication =
+        serde_json::from_str(&challenge.challenge).map_err(|e| {
             tracing::error!("Failed to deserialize auth state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "State error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "State error"})),
+            )
         })?;
 
     let webauthn = get_webauthn();
@@ -547,25 +673,34 @@ pub async fn verify_login(
         .finish_passkey_authentication(&req.response, &auth_state)
         .map_err(|e| {
             tracing::error!("Failed to finish authentication: {:?}", e);
-            (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Authentication failed"})))
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "Authentication failed"})),
+            )
         })?;
 
     // Update the credential counter
     let credential_id = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        auth_result.cred_id().as_ref()
+        auth_result.cred_id().as_ref(),
     );
-    let _ = state.webauthn_repository.update_counter(&credential_id, auth_result.counter() as i32);
+    let _ = state
+        .webauthn_repository
+        .update_counter(&credential_id, auth_result.counter() as i32);
 
     // Cleanup
-    let _ = state.webauthn_repository.delete_challenges_by_type(user_id, "login");
+    let _ = state
+        .webauthn_repository
+        .delete_challenges_by_type(user_id, "login");
     state.pending_totp_logins.remove(&req.login_token);
 
     // Generate tokens and return response
-    generate_tokens_and_response(user_id)
-        .map_err(|_| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to generate tokens"})))
-        })
+    generate_tokens_and_response(user_id).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to generate tokens"})),
+        )
+    })
 }
 
 /// POST /api/webauthn/login/start - Start WebAuthn auth for login (public endpoint)
@@ -582,9 +717,14 @@ pub async fn login_start(
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get pending login from the shared map
-    let pending = state.pending_totp_logins.get(&req.login_token)
+    let pending = state
+        .pending_totp_logins
+        .get(&req.login_token)
         .ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid or expired login token"})))
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid or expired login token"})),
+            )
         })?;
 
     let (user_id, expiry) = *pending;
@@ -598,19 +738,29 @@ pub async fn login_start(
 
     if current_time > expiry {
         state.pending_totp_logins.remove(&req.login_token);
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Login token expired"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Login token expired"})),
+        ));
     }
 
     // Get user's credentials
-    let credentials = state.webauthn_repository
+    let credentials = state
+        .webauthn_repository
         .get_credentials_by_user(user_id)
         .map_err(|e| {
             tracing::error!("Failed to get credentials: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     if credentials.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "No passkeys registered"}))));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No passkeys registered"})),
+        ));
     }
 
     // Deserialize credentials back to Passkey objects
@@ -623,7 +773,10 @@ pub async fn login_start(
         .collect();
 
     if passkeys.is_empty() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load credentials"}))));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to load credentials"})),
+        ));
     }
 
     let webauthn = get_webauthn();
@@ -633,17 +786,23 @@ pub async fn login_start(
         .start_passkey_authentication(&passkeys)
         .map_err(|e| {
             tracing::error!("Failed to start authentication: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "WebAuthn error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "WebAuthn error"})),
+            )
         })?;
 
     // Store authentication state with "login" context
-    let state_json = serde_json::to_string(&auth_state)
-        .map_err(|e| {
-            tracing::error!("Failed to serialize auth state: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Serialization error"})))
-        })?;
+    let state_json = serde_json::to_string(&auth_state).map_err(|e| {
+        tracing::error!("Failed to serialize auth state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Serialization error"})),
+        )
+    })?;
 
-    state.webauthn_repository
+    state
+        .webauthn_repository
         .create_challenge(
             user_id,
             &state_json,
@@ -653,7 +812,10 @@ pub async fn login_start(
         )
         .map_err(|e| {
             tracing::error!("Failed to store challenge: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
         })?;
 
     Ok(Json(AuthStartResponse { options: rcr }))

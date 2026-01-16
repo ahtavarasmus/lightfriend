@@ -189,7 +189,8 @@ impl<R: SignupRepository> SignupService<R> {
         }
 
         // Ensure settings and info records exist
-        self.repository.ensure_user_settings_exist(created_user.id)?;
+        self.repository
+            .ensure_user_settings_exist(created_user.id)?;
         self.repository.ensure_user_info_exists(created_user.id)?;
 
         // Set magic token for password setup
@@ -214,7 +215,11 @@ impl<R: SignupRepository> SignupService<R> {
     }
 
     /// Detect country from phone number and set preferred number.
-    fn setup_phone_country(&self, user_id: i32, phone: &str) -> Result<Option<String>, SignupError> {
+    fn setup_phone_country(
+        &self,
+        user_id: i32,
+        phone: &str,
+    ) -> Result<Option<String>, SignupError> {
         let country = country_service::detect_country(phone);
 
         // Update phone country in database
@@ -455,7 +460,11 @@ mod tests {
             .unwrap();
 
         // Verify first user was created with phone
-        if let SignupResult::NewUserCreated { phone_skipped_duplicate, .. } = result1 {
+        if let SignupResult::NewUserCreated {
+            phone_skipped_duplicate,
+            ..
+        } = result1
+        {
             assert!(!phone_skipped_duplicate);
         } else {
             panic!("Expected NewUserCreated for first user");
