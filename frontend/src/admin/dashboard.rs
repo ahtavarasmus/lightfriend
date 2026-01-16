@@ -79,13 +79,21 @@ struct GlobalMessageStatsResponse {
 #[derive(Deserialize, Clone, Debug)]
 #[allow(dead_code)]
 struct CostStatsResponse {
+    // Key metrics
+    avg_cost_per_intl_user_30d: f32,
+    avg_cost_per_us_ca_user_30d: f32,
+    avg_cost_per_intl_user_7d_projected: f32,
+    avg_cost_per_us_ca_user_7d_projected: f32,
+    // Counts
+    intl_user_count: i64,
+    us_ca_user_count: i64,
+    // Totals
     total_cost: f32,
     total_sms_cost: f32,
     total_voice_cost: f32,
-    avg_cost_per_intl_user_30d: f32,
-    avg_cost_per_intl_user_7d_projected: f32,
-    intl_user_count: i64,
     international_sms_cost: f32,
+    us_ca_sms_cost: f32,
+    // Per-user
     costs_per_user: Vec<UserCostEntry>,
 }
 
@@ -651,37 +659,29 @@ pub fn admin_dashboard() -> Html {
                         if let Some(costs) = (*cost_stats).as_ref() {
                             html! {
                                 <div class="cost-stats">
-                                    <h3>{"Avg Cost Per International User (30 days)"}</h3>
-                                    <div class="key-metric">
-                                        <span class="key-number">{format!("${:.2}", costs.avg_cost_per_intl_user_30d)}</span>
-                                        <span class="key-context">{format!("across {} intl users", costs.intl_user_count)}</span>
-                                    </div>
-
-                                    <div class="secondary-metrics">
-                                        <div class="metric-item">
-                                            <span class="metric-label">{"7-day projected to 30d:"}</span>
-                                            <span class="metric-value">{format!("${:.2}", costs.avg_cost_per_intl_user_7d_projected)}</span>
+                                    <h3>{"Avg Cost Per User (30 days)"}</h3>
+                                    <div class="key-metrics-row">
+                                        <div class="key-metric intl">
+                                            <span class="key-label">{"International"}</span>
+                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_intl_user_30d)}</span>
+                                            <span class="key-context">{format!("{} users", costs.intl_user_count)}</span>
                                         </div>
-                                        <div class="metric-item">
-                                            <span class="metric-label">{"Total intl cost (30d):"}</span>
-                                            <span class="metric-value">{format!("${:.2}", costs.international_sms_cost)}</span>
-                                        </div>
-                                        <div class="metric-item">
-                                            <span class="metric-label">{"Total cost (all):"}</span>
-                                            <span class="metric-value">{format!("${:.2}", costs.total_cost)}</span>
+                                        <div class="key-metric us-ca">
+                                            <span class="key-label">{"US/CA"}</span>
+                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_us_ca_user_30d)}</span>
+                                            <span class="key-context">{format!("{} users", costs.us_ca_user_count)}</span>
                                         </div>
                                     </div>
 
                                     {
                                         if !costs.costs_per_user.is_empty() {
-                                            // Find max cost for scaling bars
                                             let max_cost = costs.costs_per_user.iter()
                                                 .map(|u| u.sms_cost)
                                                 .fold(0.0f32, |a, b| a.max(b));
 
                                             html! {
                                                 <>
-                                                    <h4>{"Cost Per User (30 days)"}</h4>
+                                                    <h4>{"Cost Per User"}</h4>
                                                     <div class="user-cost-chart">
                                                         {
                                                             costs.costs_per_user.iter().map(|u| {
@@ -697,7 +697,7 @@ pub fn admin_dashboard() -> Html {
                                                                         <div class="chart-bar-container">
                                                                             <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
                                                                         </div>
-                                                                        <span class="chart-value">{format!("${:.2} ({} msgs)", u.sms_cost, u.sms_count)}</span>
+                                                                        <span class="chart-value">{format!("${:.4} ({} msgs)", u.sms_cost, u.sms_count)}</span>
                                                                     </div>
                                                                 }
                                                             }).collect::<Html>()
@@ -709,6 +709,33 @@ pub fn admin_dashboard() -> Html {
                                             html! { <p class="no-data">{"No user cost data"}</p> }
                                         }
                                     }
+
+                                    // Collapsible details section
+                                    <details class="cost-details">
+                                        <summary>{"Details"}</summary>
+                                        <div class="details-content">
+                                            <div class="detail-row">
+                                                <span>{"7d projected (Intl):"}</span>
+                                                <span>{format!("${:.4}", costs.avg_cost_per_intl_user_7d_projected)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"7d projected (US/CA):"}</span>
+                                                <span>{format!("${:.4}", costs.avg_cost_per_us_ca_user_7d_projected)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total Intl SMS cost:"}</span>
+                                                <span>{format!("${:.4}", costs.international_sms_cost)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total US/CA SMS cost:"}</span>
+                                                <span>{format!("${:.4}", costs.us_ca_sms_cost)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span>{"Total cost (SMS+Voice):"}</span>
+                                                <span>{format!("${:.4}", costs.total_cost)}</span>
+                                            </div>
+                                        </div>
+                                    </details>
                                 </div>
                             }
                         } else {
@@ -742,7 +769,8 @@ pub fn admin_dashboard() -> Html {
                                     </div>
 
                                     {
-                                        if !usage.breakdown_by_type.is_empty() {
+                                        // Only show activity breakdown if any item has non-zero credits
+                                        if usage.breakdown_by_type.iter().any(|a| a.total_credits > 0.0) {
                                             html! {
                                                 <>
                                                     <h4>{"Activity Breakdown"}</h4>
@@ -751,7 +779,7 @@ pub fn admin_dashboard() -> Html {
                                                             usage.breakdown_by_type.iter().map(|a| {
                                                                 html! {
                                                                     <span class="activity-item" key={a.activity_type.clone()}>
-                                                                        {format!("{}: {} ({:.2} credits)", a.activity_type, a.count, a.total_credits)}
+                                                                        {format!("{}: {} ({:.4} credits)", a.activity_type, a.count, a.total_credits)}
                                                                     </span>
                                                                 }
                                                             }).collect::<Html>()
@@ -2497,49 +2525,94 @@ pub fn admin_dashboard() -> Html {
                         font-size: 0.95rem;
                     }
 
-                    /* Key metric display */
+                    /* Key metrics row - side by side */
+                    .key-metrics-row {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                    }
+
                     .key-metric {
+                        flex: 1;
                         text-align: center;
-                        padding: 1.5rem;
+                        padding: 1rem;
+                        border-radius: 12px;
+                    }
+
+                    .key-metric.intl {
                         background: rgba(255, 87, 51, 0.15);
                         border: 2px solid rgba(255, 87, 51, 0.5);
-                        border-radius: 12px;
-                        margin-bottom: 1rem;
+                    }
+
+                    .key-metric.us-ca {
+                        background: rgba(40, 167, 69, 0.15);
+                        border: 2px solid rgba(40, 167, 69, 0.5);
+                    }
+
+                    .key-label {
+                        display: block;
+                        font-size: 0.85rem;
+                        color: #aaa;
+                        margin-bottom: 0.25rem;
                     }
 
                     .key-number {
                         display: block;
-                        font-size: 3rem;
+                        font-size: 2rem;
                         font-weight: bold;
+                    }
+
+                    .key-metric.intl .key-number {
                         color: #FF5733;
+                    }
+
+                    .key-metric.us-ca .key-number {
+                        color: #28a745;
                     }
 
                     .key-context {
                         display: block;
-                        font-size: 0.9rem;
-                        color: #aaa;
+                        font-size: 0.8rem;
+                        color: #888;
                         margin-top: 0.25rem;
                     }
 
-                    .secondary-metrics {
-                        display: flex;
-                        gap: 1.5rem;
-                        flex-wrap: wrap;
-                        margin-bottom: 1.5rem;
+                    /* Collapsible details */
+                    .cost-details {
+                        margin-top: 1rem;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        border-radius: 8px;
                     }
 
-                    .metric-item {
-                        display: flex;
-                        gap: 0.5rem;
+                    .cost-details summary {
+                        padding: 0.75rem 1rem;
+                        cursor: pointer;
+                        color: #888;
+                        font-size: 0.9rem;
                     }
 
-                    .metric-label {
+                    .cost-details summary:hover {
+                        color: #aaa;
+                    }
+
+                    .details-content {
+                        padding: 0.5rem 1rem 1rem;
+                        border-top: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .detail-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 0.25rem 0;
+                        font-size: 0.85rem;
+                    }
+
+                    .detail-row span:first-child {
                         color: #888;
                     }
 
-                    .metric-value {
-                        color: #fff;
-                        font-weight: 600;
+                    .detail-row span:last-child {
+                        color: #ddd;
                     }
 
                     /* User cost chart */
@@ -2614,6 +2687,10 @@ pub fn admin_dashboard() -> Html {
                         color: #7EB2FF;
                         font-weight: 600;
                         background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .daily-stats-table td {
+                        color: #ddd;
                     }
 
                     .daily-stats-table tr:hover {

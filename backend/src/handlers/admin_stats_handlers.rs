@@ -20,14 +20,20 @@ pub struct StatsQuery {
 // Cost Stats Response
 #[derive(Serialize)]
 pub struct CostStatsResponse {
+    // Key metrics - averages per user
+    pub avg_cost_per_intl_user_30d: f32,
+    pub avg_cost_per_us_ca_user_30d: f32,
+    pub avg_cost_per_intl_user_7d_projected: f32,
+    pub avg_cost_per_us_ca_user_7d_projected: f32,
+    // Counts
+    pub intl_user_count: i64,
+    pub us_ca_user_count: i64,
+    // Totals (for details section)
     pub total_cost: f32,
     pub total_sms_cost: f32,
     pub total_voice_cost: f32,
-    // The key metrics: average cost per international user
-    pub avg_cost_per_intl_user_30d: f32,
-    pub avg_cost_per_intl_user_7d_projected: f32,
-    pub intl_user_count: i64,
     pub international_sms_cost: f32,
+    pub us_ca_sms_cost: f32,
     // Per-user costs for the graph (sorted by cost desc)
     pub costs_per_user: Vec<UserCostEntry>,
 }
@@ -107,18 +113,24 @@ pub async fn get_cost_stats(
         .filter_map(|p| *p)
         .sum();
 
-    // Get user countries
+    // Get user countries and plan types (to exclude BYOT users)
     let user_ids: Vec<i32> = sms_data_30d.iter().map(|(uid, _, _)| *uid).collect();
-    let user_countries: Vec<(i32, Option<String>)> = users::table
+    let user_data: Vec<(i32, Option<String>, Option<String>)> = users::table
         .filter(users::id.eq_any(&user_ids))
-        .select((users::id, users::phone_number_country))
+        .select((users::id, users::phone_number_country, users::plan_type))
         .load(conn)
         .unwrap_or_default();
 
-    let country_map: std::collections::HashMap<i32, String> = user_countries
-        .into_iter()
-        .map(|(id, country)| (id, country.unwrap_or_else(|| "Unknown".to_string())))
-        .collect();
+    // Build maps for country and identify BYOT users to exclude
+    let mut country_map: std::collections::HashMap<i32, String> = std::collections::HashMap::new();
+    let mut byot_users: std::collections::HashSet<i32> = std::collections::HashSet::new();
+
+    for (id, country, plan_type) in user_data {
+        country_map.insert(id, country.unwrap_or_else(|| "Unknown".to_string()));
+        if plan_type.as_deref() == Some("byot") {
+            byot_users.insert(id);
+        }
+    }
 
     // Aggregate costs per user for 30 days
     let mut user_costs_30d: std::collections::HashMap<i32, (f32, i64)> = std::collections::HashMap::new();
@@ -137,33 +149,56 @@ pub async fn get_cost_stats(
         }
     }
 
-    // Calculate international user stats
+    // Calculate user stats (excluding BYOT users)
     let mut intl_total_cost_30d: f32 = 0.0;
     let mut intl_total_cost_7d: f32 = 0.0;
+    let mut us_ca_total_cost_30d: f32 = 0.0;
+    let mut us_ca_total_cost_7d: f32 = 0.0;
     let mut intl_users: std::collections::HashSet<i32> = std::collections::HashSet::new();
+    let mut us_ca_users: std::collections::HashSet<i32> = std::collections::HashSet::new();
 
     for (user_id, (cost, _)) in &user_costs_30d {
+        // Skip BYOT users - they pay Twilio directly
+        if byot_users.contains(user_id) {
+            continue;
+        }
         let country = country_map.get(user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
         let is_intl = country != "US" && country != "CA";
         if is_intl {
             intl_total_cost_30d += cost;
             intl_users.insert(*user_id);
+        } else {
+            us_ca_total_cost_30d += cost;
+            us_ca_users.insert(*user_id);
         }
     }
 
     for (user_id, cost) in &user_costs_7d {
+        // Skip BYOT users
+        if byot_users.contains(user_id) {
+            continue;
+        }
         let country = country_map.get(user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
         let is_intl = country != "US" && country != "CA";
         if is_intl {
             intl_total_cost_7d += cost;
+        } else {
+            us_ca_total_cost_7d += cost;
         }
     }
 
     let intl_user_count = intl_users.len() as i64;
+    let us_ca_user_count = us_ca_users.len() as i64;
 
-    // Key metric: average cost per international user
+    // Key metrics: average cost per user (30d)
     let avg_cost_per_intl_user_30d = if intl_user_count > 0 {
         intl_total_cost_30d / intl_user_count as f32
+    } else {
+        0.0
+    };
+
+    let avg_cost_per_us_ca_user_30d = if us_ca_user_count > 0 {
+        us_ca_total_cost_30d / us_ca_user_count as f32
     } else {
         0.0
     };
@@ -175,9 +210,16 @@ pub async fn get_cost_stats(
         0.0
     };
 
-    // Build per-user cost list for graph
+    let avg_cost_per_us_ca_user_7d_projected = if us_ca_user_count > 0 {
+        (us_ca_total_cost_7d / us_ca_user_count as f32) * (30.0 / 7.0)
+    } else {
+        0.0
+    };
+
+    // Build per-user cost list for graph (excluding BYOT users)
     let mut costs_per_user: Vec<UserCostEntry> = user_costs_30d
         .into_iter()
+        .filter(|(user_id, _)| !byot_users.contains(user_id))
         .map(|(user_id, (sms_cost, sms_count))| {
             let country = country_map.get(&user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
             let is_international = country != "US" && country != "CA";
@@ -195,13 +237,17 @@ pub async fn get_cost_stats(
     costs_per_user.sort_by(|a, b| b.sms_cost.partial_cmp(&a.sms_cost).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(Json(CostStatsResponse {
+        avg_cost_per_intl_user_30d,
+        avg_cost_per_us_ca_user_30d,
+        avg_cost_per_intl_user_7d_projected,
+        avg_cost_per_us_ca_user_7d_projected,
+        intl_user_count,
+        us_ca_user_count,
         total_cost: total_sms_cost + total_voice_cost,
         total_sms_cost,
         total_voice_cost,
-        avg_cost_per_intl_user_30d,
-        avg_cost_per_intl_user_7d_projected,
-        intl_user_count,
         international_sms_cost: intl_total_cost_30d,
+        us_ca_sms_cost: us_ca_total_cost_30d,
         costs_per_user,
     }))
 }
