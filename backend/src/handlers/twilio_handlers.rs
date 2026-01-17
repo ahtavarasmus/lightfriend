@@ -694,7 +694,7 @@ pub async fn twilio_status_callback(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> StatusCode {
-    use crate::api::twilio_client::RealTwilioClient;
+    use crate::api::twilio_client::{RealTwilioClient, TwilioCredentials};
     use crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository;
     use crate::services::twilio_status_service::{
         StatusCallbackInput, TwilioStatusService, TwilioStatusServiceConfig,
@@ -735,32 +735,35 @@ pub async fn twilio_status_callback(
     let repository = Arc::new(DieselTwilioStatusRepository::new(state.db_pool.clone()));
 
     // Check if Twilio credentials are available
-    let twilio_client = RealTwilioClient::from_env();
+    match TwilioCredentials::from_env() {
+        Ok(credentials) => {
+            let client = Arc::new(RealTwilioClient::new());
+            let service = TwilioStatusService::new(repository, client, credentials);
 
-    if let Some(client) = twilio_client {
-        let client = Arc::new(client);
-        let service = TwilioStatusService::new(repository, client);
-
-        if let Err(e) = service.process_status_callback(input).await {
-            tracing::error!("Failed to process status callback: {}", e);
-            // Still return OK to Twilio to prevent retries
+            if let Err(e) = service.process_status_callback(input).await {
+                tracing::error!("Failed to process status callback: {}", e);
+                // Still return OK to Twilio to prevent retries
+            }
         }
-    } else {
-        // Fallback: process without Twilio client (no price fetch or deletion)
-        tracing::warn!("Missing Twilio credentials, processing status callback without API calls");
+        Err(_) => {
+            // Fallback: process without Twilio client (no price fetch or deletion)
+            tracing::warn!("Missing Twilio credentials, processing status callback without API calls");
 
-        // Create a no-op client for when credentials aren't available
-        let client = Arc::new(NoOpTwilioClient);
-        let config = TwilioStatusServiceConfig {
-            send_failure_notifications: true,
-            fetch_price_on_final: false,
-            delete_on_final: false,
-            price_fetch_delays: vec![],
-        };
-        let service = TwilioStatusService::with_config(repository, client, config);
+            // Create a no-op client for when credentials aren't available
+            // We still need credentials for the service, so create dummy ones
+            let dummy_credentials = TwilioCredentials::new(String::new(), String::new());
+            let client = Arc::new(NoOpTwilioClient);
+            let config = TwilioStatusServiceConfig {
+                send_failure_notifications: true,
+                fetch_price_on_final: false,
+                delete_on_final: false,
+                price_fetch_delays: vec![],
+            };
+            let service = TwilioStatusService::with_config(repository, client, dummy_credentials, config);
 
-        if let Err(e) = service.process_status_callback(input).await {
-            tracing::error!("Failed to process status callback: {}", e);
+            if let Err(e) = service.process_status_callback(input).await {
+                tracing::error!("Failed to process status callback: {}", e);
+            }
         }
     }
 
@@ -773,8 +776,36 @@ struct NoOpTwilioClient;
 
 #[async_trait::async_trait]
 impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
+    async fn send_message(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _options: crate::api::twilio_client::SendMessageOptions,
+    ) -> Result<crate::api::twilio_client::SendMessageResult, crate::api::twilio_client::TwilioClientError> {
+        Ok(crate::api::twilio_client::SendMessageResult {
+            message_sid: "noop".to_string(),
+        })
+    }
+
+    async fn delete_message(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _message_sid: &str,
+    ) -> Result<(), crate::api::twilio_client::TwilioClientError> {
+        Ok(())
+    }
+
+    async fn delete_message_media(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _message_sid: &str,
+        _media_sid: &str,
+    ) -> Result<(), crate::api::twilio_client::TwilioClientError> {
+        Ok(())
+    }
+
     async fn fetch_message_price(
         &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
         _message_sid: &str,
     ) -> Result<
         Option<crate::api::twilio_client::MessagePrice>,
@@ -783,10 +814,12 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
         Ok(None)
     }
 
-    async fn delete_message(
+    async fn configure_webhook(
         &self,
-        _message_sid: &str,
-    ) -> Result<(), crate::api::twilio_client::TwilioClientError> {
-        Ok(())
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _phone_number: &str,
+        _webhook_url: &str,
+    ) -> Result<String, crate::api::twilio_client::TwilioClientError> {
+        Ok("noop".to_string())
     }
 }

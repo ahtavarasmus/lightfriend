@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::api::twilio_client::{TwilioClient, TwilioClientError};
+use crate::api::twilio_client::{TwilioClient, TwilioClientError, TwilioCredentials};
 use crate::repositories::twilio_status_repository::{
     StatusUpdate, TwilioStatusRepository, TwilioStatusRepositoryError,
 };
@@ -80,15 +80,17 @@ impl Default for TwilioStatusServiceConfig {
 pub struct TwilioStatusService<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> {
     repository: Arc<R>,
     client: Arc<C>,
+    credentials: TwilioCredentials,
     config: TwilioStatusServiceConfig,
 }
 
 impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatusService<R, C> {
-    /// Create a new service with the given repository and client.
-    pub fn new(repository: Arc<R>, client: Arc<C>) -> Self {
+    /// Create a new service with the given repository, client, and credentials.
+    pub fn new(repository: Arc<R>, client: Arc<C>, credentials: TwilioCredentials) -> Self {
         Self {
             repository,
             client,
+            credentials,
             config: TwilioStatusServiceConfig::default(),
         }
     }
@@ -97,11 +99,13 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
     pub fn with_config(
         repository: Arc<R>,
         client: Arc<C>,
+        credentials: TwilioCredentials,
         config: TwilioStatusServiceConfig,
     ) -> Self {
         Self {
             repository,
             client,
+            credentials,
             config,
         }
     }
@@ -238,6 +242,7 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
         let message_sid = message_sid.to_string();
         let repository = self.repository.clone();
         let client = self.client.clone();
+        let credentials = self.credentials.clone();
         let config = self.config.clone();
 
         // Spawn task to fetch price with retry, then delete message
@@ -249,7 +254,7 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
                 for (attempt, delay) in config.price_fetch_delays.iter().enumerate() {
                     tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
 
-                    match client.fetch_message_price(&message_sid).await {
+                    match client.fetch_message_price(&credentials, &message_sid).await {
                         Ok(Some(price)) => {
                             price_result = Some(price);
                             break;
@@ -278,10 +283,16 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
 
                 // Update price in DB if we got it
                 if let Some(price) = price_result {
+                    // Parse price string to f32
+                    let price_value = price.price.as_ref()
+                        .and_then(|p| p.parse::<f32>().ok())
+                        .unwrap_or(0.0);
+                    let price_unit = price.price_unit.as_deref().unwrap_or("USD");
+
                     if let Err(e) = repository.update_message_price(
                         &message_sid,
-                        price.price,
-                        &price.price_unit,
+                        price_value,
+                        price_unit,
                     ) {
                         tracing::error!(
                             "Failed to update price for message {}: {}",
@@ -292,8 +303,8 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
                         tracing::info!(
                             "Updated price for message {}: {} {}",
                             message_sid,
-                            price.price,
-                            price.price_unit
+                            price_value,
+                            price_unit
                         );
                     }
                 }
@@ -301,7 +312,7 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
 
             // Delete message from Twilio
             if config.delete_on_final {
-                if let Err(e) = client.delete_message(&message_sid).await {
+                if let Err(e) = client.delete_message(&credentials, &message_sid).await {
                     tracing::error!("Failed to delete message {}: {}", message_sid, e);
                 }
             }

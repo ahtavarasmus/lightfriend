@@ -104,6 +104,7 @@ pub mod repositories {
 pub mod services {
     pub mod country_service;
     pub mod signup_service;
+    pub mod twilio_message_service;
     pub mod twilio_status_service;
 }
 pub mod schema;

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use backend::api::twilio_client::mock::MockTwilioClient;
-use backend::api::twilio_client::MessagePrice;
+use backend::api::twilio_client::{MessagePrice, TwilioCredentials};
 use backend::repositories::mock_twilio_status_repository::{
     MockMessage, MockTwilioStatusRepository,
 };
@@ -39,7 +39,9 @@ fn create_test_service(
         delete_on_final: true,
         price_fetch_delays: vec![0], // No delay for tests
     };
-    TwilioStatusService::with_config(repo, client, config)
+    // Use dummy credentials for tests
+    let credentials = TwilioCredentials::new("test_sid".to_string(), "test_token".to_string());
+    TwilioStatusService::with_config(repo, client, credentials, config)
 }
 
 #[tokio::test]
@@ -159,8 +161,8 @@ async fn test_final_status_fetches_price() {
     client.set_price_response(
         "SM123",
         Some(MessagePrice {
-            price: 0.0075,
-            price_unit: "USD".to_string(),
+            price: Some("0.0075".to_string()),
+            price_unit: Some("USD".to_string()),
         }),
     );
 
