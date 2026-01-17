@@ -77,6 +77,7 @@ pub mod api {
     pub mod elevenlabs_webhook;
     pub mod tesla;
     pub mod twilio_availability;
+    pub mod twilio_client;
     pub mod twilio_pricing;
     pub mod twilio_sms;
     pub mod twilio_utils;
@@ -89,15 +90,10 @@ pub mod repositories {
     pub mod connection_auth;
     #[cfg(test)]
     pub mod mock_signup_repository;
-    #[cfg(test)]
-    pub mod mock_twilio_client;
-    #[cfg(test)]
     pub mod mock_twilio_status_repository;
-    pub mod real_twilio_client;
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod totp_repository;
-    pub mod twilio_client;
     pub mod twilio_status_repository;
     pub mod twilio_status_repository_impl;
     pub mod user_core;

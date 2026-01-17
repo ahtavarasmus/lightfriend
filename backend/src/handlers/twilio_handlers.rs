@@ -694,7 +694,7 @@ pub async fn twilio_status_callback(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> StatusCode {
-    use crate::repositories::real_twilio_client::RealTwilioClient;
+    use crate::api::twilio_client::RealTwilioClient;
     use crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository;
     use crate::services::twilio_status_service::{
         StatusCallbackInput, TwilioStatusService, TwilioStatusServiceConfig,
@@ -772,13 +772,13 @@ pub async fn twilio_status_callback(
 struct NoOpTwilioClient;
 
 #[async_trait::async_trait]
-impl crate::repositories::twilio_client::TwilioClient for NoOpTwilioClient {
+impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
     async fn fetch_message_price(
         &self,
         _message_sid: &str,
     ) -> Result<
-        Option<crate::repositories::twilio_client::MessagePrice>,
-        crate::repositories::twilio_client::TwilioClientError,
+        Option<crate::api::twilio_client::MessagePrice>,
+        crate::api::twilio_client::TwilioClientError,
     > {
         Ok(None)
     }
@@ -786,7 +786,7 @@ impl crate::repositories::twilio_client::TwilioClient for NoOpTwilioClient {
     async fn delete_message(
         &self,
         _message_sid: &str,
-    ) -> Result<(), crate::repositories::twilio_client::TwilioClientError> {
+    ) -> Result<(), crate::api::twilio_client::TwilioClientError> {
         Ok(())
     }
 }
