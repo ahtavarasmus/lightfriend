@@ -61,6 +61,7 @@ tower = "0.4"
 mockall = "0.11"
 matrix-sdk = { version = "0.13.0", features = ["sqlite"] }
 thiserror = "1.0"
+async-trait = "0.1"
 p256 = { version = "0.13", features = ["pem"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
 async-stream = "0.3"
