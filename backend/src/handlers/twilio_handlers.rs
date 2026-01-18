@@ -747,7 +747,9 @@ pub async fn twilio_status_callback(
         }
         Err(_) => {
             // Fallback: process without Twilio client (no price fetch or deletion)
-            tracing::warn!("Missing Twilio credentials, processing status callback without API calls");
+            tracing::warn!(
+                "Missing Twilio credentials, processing status callback without API calls"
+            );
 
             // Create a no-op client for when credentials aren't available
             // We still need credentials for the service, so create dummy ones
@@ -759,7 +761,8 @@ pub async fn twilio_status_callback(
                 delete_on_final: false,
                 price_fetch_delays: vec![],
             };
-            let service = TwilioStatusService::with_config(repository, client, dummy_credentials, config);
+            let service =
+                TwilioStatusService::with_config(repository, client, dummy_credentials, config);
 
             if let Err(e) = service.process_status_callback(input).await {
                 tracing::error!("Failed to process status callback: {}", e);
@@ -780,7 +783,10 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
         &self,
         _credentials: &crate::api::twilio_client::TwilioCredentials,
         _options: crate::api::twilio_client::SendMessageOptions,
-    ) -> Result<crate::api::twilio_client::SendMessageResult, crate::api::twilio_client::TwilioClientError> {
+    ) -> Result<
+        crate::api::twilio_client::SendMessageResult,
+        crate::api::twilio_client::TwilioClientError,
+    > {
         Ok(crate::api::twilio_client::SendMessageResult {
             message_sid: "noop".to_string(),
         })

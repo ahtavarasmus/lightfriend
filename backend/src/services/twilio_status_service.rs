@@ -284,16 +284,16 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
                 // Update price in DB if we got it
                 if let Some(price) = price_result {
                     // Parse price string to f32
-                    let price_value = price.price.as_ref()
+                    let price_value = price
+                        .price
+                        .as_ref()
                         .and_then(|p| p.parse::<f32>().ok())
                         .unwrap_or(0.0);
                     let price_unit = price.price_unit.as_deref().unwrap_or("USD");
 
-                    if let Err(e) = repository.update_message_price(
-                        &message_sid,
-                        price_value,
-                        price_unit,
-                    ) {
+                    if let Err(e) =
+                        repository.update_message_price(&message_sid, price_value, price_unit)
+                    {
                         tracing::error!(
                             "Failed to update price for message {}: {}",
                             message_sid,

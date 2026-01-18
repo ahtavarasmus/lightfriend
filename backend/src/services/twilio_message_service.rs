@@ -12,8 +12,7 @@ use thiserror::Error;
 use tokio::time::sleep;
 
 use crate::api::twilio_client::{
-    MessagePrice, SendMessageOptions, TwilioClient, TwilioClientError,
-    TwilioCredentials,
+    MessagePrice, SendMessageOptions, TwilioClient, TwilioClientError, TwilioCredentials,
 };
 use crate::models::user_models::{NewMessageStatusLog, User};
 use crate::repositories::user_core::UserCore;
@@ -166,10 +165,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                         from_number = Some(preferred.to_string());
                     } else {
                         update_preferred = true;
-                        from_number = Some(
-                            env::var("CAN_PHONE")
-                                .map_err(|_| TwilioMessageError::MissingEnvVar("CAN_PHONE".into()))?,
-                        );
+                        from_number =
+                            Some(env::var("CAN_PHONE").map_err(|_| {
+                                TwilioMessageError::MissingEnvVar("CAN_PHONE".into())
+                            })?);
                     }
                 }
                 "FI" => {
@@ -177,10 +176,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                         from_number = Some(preferred.to_string());
                     } else {
                         update_preferred = true;
-                        from_number = Some(
-                            env::var("FIN_PHONE")
-                                .map_err(|_| TwilioMessageError::MissingEnvVar("FIN_PHONE".into()))?,
-                        );
+                        from_number =
+                            Some(env::var("FIN_PHONE").map_err(|_| {
+                                TwilioMessageError::MissingEnvVar("FIN_PHONE".into())
+                            })?);
                     }
                 }
                 "NL" => {
@@ -188,10 +187,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                         from_number = Some(preferred.to_string());
                     } else {
                         update_preferred = true;
-                        from_number = Some(
-                            env::var("NL_PHONE")
-                                .map_err(|_| TwilioMessageError::MissingEnvVar("NL_PHONE".into()))?,
-                        );
+                        from_number =
+                            Some(env::var("NL_PHONE").map_err(|_| {
+                                TwilioMessageError::MissingEnvVar("NL_PHONE".into())
+                            })?);
                     }
                 }
                 "GB" => {
@@ -199,10 +198,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                         from_number = Some(preferred.to_string());
                     } else {
                         update_preferred = true;
-                        from_number = Some(
-                            env::var("GB_PHONE")
-                                .map_err(|_| TwilioMessageError::MissingEnvVar("GB_PHONE".into()))?,
-                        );
+                        from_number =
+                            Some(env::var("GB_PHONE").map_err(|_| {
+                                TwilioMessageError::MissingEnvVar("GB_PHONE".into())
+                            })?);
                     }
                 }
                 "AU" => {
@@ -210,10 +209,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                         from_number = Some(preferred.to_string());
                     } else {
                         update_preferred = true;
-                        from_number = Some(
-                            env::var("AUS_PHONE")
-                                .map_err(|_| TwilioMessageError::MissingEnvVar("AUS_PHONE".into()))?,
-                        );
+                        from_number =
+                            Some(env::var("AUS_PHONE").map_err(|_| {
+                                TwilioMessageError::MissingEnvVar("AUS_PHONE".into())
+                            })?);
                     }
                 }
                 _ => {
@@ -281,11 +280,9 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Build send options
         let messaging_service_sid = if use_messaging_service {
-            Some(
-                env::var("TWILIO_MESSAGING_SERVICE_SID").map_err(|_| {
-                    TwilioMessageError::MissingEnvVar("TWILIO_MESSAGING_SERVICE_SID".into())
-                })?,
-            )
+            Some(env::var("TWILIO_MESSAGING_SERVICE_SID").map_err(|_| {
+                TwilioMessageError::MissingEnvVar("TWILIO_MESSAGING_SERVICE_SID".into())
+            })?)
         } else {
             None
         };
@@ -314,12 +311,12 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         }
 
         // Send the message
-        let result = self.twilio_client.send_message(&credentials, options).await?;
+        let result = self
+            .twilio_client
+            .send_message(&credentials, options)
+            .await?;
 
-        tracing::debug!(
-            "Successfully sent message with SID: {}",
-            result.message_sid
-        );
+        tracing::debug!("Successfully sent message with SID: {}", result.message_sid);
 
         // Log initial status to database
         self.log_message_status(user, &result.message_sid, from_number.as_deref())?;

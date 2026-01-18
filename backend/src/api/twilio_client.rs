@@ -21,10 +21,12 @@ impl TwilioCredentials {
     /// Create credentials from environment variables.
     pub fn from_env() -> Result<Self, TwilioClientError> {
         Ok(Self {
-            account_sid: env::var("TWILIO_ACCOUNT_SID")
-                .map_err(|_| TwilioClientError::MissingCredentials("TWILIO_ACCOUNT_SID not set".into()))?,
-            auth_token: env::var("TWILIO_AUTH_TOKEN")
-                .map_err(|_| TwilioClientError::MissingCredentials("TWILIO_AUTH_TOKEN not set".into()))?,
+            account_sid: env::var("TWILIO_ACCOUNT_SID").map_err(|_| {
+                TwilioClientError::MissingCredentials("TWILIO_ACCOUNT_SID not set".into())
+            })?,
+            auth_token: env::var("TWILIO_AUTH_TOKEN").map_err(|_| {
+                TwilioClientError::MissingCredentials("TWILIO_AUTH_TOKEN not set".into())
+            })?,
         })
     }
 
@@ -200,10 +202,7 @@ impl TwilioClient for RealTwilioClient {
         credentials: &TwilioCredentials,
         options: SendMessageOptions,
     ) -> Result<SendMessageResult, TwilioClientError> {
-        let mut form_data: Vec<(&str, String)> = vec![
-            ("To", options.to),
-            ("Body", options.body),
-        ];
+        let mut form_data: Vec<(&str, String)> = vec![("To", options.to), ("Body", options.body)];
 
         if let Some(from) = options.from {
             form_data.push(("From", from));
@@ -569,8 +568,8 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::mock::MockTwilioClient;
+    use super::*;
 
     #[tokio::test]
     async fn test_mock_send_message() {
@@ -594,8 +593,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_with_error() {
-        let client = MockTwilioClient::new()
-            .with_send_result(Err("Test error".into()));
+        let client = MockTwilioClient::new().with_send_result(Err("Test error".into()));
         let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
         let options = SendMessageOptions {
