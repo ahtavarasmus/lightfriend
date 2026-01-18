@@ -1267,3 +1267,181 @@ async fn test_contract_forget_command_clears_context() {
     // Since we're using a mock, we verify the request processed successfully
     assert!(!response2.message.is_empty());
 }
+
+// ============================================================
+// Additional Country Coverage Tests
+// ============================================================
+// These tests ensure all country branches in TwilioMessageService are covered
+
+#[tokio::test]
+async fn test_process_sms_canada_user_full_flow() {
+    let state = create_test_state();
+    let params = TestUserParams::canada_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+16475551000".to_string(),
+        body: "What's the weather in Toronto?".to_string(),
+        message_sid: "SM_test_ca_123".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mock = MockLlmResponse::with_direct_response("It's cold in Toronto");
+    let options = ProcessSmsOptions::test_with_mock(mock.to_response());
+
+    let (status, _headers, _response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    // Verify: Canada user (like US) uses count-based credits
+    let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
+    assert!(
+        updated.credits_left < 10.0,
+        "credits_left should be deducted for Canada user"
+    );
+}
+
+#[tokio::test]
+async fn test_process_sms_netherlands_user_full_flow() {
+    let state = create_test_state();
+    let params = TestUserParams::netherlands_user(5.0, 2.5);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+31201234567".to_string(),
+        body: "Wat is het weer?".to_string(),
+        message_sid: "SM_test_nl_123".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mock = MockLlmResponse::with_direct_response("Het is bewolkt");
+    let options = ProcessSmsOptions::test_with_mock(mock.to_response());
+
+    let (status, _headers, _response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    // Verify: Netherlands user uses euro segment pricing
+    let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for Netherlands user"
+    );
+    assert_eq!(updated.credits, 2.5); // credits unchanged
+}
+
+#[tokio::test]
+async fn test_process_sms_australia_user_full_flow() {
+    let state = create_test_state();
+    let params = TestUserParams::australia_user(5.0, 2.5);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+61291234567".to_string(),
+        body: "G'day! What's the weather?".to_string(),
+        message_sid: "SM_test_au_123".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mock = MockLlmResponse::with_direct_response("Sunny day mate!");
+    let options = ProcessSmsOptions::test_with_mock(mock.to_response());
+
+    let (status, _headers, _response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    // Verify: Australia user uses euro segment pricing
+    let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for Australia user"
+    );
+    assert_eq!(updated.credits, 2.5);
+}
+
+#[tokio::test]
+async fn test_process_sms_france_user_full_flow() {
+    let state = create_test_state();
+    let params = TestUserParams::france_user(5.0, 2.5);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+33612345678".to_string(),
+        body: "Quel temps fait-il?".to_string(),
+        message_sid: "SM_test_fr_123".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mock = MockLlmResponse::with_direct_response("Il fait beau");
+    let options = ProcessSmsOptions::test_with_mock(mock.to_response());
+
+    let (status, _headers, _response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    // Verify: France user (notification-only) uses euro pricing
+    let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
+    assert!(
+        updated.credits_left < 5.0,
+        "credits_left should be deducted for France user"
+    );
+    assert_eq!(updated.credits, 2.5);
+}
+
+// ============================================================
+// Assertion Utility Tests
+// ============================================================
+
+#[test]
+fn test_canada_user_params_has_correct_phone_format() {
+    let params = TestUserParams::canada_user(10.0, 5.0);
+    // Canada uses +1 but with Canadian area codes (e.g., 647 for Toronto)
+    assert!(
+        params.phone_number.starts_with("+1"),
+        "Canada phone should start with +1 (NANP)"
+    );
+    // Area code 647 is Toronto
+    assert!(
+        params.phone_number.contains("647"),
+        "Canada test phone should use Toronto area code 647"
+    );
+}
+
+#[test]
+fn test_netherlands_user_params_has_correct_phone_format() {
+    let params = TestUserParams::netherlands_user(5.0, 2.5);
+    assert!(
+        params.phone_number.starts_with("+31"),
+        "Netherlands phone should start with +31"
+    );
+}
+
+#[test]
+fn test_australia_user_params_has_correct_phone_format() {
+    let params = TestUserParams::australia_user(5.0, 2.5);
+    assert!(
+        params.phone_number.starts_with("+61"),
+        "Australia phone should start with +61"
+    );
+}
+
+#[test]
+fn test_france_user_params_has_correct_phone_format() {
+    let params = TestUserParams::france_user(5.0, 2.5);
+    assert!(
+        params.phone_number.starts_with("+33"),
+        "France phone should start with +33"
+    );
+}

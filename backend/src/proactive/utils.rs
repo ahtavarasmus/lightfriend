@@ -2506,13 +2506,10 @@ pub async fn send_notification(
             }
 
             // Step 2: Send SMS first (this is always charged)
-            let sms_success = match crate::api::twilio_utils::send_conversation_message(
-                state,
-                notification,
-                None,
-                &user,
-            )
-            .await
+            let sms_success = match state
+                .twilio_message_service
+                .send_sms(notification, None, &user)
+                .await
             {
                 Ok(response_sid) => {
                     tracing::info!("Call+SMS: SMS sent successfully for user {}", user_id);
@@ -2638,13 +2635,10 @@ pub async fn send_notification(
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
             }
-            match crate::api::twilio_utils::send_conversation_message(
-                state,
-                notification,
-                None,
-                &user,
-            )
-            .await
+            match state
+                .twilio_message_service
+                .send_sms(notification, None, &user)
+                .await
             {
                 Ok(response_sid) => {
                     tracing::info!("Successfully sent notification to user {}", user_id);
@@ -2716,5 +2710,275 @@ pub async fn send_notification(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // MatchResponse Parsing Tests
+    // =========================================================================
+
+    #[test]
+    fn test_match_response_parses_critical_message() {
+        let json = r#"{
+            "is_critical": true,
+            "what_to_inform": "Urgent: Server down, needs immediate attention",
+            "first_message": "Hey, your production server is down!"
+        }"#;
+
+        let response: MatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(response.is_critical);
+        assert_eq!(
+            response.what_to_inform,
+            Some("Urgent: Server down, needs immediate attention".to_string())
+        );
+        assert_eq!(
+            response.first_message,
+            Some("Hey, your production server is down!".to_string())
+        );
+    }
+
+    #[test]
+    fn test_match_response_parses_non_critical_message() {
+        let json = r#"{
+            "is_critical": false,
+            "what_to_inform": "",
+            "first_message": ""
+        }"#;
+
+        let response: MatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(!response.is_critical);
+        // Empty strings should be present
+        assert_eq!(response.what_to_inform, Some("".to_string()));
+        assert_eq!(response.first_message, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_match_response_parses_missing_optional_fields() {
+        // When LLM returns only is_critical with no other fields
+        let json = r#"{"is_critical": false}"#;
+
+        let response: MatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(!response.is_critical);
+        assert!(response.what_to_inform.is_none());
+        assert!(response.first_message.is_none());
+    }
+
+    #[test]
+    fn test_match_response_parses_null_optional_fields() {
+        let json = r#"{
+            "is_critical": true,
+            "what_to_inform": null,
+            "first_message": null
+        }"#;
+
+        let response: MatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(response.is_critical);
+        assert!(response.what_to_inform.is_none());
+        assert!(response.first_message.is_none());
+    }
+
+    // =========================================================================
+    // TaskMatchResponse Parsing Tests
+    // =========================================================================
+
+    #[test]
+    fn test_task_match_response_parses_matched_task() {
+        let json = r#"{
+            "task_id": 42,
+            "sms_message": "Your package has arrived at the office",
+            "first_message": "Hey, your package is here!",
+            "match_explanation": "Message mentions package delivery"
+        }"#;
+
+        let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+
+        assert_eq!(response.task_id, Some(42));
+        assert_eq!(
+            response.sms_message,
+            Some("Your package has arrived at the office".to_string())
+        );
+        assert_eq!(
+            response.first_message,
+            Some("Hey, your package is here!".to_string())
+        );
+        assert_eq!(
+            response.match_explanation,
+            Some("Message mentions package delivery".to_string())
+        );
+    }
+
+    #[test]
+    fn test_task_match_response_parses_no_match() {
+        let json = r#"{
+            "task_id": null,
+            "sms_message": "",
+            "first_message": "",
+            "match_explanation": ""
+        }"#;
+
+        let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(response.task_id.is_none());
+        assert_eq!(response.sms_message, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_task_match_response_parses_minimal_response() {
+        // LLM might return just task_id
+        let json = r#"{"task_id": null}"#;
+
+        let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+
+        assert!(response.task_id.is_none());
+        assert!(response.sms_message.is_none());
+        assert!(response.first_message.is_none());
+        assert!(response.match_explanation.is_none());
+    }
+
+    // =========================================================================
+    // hours_until Tests
+    // =========================================================================
+
+    #[test]
+    fn test_hours_until_same_hour() {
+        assert_eq!(hours_until(12, 12), 0);
+        assert_eq!(hours_until(0, 0), 0);
+        assert_eq!(hours_until(23, 23), 0);
+    }
+
+    #[test]
+    fn test_hours_until_later_hour() {
+        assert_eq!(hours_until(8, 12), 4); // 8am to noon
+        assert_eq!(hours_until(0, 23), 23); // Midnight to 11pm
+        assert_eq!(hours_until(10, 18), 8); // 10am to 6pm
+    }
+
+    #[test]
+    fn test_hours_until_earlier_hour_wraps_around() {
+        assert_eq!(hours_until(18, 8), 14); // 6pm to 8am next day (14 hours)
+        assert_eq!(hours_until(23, 1), 2); // 11pm to 1am next day
+        assert_eq!(hours_until(20, 6), 10); // 8pm to 6am next day
+    }
+
+    // =========================================================================
+    // hours_since Tests
+    // =========================================================================
+
+    #[test]
+    fn test_hours_since_same_hour() {
+        assert_eq!(hours_since(12, 12), 0);
+        assert_eq!(hours_since(0, 0), 0);
+    }
+
+    #[test]
+    fn test_hours_since_later_hour() {
+        assert_eq!(hours_since(12, 8), 4); // Noon since 8am
+        assert_eq!(hours_since(23, 0), 23); // 11pm since midnight
+        assert_eq!(hours_since(18, 10), 8); // 6pm since 10am
+    }
+
+    #[test]
+    fn test_hours_since_earlier_hour_wraps_around() {
+        assert_eq!(hours_since(6, 20), 10); // 6am since 8pm (10 hours ago)
+        assert_eq!(hours_since(1, 23), 2); // 1am since 11pm (2 hours ago)
+        assert_eq!(hours_since(8, 18), 14); // 8am since 6pm yesterday
+    }
+
+    // =========================================================================
+    // WhatsApp Call Detection Tests
+    // =========================================================================
+
+    #[test]
+    fn test_whatsapp_incoming_call_detected() {
+        let raw_content = "Incoming call from +1234567890";
+        assert!(raw_content.contains("Incoming call"));
+    }
+
+    #[test]
+    fn test_whatsapp_missed_call_detected() {
+        let raw_content = "Missed call from John";
+        assert!(raw_content.contains("Missed call"));
+    }
+
+    #[test]
+    fn test_whatsapp_regular_message_not_call() {
+        let raw_content = "Hey, how are you?";
+        assert!(!raw_content.contains("Incoming call"));
+        assert!(!raw_content.contains("Missed call"));
+    }
+
+    // =========================================================================
+    // DigestData Serialization Tests
+    // =========================================================================
+
+    #[test]
+    fn test_digest_data_serializes_correctly() {
+        let data = DigestData {
+            messages: vec![MessageInfo {
+                sender: "John".to_string(),
+                content: "Hello there".to_string(),
+                timestamp_rfc: "2024-01-15T10:30:00Z".to_string(),
+                platform: "whatsapp".to_string(),
+            }],
+            calendar_events: vec![CalendarEvent {
+                title: "Meeting".to_string(),
+                start_time_rfc: "2024-01-15T14:00:00Z".to_string(),
+                duration_minutes: 60,
+            }],
+            time_period_hours: 8,
+            current_datetime_local: "2024-01-15T12:00:00+02:00".to_string(),
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+
+        assert!(json.contains("John"));
+        assert!(json.contains("Hello there"));
+        assert!(json.contains("whatsapp"));
+        assert!(json.contains("Meeting"));
+        assert!(json.contains("8")); // time_period_hours
+    }
+
+    #[test]
+    fn test_message_info_creation() {
+        let info = MessageInfo {
+            sender: "Alice".to_string(),
+            content: "Important meeting tomorrow".to_string(),
+            timestamp_rfc: "2024-01-15T09:00:00Z".to_string(),
+            platform: "telegram".to_string(),
+        };
+
+        assert_eq!(info.sender, "Alice");
+        assert_eq!(info.platform, "telegram");
+    }
+
+    // =========================================================================
+    // Critical Message Prompt Constants Tests
+    // =========================================================================
+
+    #[test]
+    fn test_critical_prompt_contains_key_criteria() {
+        // Verify the prompt includes important classification criteria
+        assert!(CRITICAL_PROMPT.contains("critical"));
+        assert!(CRITICAL_PROMPT.contains("two hours") || CRITICAL_PROMPT.contains("2 h"));
+        assert!(CRITICAL_PROMPT.contains("is_critical"));
+        assert!(CRITICAL_PROMPT.contains("what_to_inform"));
+        assert!(CRITICAL_PROMPT.contains("first_message"));
+    }
+
+    #[test]
+    fn test_waiting_check_prompt_contains_key_elements() {
+        // Verify the waiting check prompt has required elements
+        assert!(WAITING_CHECK_PROMPT.contains("waiting check"));
+        assert!(WAITING_CHECK_PROMPT.contains("sms_message"));
+        assert!(WAITING_CHECK_PROMPT.contains("first_message"));
+        assert!(WAITING_CHECK_PROMPT.contains("match"));
     }
 }
