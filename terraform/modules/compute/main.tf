@@ -65,6 +65,7 @@ resource "aws_instance" "enclave" {
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     cloudflare_tunnel_token = var.cloudflare_tunnel_token
     environment             = var.environment
+    domain                  = var.domain
   }))
 
   tags = {

@@ -33,3 +33,8 @@ variable "cloudflare_tunnel_token" {
   type        = string
   sensitive   = true
 }
+
+variable "domain" {
+  description = "Domain name for DNS records"
+  type        = string
+}

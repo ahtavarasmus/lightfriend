@@ -50,6 +50,7 @@ module "compute" {
   public_subnet_id     = module.networking.public_subnet_id
   security_group_id    = module.networking.security_group_id
   cloudflare_tunnel_token = module.cloudflare.tunnel_token
+  domain               = var.cloudflare_domain
 }
 
 # Cloudflare: Zero Trust tunnel and DNS
