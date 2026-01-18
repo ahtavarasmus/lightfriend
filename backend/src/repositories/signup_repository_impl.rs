@@ -74,16 +74,6 @@ impl SignupRepository for CompositeSignupRepository {
             .map_err(SignupRepositoryError::Database)
     }
 
-    fn update_phone_number_country(
-        &self,
-        user_id: i32,
-        country: Option<&str>,
-    ) -> Result<(), SignupRepositoryError> {
-        self.user_core
-            .update_phone_number_country(user_id, country)
-            .map_err(SignupRepositoryError::Database)
-    }
-
     fn set_preferred_number_for_country(
         &self,
         user_id: i32,

@@ -315,9 +315,10 @@ pub async fn handle_create_calendar_event(
                 "Calendar event '{}' created for {}",
                 args.summary, formatted_time
             );
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(state, &success_msg, None, user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&success_msg, None, user)
+                .await
             {
                 eprintln!("Failed to send success message: {}", e);
             }
@@ -338,9 +339,10 @@ pub async fn handle_create_calendar_event(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown error")
             );
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&error_msg, None, user)
+                .await
             {
                 eprintln!("Failed to send error message: {}", e);
             }

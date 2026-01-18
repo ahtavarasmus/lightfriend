@@ -61,7 +61,6 @@ pub struct User {
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
     pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
-    pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
     pub magic_token: Option<String>,          // token for magic link login/password setup
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
 }

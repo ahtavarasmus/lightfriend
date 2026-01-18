@@ -1,9 +1,10 @@
+use crate::api::twilio_client::{TwilioClient, TwilioCredentials};
 use crate::models::user_models::{CountryAvailability, NewCountryAvailability};
 use crate::schema::country_availability;
 use crate::AppState;
 use chrono::Utc;
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,85 +26,6 @@ pub struct CountryCapabilityInfo {
     pub inbound_voice_price_per_min: Option<f32>,
 }
 
-#[derive(Deserialize)]
-struct AvailablePhoneNumbersResponse {
-    #[serde(default)]
-    available_phone_numbers: Vec<serde_json::Value>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MessagingPricing {
-    #[serde(default)]
-    inbound_sms_prices: Vec<InboundSmsPrice>,
-    #[serde(default)]
-    outbound_sms_prices: Vec<OutboundSmsPrice>,
-}
-
-#[derive(Deserialize, Debug)]
-struct PhoneNumberPricing {
-    #[serde(default)]
-    phone_number_prices: Vec<PhoneNumberPrice>,
-}
-
-#[derive(Deserialize, Debug)]
-struct PhoneNumberPrice {
-    number_type: String,
-    current_price: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct InboundSmsPrice {
-    #[serde(default)]
-    prices: Vec<PriceItem>,
-}
-
-#[derive(Deserialize, Debug)]
-struct OutboundSmsPrice {
-    #[serde(default)]
-    prices: Vec<PriceItem>,
-}
-
-#[derive(Deserialize, Debug)]
-struct PriceItem {
-    current_price: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct VoicePricing {
-    #[serde(default)]
-    inbound_call_prices: Vec<InboundCallPrice>,
-    #[serde(default)]
-    outbound_prefix_prices: Vec<OutboundPrefixPrice>,
-}
-
-#[derive(Deserialize, Debug)]
-struct InboundCallPrice {
-    current_price: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct OutboundPrefixPrice {
-    current_price: String,
-}
-
-/// Response from Twilio Voice Pricing v2 API (origin-based pricing)
-#[derive(Deserialize, Debug)]
-struct OriginBasedVoicePricing {
-    #[serde(default)]
-    originating_call_prices: Vec<OriginatingCallPrice>,
-    #[serde(default)]
-    terminating_prefix_prices: Vec<TerminatingPrefixPrice>,
-}
-
-#[derive(Deserialize, Debug)]
-struct OriginatingCallPrice {
-    current_price: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct TerminatingPrefixPrice {
-    current_price: String,
-}
 
 /// Countries where we can send messages from a US number without issues
 /// Based on Twilio's A2P 10DLC coverage and practical experience
@@ -129,310 +51,49 @@ const NOTIFICATION_SUPPORTED_COUNTRIES: &[&str] = &[
     "KM", "YT", "RE", "MU", "LS", "SZ",
 ];
 
-/// Check if a country supports local phone numbers by querying Twilio API
+/// Check if a country supports local phone numbers using TwilioClient
 async fn check_local_numbers_available(
+    twilio_client: &dyn TwilioClient,
+    credentials: &TwilioCredentials,
     country_code: &str,
-    account_sid: &str,
-    auth_token: &str,
 ) -> Result<bool, String> {
-    let client = reqwest::Client::new();
-
-    // Check both Mobile and Local numbers
-    for number_type in &["Mobile", "Local"] {
-        let url = format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/{}.json",
-            account_sid,
-            country_code.to_uppercase(),
-            number_type
-        );
-
-        match client
-            .get(&url)
-            .basic_auth(account_sid, Some(auth_token))
-            .query(&[("PageSize", "1")])
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<AvailablePhoneNumbersResponse>().await {
-                    Ok(data) => {
-                        if !data.available_phone_numbers.is_empty() {
-                            return Ok(true);
-                        }
-                    }
-                    Err(_) => continue,
-                }
-            }
-            Ok(resp) if resp.status().as_u16() == 404 => {
-                // Country not supported for this number type
-                continue;
-            }
-            _ => continue,
-        }
-    }
-
-    Ok(false)
+    twilio_client
+        .check_phone_numbers_available(credentials, country_code)
+        .await
+        .map_err(|e| e.to_string())
 }
 
-/// Fetch messaging and voice pricing for a country
+/// Fetch messaging and voice pricing for a country using TwilioClient
 async fn fetch_pricing(
+    twilio_client: &dyn TwilioClient,
+    credentials: &TwilioCredentials,
     country_code: &str,
-    account_sid: &str,
-    auth_token: &str,
 ) -> Result<(Option<f32>, Option<f32>, Option<f32>, Option<f32>), String> {
-    let client = reqwest::Client::new();
-
     // Fetch messaging prices
-    let messaging_url = format!(
-        "https://pricing.twilio.com/v1/Messaging/Countries/{}",
-        country_code.to_uppercase()
-    );
-
-    let (outbound_sms_price, inbound_sms_price) = match client
-        .get(&messaging_url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
+    let messaging_pricing = twilio_client
+        .get_messaging_pricing(credentials, country_code)
         .await
-    {
-        Ok(resp) if resp.status().is_success() => match resp.json::<MessagingPricing>().await {
-            Ok(pricing) => {
-                let outbound = pricing
-                    .outbound_sms_prices
-                    .first()
-                    .and_then(|p| p.prices.first())
-                    .and_then(|p| p.current_price.parse::<f32>().ok());
+        .map_err(|e| e.to_string())?;
 
-                let inbound = pricing
-                    .inbound_sms_prices
-                    .first()
-                    .and_then(|p| p.prices.first())
-                    .and_then(|p| p.current_price.parse::<f32>().ok());
-
-                (outbound, inbound)
-            }
-            Err(_) => (None, None),
-        },
-        _ => (None, None),
-    };
-
-    // Fetch voice prices
-    let voice_url = format!(
-        "https://pricing.twilio.com/v1/Voice/Countries/{}",
-        country_code.to_uppercase()
-    );
-
-    let (outbound_voice_price, inbound_voice_price) = match client
-        .get(&voice_url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
+    // Fetch voice prices (use v1 API for standard pricing)
+    let voice_pricing = twilio_client
+        .get_voice_pricing(credentials, country_code, false)
         .await
-    {
-        Ok(resp) if resp.status().is_success() => match resp.json::<VoicePricing>().await {
-            Ok(pricing) => {
-                let outbound = pricing
-                    .outbound_prefix_prices
-                    .first()
-                    .and_then(|p| p.current_price.parse::<f32>().ok());
-
-                let inbound = pricing
-                    .inbound_call_prices
-                    .first()
-                    .and_then(|p| p.current_price.parse::<f32>().ok());
-
-                (outbound, inbound)
-            }
-            Err(_) => (None, None),
-        },
-        _ => (None, None),
-    };
+        .map_err(|e| e.to_string())?;
 
     Ok((
-        outbound_sms_price,
-        inbound_sms_price,
-        outbound_voice_price,
-        inbound_voice_price,
+        messaging_pricing.outbound_sms_price,
+        messaging_pricing.inbound_sms_price,
+        voice_pricing.outbound_price_per_min,
+        voice_pricing.inbound_price_per_min,
     ))
 }
 
-/// Fetch domestic (same-country) voice pricing using Twilio v2 API
-/// This is for BYOT users who call from their country's number to the same country
-/// Returns (outbound_per_min, inbound_per_min)
-async fn fetch_domestic_voice_pricing(
+/// Determine the tier for a given country using TwilioClient
+async fn check_country_capability_internal(
+    twilio_client: &dyn TwilioClient,
+    credentials: &TwilioCredentials,
     country_code: &str,
-    account_sid: &str,
-    auth_token: &str,
-) -> Result<(Option<f32>, Option<f32>), String> {
-    let client = reqwest::Client::new();
-    let country_upper = country_code.to_uppercase();
-
-    // Twilio v2 Voice Pricing API with origination country
-    // https://pricing.twilio.com/v2/Voice/Countries/{country}?OriginationNumber=+{country_prefix}
-    // But simpler: /v2/Voice/Numbers/{number} gives us origin-based pricing
-    // For now, use the country endpoint which gives us domestic rates
-    let url = format!(
-        "https://pricing.twilio.com/v2/Voice/Countries/{}",
-        country_upper
-    );
-
-    match client
-        .get(&url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<OriginBasedVoicePricing>().await {
-                Ok(pricing) => {
-                    // Outbound: terminating_prefix_prices (calling TO the country FROM the country)
-                    let outbound = pricing
-                        .terminating_prefix_prices
-                        .first()
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
-
-                    // Inbound: originating_call_prices (receiving calls on a number IN the country)
-                    let inbound = pricing
-                        .originating_call_prices
-                        .first()
-                        .and_then(|p| p.current_price.parse::<f32>().ok());
-
-                    Ok((outbound, inbound))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to parse v2 voice pricing for {}: {}",
-                        country_upper,
-                        e
-                    );
-                    Ok((None, None))
-                }
-            }
-        }
-        Ok(resp) => {
-            tracing::warn!(
-                "v2 voice pricing API returned {} for {}",
-                resp.status(),
-                country_upper
-            );
-            Ok((None, None))
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Failed to fetch v2 voice pricing for {}: {}",
-                country_upper,
-                e
-            );
-            Ok((None, None))
-        }
-    }
-}
-
-/// Fetch phone number monthly pricing for a country
-/// Returns (local_price, mobile_price) - both are monthly costs
-pub async fn fetch_phone_number_pricing(
-    country_code: &str,
-    account_sid: &str,
-    auth_token: &str,
-) -> Result<(Option<f32>, Option<f32>), String> {
-    let client = reqwest::Client::new();
-
-    let url = format!(
-        "https://pricing.twilio.com/v1/PhoneNumbers/Countries/{}",
-        country_code.to_uppercase()
-    );
-
-    match client
-        .get(&url)
-        .basic_auth(account_sid, Some(auth_token))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => match resp.json::<PhoneNumberPricing>().await {
-            Ok(pricing) => {
-                let mut local_price = None;
-                let mut mobile_price = None;
-
-                for price in pricing.phone_number_prices {
-                    let p = price.current_price.parse::<f32>().ok();
-                    match price.number_type.to_lowercase().as_str() {
-                        "local" => local_price = p,
-                        "mobile" => mobile_price = p,
-                        _ => {}
-                    }
-                }
-
-                Ok((local_price, mobile_price))
-            }
-            Err(_) => Ok((None, None)),
-        },
-        _ => Ok((None, None)),
-    }
-}
-
-/// Full BYOT pricing info for a country
-#[derive(Debug, Clone, Serialize)]
-pub struct ByotCountryPricing {
-    pub country_code: String,
-    pub has_local_numbers: bool,
-    /// Monthly cost for local phone number
-    pub local_number_monthly: Option<f32>,
-    /// Monthly cost for mobile phone number
-    pub mobile_number_monthly: Option<f32>,
-    /// Raw SMS price per segment (outbound)
-    pub sms_price_per_segment: Option<f32>,
-    /// Voice price per minute (outbound)
-    pub voice_price_per_minute: Option<f32>,
-    /// Inbound SMS price (if local number)
-    pub inbound_sms_price: Option<f32>,
-    /// Inbound voice price per minute (if local number)
-    pub inbound_voice_price_per_minute: Option<f32>,
-}
-
-/// Get full BYOT pricing for a country (fetches from Twilio or cache)
-/// BYOT = Bring Your Own Twilio - users buy numbers in their own country
-/// Voice pricing uses DOMESTIC rates (country→country) since users call from their own country's number
-pub async fn get_byot_pricing(
-    state: &Arc<AppState>,
-    country_code: &str,
-) -> Result<ByotCountryPricing, String> {
-    let country_upper = country_code.to_uppercase();
-
-    // Get capability info (this handles caching for SMS pricing)
-    let capability = get_country_capability(state, &country_upper).await?;
-
-    let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
-        .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
-    let auth_token =
-        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
-
-    // Fetch phone number pricing
-    let (local_price, mobile_price) =
-        fetch_phone_number_pricing(&country_upper, &account_sid, &auth_token).await?;
-
-    // Fetch DOMESTIC voice pricing using v2 API
-    // This is crucial for BYOT - users call FROM their country TO their country
-    let (domestic_outbound_voice, domestic_inbound_voice) =
-        fetch_domestic_voice_pricing(&country_upper, &account_sid, &auth_token).await?;
-
-    Ok(ByotCountryPricing {
-        country_code: country_upper,
-        has_local_numbers: capability.can_receive_sms,
-        local_number_monthly: local_price,
-        mobile_number_monthly: mobile_price,
-        sms_price_per_segment: capability.outbound_sms_price,
-        // Use domestic voice rates for BYOT (country→country calls)
-        voice_price_per_minute: domestic_outbound_voice.or(capability.outbound_voice_price_per_min),
-        inbound_sms_price: capability.inbound_sms_price,
-        // Use domestic inbound voice rates for BYOT
-        inbound_voice_price_per_minute: domestic_inbound_voice
-            .or(capability.inbound_voice_price_per_min),
-    })
-}
-
-/// Determine the tier for a given country
-pub async fn check_country_capability(
-    country_code: &str,
-    account_sid: &str,
-    auth_token: &str,
 ) -> Result<
     (
         CountryTier,
@@ -448,7 +109,7 @@ pub async fn check_country_capability(
     // Check if US/CA
     if country_upper == "US" || country_upper == "CA" {
         let (outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
-            fetch_pricing(&country_upper, account_sid, auth_token).await?;
+            fetch_pricing(twilio_client, credentials, &country_upper).await?;
         return Ok((
             CountryTier::UsCanada,
             outbound_sms,
@@ -459,9 +120,10 @@ pub async fn check_country_capability(
     }
 
     // Check if local numbers are available
-    let has_local = check_local_numbers_available(&country_upper, account_sid, auth_token).await?;
+    let has_local =
+        check_local_numbers_available(twilio_client, credentials, &country_upper).await?;
     let (outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
-        fetch_pricing(&country_upper, account_sid, auth_token).await?;
+        fetch_pricing(twilio_client, credentials, &country_upper).await?;
 
     if has_local {
         return Ok((
@@ -525,13 +187,15 @@ pub async fn get_country_capability(
     }
 
     // Not in cache or expired, fetch from Twilio
-    let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
-        .map_err(|_| "TWILIO_ACCOUNT_SID not set".to_string())?;
-    let auth_token =
-        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| "TWILIO_AUTH_TOKEN not set".to_string())?;
+    let credentials = TwilioCredentials::from_env().map_err(|e| e.to_string())?;
 
     let (tier, outbound_sms, inbound_sms, outbound_voice, inbound_voice) =
-        check_country_capability(&country_upper, &account_sid, &auth_token).await?;
+        check_country_capability_internal(
+            state.twilio_client.as_ref(),
+            &credentials,
+            &country_upper,
+        )
+        .await?;
 
     if tier == CountryTier::NotSupported {
         return Err("Country not supported for Lightfriend".to_string());

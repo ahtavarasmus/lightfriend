@@ -17,7 +17,6 @@ struct MockUser {
     email: String,
     password_hash: String,
     phone_number: String,
-    phone_number_country: Option<String>,
     preferred_number: Option<String>,
     stripe_customer_id: Option<String>,
     magic_token: Option<String>,
@@ -56,7 +55,6 @@ impl MockUser {
             confirm_send_event: None,
             waiting_checks_count: 0,
             next_billing_date_timestamp: None,
-            phone_number_country: self.phone_number_country.clone(),
             magic_token: self.magic_token.clone(),
             plan_type: None,
         }
@@ -154,15 +152,6 @@ impl MockSignupRepository {
             .unwrap_or(false)
     }
 
-    /// Get user's phone country.
-    pub fn get_phone_country(&self, user_id: i32) -> Option<String> {
-        self.users
-            .lock()
-            .unwrap()
-            .get(&user_id)
-            .and_then(|u| u.phone_number_country.clone())
-    }
-
     /// Get user's preferred number.
     pub fn get_preferred_number(&self, user_id: i32) -> Option<String> {
         self.users
@@ -247,7 +236,6 @@ impl SignupRepository for MockSignupRepository {
             email: new_user.email.clone(),
             password_hash: new_user.password_hash,
             phone_number: phone_number.clone(),
-            phone_number_country: None,
             preferred_number: None,
             stripe_customer_id: None,
             magic_token: None,
@@ -290,20 +278,6 @@ impl SignupRepository for MockSignupRepository {
 
         if let Some(user) = users.get_mut(&user_id) {
             user.phone_number = phone.to_string();
-        }
-
-        Ok(())
-    }
-
-    fn update_phone_number_country(
-        &self,
-        user_id: i32,
-        country: Option<&str>,
-    ) -> Result<(), SignupRepositoryError> {
-        let mut users = self.users.lock().unwrap();
-
-        if let Some(user) = users.get_mut(&user_id) {
-            user.phone_number_country = country.map(String::from);
         }
 
         Ok(())

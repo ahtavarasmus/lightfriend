@@ -314,11 +314,18 @@ async fn main() {
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
     let twilio_client = Arc::new(backend::RealTwilioClient::new());
+    let twilio_message_service = Arc::new(backend::TwilioMessageService::new(
+        twilio_client.clone(),
+        pool.clone(),
+        user_core.clone(),
+        user_repository.clone(),
+    ));
     let state = Arc::new(AppState {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
         twilio_client,
+        twilio_message_service,
         ai_config: AiConfig::from_env(),
         google_calendar_oauth_client,
         uber_oauth_client,
@@ -487,18 +494,17 @@ async fn main() {
             "/api/phone-verify/verify",
             post(auth_handlers::verify_phone_verify),
         )
-        .route("/api/country-info", post(twilio_handlers::get_country_info))
-        .route(
-            "/api/pricing/notification-only",
-            get(handlers::pricing_handlers::get_notification_only_countries_pricing),
-        )
-        .route(
-            "/api/pricing/euro-countries",
-            get(handlers::pricing_handlers::get_euro_countries_pricing),
-        )
         .route(
             "/api/pricing/byot/{country_code}",
             get(handlers::pricing_handlers::get_byot_country_pricing),
+        )
+        .route(
+            "/api/pricing/all-countries",
+            get(handlers::pricing_handlers::get_all_countries),
+        )
+        .route(
+            "/api/pricing/country/{country_code}",
+            get(handlers::pricing_handlers::get_single_country_pricing),
         )
         .route(
             "/api/totp/verify",

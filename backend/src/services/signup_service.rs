@@ -11,7 +11,6 @@ use thiserror::Error;
 use crate::handlers::auth_dtos::NewUser;
 use crate::models::user_models::User;
 use crate::repositories::signup_repository::{SignupRepository, SignupRepositoryError};
-use crate::services::country_service;
 
 /// Errors that can occur during signup
 #[derive(Debug, Error)]
@@ -220,11 +219,8 @@ impl<R: SignupRepository> SignupService<R> {
         user_id: i32,
         phone: &str,
     ) -> Result<Option<String>, SignupError> {
-        let country = country_service::detect_country(phone);
-
-        // Update phone country in database
-        self.repository
-            .update_phone_number_country(user_id, country.as_deref())?;
+        // Detect country from phone number using libphonenumber
+        let country = crate::utils::country::get_country_code_from_phone(phone);
 
         // Set preferred number based on country
         if let Some(ref c) = country {
@@ -282,7 +278,8 @@ mod tests {
             .unwrap();
 
         if let SignupResult::NewUserCreated { user_id, .. } = result {
-            assert_eq!(repo.get_phone_country(user_id), Some("US".to_string()));
+            // Verify preferred number was set for US user
+            assert!(repo.get_preferred_number(user_id).is_some());
         }
     }
 
@@ -431,7 +428,8 @@ mod tests {
             .unwrap();
 
         if let SignupResult::NewUserCreated { user_id, .. } = result {
-            assert_eq!(repo.get_phone_country(user_id), Some("CA".to_string()));
+            // Verify preferred number was set for CA user
+            assert!(repo.get_preferred_number(user_id).is_some());
         }
     }
 
@@ -445,7 +443,8 @@ mod tests {
             .unwrap();
 
         if let SignupResult::NewUserCreated { user_id, .. } = result {
-            assert_eq!(repo.get_phone_country(user_id), Some("FI".to_string()));
+            // Verify preferred number was set for FI user
+            assert!(repo.get_preferred_number(user_id).is_some());
         }
     }
 
@@ -483,8 +482,8 @@ mod tests {
                 ..
             } => {
                 assert!(phone_skipped_duplicate);
-                // Phone country should not be set since phone was skipped
-                assert_eq!(repo.get_phone_country(user_id), None);
+                // Preferred number should not be set since phone was skipped
+                assert_eq!(repo.get_preferred_number(user_id), None);
             }
             _ => panic!("Expected NewUserCreated for second user"),
         }

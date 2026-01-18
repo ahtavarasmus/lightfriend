@@ -138,18 +138,18 @@ mod tests {
         assert_eq!(detect_country("+358401234567"), Some("FI".to_string()));
         // Germany
         assert_eq!(detect_country("+4915123456789"), Some("DE".to_string()));
-        // UK
-        assert_eq!(detect_country("+447911123456"), Some("GB".to_string()));
+        // UK (London landline - unambiguous)
+        assert_eq!(detect_country("+442071234567"), Some("GB".to_string()));
         // Netherlands
         assert_eq!(detect_country("+31612345678"), Some("NL".to_string()));
     }
 
     #[test]
-    fn test_other_country() {
-        // China - not in supported list
-        assert_eq!(detect_country("+86123456789"), Some("Other".to_string()));
-        // Japan - not in supported list
-        assert_eq!(detect_country("+81901234567"), Some("Other".to_string()));
+    fn test_worldwide_detection() {
+        // China - now supported via libphonenumber
+        assert_eq!(detect_country("+8613812345678"), Some("CN".to_string()));
+        // Japan - now supported via libphonenumber
+        assert_eq!(detect_country("+819012345678"), Some("JP".to_string()));
     }
 
     #[test]

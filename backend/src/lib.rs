@@ -56,7 +56,6 @@ pub mod utils {
     pub mod notification_utils;
     pub mod tesla_keys;
     pub mod tool_exec;
-    pub mod us_number_pool;
     pub mod usage;
     pub mod webauthn_config;
 }
@@ -123,11 +122,8 @@ pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::UserCore;
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
+pub use services::twilio_message_service::TwilioMessageService;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use rand::Rng;
-use reqwest::Client;
-use serde_json::json;
 
 // AppState and related types - needed by all handler modules
 use dashmap::DashMap;
@@ -168,6 +164,7 @@ pub struct AppState {
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
+    pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
     pub google_calendar_oauth_client: GoogleOAuthClient,
     pub youtube_oauth_client: GoogleOAuthClient,
@@ -205,74 +202,3 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
 
-pub struct TwilioConfig {
-    pub account_sid: String,
-    pub auth_token: String,
-    pub from_number: String,
-}
-
-impl Default for TwilioConfig {
-    fn default() -> Self {
-        Self {
-            account_sid: std::env::var("TWILIO_ACCOUNT_SID")
-                .expect("TWILIO_ACCOUNT_SID must be set"),
-            auth_token: std::env::var("TWILIO_AUTH_TOKEN").expect("TWILIO_AUTH_TOKEN must be set"),
-            from_number: std::env::var("TWILIO_FROM_NUMBER")
-                .expect("TWILIO_FROM_NUMBER must be set"),
-        }
-    }
-}
-
-impl TwilioConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-pub fn generate_otp() -> String {
-    let mut rng = rand::thread_rng();
-    format!("{:06}", rng.gen_range(0..999999))
-}
-
-pub async fn send_otp(config: &TwilioConfig, to_number: &str, otp: &str) -> Result<(), String> {
-    let client = Client::new();
-    let message = format!("Your verification code is: {}. Valid for 10 minutes.", otp);
-
-    // Create basic auth header
-    let auth = format!("{}:{}", config.account_sid, config.auth_token);
-    let encoded_auth = BASE64.encode(auth.as_bytes());
-
-    // Prepare the request URL
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-        config.account_sid
-    );
-
-    // Create form data
-    let form = json!({
-        "From": config.from_number,
-        "To": to_number,
-        "Body": message,
-    });
-
-    // Send the request
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Basic {}", encoded_auth))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&form)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send request: {}", e))?;
-
-    // Check if the request was successful
-    if !response.status().is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Twilio API error: {}", error_text));
-    }
-
-    Ok(())
-}

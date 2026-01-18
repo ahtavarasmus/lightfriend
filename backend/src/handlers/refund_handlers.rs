@@ -354,9 +354,10 @@ pub async fn get_refund_eligibility(
     }
 
     // Calculate usage percentage
+    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
     let max_credits = get_max_credits_left(
         &state,
-        user.phone_number_country.as_deref(),
+        detected_country.as_deref(),
         user.plan_type.as_deref(),
     )
     .await;

@@ -212,7 +212,10 @@ pub async fn handle_send_email(
         recipient_email, args.subject, args.body
     );
     // Send the queued message
-    match crate::api::twilio_utils::send_conversation_message(state, &queued_msg, None, user).await
+    match state
+        .twilio_message_service
+        .send_sms(&queued_msg, None, user)
+        .await
     {
         Ok(_) => {
             // Deduct credits for the queued message
@@ -275,13 +278,10 @@ pub async fn handle_send_email(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                        &cloned_state,
-                        &error_msg,
-                        None,
-                        &cloned_user,
-                    )
-                    .await
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
                     {
                         eprintln!("Failed to send error message: {}", e);
                     }
@@ -437,9 +437,10 @@ pub async fn handle_respond_to_email(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown error")
             );
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(state, &error_msg, None, user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&error_msg, None, user)
+                .await
             {
                 eprintln!("Failed to send error message: {}", e);
             }
@@ -463,7 +464,10 @@ pub async fn handle_respond_to_email(
         subject, args.response_text
     );
     // Send the queued message
-    match crate::api::twilio_utils::send_conversation_message(state, &queued_msg, None, user).await
+    match state
+        .twilio_message_service
+        .send_sms(&queued_msg, None, user)
+        .await
     {
         Ok(_) => {
             // Deduct credits for the queued message
@@ -524,13 +528,10 @@ pub async fn handle_respond_to_email(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                        &cloned_state,
-                        &error_msg,
-                        None,
-                        &cloned_user,
-                    )
-                    .await
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
                     {
                         eprintln!("Failed to send error message: {}", e);
                     }

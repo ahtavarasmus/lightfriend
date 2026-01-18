@@ -607,13 +607,10 @@ pub async fn process_sms(
                     let start_time_clone = start_time;
 
                     tokio::spawn(async move {
-                        match crate::api::twilio_utils::send_conversation_message(
-                            &state_clone,
-                            &response_msg_clone,
-                            None,
-                            &user_clone,
-                        )
-                        .await
+                        match state_clone
+                            .twilio_message_service
+                            .send_sms(&response_msg_clone, None, &user_clone)
+                            .await
                         {
                             Ok(message_sid) => {
                                 // Log usage (similar to regular message)
@@ -852,13 +849,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         media_sid,
                         message_sid
                     );
-                    match crate::api::twilio_utils::delete_twilio_message_media(
-                        state,
-                        message_sid,
-                        media_sid,
-                        &user,
-                    )
-                    .await
+                    match state
+                        .twilio_message_service
+                        .delete_message_media(&user, message_sid, media_sid)
+                        .await
                     {
                         Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                         Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
@@ -2181,22 +2175,20 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     tracing::debug!("going into deleting the incoming message handler");
     tokio::spawn(async move {
-        if let Err(e) =
-            crate::api::twilio_utils::delete_twilio_message(&state_clone, &msg_sid, &user_clone)
-                .await
+        if let Err(e) = state_clone
+            .twilio_message_service
+            .delete_message_with_retry(&user_clone, &msg_sid)
+            .await
         {
             tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);
         }
     });
 
     // Send the actual message if not in test mode
-    match crate::api::twilio_utils::send_conversation_message(
-        state,
-        &clean_response,
-        media_sid,
-        &user,
-    )
-    .await
+    match state
+        .twilio_message_service
+        .send_sms(&clean_response, media_sid, &user)
+        .await
     {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history

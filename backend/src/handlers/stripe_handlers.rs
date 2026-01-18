@@ -296,8 +296,9 @@ async fn check_upgrade_refund_eligibility(
 
     // For Monitor users, check credit usage
     if was_monitor {
+        let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
         let max_credits =
-            get_max_credits_left(state, user.phone_number_country.as_deref(), Some("monitor"))
+            get_max_credits_left(state, country.as_deref(), Some("monitor"))
                 .await;
         let credits_used = max_credits - user.credits_left;
         let usage_percent = if max_credits > 0.0 {
@@ -426,7 +427,8 @@ pub async fn create_unified_subscription_checkout(
     })?;
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     // Select price ID based on subscription type and user's phone number country
-    let country = user.phone_number_country.as_deref().unwrap_or("OTHER");
+    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+    let country = detected_country.as_deref().unwrap_or("OTHER");
     tracing::debug!("country: {}", country);
 
     // Import euro plan country check
@@ -791,8 +793,8 @@ pub async fn create_checkout_session(
 
     // Check if user is on Digest plan (only Digest users can buy overage credits)
     // US/CA users are exempt from this check
-    let is_us_ca = user.phone_number_country == Some("US".to_string())
-        || user.phone_number_country == Some("CA".to_string());
+    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+    let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
 
     if !is_us_ca {
         // Check if user is on Digest plan (only Digest plan users can buy overage credits)
@@ -1416,13 +1418,13 @@ pub async fn stripe_webhook(
                 }
 
                 // Use centralized subscription setup (idempotent)
-                let phone_country = user.phone_number_country.as_deref();
+                let phone_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
                 if let Err(e) = setup_user_subscription(
                     &state,
                     user.id,
                     &price_id,
                     subscription.current_period_end,
-                    phone_country,
+                    phone_country.as_deref(),
                 )
                 .await
                 {
@@ -1444,7 +1446,7 @@ pub async fn stripe_webhook(
                 if !crate::utils::country::is_byot_plan_price(&price_id)
                     && user.preferred_number.is_none()
                 {
-                    if let Some(ref country) = user.phone_number_country {
+                    if let Some(ref country) = phone_country {
                         let _ = state
                             .user_core
                             .set_preferred_number_for_country(user.id, country);

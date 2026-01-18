@@ -1,10 +1,36 @@
-use crate::api::twilio_availability::get_byot_pricing;
+use crate::api::twilio_availability::get_country_capability;
 use crate::api::twilio_pricing::{get_euro_country_pricing, get_notification_only_pricing};
 use crate::handlers::auth_middleware::AuthUser;
 use crate::schema::usage_logs;
-use crate::utils::country::{LOCAL_NUMBER_COUNTRIES, NOTIFICATION_ONLY_COUNTRIES};
+use crate::utils::country::is_notification_only_country_code;
+
+/// ALL countries supported worldwide via Twilio
+/// Comprehensive list for pricing display - pricing fetched on-demand when selected
+const ALL_NOTIFICATION_COUNTRIES: &[&str] = &[
+    // Europe
+    "AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FO", "FI", "FR",
+    "DE", "GI", "GR", "HU", "IS", "IE", "IT", "XK", "LV", "LI", "LT", "LU", "MT", "MD", "MC",
+    "ME", "NL", "MK", "NO", "PL", "PT", "RO", "RU", "SM", "RS", "SK", "SI", "ES", "SE", "CH",
+    "UA", "GB", "VA",
+    // Asia
+    "AF", "AM", "AZ", "BH", "BD", "BT", "BN", "KH", "CN", "GE", "HK", "IN", "ID", "IR", "IQ",
+    "IL", "JP", "JO", "KZ", "KW", "KG", "LA", "LB", "MO", "MY", "MV", "MN", "MM", "NP", "OM",
+    "PK", "PS", "PH", "QA", "SA", "SG", "KR", "LK", "SY", "TW", "TJ", "TH", "TL", "TR", "TM",
+    "AE", "UZ", "VN", "YE",
+    // Africa
+    "DZ", "AO", "BJ", "BW", "BF", "BI", "CV", "CM", "CF", "TD", "KM", "CD", "DJ", "EG", "GQ",
+    "ER", "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "CI", "KE", "LS", "LR", "LY", "MG", "MW",
+    "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG", "CG", "RW", "ST", "SN", "SC", "SL", "SO",
+    "ZA", "SS", "SD", "TZ", "TG", "TN", "UG", "ZM", "ZW",
+    // North America (excluding US/CA which are local-number)
+    "AG", "BS", "BB", "BZ", "CR", "CU", "DM", "DO", "SV", "GD", "GT", "HT", "HN", "JM", "MX",
+    "NI", "PA", "KN", "LC", "VC", "TT",
+    // South America
+    "AR", "BO", "BR", "CL", "CO", "EC", "GY", "PY", "PE", "SR", "UY", "VE",
+    // Oceania (excluding AU which is local-number)
+    "FJ", "KI", "MH", "FM", "NR", "NZ", "PW", "PG", "WS", "SB", "TO", "TV", "VU",
+];
 use crate::AppState;
-use axum::extract::Path;
 use axum::{extract::State, Json};
 use diesel::dsl::sql;
 use diesel::prelude::*;
@@ -20,158 +46,314 @@ pub struct CountryPricing {
     pub voice_price: f32, // Final price per minute
 }
 
+/// Simple country info for listing (no pricing)
 #[derive(Serialize)]
-pub struct NotificationPricingResponse {
-    pub countries: Vec<CountryPricing>,
-    pub formula_note: String,
+pub struct CountryInfo {
+    pub country_code: String,
+    pub country_name: String,
+    pub is_local_number: bool,
 }
 
+/// Response for all countries list endpoint
 #[derive(Serialize)]
-pub struct EuroCountriesPricingResponse {
-    pub countries: Vec<CountryPricing>,
-    pub formula_note: String,
-    pub plans: PlanInfo,
+pub struct AllCountriesResponse {
+    pub local_number_countries: Vec<CountryInfo>,
+    pub notification_only_countries: Vec<CountryInfo>,
 }
 
-#[derive(Serialize)]
-pub struct PlanInfo {
-    pub monitor: PlanDetails,
-    pub digest: PlanDetails,
-}
+/// GET /api/pricing/all-countries
+/// Returns list of ALL supported countries (no pricing - use /api/pricing/country/{code} for pricing)
+pub async fn get_all_countries() -> Json<AllCountriesResponse> {
+    // Local-number countries (US, CA, FI, NL, GB, AU)
+    let local_number_countries: Vec<CountryInfo> = ["US", "CA", "FI", "NL", "GB", "AU"]
+        .iter()
+        .map(|&code| CountryInfo {
+            country_code: code.to_string(),
+            country_name: get_country_name(code),
+            is_local_number: true,
+        })
+        .collect();
 
-#[derive(Serialize)]
-pub struct PlanDetails {
-    pub name: String,
-    pub price: f32,
-    pub messages_included: i32,
-}
+    // All notification-only countries (worldwide)
+    let mut notification_only_countries: Vec<CountryInfo> = ALL_NOTIFICATION_COUNTRIES
+        .iter()
+        .filter(|&&code| !["US", "CA", "FI", "NL", "GB", "AU"].contains(&code))
+        .map(|&code| CountryInfo {
+            country_code: code.to_string(),
+            country_name: get_country_name(code),
+            is_local_number: false,
+        })
+        .collect();
 
-/// GET /api/pricing/notification-only
-/// Returns pricing for all notification-only countries
-pub async fn get_notification_only_countries_pricing(
-    State(state): State<Arc<AppState>>,
-) -> Json<NotificationPricingResponse> {
-    let mut countries = Vec::new();
+    // Sort by country name
+    notification_only_countries.sort_by(|a, b| a.country_name.cmp(&b.country_name));
 
-    for (_prefix, code) in NOTIFICATION_ONLY_COUNTRIES {
-        if let Ok(pricing) = get_notification_only_pricing(&state, code).await {
-            countries.push(CountryPricing {
-                country_code: code.to_string(),
-                country_name: get_country_name(code),
-                sms_price: pricing.calculated_sms_price,
-                voice_price: pricing.calculated_voice_price,
-            });
-        }
-    }
-
-    Json(NotificationPricingResponse {
-        countries,
-        formula_note: "Notification: 1.5 segments, Response: 3 segments, Digest: 3 segments, all × 1.3 VAT margin".to_string(),
+    Json(AllCountriesResponse {
+        local_number_countries,
+        notification_only_countries,
     })
 }
 
-/// GET /api/pricing/euro-countries
-/// Returns pricing for ALL euro plan countries (local-number + notification-only)
-/// Excludes US/CA which have their own pricing
-pub async fn get_euro_countries_pricing(
+/// GET /api/pricing/country/{country_code}
+/// Returns pricing for a specific country (on-demand pricing fetch)
+pub async fn get_single_country_pricing(
     State(state): State<Arc<AppState>>,
-) -> Json<EuroCountriesPricingResponse> {
-    let mut countries = Vec::new();
+    axum::extract::Path(country_code): axum::extract::Path<String>,
+) -> Result<Json<CountryPricing>, (axum::http::StatusCode, String)> {
+    let code = country_code.to_uppercase();
 
-    // Add local-number countries (excluding US/CA)
-    for (_prefix, code) in LOCAL_NUMBER_COUNTRIES {
-        // Skip US (includes Canada with +1 prefix)
-        if *code == "US" {
-            continue;
-        }
-        if let Ok(pricing) = get_euro_country_pricing(&state, code).await {
-            countries.push(CountryPricing {
-                country_code: code.to_string(),
-                country_name: get_country_name(code),
-                sms_price: pricing.calculated_sms_price,
-                voice_price: pricing.calculated_voice_price,
-            });
-        }
-    }
+    // Check if it's a local-number country or notification-only
+    let is_local = ["US", "CA", "FI", "NL", "GB", "AU"].contains(&code.as_str());
 
-    // Add notification-only countries
-    for (_prefix, code) in NOTIFICATION_ONLY_COUNTRIES {
-        if let Ok(pricing) = get_euro_country_pricing(&state, code).await {
-            countries.push(CountryPricing {
-                country_code: code.to_string(),
-                country_name: get_country_name(code),
-                sms_price: pricing.calculated_sms_price,
-                voice_price: pricing.calculated_voice_price,
-            });
-        }
-    }
+    let pricing = if is_local && !["US", "CA"].contains(&code.as_str()) {
+        // Euro local-number countries
+        get_euro_country_pricing(&state, &code)
+            .await
+            .map_err(|e| (axum::http::StatusCode::NOT_FOUND, e))?
+    } else if ["US", "CA"].contains(&code.as_str()) {
+        // US/CA have fixed pricing
+        return Ok(Json(CountryPricing {
+            country_code: code.clone(),
+            country_name: get_country_name(&code),
+            sms_price: 0.075, // Fixed US/CA SMS price
+            voice_price: 0.185, // Twilio $0.075 + ElevenLabs $0.11
+        }));
+    } else {
+        // Notification-only countries
+        get_notification_only_pricing(&state, &code)
+            .await
+            .map_err(|e| (axum::http::StatusCode::NOT_FOUND, e))?
+    };
 
-    // Sort by country name for consistent display
-    countries.sort_by(|a, b| a.country_name.cmp(&b.country_name));
-
-    Json(EuroCountriesPricingResponse {
-        countries,
-        formula_note: "Notification: 1.5 segments, Response: 3 segments, Digest: 3 segments, all × 1.3 VAT margin".to_string(),
-        plans: PlanInfo {
-            monitor: PlanDetails {
-                name: "Monitor".to_string(),
-                price: 29.0,
-                messages_included: 40,
-            },
-            digest: PlanDetails {
-                name: "Digest".to_string(),
-                price: 49.0,
-                messages_included: 120,
-            },
-        },
-    })
+    Ok(Json(CountryPricing {
+        country_code: code.clone(),
+        country_name: get_country_name(&code),
+        sms_price: pricing.calculated_sms_price,
+        voice_price: pricing.calculated_voice_price,
+    }))
 }
 
 fn get_country_name(code: &str) -> String {
     match code {
-        // Local-number countries
+        // Local-number countries (US, CA, FI, NL, GB, AU)
         "US" => "United States",
         "CA" => "Canada",
         "FI" => "Finland",
         "NL" => "Netherlands",
         "GB" | "UK" => "United Kingdom",
         "AU" => "Australia",
-        // Notification-only countries
-        "DE" => "Germany",
-        "FR" => "France",
-        "ES" => "Spain",
-        "IT" => "Italy",
-        "PT" => "Portugal",
-        "BE" => "Belgium",
+        // Europe
+        "AL" => "Albania",
+        "AD" => "Andorra",
         "AT" => "Austria",
-        "CH" => "Switzerland",
-        "PL" => "Poland",
+        "BY" => "Belarus",
+        "BE" => "Belgium",
+        "BA" => "Bosnia and Herzegovina",
+        "BG" => "Bulgaria",
+        "HR" => "Croatia",
+        "CY" => "Cyprus",
         "CZ" => "Czech Republic",
-        "SE" => "Sweden",
         "DK" => "Denmark",
-        "NO" => "Norway",
+        "EE" => "Estonia",
+        "FO" => "Faroe Islands",
+        "FR" => "France",
+        "DE" => "Germany",
+        "GI" => "Gibraltar",
+        "GR" => "Greece",
+        "HU" => "Hungary",
+        "IS" => "Iceland",
         "IE" => "Ireland",
-        "NZ" => "New Zealand",
-        "JP" => "Japan",
-        "KR" => "South Korea",
-        "SG" => "Singapore",
+        "IT" => "Italy",
+        "XK" => "Kosovo",
+        "LV" => "Latvia",
+        "LI" => "Liechtenstein",
+        "LT" => "Lithuania",
+        "LU" => "Luxembourg",
+        "MT" => "Malta",
+        "MD" => "Moldova",
+        "MC" => "Monaco",
+        "ME" => "Montenegro",
+        "MK" => "North Macedonia",
+        "NO" => "Norway",
+        "PL" => "Poland",
+        "PT" => "Portugal",
+        "RO" => "Romania",
+        "RU" => "Russia",
+        "SM" => "San Marino",
+        "RS" => "Serbia",
+        "SK" => "Slovakia",
+        "SI" => "Slovenia",
+        "ES" => "Spain",
+        "SE" => "Sweden",
+        "CH" => "Switzerland",
+        "UA" => "Ukraine",
+        "VA" => "Vatican City",
+        // Asia
+        "AF" => "Afghanistan",
+        "AM" => "Armenia",
+        "AZ" => "Azerbaijan",
+        "BH" => "Bahrain",
+        "BD" => "Bangladesh",
+        "BT" => "Bhutan",
+        "BN" => "Brunei",
+        "KH" => "Cambodia",
+        "CN" => "China",
+        "GE" => "Georgia",
         "HK" => "Hong Kong",
-        "MX" => "Mexico",
-        "BR" => "Brazil",
         "IN" => "India",
+        "ID" => "Indonesia",
+        "IR" => "Iran",
+        "IQ" => "Iraq",
+        "IL" => "Israel",
+        "JP" => "Japan",
+        "JO" => "Jordan",
+        "KZ" => "Kazakhstan",
+        "KW" => "Kuwait",
+        "KG" => "Kyrgyzstan",
+        "LA" => "Laos",
+        "LB" => "Lebanon",
+        "MO" => "Macao",
+        "MY" => "Malaysia",
+        "MV" => "Maldives",
+        "MN" => "Mongolia",
+        "MM" => "Myanmar",
+        "NP" => "Nepal",
+        "OM" => "Oman",
+        "PK" => "Pakistan",
+        "PS" => "Palestine",
+        "PH" => "Philippines",
+        "QA" => "Qatar",
+        "SA" => "Saudi Arabia",
+        "SG" => "Singapore",
+        "KR" => "South Korea",
+        "LK" => "Sri Lanka",
+        "SY" => "Syria",
+        "TW" => "Taiwan",
+        "TJ" => "Tajikistan",
+        "TH" => "Thailand",
+        "TL" => "Timor-Leste",
+        "TR" => "Turkey",
+        "TM" => "Turkmenistan",
+        "AE" => "United Arab Emirates",
+        "UZ" => "Uzbekistan",
+        "VN" => "Vietnam",
+        "YE" => "Yemen",
+        // Africa
+        "DZ" => "Algeria",
+        "AO" => "Angola",
+        "BJ" => "Benin",
+        "BW" => "Botswana",
+        "BF" => "Burkina Faso",
+        "BI" => "Burundi",
+        "CV" => "Cape Verde",
+        "CM" => "Cameroon",
+        "CF" => "Central African Republic",
+        "TD" => "Chad",
+        "KM" => "Comoros",
+        "CD" => "DR Congo",
+        "DJ" => "Djibouti",
+        "EG" => "Egypt",
+        "GQ" => "Equatorial Guinea",
+        "ER" => "Eritrea",
+        "SZ" => "Eswatini",
+        "ET" => "Ethiopia",
+        "GA" => "Gabon",
+        "GM" => "Gambia",
+        "GH" => "Ghana",
+        "GN" => "Guinea",
+        "GW" => "Guinea-Bissau",
+        "CI" => "Ivory Coast",
+        "KE" => "Kenya",
+        "LS" => "Lesotho",
+        "LR" => "Liberia",
+        "LY" => "Libya",
+        "MG" => "Madagascar",
+        "MW" => "Malawi",
+        "ML" => "Mali",
+        "MR" => "Mauritania",
+        "MU" => "Mauritius",
+        "MA" => "Morocco",
+        "MZ" => "Mozambique",
+        "NA" => "Namibia",
+        "NE" => "Niger",
+        "NG" => "Nigeria",
+        "CG" => "Republic of the Congo",
+        "RW" => "Rwanda",
+        "ST" => "Sao Tome and Principe",
+        "SN" => "Senegal",
+        "SC" => "Seychelles",
+        "SL" => "Sierra Leone",
+        "SO" => "Somalia",
         "ZA" => "South Africa",
+        "SS" => "South Sudan",
+        "SD" => "Sudan",
+        "TZ" => "Tanzania",
+        "TG" => "Togo",
+        "TN" => "Tunisia",
+        "UG" => "Uganda",
+        "ZM" => "Zambia",
+        "ZW" => "Zimbabwe",
+        // North America and Caribbean
+        "AG" => "Antigua and Barbuda",
+        "BS" => "Bahamas",
+        "BB" => "Barbados",
+        "BZ" => "Belize",
+        "CR" => "Costa Rica",
+        "CU" => "Cuba",
+        "DM" => "Dominica",
+        "DO" => "Dominican Republic",
+        "SV" => "El Salvador",
+        "GD" => "Grenada",
+        "GT" => "Guatemala",
+        "HT" => "Haiti",
+        "HN" => "Honduras",
+        "JM" => "Jamaica",
+        "MX" => "Mexico",
+        "NI" => "Nicaragua",
+        "PA" => "Panama",
+        "KN" => "Saint Kitts and Nevis",
+        "LC" => "Saint Lucia",
+        "VC" => "Saint Vincent and the Grenadines",
+        "TT" => "Trinidad and Tobago",
+        // South America
+        "AR" => "Argentina",
+        "BO" => "Bolivia",
+        "BR" => "Brazil",
+        "CL" => "Chile",
+        "CO" => "Colombia",
+        "EC" => "Ecuador",
+        "GY" => "Guyana",
+        "PY" => "Paraguay",
+        "PE" => "Peru",
+        "SR" => "Suriname",
+        "UY" => "Uruguay",
+        "VE" => "Venezuela",
+        // Oceania
+        "FJ" => "Fiji",
+        "KI" => "Kiribati",
+        "MH" => "Marshall Islands",
+        "FM" => "Micronesia",
+        "NR" => "Nauru",
+        "NZ" => "New Zealand",
+        "PW" => "Palau",
+        "PG" => "Papua New Guinea",
+        "WS" => "Samoa",
+        "SB" => "Solomon Islands",
+        "TO" => "Tonga",
+        "TV" => "Tuvalu",
+        "VU" => "Vanuatu",
         _ => code,
     }
     .to_string()
 }
 
-/// Response for BYOT pricing endpoint
+/// Response for BYOT pricing endpoint (simplified - no monthly number cost)
 #[derive(Serialize)]
 pub struct ByotPricingResponse {
     pub country_code: String,
     pub country_name: String,
     pub has_local_numbers: bool,
-    /// Monthly cost for a phone number (local or mobile, whichever is available)
+    /// Monthly cost for a phone number - always None (users check Twilio directly)
     pub monthly_number_cost: Option<f32>,
     /// Cost breakdown for different message types
     pub costs: ByotMessageCosts,
@@ -181,11 +363,11 @@ pub struct ByotPricingResponse {
 pub struct ByotMessageCosts {
     /// SMS price per segment (raw Twilio price)
     pub sms_per_segment: Option<f32>,
-    /// Notification cost (1 segment)
+    /// Notification cost (1.5 segments)
     pub notification: Option<f32>,
     /// Normal response cost (~3 segments)
     pub normal_response: Option<f32>,
-    /// Digest cost (~4 segments)
+    /// Digest cost (~3 segments)
     pub digest: Option<f32>,
     /// Voice outbound per minute
     pub voice_outbound_per_min: Option<f32>,
@@ -194,41 +376,37 @@ pub struct ByotMessageCosts {
 }
 
 /// GET /api/pricing/byot/{country_code}
-/// Returns BYOT (Bring Your Own Twilio) pricing for a specific country
+/// Returns pricing for a specific country (for frontend message equivalent calculations)
+/// Note: monthly_number_cost is always None - BYOT users should check Twilio directly for number prices
 pub async fn get_byot_country_pricing(
     State(state): State<Arc<AppState>>,
-    Path(country_code): Path<String>,
+    axum::extract::Path(country_code): axum::extract::Path<String>,
 ) -> Result<Json<ByotPricingResponse>, (axum::http::StatusCode, String)> {
-    let pricing = get_byot_pricing(&state, &country_code)
+    let capability = get_country_capability(&state, &country_code)
         .await
         .map_err(|e| (axum::http::StatusCode::NOT_FOUND, e))?;
 
-    // Use local price if available, otherwise mobile
-    let monthly_number_cost = pricing
-        .local_number_monthly
-        .or(pricing.mobile_number_monthly);
-
-    let sms_price = pricing.sms_price_per_segment;
+    let sms_price = capability.outbound_sms_price;
 
     // ElevenLabs voice AI cost: $0.11 per minute (added to all voice calls)
     const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
 
     Ok(Json(ByotPricingResponse {
-        country_code: pricing.country_code.clone(),
-        country_name: get_country_name(&pricing.country_code),
-        has_local_numbers: pricing.has_local_numbers,
-        monthly_number_cost,
+        country_code: country_code.to_uppercase(),
+        country_name: get_country_name(&country_code.to_uppercase()),
+        has_local_numbers: capability.can_receive_sms,
+        monthly_number_cost: None, // BYOT users should check Twilio website directly
         costs: ByotMessageCosts {
             sms_per_segment: sms_price,
             notification: sms_price.map(|p| p * 1.5),
             normal_response: sms_price.map(|p| p * 3.0),
             digest: sms_price.map(|p| p * 3.0),
             // Add ElevenLabs cost to voice (AI voice generation)
-            voice_outbound_per_min: pricing
-                .voice_price_per_minute
+            voice_outbound_per_min: capability
+                .outbound_voice_price_per_min
                 .map(|p| p + ELEVENLABS_COST_PER_MIN),
-            voice_inbound_per_min: pricing
-                .inbound_voice_price_per_minute
+            voice_inbound_per_min: capability
+                .inbound_voice_price_per_min
                 .map(|p| p + ELEVENLABS_COST_PER_MIN),
         },
     }))
@@ -278,16 +456,14 @@ fn is_us_or_ca(country: &str) -> bool {
     matches!(country, "US" | "CA")
 }
 
-/// Check if country code is notification-only
+/// Check if country code is notification-only (all non-local countries)
 fn is_notification_only_code(country: &str) -> bool {
-    NOTIFICATION_ONLY_COUNTRIES
-        .iter()
-        .any(|(_, c)| *c == country)
+    is_notification_only_country_code(country)
 }
 
-/// Check if country code has local numbers
+/// Check if country code has local numbers (FI, NL, GB, AU, US, CA)
 fn has_local_numbers_code(country: &str) -> bool {
-    LOCAL_NUMBER_COUNTRIES.iter().any(|(_, c)| *c == country)
+    matches!(country, "US" | "CA" | "FI" | "NL" | "GB" | "AU")
 }
 
 /// GET /api/pricing/dashboard-credits
@@ -307,17 +483,15 @@ pub async fn get_dashboard_credits(
         ))?;
 
     // Determine country
-    let country_code = user
-        .phone_number_country
-        .clone()
+    let country_code = crate::utils::country::get_country_code_from_phone(&user.phone_number)
         .unwrap_or_else(|| "US".to_string());
     let is_us_ca = is_us_or_ca(&country_code);
     let is_notification_only = is_notification_only_code(&country_code);
     let has_local_numbers = has_local_numbers_code(&country_code);
 
-    // Get pricing for this country
-    let pricing = if !is_us_ca {
-        get_byot_pricing(&state, &country_code).await.ok()
+    // Get pricing for this country using get_country_capability
+    let capability = if !is_us_ca {
+        get_country_capability(&state, &country_code).await.ok()
     } else {
         None
     };
@@ -349,9 +523,9 @@ pub async fn get_dashboard_credits(
                     None
                 },
             }
-        } else if let Some(ref p) = pricing {
+        } else if let Some(ref cap) = capability {
             // Euro: credit_value is € amount
-            let sms_price = p.sms_price_per_segment.unwrap_or(0.10);
+            let sms_price = cap.outbound_sms_price.unwrap_or(0.10);
 
             // Notification = 1.5 segments
             let notifications = (credit_value / (1.5 * sms_price)).floor() as i32;
@@ -360,12 +534,12 @@ pub async fn get_dashboard_credits(
             // Digest = 3 segments
             let digests = (credit_value / (3.0 * sms_price)).floor() as i32;
             // Voice outbound
-            let voice_out = p
-                .voice_price_per_minute
+            let voice_out = cap
+                .outbound_voice_price_per_min
                 .map(|v| (credit_value / (v + ELEVENLABS_COST_PER_MIN)).floor() as i32);
             // Voice inbound (only for local number countries)
             let voice_in = if has_local_numbers {
-                p.inbound_voice_price_per_minute
+                cap.inbound_voice_price_per_min
                     .map(|v| (credit_value / (v + ELEVENLABS_COST_PER_MIN)).floor() as i32)
             } else {
                 None
@@ -590,10 +764,8 @@ pub async fn get_usage_projection(
     // US/CA: always 400 messages (hosted plan)
     // Other countries: monitor=40, digest=120
     let plan_type = user.plan_type.clone();
-    let is_us_ca = matches!(
-        user.phone_number_country.as_deref(),
-        Some("US") | Some("CA")
-    );
+    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+    let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
     let plan_capacity = if is_us_ca {
         400 // US/CA hosted plan
     } else {
@@ -871,9 +1043,7 @@ pub async fn get_usage_projection(
         let notifications_over = (total_usage_per_month - plan_capacity) * 3;
 
         // Get country for pricing
-        let country_code = user
-            .phone_number_country
-            .clone()
+        let country_code = crate::utils::country::get_country_code_from_phone(&user.phone_number)
             .unwrap_or_else(|| "US".to_string());
 
         // Calculate euro cost for overage (weighted by SMS vs call ratio)
@@ -1002,9 +1172,7 @@ pub async fn get_usage_projection(
     };
 
     // === CALCULATE SEGMENTED BAR FIELDS ===
-    let country_code = user
-        .phone_number_country
-        .clone()
+    let country_code = crate::utils::country::get_country_code_from_phone(&user.phone_number)
         .unwrap_or_else(|| "US".to_string());
     let is_notification_only = is_notification_only_code(&country_code);
 
@@ -1150,13 +1318,14 @@ pub async fn get_byot_usage(
     }
 
     // Get user's country for pricing
-    let country_code = user.phone_number_country.clone().ok_or((
-        axum::http::StatusCode::BAD_REQUEST,
-        "Country not set. Please update your profile.".to_string(),
-    ))?;
+    let country_code = crate::utils::country::get_country_code_from_phone(&user.phone_number)
+        .ok_or((
+            axum::http::StatusCode::BAD_REQUEST,
+            "Could not detect country from phone number.".to_string(),
+        ))?;
 
-    // Fetch BYOT pricing for user's country
-    let pricing = get_byot_pricing(&state, &country_code).await.map_err(|e| {
+    // Fetch pricing for user's country using get_country_capability
+    let capability = get_country_capability(&state, &country_code).await.map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to get pricing: {}", e),
@@ -1164,14 +1333,14 @@ pub async fn get_byot_usage(
     })?;
 
     // Get pricing rates
-    let sms_per_segment = pricing.sms_price_per_segment.unwrap_or(0.0);
+    let sms_per_segment = capability.outbound_sms_price.unwrap_or(0.0);
     let notification_cost = sms_per_segment * 1.5; // 1.5 segments per notification
     let message_cost = sms_per_segment * 3.0; // 3 segments per message
     let digest_cost = sms_per_segment * 3.0; // 3 segments per digest
 
     // Voice cost includes ElevenLabs AI ($0.11/min)
     const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-    let voice_per_min = pricing.voice_price_per_minute.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
+    let voice_per_min = capability.outbound_voice_price_per_min.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
 
     // Calculate billing period
     let now: i64 = SystemTime::now()

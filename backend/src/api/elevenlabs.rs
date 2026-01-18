@@ -212,13 +212,10 @@ pub async fn fetch_assistant(
             {
                 // Send insufficient credits message
                 let error_message = "Insufficient credits to make a voice call".to_string();
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_message,
-                    None,
-                    &user,
-                )
-                .await
+                if let Err(e) = state
+                    .twilio_message_service
+                    .send_sms(&error_message, None, &user)
+                    .await
                 {
                     error!("Failed to send insufficient credits message: {}", e);
                 }
@@ -837,7 +834,9 @@ pub async fn handle_send_sms_tool_call(
     }
 
     // Send the main message using Twilio
-    match crate::api::twilio_utils::send_conversation_message(&state, &payload.message, None, &user)
+    match state
+        .twilio_message_service
+        .send_sms(&payload.message, None, &user)
         .await
     {
         Ok(message_sid) => {
@@ -1393,9 +1392,10 @@ pub async fn handle_send_chat_message(
             "Failed to find contact. Please make sure you're connected to {} bridge.",
             capitalized_platform
         );
-        if let Err(e) =
-            crate::api::twilio_utils::send_conversation_message(&state, &error_msg, None, &user)
-                .await
+        if let Err(e) = state
+            .twilio_message_service
+            .send_sms(&error_msg, None, &user)
+            .await
         {
             error!("Failed to send error message: {}", e);
         }
@@ -1410,9 +1410,10 @@ pub async fn handle_send_chat_message(
         Ok(client) => client,
         Err(e) => {
             let error_msg = format!("Failed to get client: {}", e);
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(&state, &error_msg, None, &user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&error_msg, None, &user)
+                .await
             {
                 error!("Failed to send error message: {}", e);
             }
@@ -1429,9 +1430,10 @@ pub async fn handle_send_chat_message(
         Ok(rooms) => rooms,
         Err(e) => {
             let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(&state, &error_msg, None, &user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&error_msg, None, &user)
+                .await
             {
                 error!("Failed to send error message: {}", e);
             }
@@ -1451,9 +1453,10 @@ pub async fn handle_send_chat_message(
                 "No {} contacts found matching '{}'.",
                 capitalized_platform, payload.chat_name
             );
-            if let Err(e) =
-                crate::api::twilio_utils::send_conversation_message(&state, &error_msg, None, &user)
-                    .await
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(&error_msg, None, &user)
+                .await
             {
                 error!("Failed to send error message: {}", e);
             }
@@ -1506,13 +1509,10 @@ pub async fn handle_send_chat_message(
                         "Failed to send {} message: {}",
                         cloned_capitalized_platform, e
                     );
-                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                        &cloned_state,
-                        &error_msg,
-                        None,
-                        &cloned_user,
-                    )
-                    .await
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
                     {
                         error!("Failed to send error message: {}", e);
                     }
@@ -1628,13 +1628,10 @@ pub async fn handle_email_send(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                        &cloned_state,
-                        &error_msg,
-                        None,
-                        &cloned_user,
-                    )
-                    .await
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
                     {
                         eprintln!("Failed to send error message: {}", e);
                     }
@@ -1781,13 +1778,10 @@ pub async fn handle_respond_to_email(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                        &cloned_state,
-                        &error_msg,
-                        None,
-                        &cloned_user,
-                    )
-                    .await
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
                     {
                         eprintln!("Failed to send error message: {}", e);
                     }
@@ -2303,45 +2297,21 @@ pub async fn make_notification_call(
             ));
         }
     };
-    // Get or set phone_number_country
-    let country = match user.phone_number_country {
+    // Detect country from phone number
+    let country = match crate::utils::country::get_country_code_from_phone(&user.phone_number) {
         Some(c) => c,
         None => {
-            match crate::handlers::profile_handlers::set_user_phone_country(
-                state,
-                user.id,
-                &user.phone_number,
-            )
-            .await
-            {
-                Ok(Some(c)) => c,
-                Ok(None) => {
-                    error!(
-                        "Failed to determine country for user {} after lookup",
-                        user.id
-                    );
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Missing user country",
-                            "details": "Could not determine phone number country"
-                        })),
-                    ));
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to set phone_number_country for user {}: {}",
-                        user.id, e
-                    );
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to set user country",
-                            "details": e.to_string()
-                        })),
-                    ));
-                }
-            }
+            error!(
+                "Failed to determine country for user {} from phone number",
+                user.id
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Missing user country",
+                    "details": "Could not determine phone number country"
+                })),
+            ));
         }
     };
     // Check if the user's country is supported (US, FI, GB, AU, DE, CA)
