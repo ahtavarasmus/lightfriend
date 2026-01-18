@@ -621,6 +621,7 @@ mod tests {
         create_test_state, create_test_user, set_byot_credentials, set_preferred_number,
         setup_test_encryption, TestUserParams,
     };
+    use serial_test::serial;
     use std::sync::Arc;
 
     /// Set up environment variables for testing
@@ -1057,6 +1058,7 @@ mod tests {
     // =========================================================================
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_us_user_full_flow() {
         setup_test_env();
         let state = create_test_state();
@@ -1084,6 +1086,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_ca_user_full_flow() {
         setup_test_env();
         let state = create_test_state();
@@ -1112,6 +1115,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_fi_user_full_flow() {
         setup_test_env();
         let state = create_test_state();
@@ -1131,6 +1135,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_notification_only_default_flow() {
         setup_test_env();
         let state = create_test_state();
@@ -1154,6 +1159,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_notification_only_with_local_number() {
         setup_test_env();
         let state = create_test_state();
@@ -1177,6 +1183,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_logs_message_history() {
         setup_test_env();
         let state = create_test_state();
@@ -1205,6 +1212,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_with_media_url() {
         setup_test_env();
         let state = create_test_state();
@@ -1235,6 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_byot_user_uses_own_credentials() {
         setup_test_env();
         setup_test_encryption();
@@ -1256,6 +1265,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_handles_twilio_error() {
         setup_test_env();
         let state = create_test_state();
@@ -1283,6 +1293,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_skips_in_development() {
         // Set to development environment
         std::env::set_var("ENVIRONMENT", "development");
@@ -1314,6 +1325,7 @@ mod tests {
     // =========================================================================
 
     #[tokio::test]
+    #[serial]
     async fn test_delete_message_media_success() {
         setup_test_env();
         let state = create_test_state();
@@ -1338,6 +1350,7 @@ mod tests {
     // =========================================================================
 
     #[tokio::test]
+    #[serial]
     async fn test_fetch_message_price_success() {
         setup_test_env();
         let state = create_test_state();
@@ -1375,6 +1388,7 @@ mod tests {
     // =========================================================================
 
     #[tokio::test]
+    #[serial]
     async fn test_send_sms_includes_status_callback() {
         setup_test_env();
         let state = create_test_state();

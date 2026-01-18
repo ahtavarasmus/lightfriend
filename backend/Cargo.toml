@@ -69,3 +69,6 @@ tokio-stream = "0.1"
 resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
+
+[dev-dependencies]
+serial_test = "3.0"  # For tests that modify environment variables
