@@ -97,7 +97,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     /// 1. BYOT users always use their own credentials
     /// 2. Users in local-number or notification-only countries use global credentials
     /// 3. Other users must have their own credentials
-    pub fn resolve_credentials(&self, user: &User) -> Result<TwilioCredentials, TwilioMessageError> {
+    pub fn resolve_credentials(
+        &self,
+        user: &User,
+    ) -> Result<TwilioCredentials, TwilioMessageError> {
         // BYOT users with their own credentials always use their own account
         if self.user_core.is_byot_user(user.id) {
             let (account_sid, auth_token) = self
@@ -231,10 +234,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                     if has_byot_credentials && !preferred.is_empty() {
                         from_number = Some(preferred.to_string());
                     } else {
-                        tracing::info!(
-                            "Using empty from_number for unsupported country: {}",
-                            c
-                        );
+                        tracing::info!("Using empty from_number for unsupported country: {}", c);
                     }
                 }
             }
@@ -290,8 +290,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         let media_url = media_sid.map(|media_id| {
             format!(
                 "https://api.twilio.com/2010-04-01/Accounts/{}/Media/{}",
-                credentials.account_sid,
-                media_id
+                credentials.account_sid, media_id
             )
         });
 
@@ -337,7 +336,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Warn if no valid From
         if options.from.is_none() && options.messaging_service_sid.is_none() {
-            let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+            let detected_country =
+                crate::utils::country::get_country_code_from_phone(&user.phone_number);
             tracing::warn!(
                 "No valid From available for user {} and country {:?}",
                 user.id,
@@ -354,7 +354,11 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         let message_sid = result.message_sid;
         tracing::debug!(
             "Successfully sent message{} with SID: {}",
-            if media_sid.is_some() { " with media" } else { "" },
+            if media_sid.is_some() {
+                " with media"
+            } else {
+                ""
+            },
             message_sid
         );
 
@@ -431,7 +435,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Warn if no valid From
         if options.from.is_none() && options.messaging_service_sid.is_none() {
-            let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+            let detected_country =
+                crate::utils::country::get_country_code_from_phone(&user.phone_number);
             tracing::warn!(
                 "No valid From available for user {} and country {:?}",
                 user.id,
@@ -709,7 +714,10 @@ mod tests {
         let (service, _mock) = create_test_service(&state);
 
         let result = service.resolve_credentials(&user);
-        assert!(result.is_ok(), "Should resolve global credentials for US user");
+        assert!(
+            result.is_ok(),
+            "Should resolve global credentials for US user"
+        );
 
         let creds = result.unwrap();
         assert_eq!(creds.account_sid, "AC_global_test_sid");
@@ -726,7 +734,10 @@ mod tests {
         let (service, _mock) = create_test_service(&state);
 
         let result = service.resolve_credentials(&user);
-        assert!(result.is_ok(), "Should resolve global credentials for Germany user");
+        assert!(
+            result.is_ok(),
+            "Should resolve global credentials for Germany user"
+        );
 
         let creds = result.unwrap();
         assert_eq!(creds.account_sid, "AC_global_test_sid");
@@ -782,9 +793,18 @@ mod tests {
             service.determine_sending_strategy(&user).unwrap();
 
         // US users should use messaging service, not a specific From number
-        assert!(use_messaging_service, "US users should use messaging service");
-        assert!(from_number.is_none(), "US users should not have a From number");
-        assert!(!update_preferred, "US users should not update preferred_number");
+        assert!(
+            use_messaging_service,
+            "US users should use messaging service"
+        );
+        assert!(
+            from_number.is_none(),
+            "US users should not have a From number"
+        );
+        assert!(
+            !update_preferred,
+            "US users should not update preferred_number"
+        );
     }
 
     #[test]
@@ -803,13 +823,19 @@ mod tests {
         let (from_number, use_messaging_service, update_preferred) =
             service.determine_sending_strategy(&user).unwrap();
 
-        assert!(!use_messaging_service, "CA users should not use messaging service");
+        assert!(
+            !use_messaging_service,
+            "CA users should not use messaging service"
+        );
         assert_eq!(
             from_number,
             Some("+16135559999".to_string()),
             "CA users should use their preferred number"
         );
-        assert!(!update_preferred, "Should not update if preferred already set");
+        assert!(
+            !update_preferred,
+            "Should not update if preferred already set"
+        );
     }
 
     #[test]
@@ -824,7 +850,10 @@ mod tests {
         let (from_number, use_messaging_service, update_preferred) =
             service.determine_sending_strategy(&user).unwrap();
 
-        assert!(!use_messaging_service, "CA users should not use messaging service");
+        assert!(
+            !use_messaging_service,
+            "CA users should not use messaging service"
+        );
         assert_eq!(
             from_number,
             Some("+16135551234".to_string()),
@@ -1156,7 +1185,9 @@ mod tests {
 
         let (service, _mock_client) = create_test_service(&state);
 
-        let result = service.send_sms("Test message for history", None, &user).await;
+        let result = service
+            .send_sms("Test message for history", None, &user)
+            .await;
         assert!(result.is_ok());
 
         // Verify message was logged to history
@@ -1232,7 +1263,8 @@ mod tests {
         let user = create_test_user(&state, &params);
 
         // Create mock that returns an error
-        let mock_client = Arc::new(MockTwilioClient::new().with_send_result(Err("Twilio API error".to_string())));
+        let mock_client =
+            Arc::new(MockTwilioClient::new().with_send_result(Err("Twilio API error".to_string())));
         let service = TwilioMessageService::new(
             mock_client.clone(),
             state.db_pool.clone(),
@@ -1290,9 +1322,7 @@ mod tests {
 
         let (service, mock_client) = create_test_service(&state);
 
-        let result = service
-            .delete_message_media(&user, "SM123", "ME456")
-            .await;
+        let result = service.delete_message_media(&user, "SM123", "ME456").await;
         assert!(result.is_ok());
 
         let calls = mock_client.get_calls();

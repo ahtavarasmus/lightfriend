@@ -124,7 +124,6 @@ pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
 pub use services::twilio_message_service::TwilioMessageService;
 
-
 // AppState and related types - needed by all handler modules
 use dashmap::DashMap;
 use diesel::prelude::*;
@@ -201,4 +200,3 @@ pub struct AppState {
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
-

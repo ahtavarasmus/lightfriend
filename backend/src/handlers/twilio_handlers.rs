@@ -391,9 +391,9 @@ mod tests {
             ("0.0075", Some(0.0075f32)),
             ("-0.00750", Some(-0.0075f32)),
             ("0", Some(0.0f32)),
-            ("", None),      // Empty string should fail
-            ("abc", None),   // Non-numeric should fail
-            ("null", None),  // "null" string should fail
+            ("", None),     // Empty string should fail
+            ("abc", None),  // Non-numeric should fail
+            ("null", None), // "null" string should fail
         ];
 
         for (input, expected) in test_cases {

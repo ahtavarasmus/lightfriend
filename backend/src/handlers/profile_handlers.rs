@@ -198,8 +198,8 @@ pub async fn get_profile(
                 Err(_) => None,
             };
             // Determine country based on phone number (default to "US" if unknown)
-            let country = get_country_code_from_phone(&user.phone_number)
-                .unwrap_or_else(|| "US".to_string());
+            let country =
+                get_country_code_from_phone(&user.phone_number).unwrap_or_else(|| "US".to_string());
             // Get critical notification info
             let critical_info = state
                 .user_core

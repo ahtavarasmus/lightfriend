@@ -8,24 +8,21 @@ use crate::utils::country::is_notification_only_country_code;
 /// Comprehensive list for pricing display - pricing fetched on-demand when selected
 const ALL_NOTIFICATION_COUNTRIES: &[&str] = &[
     // Europe
-    "AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FO", "FI", "FR",
-    "DE", "GI", "GR", "HU", "IS", "IE", "IT", "XK", "LV", "LI", "LT", "LU", "MT", "MD", "MC",
-    "ME", "NL", "MK", "NO", "PL", "PT", "RO", "RU", "SM", "RS", "SK", "SI", "ES", "SE", "CH",
-    "UA", "GB", "VA",
+    "AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FO", "FI", "FR", "DE",
+    "GI", "GR", "HU", "IS", "IE", "IT", "XK", "LV", "LI", "LT", "LU", "MT", "MD", "MC", "ME", "NL",
+    "MK", "NO", "PL", "PT", "RO", "RU", "SM", "RS", "SK", "SI", "ES", "SE", "CH", "UA", "GB", "VA",
     // Asia
-    "AF", "AM", "AZ", "BH", "BD", "BT", "BN", "KH", "CN", "GE", "HK", "IN", "ID", "IR", "IQ",
-    "IL", "JP", "JO", "KZ", "KW", "KG", "LA", "LB", "MO", "MY", "MV", "MN", "MM", "NP", "OM",
-    "PK", "PS", "PH", "QA", "SA", "SG", "KR", "LK", "SY", "TW", "TJ", "TH", "TL", "TR", "TM",
-    "AE", "UZ", "VN", "YE",
-    // Africa
-    "DZ", "AO", "BJ", "BW", "BF", "BI", "CV", "CM", "CF", "TD", "KM", "CD", "DJ", "EG", "GQ",
-    "ER", "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "CI", "KE", "LS", "LR", "LY", "MG", "MW",
-    "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG", "CG", "RW", "ST", "SN", "SC", "SL", "SO",
-    "ZA", "SS", "SD", "TZ", "TG", "TN", "UG", "ZM", "ZW",
+    "AF", "AM", "AZ", "BH", "BD", "BT", "BN", "KH", "CN", "GE", "HK", "IN", "ID", "IR", "IQ", "IL",
+    "JP", "JO", "KZ", "KW", "KG", "LA", "LB", "MO", "MY", "MV", "MN", "MM", "NP", "OM", "PK", "PS",
+    "PH", "QA", "SA", "SG", "KR", "LK", "SY", "TW", "TJ", "TH", "TL", "TR", "TM", "AE", "UZ", "VN",
+    "YE", // Africa
+    "DZ", "AO", "BJ", "BW", "BF", "BI", "CV", "CM", "CF", "TD", "KM", "CD", "DJ", "EG", "GQ", "ER",
+    "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "CI", "KE", "LS", "LR", "LY", "MG", "MW", "ML", "MR",
+    "MU", "MA", "MZ", "NA", "NE", "NG", "CG", "RW", "ST", "SN", "SC", "SL", "SO", "ZA", "SS", "SD",
+    "TZ", "TG", "TN", "UG", "ZM", "ZW",
     // North America (excluding US/CA which are local-number)
-    "AG", "BS", "BB", "BZ", "CR", "CU", "DM", "DO", "SV", "GD", "GT", "HT", "HN", "JM", "MX",
-    "NI", "PA", "KN", "LC", "VC", "TT",
-    // South America
+    "AG", "BS", "BB", "BZ", "CR", "CU", "DM", "DO", "SV", "GD", "GT", "HT", "HN", "JM", "MX", "NI",
+    "PA", "KN", "LC", "VC", "TT", // South America
     "AR", "BO", "BR", "CL", "CO", "EC", "GY", "PY", "PE", "SR", "UY", "VE",
     // Oceania (excluding AU which is local-number)
     "FJ", "KI", "MH", "FM", "NR", "NZ", "PW", "PG", "WS", "SB", "TO", "TV", "VU",
@@ -115,7 +112,7 @@ pub async fn get_single_country_pricing(
         return Ok(Json(CountryPricing {
             country_code: code.clone(),
             country_name: get_country_name(&code),
-            sms_price: 0.075, // Fixed US/CA SMS price
+            sms_price: 0.075,   // Fixed US/CA SMS price
             voice_price: 0.185, // Twilio $0.075 + ElevenLabs $0.11
         }));
     } else {
@@ -1325,12 +1322,14 @@ pub async fn get_byot_usage(
         ))?;
 
     // Fetch pricing for user's country using get_country_capability
-    let capability = get_country_capability(&state, &country_code).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to get pricing: {}", e),
-        )
-    })?;
+    let capability = get_country_capability(&state, &country_code)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get pricing: {}", e),
+            )
+        })?;
 
     // Get pricing rates
     let sms_per_segment = capability.outbound_sms_price.unwrap_or(0.0);
@@ -1340,7 +1339,8 @@ pub async fn get_byot_usage(
 
     // Voice cost includes ElevenLabs AI ($0.11/min)
     const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-    let voice_per_min = capability.outbound_voice_price_per_min.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
+    let voice_per_min =
+        capability.outbound_voice_price_per_min.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
 
     // Calculate billing period
     let now: i64 = SystemTime::now()

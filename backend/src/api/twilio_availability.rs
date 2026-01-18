@@ -26,7 +26,6 @@ pub struct CountryCapabilityInfo {
     pub inbound_voice_price_per_min: Option<f32>,
 }
 
-
 /// Countries where we can send messages from a US number without issues
 /// Based on Twilio's A2P 10DLC coverage and practical experience
 const NOTIFICATION_SUPPORTED_COUNTRIES: &[&str] = &[

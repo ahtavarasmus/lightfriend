@@ -778,7 +778,11 @@ pub mod mock {
         }
 
         /// Set messaging pricing for a specific country.
-        pub fn with_messaging_pricing(self, country: &str, pricing: MessagingPricingResult) -> Self {
+        pub fn with_messaging_pricing(
+            self,
+            country: &str,
+            pricing: MessagingPricingResult,
+        ) -> Self {
             self.messaging_pricing_responses
                 .lock()
                 .unwrap()
@@ -1089,8 +1093,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_delete_message_error_injection() {
-        let client =
-            MockTwilioClient::new().with_delete_message_error("Delete failed".to_string());
+        let client = MockTwilioClient::new().with_delete_message_error("Delete failed".to_string());
         let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
         let result = client.delete_message(&creds, "SM_test_123").await;
@@ -1208,8 +1211,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_configure_webhook_error_injection() {
-        let client =
-            MockTwilioClient::new().with_configure_webhook_error("Webhook config failed".to_string());
+        let client = MockTwilioClient::new()
+            .with_configure_webhook_error("Webhook config failed".to_string());
         let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
         let result = client
@@ -1231,9 +1234,7 @@ mod tests {
         let client = MockTwilioClient::new();
         let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
-        let result = client
-            .check_phone_numbers_available(&creds, "US")
-            .await;
+        let result = client.check_phone_numbers_available(&creds, "US").await;
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Default is false
 
@@ -1247,9 +1248,7 @@ mod tests {
         let client = MockTwilioClient::new().with_phone_numbers_available(true);
         let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
-        let result = client
-            .check_phone_numbers_available(&creds, "US")
-            .await;
+        let result = client.check_phone_numbers_available(&creds, "US").await;
         assert!(result.is_ok());
         assert!(result.unwrap());
     }

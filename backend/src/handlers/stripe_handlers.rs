@@ -297,9 +297,7 @@ async fn check_upgrade_refund_eligibility(
     // For Monitor users, check credit usage
     if was_monitor {
         let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
-        let max_credits =
-            get_max_credits_left(state, country.as_deref(), Some("monitor"))
-                .await;
+        let max_credits = get_max_credits_left(state, country.as_deref(), Some("monitor")).await;
         let credits_used = max_credits - user.credits_left;
         let usage_percent = if max_credits > 0.0 {
             (credits_used / max_credits * 100.0).max(0.0)
@@ -1418,7 +1416,8 @@ pub async fn stripe_webhook(
                 }
 
                 // Use centralized subscription setup (idempotent)
-                let phone_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+                let phone_country =
+                    crate::utils::country::get_country_code_from_phone(&user.phone_number);
                 if let Err(e) = setup_user_subscription(
                     &state,
                     user.id,

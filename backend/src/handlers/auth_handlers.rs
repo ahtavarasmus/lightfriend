@@ -510,8 +510,11 @@ pub async fn register(
             )
         })?;
     // Set preferred number based on detected country
-    if let Some(country) = crate::utils::country::get_country_code_from_phone(&reg_req.phone_number) {
-        let _ = state.user_core.set_preferred_number_for_country(user.id, &country);
+    if let Some(country) = crate::utils::country::get_country_code_from_phone(&reg_req.phone_number)
+    {
+        let _ = state
+            .user_core
+            .set_preferred_number_for_country(user.id, &country);
     } else if reg_req.phone_number.starts_with("+1") {
         // Fallback for +1 numbers if country detection fails
         state
