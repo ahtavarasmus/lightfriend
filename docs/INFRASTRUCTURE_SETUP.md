@@ -378,11 +378,7 @@ Fill in the infrastructure section:
 TF_CLOUD_ORG=lightfriend
 TF_CLOUD_TOKEN=<your-terraform-cloud-token>
 
-# Infrastructure - AWS (for personal AWS CLI usage, NOT for Terraform)
-# These credentials are used for manual verification commands (aws ec2 describe-instances, etc.)
-# Terraform Cloud uses OIDC and does NOT need these credentials
-AWS_ACCESS_KEY_ID=<your-personal-aws-access-key>
-AWS_SECRET_ACCESS_KEY=<your-personal-aws-secret-key>
+# AWS Region
 AWS_REGION=us-east-1
 
 # Infrastructure - Cloudflare
@@ -392,13 +388,7 @@ CLOUDFLARE_ZONE_ID=<your-zone-id>
 CLOUDFLARE_DOMAIN=<your-domain.com>
 ```
 
-**Important Notes:**
-- The AWS credentials in `.env` are for **your personal AWS CLI** to run verification/debugging commands
-- Terraform Cloud authenticates via OIDC and does **not** use these credentials
-- You can get personal AWS credentials by:
-  - Using AWS SSO (`aws sso login`)
-  - Or creating a personal IAM user with read-only permissions
-- If you don't need to run AWS CLI commands locally, you can skip setting AWS credentials in `.env`
+**Note:** Terraform Cloud uses OIDC for AWS authentication and does not require AWS access keys in your `.env` file.
 
 ### 4.2 Initialize Terraform
 

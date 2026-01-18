@@ -242,10 +242,25 @@ See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for backup commands and automat
 
 ---
 
+## Cloud Deployment
+
+For production/staging deployment to AWS with Cloudflare Zero Trust:
+
+- **[docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md)** - Complete Terraform setup guide for AWS + Cloudflare
+
+The infrastructure includes:
+- EC2 instances with Nitro Enclave support
+- Cloudflare Zero Trust tunnels for secure access
+- Environment-specific subdomains (e.g., `api-dev-eddie.example.com`)
+- Terraform Cloud for state management
+
+---
+
 ## Documentation
 
 - **[docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md)** - Complete Docker setup, commands, troubleshooting
 - **[docs/MATRIX_SETUP_GUIDE.md](docs/MATRIX_SETUP_GUIDE.md)** - Manual Matrix setup (for local dev)
+- **[docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md)** - Cloud deployment with Terraform
 - **[CLAUDE.md](CLAUDE.md)** - Project architecture and development guide
 
 ---
