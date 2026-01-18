@@ -20,7 +20,12 @@ output "tunnel_id" {
   value       = module.cloudflare.tunnel_id
 }
 
+output "api_url" {
+  description = "API endpoint URL"
+  value       = module.cloudflare.api_url
+}
+
 output "app_url" {
-  description = "Application URL"
-  value       = "https://api.${var.cloudflare_domain}"
+  description = "Frontend application URL"
+  value       = module.cloudflare.app_url
 }

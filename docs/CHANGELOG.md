@@ -15,12 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `lightfriend-add-frontend-page` - Yew frontend page creation guide
 - `/update-docs` command for documentation maintenance
 - Organized documentation into `docs/` folder
+- Complete Terraform infrastructure setup with AWS + Cloudflare
+- Environment-specific subdomains for multi-environment support (e.g., `api-dev-eddie.example.com`)
+- Comprehensive AWS IAM permissions policy for Terraform Cloud OIDC
+- Terraform Cloud workspace configuration guide
 
 ### Changed
 - Streamlined `CLAUDE.md` from 373 to 97 lines (74% reduction)
 - Moved detailed Docker setup to `docs/DOCKER_SETUP.md`
 - Moved Matrix setup guide to `docs/MATRIX_SETUP_GUIDE.md`
 - Updated all documentation references to new paths
+- Migrated Cloudflare resources to non-deprecated providers (`cloudflare_zero_trust_tunnel_cloudflared`)
+- Updated `INFRASTRUCTURE_SETUP.md` with complete step-by-step guide and troubleshooting
 
 ## [2025-01-11] - SMS & Email Improvements
 
