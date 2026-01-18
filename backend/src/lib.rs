@@ -118,6 +118,7 @@ pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
 pub mod test_utils;
 
 // Re-export key types for external use
+pub use api::twilio_client::RealTwilioClient;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::UserCore;
 pub use repositories::user_repository::UserRepository;
@@ -166,6 +167,7 @@ pub struct AppState {
     pub db_pool: DbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
+    pub twilio_client: Arc<RealTwilioClient>,
     pub ai_config: AiConfig,
     pub google_calendar_oauth_client: GoogleOAuthClient,
     pub youtube_oauth_client: GoogleOAuthClient,

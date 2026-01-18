@@ -840,14 +840,29 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         payload.media_content_type0.as_ref(),
     ) {
         if num_media != "0" {
-            // Extract media SID from URL
-            if let Some(media_sid) = media_url.split("/Media/").nth(1) {
-                tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(state, media_sid, &user)
+            // Extract message SID and media SID from URL
+            // URL format: .../Messages/{message_sid}/Media/{media_sid}
+            if let (Some(msg_part), Some(media_sid)) = (
+                media_url.split("/Messages/").nth(1),
+                media_url.split("/Media/").nth(1),
+            ) {
+                if let Some(message_sid) = msg_part.split("/Media/").next() {
+                    tracing::debug!(
+                        "Attempting to delete media {} from message {}",
+                        media_sid,
+                        message_sid
+                    );
+                    match crate::api::twilio_utils::delete_twilio_message_media(
+                        state,
+                        message_sid,
+                        media_sid,
+                        &user,
+                    )
                     .await
-                {
-                    Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
-                    Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
+                    {
+                        Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
+                        Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
+                    }
                 }
             }
         }

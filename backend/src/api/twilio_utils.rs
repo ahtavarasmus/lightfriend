@@ -1,3 +1,4 @@
+use crate::api::twilio_client::{SendMessageOptions, TwilioClient, TwilioCredentials};
 use crate::models::user_models::{NewMessageStatusLog, User};
 use crate::schema::message_status_log;
 use crate::AppState;
@@ -24,21 +25,6 @@ use tracing;
 use url::form_urlencoded;
 
 #[derive(Deserialize)]
-pub struct MessageResponse {
-    sid: String,
-}
-
-#[derive(Deserialize)]
-struct PhoneNumbersResponse {
-    incoming_phone_numbers: Vec<PhoneNumberInfo>,
-}
-
-#[derive(Deserialize)]
-struct PhoneNumberInfo {
-    sid: String,
-}
-
-#[derive(Deserialize)]
 struct ElevenLabsResponse {
     phone_number_id: String,
 }
@@ -50,50 +36,18 @@ pub async fn set_twilio_webhook(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    let client = Client::new();
     let webhook_url = format!("{}/api/sms/server", env::var("SERVER_URL")?);
 
-    // Find the phone number SID
-    let params = [("PhoneNumber", phone_number)];
-    let response = client
-        .get(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers.json",
-            account_sid
-        ))
-        .basic_auth(account_sid, Some(auth_token))
-        .query(&params)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        return Err(format!("Failed to list phone numbers: {}", response.status()).into());
-    }
-
-    let data: PhoneNumbersResponse = response.json().await?;
-    let phone_sid = data
-        .incoming_phone_numbers
-        .first()
-        .ok_or("No matching phone number found")?
-        .sid
-        .clone();
-
-    // Update the webhook
-    let update_params = [("SmsUrl", webhook_url.as_str()), ("SmsMethod", "POST")];
-    let update_response = client
-        .post(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers/{}.json",
-            account_sid, phone_sid
-        ))
-        .basic_auth(account_sid, Some(auth_token))
-        .form(&update_params)
-        .send()
-        .await?;
-
-    if !update_response.status().is_success() {
-        return Err(format!("Failed to update webhook: {}", update_response.status()).into());
-    }
+    // Use TwilioClient to configure the webhook
+    let credentials = TwilioCredentials::new(account_sid.to_string(), auth_token.to_string());
+    state
+        .twilio_client
+        .configure_webhook(&credentials, phone_number, &webhook_url)
+        .await
+        .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
 
     // If Twilio update succeeds, add to ElevenLabs
+    let client = Client::new();
     let eleven_key = env::var("ELEVENLABS_API_KEY")?;
 
     // Check for existing phone number ID and delete if exists
@@ -431,6 +385,7 @@ pub async fn validate_twilio_status_callback_signature(
 
 pub async fn delete_twilio_message_media(
     state: &Arc<AppState>,
+    message_sid: &str,
     media_sid: &str,
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -447,27 +402,20 @@ pub async fn delete_twilio_message_media(
     } else {
         state.user_core.get_twilio_credentials(user.id)?
     };
-    let client = Client::new();
 
-    let response = client
-        .delete(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/Media/{}",
-            account_sid, media_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?;
+    let credentials = TwilioCredentials::new(account_sid, auth_token);
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to delete message media: {} - {}",
-            response.status(),
-            response.text().await?
-        )
-        .into());
-    }
+    state
+        .twilio_client
+        .delete_message_media(&credentials, message_sid, media_sid)
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
 
-    tracing::debug!("Successfully deleted message media: {}", media_sid);
+    tracing::debug!(
+        "Successfully deleted message media: {} from message {}",
+        media_sid,
+        message_sid
+    );
     Ok(())
 }
 
@@ -479,7 +427,7 @@ pub async fn delete_twilio_message(
     message_sid: &str,
     user: &User,
 ) -> Result<(), Box<dyn Error>> {
-    tracing::debug!("deleting incoming message");
+    tracing::debug!("deleting incoming message: {}", message_sid);
 
     // BYOT users with their own credentials always use their own account
     let (account_sid, auth_token) = if state.user_core.is_byot_user(user.id) {
@@ -495,32 +443,31 @@ pub async fn delete_twilio_message(
         state.user_core.get_twilio_credentials(user.id)?
     };
 
-    let client = Client::new();
+    let credentials = TwilioCredentials::new(account_sid, auth_token);
 
     // Wait 1-2 minutes to avoid 'resource not complete' errors
     sleep(Duration::from_secs(60)).await;
 
     let mut attempts = 0;
     loop {
-        let response = client
-            .delete(format!(
-                "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}.json",
-                account_sid, message_sid
-            ))
-            .basic_auth(&account_sid, Some(&auth_token))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            tracing::info!("Incoming message deleted: {}", message_sid);
-            return Ok(());
-        } else if attempts < 3 {
-            attempts += 1;
-            let wait_secs = 60 * attempts as u64;
-            tracing::warn!("Retry deletion after {} seconds", wait_secs);
-            sleep(Duration::from_secs(wait_secs)).await;
-        } else {
-            return Err(format!("Failed to delete: {}", response.status()).into());
+        match state
+            .twilio_client
+            .delete_message(&credentials, message_sid)
+            .await
+        {
+            Ok(()) => {
+                tracing::info!("Incoming message deleted: {}", message_sid);
+                return Ok(());
+            }
+            Err(e) if attempts < 3 => {
+                attempts += 1;
+                let wait_secs = 60 * attempts as u64;
+                tracing::warn!("Retry deletion after {} seconds: {:?}", wait_secs, e);
+                sleep(Duration::from_secs(wait_secs)).await;
+            }
+            Err(e) => {
+                return Err(format!("Failed to delete: {}", e).into());
+            }
         }
     }
 }
@@ -572,8 +519,6 @@ pub async fn send_conversation_message(
         // Non-supported country must have their own credentials
         state.user_core.get_twilio_credentials(user.id)?
     };
-
-    let client = Client::new();
 
     // Get or set country
     let mut country = user.phone_number_country.clone();
@@ -694,65 +639,61 @@ pub async fn send_conversation_message(
             });
     }
 
-    // Build form_data
-    let mut form_data = vec![("To", user.phone_number.as_str()), ("Body", body)];
-    let sid =
-        env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
-
-    // Add StatusCallback URL for delivery status tracking
-    let server_url = env::var("SERVER_URL").unwrap_or_default();
-    let status_callback_url = format!("{}/api/twilio/status-callback", server_url);
-
-    if use_messaging_service {
-        form_data.push(("MessagingServiceSid", sid.as_str()));
-    } else if !from_number.is_empty() {
-        form_data.push(("From", from_number.as_str()));
+    // Build send options using the TwilioClient trait
+    let messaging_service_sid = if use_messaging_service {
+        Some(
+            env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set"),
+        )
     } else {
+        None
+    };
+
+    let server_url = env::var("SERVER_URL").unwrap_or_default();
+    let status_callback_url = if !server_url.is_empty() {
+        Some(format!("{}/api/twilio/status-callback", server_url))
+    } else {
+        None
+    };
+
+    // Handle media_sid if provided - convert to full URL
+    let media_url = media_sid.map(|media_id| {
+        format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Media/{}",
+            account_sid, media_id
+        )
+    });
+
+    // Warn if no valid From
+    if from_number.is_empty() && messaging_service_sid.is_none() {
         tracing::warn!(
             "No valid From available for user {} and country {:?}",
             user.id,
             country
         );
-        // Fallback or error as needed
     }
 
-    // Only add StatusCallback if SERVER_URL is configured
-    if !server_url.is_empty() {
-        form_data.push(("StatusCallback", status_callback_url.as_str()));
-    }
+    let credentials = TwilioCredentials::new(account_sid.clone(), auth_token);
+    let options = SendMessageOptions {
+        to: user.phone_number.clone(),
+        body: body.to_string(),
+        media_url,
+        from: if from_number.is_empty() {
+            None
+        } else {
+            Some(from_number.clone())
+        },
+        messaging_service_sid,
+        status_callback_url,
+    };
 
-    // Handle media_sid if provided
-    let media_url: String;
-    if let Some(media_id) = media_sid {
-        // Construct the MediaUrl using the media_sid (corrected to without .json and proper path)
-        // Note: This assumes media_sid is a valid Media SID hosted on Twilio. However, Twilio API URLs require authentication,
-        // so this may not work for sending MMS as the MediaUrl must be publicly accessible. Consider hosting media externally (e.g., S3) for reliability.
-        media_url = format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Media/{}",
-            account_sid, media_id
-        );
-        form_data.push(("MediaUrl", &media_url));
-    }
+    // Send using the TwilioClient from AppState
+    let result = state
+        .twilio_client
+        .send_message(&credentials, options)
+        .await
+        .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
 
-    let resp = client
-        .post(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-            account_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&form_data)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        tracing::error!("Twilio send error: status {}, body: {}", status, text);
-        return Err(format!("Failed to send message: {}", text).into());
-    }
-
-    let response: MessageResponse = resp.json().await?;
-
+    let message_sid = result.message_sid;
     tracing::debug!(
         "Successfully sent message{} with SID: {}",
         if media_sid.is_some() {
@@ -760,7 +701,7 @@ pub async fn send_conversation_message(
         } else {
             ""
         },
-        response.sid
+        message_sid
     );
 
     // Log initial message status to database for tracking
@@ -770,7 +711,7 @@ pub async fn send_conversation_message(
             .unwrap()
             .as_secs() as i32;
         let new_status = NewMessageStatusLog {
-            message_sid: response.sid.clone(),
+            message_sid: message_sid.clone(),
             user_id: user.id,
             direction: "outbound".to_string(),
             to_number: user.phone_number.clone(),
@@ -794,16 +735,16 @@ pub async fn send_conversation_message(
         {
             tracing::error!(
                 "Failed to log message status for SID {}: {}",
-                response.sid,
+                message_sid,
                 e
             );
         } else {
-            tracing::info!("Logged initial message status for SID {}", response.sid);
+            tracing::info!("Logged initial message status for SID {}", message_sid);
         }
     }
 
     // Message deletion now happens in the status callback handler
     // when the message reaches a final status (delivered/failed/undelivered)
 
-    Ok(response.sid)
+    Ok(message_sid)
 }

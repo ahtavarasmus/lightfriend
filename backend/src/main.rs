@@ -313,10 +313,12 @@ async fn main() {
 
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
+    let twilio_client = Arc::new(backend::RealTwilioClient::new());
     let state = Arc::new(AppState {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
+        twilio_client,
         ai_config: AiConfig::from_env(),
         google_calendar_oauth_client,
         uber_oauth_client,

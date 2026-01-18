@@ -82,6 +82,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         db_pool: pool,
         user_core,
         user_repository,
+        twilio_client: Arc::new(crate::RealTwilioClient::new()),
         ai_config: crate::AiConfig::default_for_tests(),
         google_calendar_oauth_client: google_oauth.clone(),
         youtube_oauth_client: google_oauth.clone(),
