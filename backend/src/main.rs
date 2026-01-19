@@ -22,8 +22,8 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AiConfig, AppState, SqliteConnectionCustomizer, TotpRepository,
-    UserCore, UserRepository, WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
+    SqliteConnectionCustomizer, TotpRepository, UserCore, UserRepository, WebauthnRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
@@ -219,6 +219,7 @@ async fn main() {
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -347,6 +348,7 @@ async fn main() {
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,
+        admin_alert_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -601,6 +603,32 @@ async fn main() {
         .route(
             "/api/admin/stats/usage",
             get(handlers::admin_stats_handlers::get_usage_stats),
+        )
+        // Alert management routes
+        .route("/api/admin/alerts", get(admin_handlers::get_alerts))
+        .route(
+            "/api/admin/alerts/count",
+            get(admin_handlers::get_alert_count),
+        )
+        .route(
+            "/api/admin/alerts/{id}/acknowledge",
+            post(admin_handlers::acknowledge_alert),
+        )
+        .route(
+            "/api/admin/alerts/acknowledge-all",
+            post(admin_handlers::acknowledge_all_alerts),
+        )
+        .route(
+            "/api/admin/alerts/disabled-types",
+            get(admin_handlers::get_disabled_alert_types),
+        )
+        .route(
+            "/api/admin/alerts/disable/{alert_type}",
+            post(admin_handlers::disable_alert_type),
+        )
+        .route(
+            "/api/admin/alerts/enable/{alert_type}",
+            post(admin_handlers::enable_alert_type),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

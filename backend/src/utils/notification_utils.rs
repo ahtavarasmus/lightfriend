@@ -3,6 +3,272 @@ use crate::AppState;
 use std::error::Error;
 use std::sync::Arc;
 
+// ============================================================================
+// Admin Alert System
+// ============================================================================
+
+/// Severity levels for admin alerts with different cooldown periods
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertSeverity {
+    /// Critical issues requiring immediate attention (1 hour cooldown)
+    /// Use for: missing credentials, payment failures, security issues
+    Critical,
+    /// Errors that need attention but aren't emergencies (6 hour cooldown)
+    /// Use for: API failures, integration issues, unexpected states
+    Error,
+    /// Warnings about potential issues (24 hour cooldown)
+    /// Use for: rate limits approaching, deprecation notices, performance issues
+    Warning,
+}
+
+impl AlertSeverity {
+    /// Get cooldown period in seconds for this severity level
+    pub fn cooldown_seconds(&self) -> i32 {
+        match self {
+            AlertSeverity::Critical => 3600,     // 1 hour
+            AlertSeverity::Error => 6 * 3600,    // 6 hours
+            AlertSeverity::Warning => 24 * 3600, // 24 hours
+        }
+    }
+
+    /// Get display prefix for email subject
+    pub fn prefix(&self) -> &'static str {
+        match self {
+            AlertSeverity::Critical => "[CRITICAL]",
+            AlertSeverity::Error => "[ERROR]",
+            AlertSeverity::Warning => "[WARNING]",
+        }
+    }
+}
+
+/// Macro for sending admin alerts with automatic location capture.
+///
+/// # Usage
+///
+/// ```ignore
+/// // Simple alert
+/// admin_alert!(state, Critical, "Database connection lost");
+///
+/// // Alert with context fields
+/// admin_alert!(state, Critical, "Twilio credentials missing",
+///     message_sid = payload.MessageSid,
+///     status = payload.MessageStatus
+/// );
+///
+/// // Warning level
+/// admin_alert!(state, Warning, "Rate limit at 80%",
+///     current = count,
+///     limit = max_requests
+/// );
+/// ```
+///
+/// The macro automatically captures file, line, and module path.
+/// Alerts are spawned as background tasks and don't block the caller.
+#[macro_export]
+macro_rules! admin_alert {
+    // With context fields
+    ($state:expr, $severity:ident, $message:expr, $($key:ident = $value:expr),+ $(,)?) => {{
+        let context = vec![
+            $(
+                (stringify!($key).to_string(), format!("{}", $value)),
+            )+
+        ];
+        $crate::utils::notification_utils::send_admin_alert_internal(
+            $state.clone(),
+            $crate::utils::notification_utils::AlertSeverity::$severity,
+            $message.to_string(),
+            Some(context),
+            file!(),
+            line!(),
+            module_path!(),
+        );
+    }};
+    // Without context fields
+    ($state:expr, $severity:ident, $message:expr) => {{
+        $crate::utils::notification_utils::send_admin_alert_internal(
+            $state.clone(),
+            $crate::utils::notification_utils::AlertSeverity::$severity,
+            $message.to_string(),
+            None,
+            file!(),
+            line!(),
+            module_path!(),
+        );
+    }};
+}
+
+/// Internal function called by admin_alert! macro. Do not call directly.
+pub fn send_admin_alert_internal(
+    state: Arc<AppState>,
+    severity: AlertSeverity,
+    message: String,
+    context: Option<Vec<(String, String)>>,
+    file: &'static str,
+    line: u32,
+    module: &'static str,
+) {
+    tokio::spawn(async move {
+        if let Err(e) =
+            send_alert_with_context(&state, severity, &message, context, file, line, module).await
+        {
+            tracing::error!(
+                "Failed to send {} admin alert '{}': {}",
+                format!("{:?}", severity).to_lowercase(),
+                message,
+                e
+            );
+        }
+    });
+}
+
+/// Send an admin alert with full context. Called by the macro's spawned task.
+async fn send_alert_with_context(
+    state: &Arc<AppState>,
+    severity: AlertSeverity,
+    message: &str,
+    context: Option<Vec<(String, String)>>,
+    file: &str,
+    line: u32,
+    module: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let subject = format!("{} {}", severity.prefix(), message);
+    let location = format!("{}:{}", file, line);
+    let cooldown_seconds = severity.cooldown_seconds();
+    let cooldown_hours = cooldown_seconds / 3600;
+
+    // Build full message with context for database storage
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let mut full_message = format!(
+        "{} {}\n\nLocation: {}:{}\nModule: {}\nTime: {}\n",
+        severity.prefix(),
+        message,
+        file,
+        line,
+        module,
+        timestamp
+    );
+
+    if let Some(ref ctx) = context {
+        full_message.push_str("\nContext:\n");
+        for (key, value) in ctx {
+            full_message.push_str(&format!("  {}: {}\n", key, value));
+        }
+    }
+
+    // Always log to database first
+    if let Err(e) = state.admin_alert_repository.create_alert(
+        &subject,
+        &format!("{:?}", severity),
+        &full_message,
+        &location,
+        module,
+    ) {
+        tracing::warn!("Failed to log admin alert to database: {}", e);
+    }
+
+    // Check if this alert type is disabled
+    match state
+        .admin_alert_repository
+        .is_alert_type_disabled(&subject)
+    {
+        Ok(true) => {
+            tracing::debug!(
+                "Skipping email for admin alert '{}' - alert type is disabled",
+                subject
+            );
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!(
+                "Failed to check if alert type is disabled: {}, proceeding with send",
+                e
+            );
+        }
+    }
+
+    let admin_email =
+        std::env::var("ADMIN_ALERT_EMAIL").unwrap_or_else(|_| "rasmus@ahtava.com".to_string());
+
+    if admin_email.is_empty() {
+        tracing::warn!("ADMIN_ALERT_EMAIL is empty, skipping alert email");
+        return Ok(());
+    }
+
+    // Check cooldown
+    match state.user_repository.has_recent_notification(
+        1,        // Admin user ID
+        &subject, // Use full subject as notification type
+        cooldown_seconds,
+    ) {
+        Ok(true) => {
+            tracing::debug!(
+                "Skipping admin alert email '{}' - still in {}-hour cooldown period",
+                subject,
+                cooldown_hours
+            );
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!(
+                "Failed to check alert cooldown: {}, proceeding with send",
+                e
+            );
+        }
+    }
+
+    // Build email body (simpler version without reply-to-disable instructions)
+    let mut body = full_message.clone();
+    body.push_str(&format!(
+        "\n---\nCooldown: {} hours for {:?} alerts.\nManage alerts at: /admin/alerts",
+        cooldown_hours, severity
+    ));
+
+    // Log the notification to prevent duplicate sends (for cooldown tracking)
+    let _ = state.user_repository.log_usage(LogUsageParams {
+        user_id: 1,
+        sid: None,
+        activity_type: subject.clone(),
+        credits: None,
+        time_consumed: None,
+        success: Some(true),
+        reason: None,
+        status: None,
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    });
+
+    // Send the email
+    let from_with_name = "Lightfriend Alerts <noreply@lightfriend.ai>".to_string();
+    let email = resend_rs::types::CreateEmailBaseOptions::new(
+        from_with_name,
+        [admin_email.as_str()],
+        &subject,
+    )
+    .with_text(&body);
+
+    let resend_api_key = std::env::var("RESEND_API_KEY").map_err(|_| "RESEND_API_KEY not set")?;
+    let resend = resend_rs::Resend::new(&resend_api_key);
+
+    resend
+        .emails
+        .send(email)
+        .await
+        .map_err(|e| format!("Failed to send alert email: {:?}", e))?;
+
+    tracing::info!(
+        "Sent {} admin alert: {}",
+        format!("{:?}", severity).to_lowercase(),
+        message
+    );
+    Ok(())
+}
+
+// ============================================================================
+// Legacy Alert Functions (kept for backwards compatibility)
+// ============================================================================
+
 /// Sends an email to the admin (rasmus@ahtava.com) with usage statistics
 /// for Tinfoil API key renewals. This helps monitor token consumption patterns.
 ///
@@ -142,6 +408,36 @@ pub async fn send_admin_alert(
 ) -> Result<(), Box<dyn Error>> {
     use axum::extract::{Json, State as AxumState};
 
+    const COOLDOWN_HOURS: i32 = 6;
+    let cooldown_seconds = COOLDOWN_HOURS * 3600;
+
+    // Always log to database first
+    if let Err(e) = state.admin_alert_repository.create_alert(
+        subject, "Error", // Legacy function uses Error severity by default
+        message, "legacy", // No location info for legacy function
+        "legacy",
+    ) {
+        tracing::warn!("Failed to log admin alert to database: {}", e);
+    }
+
+    // Check if this alert type is disabled
+    match state.admin_alert_repository.is_alert_type_disabled(subject) {
+        Ok(true) => {
+            tracing::debug!(
+                "Skipping email for admin alert '{}' - alert type is disabled",
+                subject
+            );
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!(
+                "Failed to check if alert type is disabled: {}, proceeding with send",
+                e
+            );
+        }
+    }
+
     // Get the admin alert email from environment variable or default to rasmus@ahtava.com
     let admin_email =
         std::env::var("ADMIN_ALERT_EMAIL").unwrap_or_else(|_| "rasmus@ahtava.com".to_string());
@@ -150,9 +446,6 @@ pub async fn send_admin_alert(
         tracing::warn!("ADMIN_ALERT_EMAIL is empty, skipping alert");
         return Ok(());
     }
-
-    const COOLDOWN_HOURS: i32 = 6;
-    let cooldown_seconds = COOLDOWN_HOURS * 3600;
 
     // Check cooldown: has this alert type been sent recently?
     match state.user_repository.has_recent_notification(
@@ -168,9 +461,7 @@ pub async fn send_admin_alert(
             );
             return Ok(());
         }
-        Ok(false) => {
-            // Not in cooldown, proceed with reply check
-        }
+        Ok(false) => {}
         Err(e) => {
             tracing::warn!(
                 "Failed to check alert cooldown: {}, proceeding with send",
@@ -179,62 +470,16 @@ pub async fn send_admin_alert(
         }
     }
 
-    // Check if admin has replied to disable this alert type
-    // Search for emails from admin containing the subject line
-    if let Ok(Some(_)) = state.user_repository.get_imap_credentials(1) {
-        // Admin (user_id 1) has IMAP configured, check for replies
-        match crate::handlers::imap_handlers::fetch_emails_imap(
-            state,
-            1,
-            false,
-            Some(10),
-            false,
-            true,
-        )
-        .await
-        {
-            Ok(emails) => {
-                // Check if any email from admin's sent folder or replies contains the subject
-                // and has content indicating they want to disable alerts
-                for email in emails {
-                    if let Some(email_subject) = &email.subject {
-                        if email_subject.contains(subject) {
-                            if let Some(snippet) = &email.snippet {
-                                let lower_snippet = snippet.to_lowercase();
-                                // Check for common disable phrases
-                                if lower_snippet.contains("disable")
-                                    || lower_snippet.contains("stop")
-                                    || lower_snippet.contains("unsubscribe")
-                                    || lower_snippet.contains("mute")
-                                {
-                                    tracing::info!(
-                                        "Admin has replied to disable alerts for '{}', skipping",
-                                        subject
-                                    );
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::debug!("Could not check admin email replies: {:?}", e);
-            }
-        }
-    }
-
-    // Append instructions for disabling to the message
+    // Build message with admin dashboard link instead of reply-to-disable
     let enhanced_message = format!(
         "{}\n\n\
         ---\n\
-        To disable future alerts of this type, reply to this email with the word 'disable'.\n\
-        This alert has a {}-hour cooldown to prevent spam.",
+        Cooldown: {}-hour for this alert type.\n\
+        Manage alerts at: /admin/alerts",
         message, COOLDOWN_HOURS
     );
 
-    // Create email request - lettre handles line ending conversion during SMTP transmission
-    // Don't convert \n to \r\n here as it causes encoding issues with lettre's body builder
+    // Create email request
     let email_request = crate::handlers::imap_handlers::SendEmailRequest {
         to: admin_email.clone(),
         subject: subject.to_string(),
@@ -260,12 +505,12 @@ pub async fn send_admin_alert(
 
             // Log this alert in usage_logs for cooldown tracking
             if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                user_id: 1,                         // Admin user ID
-                sid: None,                          // No SID for email alerts
-                activity_type: subject.to_string(), // Use subject as activity_type
+                user_id: 1,
+                sid: None,
+                activity_type: subject.to_string(),
                 credits: None,
                 time_consumed: None,
-                success: Some(true), // Success
+                success: Some(true),
                 reason: None,
                 status: Some("sent".to_string()),
                 recharge_threshold_timestamp: None,

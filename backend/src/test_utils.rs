@@ -74,6 +74,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     ));
     let webauthn_repository =
         Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(
+        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -112,6 +115,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,
+        admin_alert_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),

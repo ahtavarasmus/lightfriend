@@ -86,8 +86,8 @@ pub mod models {
     pub mod user_models;
 }
 pub mod repositories {
+    pub mod admin_alert_repository;
     pub mod connection_auth;
-    #[cfg(test)]
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
     pub mod signup_repository;
@@ -118,6 +118,7 @@ pub mod test_utils;
 
 // Re-export key types for external use
 pub use api::twilio_client::RealTwilioClient;
+pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::UserCore;
 pub use repositories::user_repository::UserRepository;
@@ -192,6 +193,7 @@ pub struct AppState {
     pub pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
     pub totp_repository: Arc<TotpRepository>,
     pub webauthn_repository: Arc<WebauthnRepository>,
+    pub admin_alert_repository: Arc<AdminAlertRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
