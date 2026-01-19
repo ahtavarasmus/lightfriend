@@ -373,16 +373,7 @@ pub fn pricing_wrapper() -> Html {
                     if let Ok(profile) = response.json::<UserProfile>().await {
                         profile_data.set(Some(profile.clone()));
                         is_logged_in.set(true);
-
-                        let phone_country = profile.phone_number_country.unwrap_or("US".to_string());
-                        selected_country.set(phone_country.clone());
-
-                        let full_name = country_map.get(&phone_country).cloned().unwrap_or(phone_country.clone());
-                        country_name.set(full_name);
-
-                        if phone_country == "Other" {
-                            country_name.set(ip_name.clone());
-                        }
+                        // Country is determined from IP geolocation (set earlier in this effect)
                     } else {
                         is_logged_in.set(false);
                     }

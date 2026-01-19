@@ -143,6 +143,7 @@ struct AdminAlert {
     severity: String,
     message: String,
     location: String,
+    #[allow(dead_code)]
     module: String,
     acknowledged: i32,
     created_at: i32,
@@ -151,14 +152,17 @@ struct AdminAlert {
 #[derive(Deserialize, Clone, Debug)]
 struct AlertsResponse {
     alerts: Vec<AdminAlert>,
+    #[allow(dead_code)]
     total: i64,
     unacknowledged_count: i64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
 struct DisabledAlertType {
+    #[allow(dead_code)]
     id: Option<i32>,
     alert_type: String,
+    #[allow(dead_code)]
     disabled_at: i32,
 }
 
@@ -178,7 +182,6 @@ struct UserInfo {
     id: i32,
     email: String,
     phone_number: String,
-    phone_number_country: Option<String>,
     time_to_live: Option<i32>,
     verified: bool,
     credits: f32,
@@ -1330,7 +1333,6 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
                                                 <th>{"Phone"}</th>
-                                                <th>{"Country"}</th>
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Monthly Credits"}</th>
                                                 <th>{"Tier"}</th>
@@ -1386,7 +1388,6 @@ pub fn admin_dashboard() -> Html {
                                                                     </div>
                                                                 </td>
                                                                 <td>{&user.phone_number}</td>
-                                                                <td>{user.phone_number_country.clone().unwrap_or_else(|| "?".to_string())}</td>
                                                                 <td>{format!("{:.2}€", user.credits)}</td>
                                                                 <td>{format!("{:.2}€", user.credits_left)}</td>
                                                                 <td>
