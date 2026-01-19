@@ -1,6 +1,4 @@
-use crate::utils::country::{
-    get_country_code_from_phone, is_local_number_country, is_notification_only_country,
-};
+use crate::utils::country::get_country_code_from_phone;
 use crate::AppState;
 use std::sync::Arc;
 
@@ -41,15 +39,9 @@ pub async fn check_user_credits(
         return Ok(());
     }
 
-    // Check if the event type is free based on country
-    // Local number countries and notification-only countries are charged through Lightfriend
-    // Other countries pay Twilio directly (require their own credentials)
-    let messages_are_included = !is_local_number_country(&user.phone_number)
-        && !is_notification_only_country(&user.phone_number);
-
-    if messages_are_included {
-        return Ok(());
-    }
+    // All other users are charged through Lightfriend:
+    // - Local number countries (US, CA, FI, NL, GB, AU) use hardcoded pricing
+    // - Notification-only countries (all others worldwide) use dynamic Twilio API pricing
 
     // Get required amounts based on region (dual interpretation)
     let (required_credits_left, required_credits) = if is_us_or_ca(&user.phone_number) {
@@ -127,21 +119,18 @@ pub async fn check_user_credits(
 
     // Check if user has sufficient balance
     if user.credits_left < required_credits_left && user.credits < required_credits {
-        // Check if enough time has passed since the last notification (24 hours)
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let should_notify = match user.last_credits_notification {
-            None => true,
-            Some(last_time) => (current_time - last_time) >= 24 * 3600, // 24 hours in seconds
-        };
+        // Only send notification once ever (when last_credits_notification is None)
+        // The notification flag is cleared when user adds credits
+        let should_notify = user.last_credits_notification.is_none();
 
         if should_notify && event_type != "digest" {
             // Send notification about depleted credits and monthly quota
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
 
-            // Update the last notification timestamp
+            // Update the last notification timestamp to prevent repeat notifications
             if let Err(e) = state
                 .user_core
                 .update_last_credits_notification(user.id, current_time)
@@ -153,12 +142,14 @@ pub async fn check_user_credits(
             let state_clone = state.clone();
 
             tokio::spawn(async move {
-                let _ = crate::api::twilio_utils::send_conversation_message(
-                    &state_clone,
-                    "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
-                    None,
-                    &user_clone,
-                ).await;
+                let _ = state_clone
+                    .twilio_message_service
+                    .send_sms(
+                        "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
+                        None,
+                        &user_clone,
+                    )
+                    .await;
             });
         }
         return Err("Insufficient credits. You have used all your monthly quota and don't have enough extra credits.".to_string());
@@ -218,15 +209,9 @@ pub fn deduct_user_credits(
         return Ok(());
     }
 
-    // Check if the event type is free based on country
-    // Local number countries and notification-only countries are charged through Lightfriend
-    // Other countries pay Twilio directly (require their own credentials)
-    let messages_are_included = !is_local_number_country(&user.phone_number)
-        && !is_notification_only_country(&user.phone_number);
-
-    if messages_are_included {
-        return Ok(());
-    }
+    // All other users are charged through Lightfriend:
+    // - Local number countries (US, CA, FI, NL, GB, AU) use hardcoded pricing
+    // - Notification-only countries (all others worldwide) use dynamic Twilio API pricing
 
     // Calculate deduction amounts based on region (dual interpretation)
     let (credits_left_deduction, credits_deduction) = if is_us_or_ca(&user.phone_number) {

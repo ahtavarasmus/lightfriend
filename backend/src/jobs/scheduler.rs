@@ -835,6 +835,33 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add once tasks job to scheduler");
 
+    // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
+    let state_clone = Arc::clone(&state);
+    let alert_cleanup_job = Job::new_async("0 0 2 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running admin alert cleanup...");
+
+            // Clean up alerts older than 30 days
+            let cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32
+                - (30 * 24 * 60 * 60); // 30 days ago
+
+            match state.admin_alert_repository.delete_old_alerts(cutoff) {
+                Ok(count) => debug!("Cleaned up {} old admin alerts", count),
+                Err(e) => error!("Failed to cleanup old admin alerts: {}", e),
+            }
+        })
+    })
+    .expect("Failed to create alert cleanup job");
+
+    sched
+        .add(alert_cleanup_job)
+        .await
+        .expect("Failed to add alert cleanup job to scheduler");
+
     // Task cleanup - runs daily at 3am UTC to remove old completed/cancelled tasks
     let state_clone = Arc::clone(&state);
     let task_cleanup_job = Job::new_async("0 0 3 * * *", move |_, _| {

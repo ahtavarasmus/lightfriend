@@ -1,6 +1,19 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    admin_alerts (id) {
+        id -> Nullable<Integer>,
+        alert_type -> Text,
+        severity -> Text,
+        message -> Text,
+        location -> Text,
+        module -> Text,
+        acknowledged -> Integer,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     bridge_disconnection_events (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -105,6 +118,14 @@ diesel::table! {
         enabled -> Integer,
         last_sent_at -> Nullable<Integer>,
         created_at -> Integer,
+    }
+}
+
+diesel::table! {
+    disabled_alert_types (id) {
+        id -> Nullable<Integer>,
+        alert_type -> Text,
+        disabled_at -> Integer,
     }
 }
 
@@ -413,7 +434,6 @@ diesel::table! {
         confirm_send_event -> Nullable<Text>,
         waiting_checks_count -> Integer,
         next_billing_date_timestamp -> Nullable<Integer>,
-        phone_number_country -> Nullable<Text>,
         magic_token -> Nullable<Text>,
         plan_type -> Nullable<Text>,
     }
@@ -492,6 +512,7 @@ diesel::joinable!(webauthn_challenges -> users (user_id));
 diesel::joinable!(webauthn_credentials -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    admin_alerts,
     bridge_disconnection_events,
     bridges,
     calendar_notifications,
@@ -501,6 +522,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     country_availability,
     critical_categories,
     digests,
+    disabled_alert_types,
     email_judgments,
     google_calendar,
     imap_connection,

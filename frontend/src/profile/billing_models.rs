@@ -49,7 +49,6 @@ pub struct UserProfile {
     pub estimated_monitoring_cost: f32,
     pub location: Option<String>,
     pub nearby_places: Option<String>,
-    pub phone_number_country: Option<String>,
     pub server_ip: Option<String>,
     pub plan_type: Option<String>,
     pub phone_service_active: Option<bool>, // whether phone service is active - can be disabled for security

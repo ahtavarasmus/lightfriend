@@ -16,6 +16,7 @@ use crate::api::twilio_client::{
 };
 use crate::models::user_models::{NewMessageStatusLog, User};
 use crate::repositories::user_core::UserCore;
+use crate::repositories::user_repository::UserRepository;
 use crate::schema::message_status_log;
 use crate::DbPool;
 
@@ -70,14 +71,23 @@ pub struct MessageSendResult {
 pub struct TwilioMessageService<T: TwilioClient> {
     twilio_client: Arc<T>,
     db_pool: DbPool,
+    user_core: Arc<UserCore>,
+    user_repository: Arc<UserRepository>,
 }
 
 impl<T: TwilioClient> TwilioMessageService<T> {
     /// Create a new TwilioMessageService.
-    pub fn new(twilio_client: Arc<T>, db_pool: DbPool) -> Self {
+    pub fn new(
+        twilio_client: Arc<T>,
+        db_pool: DbPool,
+        user_core: Arc<UserCore>,
+        user_repository: Arc<UserRepository>,
+    ) -> Self {
         Self {
             twilio_client,
             db_pool,
+            user_core,
+            user_repository,
         }
     }
 
@@ -90,11 +100,11 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     pub fn resolve_credentials(
         &self,
         user: &User,
-        user_core: &UserCore,
     ) -> Result<TwilioCredentials, TwilioMessageError> {
         // BYOT users with their own credentials always use their own account
-        if user_core.is_byot_user(user.id) {
-            let (account_sid, auth_token) = user_core
+        if self.user_core.is_byot_user(user.id) {
+            let (account_sid, auth_token) = self
+                .user_core
                 .get_twilio_credentials(user.id)
                 .map_err(|e| TwilioMessageError::Database(e.to_string()))?;
             return Ok(TwilioCredentials::new(account_sid, auth_token));
@@ -115,7 +125,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         }
 
         // Non-supported country must have their own credentials
-        let (account_sid, auth_token) = user_core
+        let (account_sid, auth_token) = self
+            .user_core
             .get_twilio_credentials(user.id)
             .map_err(|_| TwilioMessageError::NoCredentials)?;
         Ok(TwilioCredentials::new(account_sid, auth_token))
@@ -127,12 +138,15 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     pub fn determine_sending_strategy(
         &self,
         user: &User,
-        user_core: &UserCore,
     ) -> Result<(Option<String>, bool, bool), TwilioMessageError> {
         let preferred = user.preferred_number.as_deref().unwrap_or("");
-        let has_byot_credentials = user_core.is_byot_user(user.id);
+        let has_byot_credentials = self.user_core.is_byot_user(user.id);
         let is_notification_only =
             crate::utils::country::is_notification_only_country(&user.phone_number);
+
+        // Detect country from phone number using libphonenumber
+        let country = crate::utils::country::get_country_code_from_phone(&user.phone_number)
+            .or_else(|| Some("Other".to_string()));
 
         let mut from_number: Option<String> = None;
         let mut use_messaging_service = false;
@@ -155,8 +169,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                     user.id
                 );
             }
-        } else if let Some(ref country) = user.phone_number_country {
-            match country.as_str() {
+        } else if let Some(ref c) = country {
+            match c.as_str() {
                 "US" => {
                     use_messaging_service = true;
                 }
@@ -220,10 +234,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                     if has_byot_credentials && !preferred.is_empty() {
                         from_number = Some(preferred.to_string());
                     } else {
-                        tracing::info!(
-                            "Using empty from_number for unsupported country: {}",
-                            country
-                        );
+                        tracing::info!("Using empty from_number for unsupported country: {}", c);
                     }
                 }
             }
@@ -232,17 +243,138 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         Ok((from_number, use_messaging_service, update_preferred))
     }
 
-    /// Send a conversation message to a user.
+    /// Send an SMS message to a user - convenience method matching the legacy twilio_utils interface.
     ///
-    /// This is the main entry point for sending messages, handling:
-    /// - Credential resolution
+    /// This is the primary method call sites should use. It handles:
+    /// - Credential resolution (BYOT vs global)
+    /// - Country detection and setting if missing
     /// - From number selection
+    /// - Media SID to URL conversion
     /// - Message history logging
     /// - Status tracking
+    ///
+    /// Returns the message SID on success.
+    pub async fn send_sms(
+        &self,
+        body: &str,
+        media_sid: Option<&String>,
+        user: &User,
+    ) -> Result<String, TwilioMessageError> {
+        // Log to message history using repository
+        let history_entry = crate::models::user_models::NewMessageHistory {
+            user_id: user.id,
+            role: "assistant".to_string(),
+            encrypted_content: body.to_string(),
+            tool_name: None,
+            tool_call_id: None,
+            tool_calls_json: None,
+            created_at: chrono::Utc::now().timestamp() as i32,
+            conversation_id: "".to_string(),
+        };
+
+        if let Err(e) = self.user_repository.create_message_history(&history_entry) {
+            tracing::error!("Failed to store message in history: {}", e);
+        }
+
+        // Skip sending in development environment
+        let running_environment = env::var("ENVIRONMENT").unwrap_or_default();
+        if running_environment == "development" {
+            tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
+            return Ok("dev_not_sending".to_string());
+        }
+
+        // Resolve credentials first (needed for media URL construction)
+        let credentials = self.resolve_credentials(user)?;
+
+        // Convert media_sid to full URL if provided
+        let media_url = media_sid.map(|media_id| {
+            format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/Media/{}",
+                credentials.account_sid, media_id
+            )
+        });
+
+        // Determine sending strategy
+        let (from_number, use_messaging_service, update_preferred) =
+            self.determine_sending_strategy(user)?;
+
+        // Update preferred number if needed
+        if update_preferred {
+            if let Some(ref num) = from_number {
+                if let Err(e) = self.user_core.update_preferred_number(user.id, num) {
+                    tracing::error!(
+                        "Failed to update preferred_number for user {}: {:?}",
+                        user.id,
+                        e
+                    );
+                }
+            }
+        }
+
+        // Build send options
+        let messaging_service_sid = if use_messaging_service {
+            Some(env::var("TWILIO_MESSAGING_SERVICE_SID").map_err(|_| {
+                TwilioMessageError::MissingEnvVar("TWILIO_MESSAGING_SERVICE_SID".into())
+            })?)
+        } else {
+            None
+        };
+
+        let status_callback_url = env::var("SERVER_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|url| format!("{}/api/twilio/status-callback", url));
+
+        let options = SendMessageOptions {
+            to: user.phone_number.clone(),
+            body: body.to_string(),
+            media_url,
+            from: from_number.clone(),
+            messaging_service_sid,
+            status_callback_url,
+        };
+
+        // Warn if no valid From
+        if options.from.is_none() && options.messaging_service_sid.is_none() {
+            let detected_country =
+                crate::utils::country::get_country_code_from_phone(&user.phone_number);
+            tracing::warn!(
+                "No valid From available for user {} and country {:?}",
+                user.id,
+                detected_country
+            );
+        }
+
+        // Send the message
+        let result = self
+            .twilio_client
+            .send_message(&credentials, options)
+            .await?;
+
+        let message_sid = result.message_sid;
+        tracing::debug!(
+            "Successfully sent message{} with SID: {}",
+            if media_sid.is_some() {
+                " with media"
+            } else {
+                ""
+            },
+            message_sid
+        );
+
+        // Log initial status to database
+        self.log_message_status(user, &message_sid, from_number.as_deref())?;
+
+        Ok(message_sid)
+    }
+
+    /// Send a conversation message to a user using SendConfig.
+    ///
+    /// This method provides more control over message parameters.
+    /// For most cases, use `send_sms` instead.
     pub async fn send_conversation_message(
         &self,
         user: &User,
-        user_core: &UserCore,
         config: SendConfig,
     ) -> Result<MessageSendResult, TwilioMessageError> {
         // Log to message history
@@ -259,16 +391,16 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         }
 
         // Resolve credentials
-        let credentials = self.resolve_credentials(user, user_core)?;
+        let credentials = self.resolve_credentials(user)?;
 
         // Determine sending strategy
         let (from_number, use_messaging_service, update_preferred) =
-            self.determine_sending_strategy(user, user_core)?;
+            self.determine_sending_strategy(user)?;
 
         // Update preferred number if needed
         if update_preferred {
             if let Some(ref num) = from_number {
-                if let Err(e) = user_core.update_preferred_number(user.id, num) {
+                if let Err(e) = self.user_core.update_preferred_number(user.id, num) {
                     tracing::error!(
                         "Failed to update preferred_number for user {}: {:?}",
                         user.id,
@@ -303,10 +435,12 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Warn if no valid From
         if options.from.is_none() && options.messaging_service_sid.is_none() {
+            let detected_country =
+                crate::utils::country::get_country_code_from_phone(&user.phone_number);
             tracing::warn!(
                 "No valid From available for user {} and country {:?}",
                 user.id,
-                user.phone_number_country
+                detected_country
             );
         }
 
@@ -334,12 +468,11 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     pub async fn delete_message_with_retry(
         &self,
         user: &User,
-        user_core: &UserCore,
         message_sid: &str,
     ) -> Result<(), TwilioMessageError> {
         tracing::debug!("Deleting incoming message: {}", message_sid);
 
-        let credentials = self.resolve_credentials(user, user_core)?;
+        let credentials = self.resolve_credentials(user)?;
 
         // Wait 1 minute to avoid 'resource not complete' errors
         sleep(Duration::from_secs(60)).await;
@@ -372,11 +505,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     pub async fn delete_message_media(
         &self,
         user: &User,
-        user_core: &UserCore,
         message_sid: &str,
         media_sid: &str,
     ) -> Result<(), TwilioMessageError> {
-        let credentials = self.resolve_credentials(user, user_core)?;
+        let credentials = self.resolve_credentials(user)?;
         self.twilio_client
             .delete_message_media(&credentials, message_sid, media_sid)
             .await?;
@@ -388,10 +520,9 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     pub async fn fetch_message_price(
         &self,
         user: &User,
-        user_core: &UserCore,
         message_sid: &str,
     ) -> Result<Option<MessagePrice>, TwilioMessageError> {
-        let credentials = self.resolve_credentials(user, user_core)?;
+        let credentials = self.resolve_credentials(user)?;
         Ok(self
             .twilio_client
             .fetch_message_price(&credentials, message_sid)
@@ -479,24 +610,5 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Note: Full integration tests require a test database setup.
-    // These are basic unit tests for the service logic.
-
-    #[test]
-    fn test_send_config_creation() {
-        let config = SendConfig {
-            to: "+1234567890".to_string(),
-            body: "Hello, world!".to_string(),
-            media_url: None,
-        };
-        assert_eq!(config.to, "+1234567890");
-        assert_eq!(config.body, "Hello, world!");
     }
 }

@@ -61,8 +61,7 @@ pub struct User {
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
     pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
-    pub phone_number_country: Option<String>, // "US", "CA", .. diff between us and ca phone numbers so we don't have to use api to look up each time
-    pub magic_token: Option<String>,          // token for magic link login/password setup
+    pub magic_token: Option<String>, // token for magic link login/password setup
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
 }
 
@@ -822,4 +821,48 @@ pub struct NewMessageStatusLog {
     pub updated_at: i32,
     pub price: Option<f32>,
     pub price_unit: Option<String>,
+}
+
+// Admin Alert models for tracking system alerts
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = crate::schema::admin_alerts)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct AdminAlert {
+    pub id: Option<i32>,
+    pub alert_type: String,
+    pub severity: String,
+    pub message: String,
+    pub location: String,
+    pub module: String,
+    pub acknowledged: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = crate::schema::admin_alerts)]
+pub struct NewAdminAlert {
+    pub alert_type: String,
+    pub severity: String,
+    pub message: String,
+    pub location: String,
+    pub module: String,
+    pub acknowledged: i32,
+    pub created_at: i32,
+}
+
+// Disabled Alert Types models for tracking which alerts are silenced
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = crate::schema::disabled_alert_types)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct DisabledAlertType {
+    pub id: Option<i32>,
+    pub alert_type: String,
+    pub disabled_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = crate::schema::disabled_alert_types)]
+pub struct NewDisabledAlertType {
+    pub alert_type: String,
+    pub disabled_at: i32,
 }

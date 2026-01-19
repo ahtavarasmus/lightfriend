@@ -135,6 +135,42 @@ struct ActivityTypeBreakdown {
     total_credits: f32,
 }
 
+// Admin Alert types
+#[derive(Deserialize, Clone, Debug)]
+struct AdminAlert {
+    id: Option<i32>,
+    alert_type: String,
+    severity: String,
+    message: String,
+    location: String,
+    #[allow(dead_code)]
+    module: String,
+    acknowledged: i32,
+    created_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct AlertsResponse {
+    alerts: Vec<AdminAlert>,
+    #[allow(dead_code)]
+    total: i64,
+    unacknowledged_count: i64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct DisabledAlertType {
+    #[allow(dead_code)]
+    id: Option<i32>,
+    alert_type: String,
+    #[allow(dead_code)]
+    disabled_at: i32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct DisabledTypesResponse {
+    disabled_types: Vec<DisabledAlertType>,
+}
+
 #[derive(Serialize)]
 struct ChangePasswordRequest {
     new_password: String,
@@ -146,7 +182,6 @@ struct UserInfo {
     id: i32,
     email: String,
     phone_number: String,
-    phone_number_country: Option<String>,
     time_to_live: Option<i32>,
     verified: bool,
     credits: f32,
@@ -346,6 +381,15 @@ pub fn admin_dashboard() -> Html {
     let cost_stats: UseStateHandle<Option<CostStatsResponse>> = use_state(|| None);
     let usage_stats: UseStateHandle<Option<UsageStatsResponse>> = use_state(|| None);
     let stats_days = use_state(|| 30i32);
+    // Admin alerts state
+    let admin_alerts: UseStateHandle<Vec<AdminAlert>> = use_state(|| Vec::new());
+    let disabled_alert_types: UseStateHandle<Vec<DisabledAlertType>> = use_state(|| Vec::new());
+    let alert_count = use_state(|| 0i64);
+    let show_alerts_section = use_state(|| false);
+    // Collapsible section states
+    let show_stats_section = use_state(|| false);
+    let show_broadcast_section = use_state(|| false);
+    let show_password_section = use_state(|| false);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
@@ -353,6 +397,9 @@ pub fn admin_dashboard() -> Html {
     let cost_stats_effect = cost_stats.clone();
     let usage_stats_effect = usage_stats.clone();
     let stats_days_effect = (*stats_days).clone();
+    let admin_alerts_effect = admin_alerts.clone();
+    let disabled_types_effect = disabled_alert_types.clone();
+    let alert_count_effect = alert_count.clone();
 
     use_effect_with_deps(move |_| {
         let users = users_effect;
@@ -361,6 +408,9 @@ pub fn admin_dashboard() -> Html {
         let cost_stats = cost_stats_effect;
         let usage_stats = usage_stats_effect;
         let stats_days = stats_days_effect;
+        let admin_alerts = admin_alerts_effect;
+        let disabled_types = disabled_types_effect;
+        let alert_count = alert_count_effect;
 
         wasm_bindgen_futures::spawn_local(async move {
             // Fetch users
@@ -422,6 +472,31 @@ pub fn admin_dashboard() -> Html {
                     }
                 }
             }
+
+            // Fetch admin alerts
+            if let Ok(response) = Api::get("/api/admin/alerts?limit=50")
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<AlertsResponse>().await {
+                        admin_alerts.set(data.alerts);
+                        alert_count.set(data.unacknowledged_count);
+                    }
+                }
+            }
+
+            // Fetch disabled alert types
+            if let Ok(response) = Api::get("/api/admin/alerts/disabled-types")
+                .send()
+                .await
+            {
+                if response.ok() {
+                    if let Ok(data) = response.json::<DisabledTypesResponse>().await {
+                        disabled_types.set(data.disabled_types);
+                    }
+                }
+            }
         });
         || ()
     }, ());
@@ -446,168 +521,231 @@ pub fn admin_dashboard() -> Html {
                     </Link<Route>>
                 </div>
 
-                <div class="broadcast-section email-broadcast">
-                    <h2>{"Email Broadcast"}</h2>
-                    <input
-                        type="text"
-                        value={(*email_subject).clone()}
-                        onchange={{
-                            let email_subject = email_subject.clone();
-                            Callback::from(move |e: Event| {
-                                let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                email_subject.set(input.value());
-                            })
-                        }}
-                        placeholder="Enter email subject..."
-                        class="email-subject-input"
-                    />
-                    <textarea
-                        value={(*email_message).clone()}
-                        onchange={{
-                            let email_message = email_message.clone();
-                            Callback::from(move |e: Event| {
-                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                email_message.set(input.value());
-                            })
-                        }}
-                        placeholder="Enter email message to broadcast..."
-                        class="broadcast-textarea"
-                    />
-                    <button
-                        onclick={{
-                            let email_subject = email_subject.clone();
-                            let email_message = email_message.clone();
-                            let error = error.clone();
-                            Callback::from(move |_| {
-                                let email_subject = email_subject.clone();
-                                let email_message = email_message.clone();
-                                let error = error.clone();
-                                
-                                if email_subject.is_empty() || email_message.is_empty() {
-                                    error.set(Some("Subject and message cannot be empty".to_string()));
-                                    return;
-                                }
-                                
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    let broadcast_message = EmailBroadcastMessage {
-                                        subject: (*email_subject).clone(),
-                                        message: (*email_message).clone(),
-                                    };
+                <div class="collapsible-section broadcast-section">
+                    <div class="collapsible-header" onclick={{
+                        let show_broadcast_section = show_broadcast_section.clone();
+                        Callback::from(move |_| {
+                            show_broadcast_section.set(!*show_broadcast_section);
+                        })
+                    }}>
+                        <h2>{"Email Broadcast"}</h2>
+                        <span class="toggle-indicator">{if *show_broadcast_section { "▼" } else { "▶" }}</span>
+                    </div>
+                    {
+                        if *show_broadcast_section {
+                            html! {
+                                <div class="collapsible-content">
+                                    <input
+                                        type="text"
+                                        value={(*email_subject).clone()}
+                                        onchange={{
+                                            let email_subject = email_subject.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                email_subject.set(input.value());
+                                            })
+                                        }}
+                                        placeholder="Enter email subject..."
+                                        class="email-subject-input"
+                                    />
+                                    <textarea
+                                        value={(*email_message).clone()}
+                                        onchange={{
+                                            let email_message = email_message.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                                email_message.set(input.value());
+                                            })
+                                        }}
+                                        placeholder="Enter email message to broadcast..."
+                                        class="broadcast-textarea"
+                                    />
+                                    <button
+                                        onclick={{
+                                            let email_subject = email_subject.clone();
+                                            let email_message = email_message.clone();
+                                            let error = error.clone();
+                                            Callback::from(move |_| {
+                                                let email_subject = email_subject.clone();
+                                                let email_message = email_message.clone();
+                                                let error = error.clone();
 
-                                    match Api::post("/api/admin/broadcast-email")
-                                        .json(&broadcast_message)
-                                        .unwrap()
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            if response.ok() {
-                                                email_subject.set(String::new());
-                                                email_message.set(String::new());
-                                                error.set(Some("Email broadcast sent successfully".to_string()));
-                                            } else {
-                                                error.set(Some("Failed to send email broadcast(lol you thought you were him?)".to_string()));
-                                            }
-                                        }
-                                        Err(_) => {
-                                            error.set(Some("Failed to send email broadcast request(lol you thought you were him?)".to_string()));
-                                        }
-                                    }
-                                });
-                            })
-                        }}
-                        class="broadcast-button email"
-                    >
-                        {"Send Email Broadcast"}
-                    </button>
+                                                if email_subject.is_empty() || email_message.is_empty() {
+                                                    error.set(Some("Subject and message cannot be empty".to_string()));
+                                                    return;
+                                                }
+
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    let broadcast_message = EmailBroadcastMessage {
+                                                        subject: (*email_subject).clone(),
+                                                        message: (*email_message).clone(),
+                                                    };
+
+                                                    match Api::post("/api/admin/broadcast-email")
+                                                        .json(&broadcast_message)
+                                                        .unwrap()
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(response) => {
+                                                            if response.ok() {
+                                                                email_subject.set(String::new());
+                                                                email_message.set(String::new());
+                                                                error.set(Some("Email broadcast sent successfully".to_string()));
+                                                            } else {
+                                                                error.set(Some("Failed to send email broadcast".to_string()));
+                                                            }
+                                                        }
+                                                        Err(_) => {
+                                                            error.set(Some("Failed to send email broadcast request".to_string()));
+                                                        }
+                                                    }
+                                                });
+                                            })
+                                        }}
+                                        class="broadcast-button email"
+                                    >
+                                        {"Send Email Broadcast"}
+                                    </button>
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                 </div>
 
                 // Change Password Section
-                <div class="password-section">
-                    <h2>{"Change Admin Password"}</h2>
-                    <div class="password-form">
-                        <input
-                            type="password"
-                            value={(*new_password).clone()}
-                            onchange={{
-                                let new_password = new_password.clone();
-                                Callback::from(move |e: Event| {
-                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                    new_password.set(input.value());
-                                })
-                            }}
-                            placeholder="Enter new password (min 6 characters)..."
-                            class="password-input"
-                        />
-                        <button
-                            onclick={{
-                                let new_password = new_password.clone();
-                                let password_status = password_status.clone();
-                                Callback::from(move |_| {
-                                    let password_value = (*new_password).clone();
-                                    let new_password = new_password.clone();
-                                    let password_status = password_status.clone();
-
-                                    if password_value.len() < 6 {
-                                        password_status.set(Some("Password must be at least 6 characters".to_string()));
-                                        return;
-                                    }
-
-                                    wasm_bindgen_futures::spawn_local(async move {
-                                        let request = ChangePasswordRequest {
-                                            new_password: password_value,
-                                        };
-
-                                        match Api::post("/api/admin/change-password")
-                                            .json(&request)
-                                            .unwrap()
-                                            .send()
-                                            .await
-                                        {
-                                            Ok(response) => {
-                                                if response.ok() {
-                                                    new_password.set(String::new());
-                                                    password_status.set(Some("Password updated successfully!".to_string()));
-                                                    // Clear message after 3 seconds
+                <div class="collapsible-section password-section">
+                    <div class="collapsible-header" onclick={{
+                        let show_password_section = show_password_section.clone();
+                        Callback::from(move |_| {
+                            show_password_section.set(!*show_password_section);
+                        })
+                    }}>
+                        <h2>{"Change Admin Password"}</h2>
+                        <span class="toggle-indicator">{if *show_password_section { "▼" } else { "▶" }}</span>
+                    </div>
+                    {
+                        if *show_password_section {
+                            html! {
+                                <div class="collapsible-content">
+                                    <div class="password-form">
+                                        <input
+                                            type="password"
+                                            value={(*new_password).clone()}
+                                            onchange={{
+                                                let new_password = new_password.clone();
+                                                Callback::from(move |e: Event| {
+                                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                    new_password.set(input.value());
+                                                })
+                                            }}
+                                            placeholder="Enter new password (min 6 characters)..."
+                                            class="password-input"
+                                        />
+                                        <button
+                                            onclick={{
+                                                let new_password = new_password.clone();
+                                                let password_status = password_status.clone();
+                                                Callback::from(move |_| {
+                                                    let password_value = (*new_password).clone();
+                                                    let new_password = new_password.clone();
                                                     let password_status = password_status.clone();
-                                                    gloo_timers::callback::Timeout::new(3000, move || {
-                                                        password_status.set(None);
-                                                    }).forget();
-                                                } else {
-                                                    password_status.set(Some("Failed to update password".to_string()));
+
+                                                    if password_value.len() < 6 {
+                                                        password_status.set(Some("Password must be at least 6 characters".to_string()));
+                                                        return;
+                                                    }
+
+                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                        let request = ChangePasswordRequest {
+                                                            new_password: password_value,
+                                                        };
+
+                                                        match Api::post("/api/admin/change-password")
+                                                            .json(&request)
+                                                            .unwrap()
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            Ok(response) => {
+                                                                if response.ok() {
+                                                                    new_password.set(String::new());
+                                                                    password_status.set(Some("Password updated successfully!".to_string()));
+                                                                    let password_status = password_status.clone();
+                                                                    gloo_timers::callback::Timeout::new(3000, move || {
+                                                                        password_status.set(None);
+                                                                    }).forget();
+                                                                } else {
+                                                                    password_status.set(Some("Failed to update password".to_string()));
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                password_status.set(Some("Failed to send request".to_string()));
+                                                            }
+                                                        }
+                                                    });
+                                                })
+                                            }}
+                                            class="broadcast-button"
+                                        >
+                                            {"Change Password"}
+                                        </button>
+                                        {
+                                            if let Some(status) = (*password_status).as_ref() {
+                                                html! {
+                                                    <span class={classes!(
+                                                        "password-status",
+                                                        if status.contains("success") { "success" } else { "error" }
+                                                    )}>
+                                                        {status}
+                                                    </span>
                                                 }
-                                            }
-                                            Err(_) => {
-                                                password_status.set(Some("Failed to send request".to_string()));
+                                            } else {
+                                                html! {}
                                             }
                                         }
-                                    });
-                                })
-                            }}
-                            class="broadcast-button"
-                        >
-                            {"Change Password"}
-                        </button>
-                        {
-                            if let Some(status) = (*password_status).as_ref() {
-                                html! {
-                                    <span class={classes!(
-                                        "password-status",
-                                        if status.contains("success") { "success" } else { "error" }
-                                    )}>
-                                        {status}
-                                    </span>
-                                }
-                            } else {
-                                html! {}
+                                    </div>
+                                </div>
                             }
+                        } else {
+                            html! {}
                         }
-                    </div>
+                    }
                 </div>
 
                 // Cost & Usage Statistics Section
-                <div class="cost-usage-stats-section">
-                    <h2>{"Cost & Usage Statistics"}</h2>
+                <div class="collapsible-section cost-usage-stats-section">
+                    <div class="collapsible-header" onclick={{
+                        let show_stats_section = show_stats_section.clone();
+                        Callback::from(move |_| {
+                            show_stats_section.set(!*show_stats_section);
+                        })
+                    }}>
+                        <h2>
+                            {"Cost & Usage Stats "}
+                            {
+                                if let Some(costs) = (*cost_stats).as_ref() {
+                                    html! {
+                                        <span class="header-stat">
+                                            {format!("(Avg: ${:.4}/user Intl, ${:.4}/user US)",
+                                                costs.avg_cost_per_intl_user_30d,
+                                                costs.avg_cost_per_us_ca_user_30d
+                                            )}
+                                        </span>
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            }
+                        </h2>
+                        <span class="toggle-indicator">{if *show_stats_section { "▼" } else { "▶" }}</span>
+                    </div>
+                    {
+                        if *show_stats_section {
+                            html! {
+                                <div class="collapsible-content">
                     <div class="stats-period-selector">
                         <span>{"Period: "}</span>
                         <select
@@ -833,6 +971,257 @@ pub fn admin_dashboard() -> Html {
                             html! { <p class="loading">{"Loading usage stats..."}</p> }
                         }
                     }
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
+                </div>
+
+                // Admin Alerts Section
+                <div class="alerts-section">
+                    <div class="alerts-header" onclick={{
+                        let show_alerts_section = show_alerts_section.clone();
+                        Callback::from(move |_| {
+                            show_alerts_section.set(!*show_alerts_section);
+                        })
+                    }}>
+                        <h2>
+                            {"System Alerts "}
+                            {
+                                if *alert_count > 0 {
+                                    html! { <span class="alert-badge">{*alert_count}</span> }
+                                } else {
+                                    html! {}
+                                }
+                            }
+                        </h2>
+                        <span class="toggle-indicator">{if *show_alerts_section { "▼" } else { "▶" }}</span>
+                    </div>
+
+                    {
+                        if *show_alerts_section {
+                            let admin_alerts_for_actions = admin_alerts.clone();
+                            let disabled_types_for_actions = disabled_alert_types.clone();
+                            let alert_count_for_actions = alert_count.clone();
+
+                            html! {
+                                <div class="alerts-content">
+                                    // Acknowledge all button
+                                    {
+                                        if *alert_count > 0 {
+                                            let admin_alerts_ack = admin_alerts_for_actions.clone();
+                                            let alert_count_ack = alert_count_for_actions.clone();
+                                            html! {
+                                                <button class="acknowledge-all-btn" onclick={Callback::from(move |_| {
+                                                    let admin_alerts = admin_alerts_ack.clone();
+                                                    let alert_count = alert_count_ack.clone();
+                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                        if let Ok(response) = Api::post("/api/admin/alerts/acknowledge-all")
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            if response.ok() {
+                                                                // Mark all as acknowledged locally
+                                                                let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
+                                                                    let mut new_alert = a.clone();
+                                                                    new_alert.acknowledged = 1;
+                                                                    new_alert
+                                                                }).collect();
+                                                                admin_alerts.set(updated);
+                                                                alert_count.set(0);
+                                                            }
+                                                        }
+                                                    });
+                                                })}>
+                                                    {"Acknowledge All"}
+                                                </button>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    // Disabled alert types section
+                                    {
+                                        if !(*disabled_types_for_actions).is_empty() {
+                                            let disabled_types_display = disabled_types_for_actions.clone();
+                                            html! {
+                                                <div class="disabled-types-section">
+                                                    <h3>{"Disabled Alert Types"}</h3>
+                                                    <div class="disabled-types-list">
+                                                        {
+                                                            (*disabled_types_display).iter().map(|dt| {
+                                                                let alert_type = dt.alert_type.clone();
+                                                                let disabled_types_enable = disabled_types_for_actions.clone();
+                                                                let encoded_type = urlencoding::encode(&alert_type).into_owned();
+                                                                html! {
+                                                                    <div class="disabled-type-item" key={alert_type.clone()}>
+                                                                        <span class="disabled-type-name">{&alert_type}</span>
+                                                                        <button class="enable-btn" onclick={Callback::from(move |_| {
+                                                                            let disabled_types = disabled_types_enable.clone();
+                                                                            let encoded = encoded_type.clone();
+                                                                            let alert_type_to_remove = alert_type.clone();
+                                                                            wasm_bindgen_futures::spawn_local(async move {
+                                                                                if let Ok(response) = Api::post(&format!("/api/admin/alerts/enable/{}", encoded))
+                                                                                    .send()
+                                                                                    .await
+                                                                                {
+                                                                                    if response.ok() {
+                                                                                        let updated: Vec<DisabledAlertType> = (*disabled_types)
+                                                                                            .iter()
+                                                                                            .filter(|d| d.alert_type != alert_type_to_remove)
+                                                                                            .cloned()
+                                                                                            .collect();
+                                                                                        disabled_types.set(updated);
+                                                                                    }
+                                                                                }
+                                                                            });
+                                                                        })}>
+                                                                            {"Enable"}
+                                                                        </button>
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    // Alerts table
+                                    {
+                                        if (*admin_alerts_for_actions).is_empty() {
+                                            html! { <p class="no-alerts">{"No alerts recorded."}</p> }
+                                        } else {
+                                            let alerts_display = admin_alerts_for_actions.clone();
+                                            let disabled_types_for_disable = disabled_alert_types.clone();
+                                            let admin_alerts_ack = admin_alerts.clone();
+                                            let alert_count_ack = alert_count.clone();
+                                            html! {
+                                                <table class="alerts-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{"Severity"}</th>
+                                                            <th>{"Type"}</th>
+                                                            <th>{"Location"}</th>
+                                                            <th>{"Time"}</th>
+                                                            <th>{"Actions"}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {
+                                                            (*alerts_display).iter().map(|alert| {
+                                                                let alert_id = alert.id.unwrap_or(0);
+                                                                let alert_type = alert.alert_type.clone();
+                                                                let severity_class = match alert.severity.as_str() {
+                                                                    "Critical" => "severity-critical",
+                                                                    "Error" => "severity-error",
+                                                                    "Warning" => "severity-warning",
+                                                                    _ => "severity-info",
+                                                                };
+                                                                let row_class = if alert.acknowledged == 0 {
+                                                                    "alert-row unacknowledged"
+                                                                } else {
+                                                                    "alert-row acknowledged"
+                                                                };
+                                                                let timestamp = Utc.timestamp_opt(alert.created_at as i64, 0)
+                                                                    .single()
+                                                                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                                    .unwrap_or_else(|| "Unknown".to_string());
+
+                                                                let admin_alerts_row = admin_alerts_ack.clone();
+                                                                let alert_count_row = alert_count_ack.clone();
+                                                                let disabled_types_row = disabled_types_for_disable.clone();
+                                                                let encoded_type = urlencoding::encode(&alert_type).into_owned();
+
+                                                                html! {
+                                                                    <tr class={row_class} key={alert_id}>
+                                                                        <td class={severity_class}>{&alert.severity}</td>
+                                                                        <td class="alert-type-cell" title={alert.message.clone()}>{&alert.alert_type}</td>
+                                                                        <td class="location-cell">{&alert.location}</td>
+                                                                        <td>{timestamp}</td>
+                                                                        <td class="actions-cell">
+                                                                            {
+                                                                                if alert.acknowledged == 0 {
+                                                                                    let admin_alerts_ack_btn = admin_alerts_row.clone();
+                                                                                    let alert_count_ack_btn = alert_count_row.clone();
+                                                                                    html! {
+                                                                                        <button class="ack-btn" onclick={Callback::from(move |_| {
+                                                                                            let admin_alerts = admin_alerts_ack_btn.clone();
+                                                                                            let alert_count = alert_count_ack_btn.clone();
+                                                                                            wasm_bindgen_futures::spawn_local(async move {
+                                                                                                if let Ok(response) = Api::post(&format!("/api/admin/alerts/{}/acknowledge", alert_id))
+                                                                                                    .send()
+                                                                                                    .await
+                                                                                                {
+                                                                                                    if response.ok() {
+                                                                                                        let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
+                                                                                                            if a.id == Some(alert_id) {
+                                                                                                                let mut new_alert = a.clone();
+                                                                                                                new_alert.acknowledged = 1;
+                                                                                                                new_alert
+                                                                                                            } else {
+                                                                                                                a.clone()
+                                                                                                            }
+                                                                                                        }).collect();
+                                                                                                        admin_alerts.set(updated);
+                                                                                                        alert_count.set((*alert_count - 1).max(0));
+                                                                                                    }
+                                                                                                }
+                                                                                            });
+                                                                                        })}>
+                                                                                            {"Ack"}
+                                                                                        </button>
+                                                                                    }
+                                                                                } else {
+                                                                                    html! {}
+                                                                                }
+                                                                            }
+                                                                            <button class="disable-btn" onclick={Callback::from(move |_| {
+                                                                                let disabled_types = disabled_types_row.clone();
+                                                                                let encoded = encoded_type.clone();
+                                                                                let alert_type_clone = alert_type.clone();
+                                                                                wasm_bindgen_futures::spawn_local(async move {
+                                                                                    if let Ok(response) = Api::post(&format!("/api/admin/alerts/disable/{}", encoded))
+                                                                                        .send()
+                                                                                        .await
+                                                                                    {
+                                                                                        if response.ok() {
+                                                                                            let current_time = chrono::Utc::now().timestamp() as i32;
+                                                                                            let mut updated = (*disabled_types).clone();
+                                                                                            updated.push(DisabledAlertType {
+                                                                                                id: None,
+                                                                                                alert_type: alert_type_clone,
+                                                                                                disabled_at: current_time,
+                                                                                            });
+                                                                                            disabled_types.set(updated);
+                                                                                        }
+                                                                                    }
+                                                                                });
+                                                                            })}>
+                                                                                {"Disable"}
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                 </div>
 
                 // Global SMS Stats Section
@@ -944,7 +1333,6 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
                                                 <th>{"Phone"}</th>
-                                                <th>{"Country"}</th>
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Monthly Credits"}</th>
                                                 <th>{"Tier"}</th>
@@ -1000,7 +1388,6 @@ pub fn admin_dashboard() -> Html {
                                                                     </div>
                                                                 </td>
                                                                 <td>{&user.phone_number}</td>
-                                                                <td>{user.phone_number_country.clone().unwrap_or_else(|| "?".to_string())}</td>
                                                                 <td>{format!("{:.2}€", user.credits)}</td>
                                                                 <td>{format!("{:.2}€", user.credits_left)}</td>
                                                                 <td>
@@ -2710,6 +3097,269 @@ pub fn admin_dashboard() -> Html {
                         border-radius: 4px;
                         font-size: 0.85rem;
                         color: #ddd;
+                    }
+
+                    /* Collapsible Sections */
+                    .collapsible-section {
+                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                        border-radius: 12px;
+                        padding: 1.5rem;
+                        margin-bottom: 1.5rem;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .collapsible-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        cursor: pointer;
+                        padding: 0.5rem;
+                        margin: -0.5rem;
+                        border-radius: 8px;
+                        transition: background 0.2s;
+                    }
+
+                    .collapsible-header:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .collapsible-header h2 {
+                        color: #7EB2FF;
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.75rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .header-stat {
+                        font-size: 0.85rem;
+                        color: #28a745;
+                        font-weight: normal;
+                    }
+
+                    .collapsible-content {
+                        margin-top: 1rem;
+                    }
+
+                    /* Admin Alerts Section */
+                    .alerts-section {
+                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                        border-radius: 12px;
+                        padding: 1.5rem;
+                        margin-bottom: 1.5rem;
+                        border: 1px solid rgba(255, 200, 100, 0.3);
+                    }
+
+                    .alerts-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        cursor: pointer;
+                        padding: 0.5rem;
+                        margin: -0.5rem;
+                        border-radius: 8px;
+                        transition: background 0.2s;
+                    }
+
+                    .alerts-header:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .alerts-header h2 {
+                        color: #FFD700;
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.75rem;
+                    }
+
+                    .alert-badge {
+                        background: #ff4444;
+                        color: white;
+                        font-size: 0.8rem;
+                        padding: 0.2rem 0.6rem;
+                        border-radius: 12px;
+                        font-weight: bold;
+                    }
+
+                    .toggle-indicator {
+                        color: #888;
+                        font-size: 1rem;
+                    }
+
+                    .alerts-content {
+                        margin-top: 1rem;
+                    }
+
+                    .acknowledge-all-btn {
+                        background: #28a745;
+                        color: white;
+                        border: none;
+                        padding: 0.5rem 1rem;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        margin-bottom: 1rem;
+                        font-size: 0.9rem;
+                    }
+
+                    .acknowledge-all-btn:hover {
+                        background: #218838;
+                    }
+
+                    .disabled-types-section {
+                        background: rgba(255, 100, 100, 0.1);
+                        border: 1px solid rgba(255, 100, 100, 0.3);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .disabled-types-section h3 {
+                        color: #ff8888;
+                        margin: 0 0 0.75rem 0;
+                        font-size: 1rem;
+                    }
+
+                    .disabled-types-list {
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 0.5rem;
+                    }
+
+                    .disabled-type-item {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        background: rgba(0, 0, 0, 0.3);
+                        padding: 0.4rem 0.8rem;
+                        border-radius: 6px;
+                    }
+
+                    .disabled-type-name {
+                        color: #ddd;
+                        font-size: 0.85rem;
+                    }
+
+                    .enable-btn {
+                        background: #28a745;
+                        color: white;
+                        border: none;
+                        padding: 0.2rem 0.5rem;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 0.75rem;
+                    }
+
+                    .enable-btn:hover {
+                        background: #218838;
+                    }
+
+                    .no-alerts {
+                        color: #888;
+                        font-style: italic;
+                        text-align: center;
+                        padding: 1rem;
+                    }
+
+                    .alerts-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.85rem;
+                    }
+
+                    .alerts-table th,
+                    .alerts-table td {
+                        padding: 0.6rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    }
+
+                    .alerts-table th {
+                        color: #FFD700;
+                        font-weight: 600;
+                        background: rgba(0, 0, 0, 0.3);
+                    }
+
+                    .alert-row {
+                        transition: background 0.2s;
+                    }
+
+                    .alert-row:hover {
+                        background: rgba(255, 255, 255, 0.05);
+                    }
+
+                    .alert-row.unacknowledged {
+                        background: rgba(255, 200, 100, 0.1);
+                    }
+
+                    .alert-row.acknowledged {
+                        opacity: 0.7;
+                    }
+
+                    .severity-critical {
+                        color: #ff4444;
+                        font-weight: bold;
+                    }
+
+                    .severity-error {
+                        color: #ff8800;
+                        font-weight: bold;
+                    }
+
+                    .severity-warning {
+                        color: #ffcc00;
+                    }
+
+                    .severity-info {
+                        color: #7EB2FF;
+                    }
+
+                    .alert-type-cell {
+                        color: #ddd;
+                        max-width: 250px;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                    }
+
+                    .location-cell {
+                        color: #888;
+                        font-family: monospace;
+                        font-size: 0.8rem;
+                    }
+
+                    .actions-cell {
+                        display: flex;
+                        gap: 0.5rem;
+                    }
+
+                    .ack-btn {
+                        background: #007bff;
+                        color: white;
+                        border: none;
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 0.75rem;
+                    }
+
+                    .ack-btn:hover {
+                        background: #0056b3;
+                    }
+
+                    .disable-btn {
+                        background: #6c757d;
+                        color: white;
+                        border: none;
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 0.75rem;
+                    }
+
+                    .disable-btn:hover {
+                        background: #545b62;
                     }
 
                 "#}

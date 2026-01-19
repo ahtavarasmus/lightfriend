@@ -6,7 +6,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::models::user_models::{MessageStatusLog, WaitlistEntry};
+use crate::models::user_models::{AdminAlert, DisabledAlertType, MessageStatusLog, WaitlistEntry};
 use crate::schema::{message_status_log, waitlist};
 
 #[derive(Deserialize)]
@@ -990,4 +990,236 @@ pub async fn get_global_message_stats(
         sent,
         recent_failed,
     }))
+}
+
+// ============================================================================
+// Admin Alert Management Endpoints
+// ============================================================================
+
+/// Query params for listing alerts
+#[derive(Deserialize)]
+pub struct AlertsQueryParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub severity: Option<String>,
+}
+
+/// Response for listing alerts
+#[derive(Serialize)]
+pub struct AlertsResponse {
+    pub alerts: Vec<AdminAlert>,
+    pub total: i64,
+    pub unacknowledged_count: i64,
+}
+
+/// Response for unacknowledged count
+#[derive(Serialize)]
+pub struct AlertCountResponse {
+    pub count: i64,
+}
+
+/// Response for disabled types
+#[derive(Serialize)]
+pub struct DisabledTypesResponse {
+    pub disabled_types: Vec<DisabledAlertType>,
+}
+
+/// Get paginated list of alerts
+/// GET /api/admin/alerts
+pub async fn get_alerts(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AlertsQueryParams>,
+) -> Result<Json<AlertsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
+    let severity_filter = params.severity.as_deref();
+
+    let alerts = state
+        .admin_alert_repository
+        .get_alerts(limit, offset, severity_filter)
+        .map_err(|e| {
+            tracing::error!("Failed to get alerts: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get alerts"})),
+            )
+        })?;
+
+    let total = state
+        .admin_alert_repository
+        .get_total_count(severity_filter)
+        .map_err(|e| {
+            tracing::error!("Failed to get total alert count: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get alert count"})),
+            )
+        })?;
+
+    let unacknowledged_count = state
+        .admin_alert_repository
+        .get_unacknowledged_count()
+        .map_err(|e| {
+            tracing::error!("Failed to get unacknowledged count: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get unacknowledged count"})),
+            )
+        })?;
+
+    Ok(Json(AlertsResponse {
+        alerts,
+        total,
+        unacknowledged_count,
+    }))
+}
+
+/// Get unacknowledged alert count
+/// GET /api/admin/alerts/count
+pub async fn get_alert_count(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<AlertCountResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let count = state
+        .admin_alert_repository
+        .get_unacknowledged_count()
+        .map_err(|e| {
+            tracing::error!("Failed to get alert count: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get alert count"})),
+            )
+        })?;
+
+    Ok(Json(AlertCountResponse { count }))
+}
+
+/// Acknowledge a single alert
+/// POST /api/admin/alerts/:id/acknowledge
+pub async fn acknowledge_alert(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(alert_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .admin_alert_repository
+        .acknowledge_alert(alert_id)
+        .map_err(|e| {
+            tracing::error!("Failed to acknowledge alert {}: {}", alert_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to acknowledge alert"})),
+            )
+        })?;
+
+    Ok(Json(json!({"message": "Alert acknowledged"})))
+}
+
+/// Acknowledge all alerts
+/// POST /api/admin/alerts/acknowledge-all
+pub async fn acknowledge_all_alerts(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let count = state
+        .admin_alert_repository
+        .acknowledge_all()
+        .map_err(|e| {
+            tracing::error!("Failed to acknowledge all alerts: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to acknowledge alerts"})),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "message": "All alerts acknowledged",
+        "count": count
+    })))
+}
+
+/// Get list of disabled alert types
+/// GET /api/admin/alerts/disabled-types
+pub async fn get_disabled_alert_types(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DisabledTypesResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let disabled_types = state
+        .admin_alert_repository
+        .get_disabled_types()
+        .map_err(|e| {
+            tracing::error!("Failed to get disabled types: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get disabled types"})),
+            )
+        })?;
+
+    Ok(Json(DisabledTypesResponse { disabled_types }))
+}
+
+/// Disable an alert type
+/// POST /api/admin/alerts/disable/:alert_type
+pub async fn disable_alert_type(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(alert_type): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // URL decode the alert_type since it may contain special characters
+    let alert_type = urlencoding::decode(&alert_type)
+        .map_err(|e| {
+            tracing::error!("Failed to decode alert type: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid alert type encoding"})),
+            )
+        })?
+        .into_owned();
+
+    state
+        .admin_alert_repository
+        .disable_alert_type(&alert_type)
+        .map_err(|e| {
+            tracing::error!("Failed to disable alert type '{}': {}", alert_type, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to disable alert type"})),
+            )
+        })?;
+
+    tracing::info!("Alert type disabled: {}", alert_type);
+    Ok(Json(json!({
+        "message": "Alert type disabled",
+        "alert_type": alert_type
+    })))
+}
+
+/// Enable an alert type (remove from disabled list)
+/// POST /api/admin/alerts/enable/:alert_type
+pub async fn enable_alert_type(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(alert_type): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // URL decode the alert_type since it may contain special characters
+    let alert_type = urlencoding::decode(&alert_type)
+        .map_err(|e| {
+            tracing::error!("Failed to decode alert type: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid alert type encoding"})),
+            )
+        })?
+        .into_owned();
+
+    state
+        .admin_alert_repository
+        .enable_alert_type(&alert_type)
+        .map_err(|e| {
+            tracing::error!("Failed to enable alert type '{}': {}", alert_type, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to enable alert type"})),
+            )
+        })?;
+
+    tracing::info!("Alert type enabled: {}", alert_type);
+    Ok(Json(json!({
+        "message": "Alert type enabled",
+        "alert_type": alert_type
+    })))
 }

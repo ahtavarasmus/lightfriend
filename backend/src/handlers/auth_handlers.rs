@@ -61,7 +61,6 @@ pub async fn get_users(
             id: user.id,
             email: user.email,
             phone_number: user.phone_number.clone(),
-            phone_number_country: user.phone_number_country,
             nickname: user.nickname,
             time_to_live: user.time_to_live,
             verified: user.verified,
@@ -270,7 +269,9 @@ pub async fn request_phone_verify(
         "Your Lightfriend verification code is: {}. Valid for 5 minutes.",
         otp
     );
-    if crate::api::twilio_utils::send_conversation_message(&state, &message, None, &user)
+    if state
+        .twilio_message_service
+        .send_sms(&message, None, &user)
         .await
         .is_err()
     {
@@ -508,30 +509,12 @@ pub async fn register(
                 Json(json!({"error": "User not found after registration"})),
             )
         })?;
-    // Set phone number country
-    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(
-        &state,
-        user.id,
-        &reg_req.phone_number,
-    )
-    .await
+    // Set preferred number based on detected country
+    if let Some(country) = crate::utils::country::get_country_code_from_phone(&reg_req.phone_number)
     {
-        tracing::error!("Failed to set phone country during registration: {}", e);
-        // Continue without failing registration
-    }
-    // Set preferred number if user has US number
-    if reg_req.phone_number.starts_with("+1") {
-        state
+        let _ = state
             .user_core
-            .set_preferred_number_to_us_default(user.id)
-            .map_err(|e| {
-                tracing::error!("Failed to set preferred number: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Failed to set preferred number") })),
-                )
-            })?;
-        tracing::debug!("Preferred number set successfully, generating tokens");
+            .set_preferred_number_for_country(user.id, &country);
     }
     generate_tokens_and_response(user.id)
 }

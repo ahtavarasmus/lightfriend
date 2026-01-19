@@ -2506,13 +2506,10 @@ pub async fn send_notification(
             }
 
             // Step 2: Send SMS first (this is always charged)
-            let sms_success = match crate::api::twilio_utils::send_conversation_message(
-                state,
-                notification,
-                None,
-                &user,
-            )
-            .await
+            let sms_success = match state
+                .twilio_message_service
+                .send_sms(notification, None, &user)
+                .await
             {
                 Ok(response_sid) => {
                     tracing::info!("Call+SMS: SMS sent successfully for user {}", user_id);
@@ -2638,13 +2635,10 @@ pub async fn send_notification(
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
             }
-            match crate::api::twilio_utils::send_conversation_message(
-                state,
-                notification,
-                None,
-                &user,
-            )
-            .await
+            match state
+                .twilio_message_service
+                .send_sms(notification, None, &user)
+                .await
             {
                 Ok(response_sid) => {
                     tracing::info!("Successfully sent notification to user {}", user_id);
@@ -2716,5 +2710,82 @@ pub async fn send_notification(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // hours_until Tests (internal function)
+    // =========================================================================
+
+    #[test]
+    fn test_hours_until_same_hour() {
+        assert_eq!(hours_until(12, 12), 0);
+        assert_eq!(hours_until(0, 0), 0);
+        assert_eq!(hours_until(23, 23), 0);
+    }
+
+    #[test]
+    fn test_hours_until_later_hour() {
+        assert_eq!(hours_until(8, 12), 4); // 8am to noon
+        assert_eq!(hours_until(0, 23), 23); // Midnight to 11pm
+        assert_eq!(hours_until(10, 18), 8); // 10am to 6pm
+    }
+
+    #[test]
+    fn test_hours_until_earlier_hour_wraps_around() {
+        assert_eq!(hours_until(18, 8), 14); // 6pm to 8am next day (14 hours)
+        assert_eq!(hours_until(23, 1), 2); // 11pm to 1am next day
+        assert_eq!(hours_until(20, 6), 10); // 8pm to 6am next day
+    }
+
+    // =========================================================================
+    // hours_since Tests
+    // =========================================================================
+
+    #[test]
+    fn test_hours_since_same_hour() {
+        assert_eq!(hours_since(12, 12), 0);
+        assert_eq!(hours_since(0, 0), 0);
+    }
+
+    #[test]
+    fn test_hours_since_later_hour() {
+        assert_eq!(hours_since(12, 8), 4); // Noon since 8am
+        assert_eq!(hours_since(23, 0), 23); // 11pm since midnight
+        assert_eq!(hours_since(18, 10), 8); // 6pm since 10am
+    }
+
+    #[test]
+    fn test_hours_since_earlier_hour_wraps_around() {
+        assert_eq!(hours_since(6, 20), 10); // 6am since 8pm (10 hours ago)
+        assert_eq!(hours_since(1, 23), 2); // 1am since 11pm (2 hours ago)
+        assert_eq!(hours_since(8, 18), 14); // 8am since 6pm yesterday
+    }
+
+    // =========================================================================
+    // Critical Message Prompt Constants Tests (internal constants)
+    // =========================================================================
+
+    #[test]
+    fn test_critical_prompt_contains_key_criteria() {
+        // Verify the prompt includes important classification criteria
+        assert!(CRITICAL_PROMPT.contains("critical"));
+        assert!(CRITICAL_PROMPT.contains("two hours") || CRITICAL_PROMPT.contains("2 h"));
+        assert!(CRITICAL_PROMPT.contains("is_critical"));
+        assert!(CRITICAL_PROMPT.contains("what_to_inform"));
+        assert!(CRITICAL_PROMPT.contains("first_message"));
+    }
+
+    #[test]
+    fn test_waiting_check_prompt_contains_key_elements() {
+        // Verify the waiting check prompt has required elements
+        assert!(WAITING_CHECK_PROMPT.contains("waiting check"));
+        assert!(WAITING_CHECK_PROMPT.contains("sms_message"));
+        assert!(WAITING_CHECK_PROMPT.contains("first_message"));
+        assert!(WAITING_CHECK_PROMPT.contains("match"));
     }
 }

@@ -55,8 +55,13 @@ impl crate::repositories::user_repository::UserRepository {
 
         let new_credits = user.credits + amount;
 
+        // Clear last_credits_notification when credits are added so user can be
+        // notified again if credits deplete in the future
         diesel::update(users::table.find(user_id))
-            .set(users::credits.eq(new_credits))
+            .set((
+                users::credits.eq(new_credits),
+                users::last_credits_notification.eq(None::<i32>),
+            ))
             .execute(&mut conn)?;
         Ok(())
     }

@@ -74,14 +74,26 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     ));
     let webauthn_repository =
         Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(
+        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
+    let twilio_client = Arc::new(crate::RealTwilioClient::new());
+    let twilio_message_service = Arc::new(crate::TwilioMessageService::new(
+        twilio_client.clone(),
+        pool.clone(),
+        user_core.clone(),
+        user_repository.clone(),
+    ));
 
     Arc::new(crate::AppState {
         db_pool: pool,
         user_core,
         user_repository,
+        twilio_client,
+        twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
         google_calendar_oauth_client: google_oauth.clone(),
         youtube_oauth_client: google_oauth.clone(),
@@ -103,6 +115,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,
+        admin_alert_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -324,15 +337,24 @@ impl MockLlmResponse {
 }
 
 /// Phone number prefixes for testing different country pricing
+/// NOTE: These use valid area codes recognized by phonenumber library
 pub mod test_phone_numbers {
-    /// US phone number (+1 prefix) - uses credits_left count-based pricing
-    pub const US: &str = "+15551234567";
+    /// US phone number (San Francisco 415 area code) - uses credits_left count-based pricing
+    pub const US: &str = "+14155551234";
+    /// Canada phone number (Toronto 647 area code) - uses preferred_number or CAN_PHONE
+    pub const CANADA: &str = "+16475551234";
     /// Finland phone number (+358 prefix) - uses euro segment pricing
     pub const FINLAND: &str = "+358401234567";
     /// UK phone number (+44 prefix) - uses euro segment pricing
     pub const UK: &str = "+447911123456";
+    /// Netherlands phone number (+31 prefix) - uses euro segment pricing
+    pub const NETHERLANDS: &str = "+31612345678";
+    /// Australia phone number (+61 prefix) - uses euro segment pricing
+    pub const AUSTRALIA: &str = "+61412345678";
     /// Germany phone number (+49 prefix) - notification-only pricing
-    pub const GERMANY: &str = "+4915112345678";
+    pub const GERMANY: &str = "+4915123456789";
+    /// France phone number (+33 prefix) - notification-only pricing
+    pub const FRANCE: &str = "+33612345678";
 }
 
 /// Test user creation parameters
@@ -400,6 +422,50 @@ impl TestUserParams {
             sub_tier,
         }
     }
+
+    /// Create params for a Canada user
+    pub fn canada_user(credits_left: f32, credits: f32) -> Self {
+        Self {
+            email: "test_ca@example.com".to_string(),
+            phone_number: test_phone_numbers::CANADA.to_string(),
+            credits,
+            credits_left,
+            sub_tier: Some("tier 2".to_string()),
+        }
+    }
+
+    /// Create params for a Netherlands user
+    pub fn netherlands_user(credits_left: f32, credits: f32) -> Self {
+        Self {
+            email: "test_nl@example.com".to_string(),
+            phone_number: test_phone_numbers::NETHERLANDS.to_string(),
+            credits,
+            credits_left,
+            sub_tier: Some("tier 2".to_string()),
+        }
+    }
+
+    /// Create params for an Australia user
+    pub fn australia_user(credits_left: f32, credits: f32) -> Self {
+        Self {
+            email: "test_au@example.com".to_string(),
+            phone_number: test_phone_numbers::AUSTRALIA.to_string(),
+            credits,
+            credits_left,
+            sub_tier: Some("tier 2".to_string()),
+        }
+    }
+
+    /// Create params for a France user (notification-only)
+    pub fn france_user(credits_left: f32, credits: f32) -> Self {
+        Self {
+            email: "test_fr@example.com".to_string(),
+            phone_number: test_phone_numbers::FRANCE.to_string(),
+            credits,
+            credits_left,
+            sub_tier: Some("tier 2".to_string()),
+        }
+    }
 }
 
 /// Deactivate phone service for a user (for testing stolen phone scenario)
@@ -430,6 +496,32 @@ pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
         .user_core
         .update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
         .expect("Failed to set BYOT credentials");
+    // Also set plan_type to "byot" so is_byot_user() returns true
+    set_plan_type(state, user_id, "byot");
+}
+
+/// Set the plan_type for a user (used for BYOT testing)
+pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str) {
+    use crate::schema::users;
+    use diesel::prelude::*;
+
+    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    diesel::update(users::table.filter(users::id.eq(user_id)))
+        .set(users::plan_type.eq(Some(plan_type.to_string())))
+        .execute(&mut conn)
+        .expect("Failed to set plan_type");
+}
+
+/// Set the preferred_number for a user
+pub fn set_preferred_number(state: &Arc<crate::AppState>, user_id: i32, number: &str) {
+    use crate::schema::users;
+    use diesel::prelude::*;
+
+    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    diesel::update(users::table.filter(users::id.eq(user_id)))
+        .set(users::preferred_number.eq(Some(number.to_string())))
+        .execute(&mut conn)
+        .expect("Failed to set preferred_number");
 }
 
 // =============================================================================

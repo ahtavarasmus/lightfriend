@@ -37,7 +37,6 @@ pub struct UserResponse {
     pub id: i32,
     pub email: String,
     pub phone_number: String,
-    pub phone_number_country: Option<String>,
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
     pub verified: bool,

@@ -5,168 +5,8 @@ use web_sys::{MouseEvent, window, Event};
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::json;
-use crate::config;
-use serde::Deserialize;
 use crate::utils::api::Api;
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct AvailablePhoneNumber {
-    pub phone_number: String,
-    pub friendly_name: String,
-    pub address_requirements: String,
-    pub capabilities: Capabilities,
-    pub iso_country: String,
-    pub locality: Option<String>,
-    pub region: Option<String>,
-    pub postal_code: Option<String>,
-    pub lata: Option<String>,
-    pub rate_center: Option<String>,
-    pub latitude: Option<String>,
-    pub longitude: Option<String>,
-    #[serde(default)]
-    pub beta: bool,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct Capabilities {
-    #[serde(default)]
-    pub voice: bool,
-    #[serde(default, rename = "SMS", alias = "sms")]
-    pub sms: bool,
-    #[serde(default, rename = "MMS", alias = "mms")]
-    pub mms: bool,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct AvailableNumbers {
-    pub locals: Vec<AvailablePhoneNumber>,
-    pub mobiles: Vec<AvailablePhoneNumber>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct PhoneNumberCountry {
-    pub country: String,
-    pub iso_country: String,
-    pub phone_number_prices: Vec<PhoneNumberPrice>,
-    pub price_unit: String,
-    pub url: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct PhoneNumberPrice {
-    pub number_type: String,
-    pub base_price: String,
-    pub current_price: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct MessagingCountry {
-    pub country: String,
-    pub iso_country: String,
-    pub url: String,
-    pub price_unit: String,
-    pub inbound_sms_prices: Vec<InboundSmsPrice>,
-    pub outbound_sms_prices: Vec<OutboundSmsPrice>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct InboundSmsPrice {
-    pub number_type: String,
-    pub current_price: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct OutboundSmsPrice {
-    pub carrier: String,
-    pub mcc: String,
-    pub mnc: String,
-    pub prices: Vec<OutboundPrice>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct OutboundPrice {
-    pub number_type: String,
-    pub base_price: String,
-    pub current_price: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct VoiceCountry {
-    pub country: String,
-    pub iso_country: String,
-    pub url: String,
-    pub inbound_call_prices: Vec<InboundCallPrice>,
-    pub outbound_prefix_prices: Vec<OutboundPrefixPrice>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct InboundCallPrice {
-    pub number_type: String,
-    pub base_price: String,
-    pub current_price: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct OutboundPrefixPrice {
-    pub prefixes: Vec<String>,
-    pub base_price: String,
-    pub current_price: String,
-    pub friendly_name: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct TwilioPrices {
-    pub phone_numbers: PhoneNumberCountry,
-    pub messaging: MessagingCountry,
-    pub voice: VoiceCountry,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct Regulation {
-    pub sid: String,
-    pub friendly_name: String,
-    pub iso_country: String,
-    pub number_type: String,
-    pub end_user_type: String,
-    pub requirements: Requirements,
-    pub url: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct Requirements {
-    pub end_user: Vec<EndUserRequirement>,
-    pub supporting_document: Vec<Vec<SupportingDocumentRequirement>>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct EndUserRequirement {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub req_type: String,
-    pub requirement_name: String,
-    pub url: String,
-    pub fields: Vec<String>,
-    pub detailed_fields: Vec<FieldDetail>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct SupportingDocumentRequirement {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub req_type: String,
-    pub requirement_name: String,
-    pub description: String,
-    pub accepted_documents: Vec<AcceptedDocument>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct AcceptedDocument {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub doc_type: String,
-    pub url: String,
-    pub fields: Vec<String>,
-    pub detailed_fields: Vec<FieldDetail>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct FieldDetail {
-    pub machine_name: String,
-    pub friendly_name: String,
-    pub description: String,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct TwilioRegulations {
-    pub local: Vec<Regulation>,
-    pub mobile: Vec<Regulation>,
-}
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct CountryInfoResponse {
-    pub available_numbers: AvailableNumbers,
-    pub prices: TwilioPrices,
-    pub regulations: TwilioRegulations,
-}
+
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
     #[prop_or_default]
@@ -192,17 +32,11 @@ pub struct TwilioHostedInstructionsProps {
 struct IntroAndCountryProps {
     selected_country: UseStateHandle<String>,
     on_country_change: Callback<Event>,
-    is_loading: UseStateHandle<bool>,
-    fetch_error: UseStateHandle<Option<String>>,
-    country_info: UseStateHandle<Option<CountryInfoResponse>>,
 }
 #[function_component(IntroAndCountryComponent)]
 fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
     let selected_country = props.selected_country.clone();
     let on_country_change = props.on_country_change.clone();
-    let is_loading = props.is_loading.clone();
-    let fetch_error = props.fetch_error.clone();
-    let country_info = props.country_info.clone();
     html! {
         <>
             <div class="instruction-block overview-block">
@@ -309,278 +143,22 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                             <option value="za" selected={*selected_country == "za"}>{"ZA"}</option>
                         </select>
                     </div>
-                    { if *is_loading {
-                        html! { <p>{"Loading..."}</p> }
-                    } else if let Some(err) = &*fetch_error {
-                        html! {
-                            <div>
-                                <p class="error">{err}</p>
-                                if !selected_country.is_empty() {
-                                    <p>
-                                        {"More info from these links or email me rasmus@ahtava.com"}
-                                        <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{" Pricing"}</a>
-                                        {" and "}
-                                        <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank">{"Regulations"}</a>
-                                        {"."}
-                                    </p>
-                                }
-                            </div>
-                        }
-                    } else if let Some(info) = (*country_info).clone() {
-                        let locals = info.available_numbers.locals;
-                        let mobiles = info.available_numbers.mobiles;
-                        let price_unit = info.prices.phone_numbers.price_unit.clone();
-                        let mut local_regs = info.regulations.local.clone();
-                        local_regs = local_regs.into_iter().filter(|reg| reg.end_user_type == "individual").collect();
-                        let mut mobile_regs = info.regulations.mobile.clone();
-                        mobile_regs = mobile_regs.into_iter().filter(|reg| reg.end_user_type == "individual").collect();
+                    { if !selected_country.is_empty() {
                         html! {
                             <div class="country-info">
-                                <h3>{"Available Numbers"}</h3>
-                                {
-                                    if locals.is_empty() && mobiles.is_empty() {
-                                        html! { <p>{"No available numbers found for this country."}</p> }
-                                    } else {
-                                        html! {
-                                            <>
-                                            <table class="country-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>{"Number Type"}</th>
-                                                        <th>{"Number"}</th>
-                                                        <th>{"Address Requirements"}</th>
-                                                        <th>{"Capabilities"}</th>
-                                                        <th>{format!("Monthly Price ({})", price_unit)}</th>
-                                                        <th>{"Inbound SMS Price (per 160 chars)"}</th>
-                                                        <th>{"Outbound SMS Price (per 160 chars)"}</th>
-                                                        <th>{"Inbound Call Price (per minute)"}</th>
-                                                        <th>{"Outbound Call Price (per minute)"}</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {
-                                                        if !locals.is_empty() {
-                                                            let num = locals[0].clone();
-                                                            let num_type = "local".to_string();
-                                                            let monthly_price = info.prices.phone_numbers.phone_number_prices.iter()
-                                                                .find(|p| p.number_type == num_type)
-                                                                .map(|p| p.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let inbound_sms_price = info.prices.messaging.inbound_sms_prices.iter()
-                                                                .find(|inp| inp.number_type == num_type)
-                                                                .map(|inp| inp.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let outbound_sms_min_price = info.prices.messaging.outbound_sms_prices.iter()
-                                                                .flat_map(|out| &out.prices)
-                                                                .filter(|pr| pr.number_type == num_type)
-                                                                .map(|pr| pr.current_price.parse::<f64>().unwrap_or(f64::MAX))
-                                                                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let inbound_call_price = info.prices.voice.inbound_call_prices.iter()
-                                                                .find(|inp| inp.number_type == num_type)
-                                                                .map(|inp| inp.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
-                                                                .map(|outp| outp.current_price.parse::<f64>().unwrap_or(f64::MAX))
-                                                                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let has_inbound_sms = inbound_sms_price != "N/A" && num.capabilities.sms;
-                                                            let has_outbound_sms = outbound_sms_min_price != "N/A" && num.capabilities.sms;
-                                                            let mut caps: Vec<String> = Vec::new();
-                                                            if num.capabilities.voice { caps.push("Voice".to_string()); }
-                                                            if has_inbound_sms && has_outbound_sms {
-                                                                caps.push("SMS".to_string());
-                                                            } else {
-                                                                if has_inbound_sms { caps.push("Inbound SMS".to_string()); }
-                                                                if has_outbound_sms { caps.push("Outbound SMS".to_string()); }
-                                                            }
-                                                            if num.capabilities.mms { caps.push("MMS".to_string()); }
-                                                            let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
-                                                            html! {
-                                                                <tr>
-                                                                    <td>{"Local"}</td>
-                                                                    <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
-                                                                    <td>{ num.address_requirements }</td>
-                                                                    <td>{ caps_str }</td>
-                                                                    <td>{ monthly_price }</td>
-                                                                    <td>{ inbound_sms_price }</td>
-                                                                    <td>{ outbound_sms_min_price }</td>
-                                                                    <td>{ inbound_call_price }</td>
-                                                                    <td>{ outbound_call_price }</td>
-                                                                </tr>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if !mobiles.is_empty() {
-                                                            let num = mobiles[0].clone();
-                                                            let num_type = "mobile".to_string();
-                                                            let monthly_price = info.prices.phone_numbers.phone_number_prices.iter()
-                                                                .find(|p| p.number_type == num_type)
-                                                                .map(|p| p.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let inbound_sms_price = info.prices.messaging.inbound_sms_prices.iter()
-                                                                .find(|inp| inp.number_type == num_type)
-                                                                .map(|inp| inp.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let outbound_sms_min_price = info.prices.messaging.outbound_sms_prices.iter()
-                                                                .flat_map(|out| &out.prices)
-                                                                .filter(|pr| pr.number_type == num_type)
-                                                                .map(|pr| pr.current_price.parse::<f64>().unwrap_or(f64::MAX))
-                                                                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let inbound_call_price = info.prices.voice.inbound_call_prices.iter()
-                                                                .find(|inp| inp.number_type == num_type)
-                                                                .map(|inp| inp.current_price.clone())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
-                                                                .map(|outp| outp.current_price.parse::<f64>().unwrap_or(f64::MAX))
-                                                                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or("N/A".to_string());
-                                                            let has_inbound_sms = inbound_sms_price != "N/A" && num.capabilities.sms;
-                                                            let has_outbound_sms = outbound_sms_min_price != "N/A" && num.capabilities.sms;
-                                                            let mut caps: Vec<String> = Vec::new();
-                                                            if num.capabilities.voice { caps.push("Voice".to_string()); }
-                                                            if has_inbound_sms && has_outbound_sms {
-                                                                caps.push("SMS".to_string());
-                                                            } else {
-                                                                if has_inbound_sms { caps.push("Inbound SMS".to_string()); }
-                                                                if has_outbound_sms { caps.push("Outbound SMS".to_string()); }
-                                                            }
-                                                            if num.capabilities.mms { caps.push("MMS".to_string()); }
-                                                            let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
-                                                            html! {
-                                                                <tr>
-                                                                    <td>{"Mobile"}</td>
-                                                                    <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
-                                                                    <td>{ num.address_requirements }</td>
-                                                                    <td>{ caps_str }</td>
-                                                                    <td>{ monthly_price }</td>
-                                                                    <td>{ inbound_sms_price }</td>
-                                                                    <td>{ outbound_sms_min_price }</td>
-                                                                    <td>{ inbound_call_price }</td>
-                                                                    <td>{ outbound_call_price }</td>
-                                                                </tr>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                </tbody>
-                                            </table>
-                                            <p>{"Average usage per month falls around 50-200 SMS queries per month with average cost of 1.5x the outbound SMS cost. Normal voice calling is usually based on the inbound costs, though you can make the agent call you about important notifications which is when the outbound call price applies."}</p>
-                                            </>
-                                        }
-                                    }
-                                }
-                                <h3>{"Regulations"}</h3>
-                                {
-                                    if !locals.is_empty() {
-                                        html! {
-                                            <div>
-                                                <h4>{"Local"}</h4>
-                                                {
-                                                    if local_regs.is_empty() {
-                                                        html! { <p>{"No specific regulations found"}</p> }
-                                                    } else {
-                                                        html! {
-                                                            { for local_regs.iter().map(|reg| {
-                                                                html! {
-                                                                    <div>
-                                                                        <p>{ reg.friendly_name.clone() } { " (" } { reg.end_user_type.clone() } { ")" }</p>
-                                                                        <ul>
-                                                                            { for reg.requirements.end_user.iter().map(|eu| {
-                                                                                let fields_joined = eu.fields.iter().fold(String::new(), |acc, f| if acc.is_empty() { f.clone() } else { acc + ", " + f });
-                                                                                html! {
-                                                                                    <li>
-                                                                                        { eu.name.clone() } { " (" } { eu.req_type.clone() } { "): " } { fields_joined }
-                                                                                    </li>
-                                                                                }
-                                                                            }) }
-                                                                        </ul>
-                                                                        <p>{"Supporting Documents"}</p>
-                                                                        { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
-                                                                            let accepted_joined = doc.accepted_documents.iter().fold(String::new(), |acc, ad| if acc.is_empty() { ad.name.clone() } else { acc + ", " + &ad.name });
-                                                                            html! {
-                                                                                <div>
-                                                                                    { doc.name.clone() } { ": " } { doc.description.clone() }
-                                                                                    { " Accepted: " } { accepted_joined }
-                                                                                </div>
-                                                                            }
-                                                                        }) }
-                                                                    </div>
-                                                                }
-                                                            }) }
-                                                        }
-                                                    }
-                                                }
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                                {
-                                    if !mobiles.is_empty() {
-                                        html! {
-                                            <div>
-                                                <h4>{"Mobile"}</h4>
-                                                {
-                                                    if mobile_regs.is_empty() {
-                                                        html! { <p>{"No specific regulations found"}</p> }
-                                                    } else {
-                                                        html! {
-                                                            { for mobile_regs.iter().map(|reg| {
-                                                                html! {
-                                                                    <div>
-                                                                        <p>{ reg.friendly_name.clone() } { " (" } { reg.end_user_type.clone() } { ")" }</p>
-                                                                        <ul>
-                                                                            { for reg.requirements.end_user.iter().map(|eu| {
-                                                                                let fields_joined = eu.fields.iter().fold(String::new(), |acc, f| if acc.is_empty() { f.clone() } else { acc + ", " + f });
-                                                                                html! {
-                                                                                    <li>
-                                                                                        { eu.name.clone() } { " (" } { eu.req_type.clone() } { "): " } { fields_joined }
-                                                                                    </li>
-                                                                                }
-                                                                            }) }
-                                                                        </ul>
-                                                                        <p>{"Supporting Documents"}</p>
-                                                                        { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
-                                                                            let accepted_joined = doc.accepted_documents.iter().fold(String::new(), |acc, ad| if acc.is_empty() { ad.name.clone() } else { acc + ", " + &ad.name });
-                                                                            html! {
-                                                                                <div>
-                                                                                    { doc.name.clone() } { ": " } { doc.description.clone() }
-                                                                                    { " Accepted: " } { accepted_joined }
-                                                                                </div>
-                                                                            }
-                                                                        }) }
-                                                                    </div>
-                                                                }
-                                                            }) }
-                                                        }
-                                                    }
-                                                }
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                                if !selected_country.is_empty() {
-                                    <p>
-                                        {"Check these more at"}
-                                        <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{"Pricing"}</a>
-                                        {" and "}
-                                        <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank">{"Regulations"}</a>
-                                        {"."}
-                                    </p>
-                                }
+                                <p>
+                                    {"View pricing and regulations for your country:"}
+                                </p>
+                                <p>
+                                    <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank" class="twilio-link">{"Twilio SMS Pricing"}</a>
+                                    {" | "}
+                                    <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank" class="twilio-link">{"Regulatory Requirements"}</a>
+                                    {" | "}
+                                    <a href={format!("https://www.twilio.com/en-us/phone-numbers/{}", *selected_country)} target="_blank" class="twilio-link">{"Available Numbers"}</a>
+                                </p>
+                                <p class="info-note">
+                                    {"Questions? Email rasmus@ahtava.com"}
+                                </p>
                             </div>
                         }
                     } else {
@@ -590,6 +168,20 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
             </div>
             <style>
                 {r#"
+                .twilio-link {
+                    color: #1E90FF;
+                    text-decoration: none;
+                    font-weight: 500;
+                }
+                .twilio-link:hover {
+                    text-decoration: underline;
+                    color: #7EB2FF;
+                }
+                .info-note {
+                    margin-top: 1rem;
+                    font-size: 0.9rem;
+                    color: #888;
+                }
                 .instruction-block {
                     display: flex;
                     align-items: center;
@@ -1408,48 +1000,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         let val = &*auth_token;
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
-    let country_info = use_state(|| None::<CountryInfoResponse>);
-    let fetch_error = use_state(|| None::<String>);
-    let is_loading = use_state(|| false);
-    {
-        let selected_country = selected_country.clone();
-        let country_info = country_info.clone();
-        let fetch_error = fetch_error.clone();
-        let is_loading = is_loading.clone();
-        use_effect_with_deps(
-            move |country| {
-                let country = (*country).clone();
-                if !country.is_empty() {
-                    is_loading.set(true);
-                    fetch_error.set(None);
-                    country_info.set(None);
-                    spawn_local(async move {
-                        let request_body = json!({"country_code": country.to_uppercase()});
-                        let response = Request::post(&format!("{}/api/country-info", config::get_backend_url()))
-                            .json(&request_body)
-                            .unwrap()
-                            .send()
-                            .await;
-                        match response {
-                            Ok(resp) if resp.ok() => {
-                                match resp.json::<CountryInfoResponse>().await {
-                                    Ok(data) => {
-                                        country_info.set(Some(data));
-                                        fetch_error.set(None);
-                                    }
-                                    Err(e) => fetch_error.set(Some(e.to_string())),
-                                }
-                            }
-                            _ => fetch_error.set(Some("Failed to fetch country information".to_string())),
-                        }
-                        is_loading.set(false);
-                    });
-                }
-                || ()
-            },
-            selected_country,
-        );
-    }
     html! {
         <div class="instructions-page">
             <div class="instructions-background"></div>
@@ -1466,9 +1016,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                 <IntroAndCountryComponent
                     selected_country={selected_country.clone()}
                     on_country_change={on_country_change.clone()}
-                    is_loading={is_loading.clone()}
-                    fetch_error={fetch_error.clone()}
-                    country_info={country_info.clone()}
                 />
                 // TextBee section temporarily hidden
                 // <div class="instruction-block">

@@ -22,8 +22,8 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AiConfig, AppState, SqliteConnectionCustomizer, TotpRepository,
-    UserCore, UserRepository, WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
+    SqliteConnectionCustomizer, TotpRepository, UserCore, UserRepository, WebauthnRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
@@ -219,6 +219,7 @@ async fn main() {
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -313,10 +314,19 @@ async fn main() {
 
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
+    let twilio_client = Arc::new(backend::RealTwilioClient::new());
+    let twilio_message_service = Arc::new(backend::TwilioMessageService::new(
+        twilio_client.clone(),
+        pool.clone(),
+        user_core.clone(),
+        user_repository.clone(),
+    ));
     let state = Arc::new(AppState {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
+        twilio_client,
+        twilio_message_service,
         ai_config: AiConfig::from_env(),
         google_calendar_oauth_client,
         uber_oauth_client,
@@ -338,6 +348,7 @@ async fn main() {
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
         webauthn_repository,
+        admin_alert_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -485,18 +496,17 @@ async fn main() {
             "/api/phone-verify/verify",
             post(auth_handlers::verify_phone_verify),
         )
-        .route("/api/country-info", post(twilio_handlers::get_country_info))
-        .route(
-            "/api/pricing/notification-only",
-            get(handlers::pricing_handlers::get_notification_only_countries_pricing),
-        )
-        .route(
-            "/api/pricing/euro-countries",
-            get(handlers::pricing_handlers::get_euro_countries_pricing),
-        )
         .route(
             "/api/pricing/byot/{country_code}",
             get(handlers::pricing_handlers::get_byot_country_pricing),
+        )
+        .route(
+            "/api/pricing/all-countries",
+            get(handlers::pricing_handlers::get_all_countries),
+        )
+        .route(
+            "/api/pricing/country/{country_code}",
+            get(handlers::pricing_handlers::get_single_country_pricing),
         )
         .route(
             "/api/totp/verify",
@@ -593,6 +603,32 @@ async fn main() {
         .route(
             "/api/admin/stats/usage",
             get(handlers::admin_stats_handlers::get_usage_stats),
+        )
+        // Alert management routes
+        .route("/api/admin/alerts", get(admin_handlers::get_alerts))
+        .route(
+            "/api/admin/alerts/count",
+            get(admin_handlers::get_alert_count),
+        )
+        .route(
+            "/api/admin/alerts/{id}/acknowledge",
+            post(admin_handlers::acknowledge_alert),
+        )
+        .route(
+            "/api/admin/alerts/acknowledge-all",
+            post(admin_handlers::acknowledge_all_alerts),
+        )
+        .route(
+            "/api/admin/alerts/disabled-types",
+            get(admin_handlers::get_disabled_alert_types),
+        )
+        .route(
+            "/api/admin/alerts/disable/{alert_type}",
+            post(admin_handlers::disable_alert_type),
+        )
+        .route(
+            "/api/admin/alerts/enable/{alert_type}",
+            post(admin_handlers::enable_alert_type),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
