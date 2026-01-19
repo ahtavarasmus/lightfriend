@@ -822,6 +822,16 @@ impl UserCore {
         Ok(())
     }
 
+    /// Clear the last_credits_notification field when user adds credits.
+    /// This allows the notification to be sent again if credits deplete again.
+    pub fn clear_last_credits_notification(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::last_credits_notification.eq(None::<i32>))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_discount_tier(
         &self,
         user_id: i32,

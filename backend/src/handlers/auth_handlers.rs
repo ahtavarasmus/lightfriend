@@ -515,19 +515,6 @@ pub async fn register(
         let _ = state
             .user_core
             .set_preferred_number_for_country(user.id, &country);
-    } else if reg_req.phone_number.starts_with("+1") {
-        // Fallback for +1 numbers if country detection fails
-        state
-            .user_core
-            .set_preferred_number_to_us_default(user.id)
-            .map_err(|e| {
-                tracing::error!("Failed to set preferred number: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Failed to set preferred number") })),
-                )
-            })?;
-        tracing::debug!("Preferred number set successfully, generating tokens");
     }
     generate_tokens_and_response(user.id)
 }

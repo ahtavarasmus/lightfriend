@@ -429,26 +429,19 @@ pub async fn create_unified_subscription_checkout(
     let country = detected_country.as_deref().unwrap_or("OTHER");
     tracing::debug!("country: {}", country);
 
-    // Import euro plan country check
-    use crate::utils::country::is_euro_plan_country;
-
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
                 std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
                     .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
-            } else if is_euro_plan_country(country) {
-                // Euro countries: Monitor (€29) or Digest (€59) plan
+            } else {
+                // Non-US/CA countries: Monitor or Digest plan
                 match body.plan_type.as_deref() {
                     Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
                         .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
                     _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
                         .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"), // Default to Monitor
                 }
-            } else {
-                // Fallback for any other countries
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-                    .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
             }
         }
     };
@@ -571,17 +564,14 @@ pub async fn create_guest_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     let country = body.selected_country.as_str();
 
-    // Import euro plan country check
-    use crate::utils::country::is_euro_plan_country;
-
     // Select price ID based on subscription type and country
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
                 std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
                     .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
-            } else if is_euro_plan_country(country) {
-                // Euro countries: use monitor or digest plan based on selection
+            } else {
+                // Non-US/CA countries: use monitor or digest plan based on selection
                 let plan_type = body.plan_type.as_deref().unwrap_or("monitor");
                 if plan_type == "digest" {
                     std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
@@ -590,10 +580,6 @@ pub async fn create_guest_checkout(
                     std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
                         .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set")
                 }
-            } else {
-                // Other countries fallback
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-                    .expect("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER not set")
             }
         }
     };

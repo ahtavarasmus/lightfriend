@@ -119,21 +119,18 @@ pub async fn check_user_credits(
 
     // Check if user has sufficient balance
     if user.credits_left < required_credits_left && user.credits < required_credits {
-        // Check if enough time has passed since the last notification (24 hours)
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let should_notify = match user.last_credits_notification {
-            None => true,
-            Some(last_time) => (current_time - last_time) >= 24 * 3600, // 24 hours in seconds
-        };
+        // Only send notification once ever (when last_credits_notification is None)
+        // The notification flag is cleared when user adds credits
+        let should_notify = user.last_credits_notification.is_none();
 
         if should_notify && event_type != "digest" {
             // Send notification about depleted credits and monthly quota
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
 
-            // Update the last notification timestamp
+            // Update the last notification timestamp to prevent repeat notifications
             if let Err(e) = state
                 .user_core
                 .update_last_credits_notification(user.id, current_time)
