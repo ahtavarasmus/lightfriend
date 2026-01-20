@@ -1230,87 +1230,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 pub struct FeatureListProps {
     pub selected_country: String,
 }
-#[function_component(FeatureList)]
-pub fn feature_list(props: &FeatureListProps) -> Html {
-    let base_messages_text: String = match props.selected_country.as_str() {
-        "US" => "400 Messages per month included".to_string(),
-        "CA" => "400 Messages per month included".to_string(),
-        "FI" | "NL" | "GB" | "AU" => "Messages via prepaid credits".to_string(),
-        c if is_notification_only_country(c) => "Notification service via US number - prepaid credits".to_string(),
-        _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
-    };
-    let feature_css = r#"
-    .feature-list {
-        max-width: 1000px;
-        margin: 4rem auto;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
-        border-radius: 24px;
-        padding: 2.5rem;
-        backdrop-filter: blur(10px);
-    }
-    .feature-list h2 {
-        color: #7EB2FF;
-        font-size: 2rem;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    .feature-list ul {
-        list-style-type: none;
-        padding: 0;
-    }
-    .feature-list li {
-        color: #e0e0e0;
-        padding: 0.5rem 0;
-        font-size: 1.1rem;
-        display: flex;
-        align-items: center;
-    }
-    .feature-list li i {
-        margin-right: 1rem;
-        color: #7EB2FF;
-        width: 1.2em; /* Fixed width for alignment */
-        text-align: center;
-    }
-    @media (max-width: 968px) {
-        .feature-list {
-            padding: 1.5rem;
-            margin: 2rem 1rem;
-            max-width: calc(100vw - 2rem);
-        }
-    }
-    "#;
-    html! {
-        <div class="feature-list">
-            <style>{feature_css}</style>
-            <h2>{"Included in All Plans"}</h2>
-            <ul>
-                <li><i class="fas fa-phone"></i>{"Voice calling and SMS interface"}</li>
-                <li><i class="fas fa-comments"></i>{base_messages_text}</li>
-                <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
-                <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast up to 7 days"}</li>
-                <li><i class="fas fa-route"></i>{"Step-by-step Directions from Google Maps"}</li>
-                <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
-                <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
-                <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
-                <li><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</li>
-                <li><i class="fab fa-signal-messenger"></i>{"Send, Fetch and Monitor Signal Messages"}</li>
-                <li><i class="fas fa-envelope"></i>{"Fetch, Send, Reply and Monitor Emails"}</li>
-                <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
-                <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
-                <li><i class="fas fa-car"></i>{"Tesla Vehicle Control (lock, unlock, climate, start, battery)"}</li>
-                <li><i class="fas fa-desktop"></i>{"Web Dashboard with Chat & Voice Calls"}</li>
-                <li><i class="fas fa-play-circle"></i>{"Video Player for Shared Links (coming soon)"}</li>
-                <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
-                <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
-                <li><i class="fas fa-clock"></i>{"Custom Waiting Checks Specific Content"}</li>
-                <li><i class="fas fa-bell"></i>{"Priority Sender Notifications"}</li>
-                <li><i class="fas fa-rocket"></i>{"All Future Features Included"}</li>
-                <li><i class="fas fa-headset"></i>{"Priority Support"}</li>
-            </ul>
-        </div>
-    }
-}
 #[function_component(CreditPricing)]
 pub fn credit_pricing(props: &FeatureListProps) -> Html {
     let country = &props.selected_country;
@@ -2236,7 +2155,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     }
                 }
             </div>
-            <FeatureList selected_country={props.selected_country.clone()} />
             <CreditPricing selected_country={props.selected_country.clone()} />
             <div class="pricing-faq">
                 <h2>{"Common Questions"}</h2>

@@ -259,7 +259,21 @@ pub fn faq() -> Html {
 
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
+                    question="Will I be charged extra for replying to messages?"
+                    id="international-sms-rates"
+                >
+                    <p>{"If you're in a country without a local Lightfriend number (see above), you'll receive messages from a foreign number - typically US or UK. While receiving messages works the same everywhere, replying may incur international SMS rates from your mobile carrier."}</p>
+                    <h3>{"Reducing Costs"}</h3>
+                    <ul>
+                        <li>{"You can choose which country's number to use in your settings - options include US, Canada, UK, Finland, Netherlands, and Australia. For example, if you're in Europe, a UK number may be cheaper to text than a US number."}</li>
+                        <li>{"Most of Lightfriend's value comes from receiving notifications - calendar reminders, message summaries, and alerts - which doesn't require you to reply."}</li>
+                    </ul>
+                    <h3>{"Check Your Carrier's Rates"}</h3>
+                    <p>{"International SMS rates vary by carrier. Contact your mobile provider to understand what you'd pay to text a US or UK number, then choose the cheaper option in your Lightfriend settings."}</p>
+                </FaqItem>
+
+                <FaqItem
                     question="Can I try the service before signing up?"
                     id="try-service"
                 >
