@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use anyhow::{anyhow, Result};
 use axum::{extract::State, http::StatusCode, response::Json as AxumJson};
 use serde_json::json;

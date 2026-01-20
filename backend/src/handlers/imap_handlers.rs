@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use crate::{handlers::auth_middleware::AuthUser, AppState};
 use axum::{
     extract::{Json, State},

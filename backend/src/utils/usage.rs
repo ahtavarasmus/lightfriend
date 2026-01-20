@@ -1,5 +1,6 @@
 use crate::utils::country::get_country_code_from_phone;
 use crate::AppState;
+use crate::UserCoreOps;
 use std::sync::Arc;
 
 /// Helper to check if a phone number is US/CA

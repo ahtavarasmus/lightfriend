@@ -20,6 +20,7 @@ use backend::test_utils::{
     set_byot_credentials, MockLlmResponse, TestUserParams,
 };
 use backend::utils::usage::deduct_user_credits;
+use backend::UserCoreOps;
 
 #[test]
 fn test_mock_llm_response_creates_valid_response() {

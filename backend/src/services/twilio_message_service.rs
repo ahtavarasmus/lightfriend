@@ -3,6 +3,7 @@
 //! This service handles credential resolution, message sending, and database logging,
 //! separating business logic from the underlying Twilio API calls.
 
+use crate::UserCoreOps;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
 use diesel::prelude::*;
 use rand::Rng;

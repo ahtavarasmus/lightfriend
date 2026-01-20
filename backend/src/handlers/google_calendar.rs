@@ -1,4 +1,5 @@
 use crate::handlers::auth_middleware::AuthUser;
+use crate::UserCoreOps;
 use axum::{
     extract::{Query, State},
     http::StatusCode,

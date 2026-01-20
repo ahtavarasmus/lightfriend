@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;

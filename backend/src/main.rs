@@ -23,7 +23,8 @@ use tracing::Level;
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
     api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
-    SqliteConnectionCustomizer, TotpRepository, UserCore, UserRepository, WebauthnRepository,
+    SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
+    WebauthnRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,

@@ -3,6 +3,7 @@ use crate::api::twilio_pricing::{get_euro_country_pricing, get_notification_only
 use crate::handlers::auth_middleware::AuthUser;
 use crate::schema::usage_logs;
 use crate::utils::country::is_notification_only_country_code;
+use crate::UserCoreOps;
 
 /// ALL countries supported worldwide via Twilio
 /// Comprehensive list for pricing display - pricing fetched on-demand when selected

@@ -1,6 +1,7 @@
 use crate::handlers::imap_handlers::{fetch_emails_imap, fetch_single_email_imap};
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::middleware;
 use axum::{
     body::Body,

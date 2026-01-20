@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use anyhow::{anyhow, Result};
 use matrix_sdk::{
     room::Room,

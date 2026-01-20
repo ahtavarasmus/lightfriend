@@ -1,4 +1,5 @@
 use crate::handlers::auth_middleware::AuthUser;
+use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, response::Response, Json};
 use chrono::{Duration, Utc};
 use governor::{Quota, RateLimiter};

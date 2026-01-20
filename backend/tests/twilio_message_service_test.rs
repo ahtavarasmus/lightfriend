@@ -8,6 +8,7 @@ use backend::test_utils::{
     create_test_state, create_test_user, set_byot_credentials, set_preferred_number,
     setup_test_encryption, TestUserParams,
 };
+use backend::UserCoreOps;
 use serial_test::serial;
 use std::sync::Arc;
 

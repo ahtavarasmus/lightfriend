@@ -1,5 +1,6 @@
 use crate::utils::encryption::decrypt;
 use crate::AppState;
+use crate::UserCoreOps;
 use anyhow::{anyhow, Result};
 use hmac::{Hmac, Mac};
 use matrix_sdk::store::RoomLoadSettings;

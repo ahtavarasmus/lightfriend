@@ -1,6 +1,7 @@
 use crate::repositories::user_repository::LogUsageParams;
 use crate::tool_call_utils::utils::{create_openai_client_for_user, ChatMessage};
 use crate::AppState;
+use crate::UserCoreOps;
 use crate::{AiProvider, ModelPurpose};
 use axum::{extract::Form, extract::State, http::StatusCode, Json};
 use chrono::Utc;

@@ -7,6 +7,7 @@
 use crate::tool_call_utils::utils::create_openai_client_for_user;
 use crate::AppState;
 use crate::ModelPurpose;
+use crate::UserCoreOps;
 use openai_api_rs::v1::chat_completion;
 use serde::Deserialize;
 use std::collections::HashMap;

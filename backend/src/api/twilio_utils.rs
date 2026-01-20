@@ -1,5 +1,6 @@
 use crate::api::twilio_client::{TwilioClient, TwilioCredentials};
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::{
     body::{to_bytes, Body},
     extract::State,

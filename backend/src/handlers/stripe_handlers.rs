@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use stripe::{
     BillingPortalSession, CheckoutSession, Client, CreateBillingPortalSession,
     CreateCheckoutSession, CreateCustomer, CreatePaymentIntent, Customer, PaymentIntent,

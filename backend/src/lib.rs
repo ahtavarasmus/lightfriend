@@ -120,7 +120,7 @@ pub mod test_utils;
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::totp_repository::TotpRepository;
-pub use repositories::user_core::UserCore;
+pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
 pub use services::twilio_message_service::TwilioMessageService;
