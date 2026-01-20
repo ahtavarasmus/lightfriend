@@ -253,7 +253,7 @@ async fn handle_post_call_transcription(
     let conversation_id = payload.data.conversation_id;
     let call_duration_secs = payload.data.metadata.call_duration_secs;
     let call_successful = payload.data.analysis.call_successful;
-    let call_summary = payload.data.analysis.transcript_summary;
+    // Note: transcript_summary is available but not stored for privacy
     let user_id: Option<String> = payload
         .data
         .conversation_initiation_client_data
@@ -332,13 +332,13 @@ async fn handle_post_call_transcription(
                 _ => false,
             };
 
-            // Update the usage log with final values
+            // Update the usage log with final values (no transcript for privacy)
             if let Err(e) = state.user_repository.update_usage_log_fields(
                 user_id,
                 &usage.sid.unwrap_or_default(),
                 "done",
                 success,
-                &call_summary,
+                "", // No call summary stored for privacy
                 Some(call_duration_secs),
             ) {
                 error!("Failed to update usage log: {}", e);
@@ -373,7 +373,7 @@ async fn handle_post_call_transcription(
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
-                encrypted_content: format!("[CALL_SUMMARY] {}", call_summary),
+                encrypted_content: format!("[CALL_END] Duration: {}s", call_duration_secs),
                 tool_name: None,
                 tool_call_id: None,
                 tool_calls_json: None,

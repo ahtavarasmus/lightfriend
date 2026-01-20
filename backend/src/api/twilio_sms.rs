@@ -484,32 +484,6 @@ pub async fn handle_regular_sms(
 ) {
     tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
 
-    // First check if this user has a discount_tier == msg - they shouldn't be using this endpoint
-    match state.user_core.find_by_phone_number(&payload.from) {
-        Ok(Some(user)) => {
-            if let Some(tier) = user.discount_tier {
-                if tier == "msg" {
-                    tracing::warn!(
-                        "User {} with discount_tier=msg attempted to use regular SMS endpoint",
-                        user.id
-                    );
-                    return SmsResult::UserError {
-                        message: "Please use your dedicated SMS endpoint. Contact support if you need help.".to_string(),
-                        status: StatusCode::FORBIDDEN,
-                    }.into_response();
-                }
-            }
-        }
-        Ok(None) => {
-            tracing::error!("No user found for phone number: {}", payload.from);
-            return SmsResult::user_not_found().into_response();
-        }
-        Err(e) => {
-            tracing::error!("Database error while finding user: {}", e);
-            return SmsResult::database_error(&e.to_string()).into_response();
-        }
-    }
-
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
         if let Ok(Some(user)) = state.user_core.find_by_phone_number(&payload.from) {

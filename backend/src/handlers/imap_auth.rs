@@ -22,6 +22,31 @@ pub struct ImapCredentials {
     imap_port: Option<u16>, // e.g., 993
 }
 
+/// Detects the IMAP server based on email domain.
+/// Returns (server, port) tuple.
+pub fn detect_imap_server(email: &str) -> (&'static str, u16) {
+    let domain = email.split('@').nth(1).unwrap_or("").to_lowercase();
+
+    match domain.as_str() {
+        // iCloud
+        "icloud.com" | "me.com" | "mac.com" => ("imap.mail.me.com", 993),
+        // Google
+        "gmail.com" | "googlemail.com" => ("imap.gmail.com", 993),
+        // Microsoft
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" => ("outlook.office365.com", 993),
+        // Yahoo
+        "yahoo.com" | "yahoo.co.uk" | "yahoo.fr" | "yahoo.de" => ("imap.mail.yahoo.com", 993),
+        // AOL
+        "aol.com" => ("imap.aol.com", 993),
+        // Zoho
+        "zoho.com" | "zohomail.com" => ("imap.zoho.com", 993),
+        // FastMail
+        "fastmail.com" | "fastmail.fm" => ("imap.fastmail.com", 993),
+        // Default to Gmail (legacy behavior, but log warning)
+        _ => ("imap.gmail.com", 993),
+    }
+}
+
 // Struct to serialize the IMAP status response
 #[derive(Serialize)]
 pub struct ImapStatus {
@@ -31,7 +56,7 @@ pub struct ImapStatus {
 
 use native_tls::TlsStream;
 
-// Function to establish an IMAP connection to Gmail for credential verification
+// Function to establish an IMAP connection for credential verification
 async fn connect_imap(
     email: &str,
     password: &str,
@@ -40,8 +65,18 @@ async fn connect_imap(
 ) -> Result<Session<TlsStream<std::net::TcpStream>>, Box<dyn Error>> {
     let tls = TlsConnector::builder().build()?;
 
-    let server = imap_server.unwrap_or("imap.gmail.com");
-    let port = imap_port.unwrap_or(993);
+    // Use provided server/port or auto-detect from email domain
+    let (detected_server, detected_port) = detect_imap_server(email);
+    let server = imap_server.unwrap_or(detected_server);
+    let port = imap_port.unwrap_or(detected_port);
+
+    tracing::debug!(
+        "Connecting to IMAP server {} on port {} for email {}",
+        server,
+        port,
+        email
+    );
+
     let client = imap::connect((server, port), server, &tls)?;
 
     match client.login(email, password) {

@@ -10,8 +10,10 @@ use std::collections::HashMap;
 use crate::utils::api::Api;
 
 /// Check if a country is notification-only (receives SMS from US number, dynamic pricing)
+/// Any country that's not a local-number country is notification-only
 fn is_notification_only_country(country: &str) -> bool {
-    matches!(country, "DE" | "FR" | "ES" | "IT" | "PT" | "BE" | "AT" | "CH" | "PL" | "CZ" | "SE" | "DK" | "NO" | "IE" | "NZ")
+    // Local number countries have dedicated Twilio numbers
+    !matches!(country, "US" | "CA" | "FI" | "NL" | "GB" | "AU")
 }
 
 /// Check if country has local number (can receive inbound calls)
@@ -364,50 +366,9 @@ pub fn byot_pricing_display() -> Html {
                             <option value="SG" selected={current_country == "SG"}>{"Singapore"}</option>
                             <option value="HK" selected={current_country == "HK"}>{"Hong Kong"}</option>
                             <option value="TW" selected={current_country == "TW"}>{"Taiwan"}</option>
-                            <option value="MY" selected={current_country == "MY"}>{"Malaysia"}</option>
-                            <option value="TH" selected={current_country == "TH"}>{"Thailand"}</option>
-                            <option value="PH" selected={current_country == "PH"}>{"Philippines"}</option>
-                            <option value="ID" selected={current_country == "ID"}>{"Indonesia"}</option>
-                            <option value="VN" selected={current_country == "VN"}>{"Vietnam"}</option>
-                            <option value="IN" selected={current_country == "IN"}>{"India"}</option>
-                            <option value="PK" selected={current_country == "PK"}>{"Pakistan"}</option>
-                            <option value="BD" selected={current_country == "BD"}>{"Bangladesh"}</option>
-                            <option value="LK" selected={current_country == "LK"}>{"Sri Lanka"}</option>
-                        </optgroup>
-                        <optgroup label="Americas">
-                            <option value="MX" selected={current_country == "MX"}>{"Mexico"}</option>
-                            <option value="BR" selected={current_country == "BR"}>{"Brazil"}</option>
-                            <option value="AR" selected={current_country == "AR"}>{"Argentina"}</option>
-                            <option value="CL" selected={current_country == "CL"}>{"Chile"}</option>
-                            <option value="CO" selected={current_country == "CO"}>{"Colombia"}</option>
-                            <option value="PE" selected={current_country == "PE"}>{"Peru"}</option>
-                            <option value="VE" selected={current_country == "VE"}>{"Venezuela"}</option>
-                            <option value="EC" selected={current_country == "EC"}>{"Ecuador"}</option>
-                            <option value="CR" selected={current_country == "CR"}>{"Costa Rica"}</option>
-                            <option value="PA" selected={current_country == "PA"}>{"Panama"}</option>
-                            <option value="PR" selected={current_country == "PR"}>{"Puerto Rico"}</option>
                         </optgroup>
                         <optgroup label="Middle East">
                             <option value="IL" selected={current_country == "IL"}>{"Israel"}</option>
-                            <option value="AE" selected={current_country == "AE"}>{"UAE"}</option>
-                            <option value="SA" selected={current_country == "SA"}>{"Saudi Arabia"}</option>
-                            <option value="QA" selected={current_country == "QA"}>{"Qatar"}</option>
-                            <option value="KW" selected={current_country == "KW"}>{"Kuwait"}</option>
-                            <option value="BH" selected={current_country == "BH"}>{"Bahrain"}</option>
-                            <option value="OM" selected={current_country == "OM"}>{"Oman"}</option>
-                            <option value="JO" selected={current_country == "JO"}>{"Jordan"}</option>
-                            <option value="TR" selected={current_country == "TR"}>{"Turkey"}</option>
-                        </optgroup>
-                        <optgroup label="Africa">
-                            <option value="ZA" selected={current_country == "ZA"}>{"South Africa"}</option>
-                            <option value="NG" selected={current_country == "NG"}>{"Nigeria"}</option>
-                            <option value="KE" selected={current_country == "KE"}>{"Kenya"}</option>
-                            <option value="EG" selected={current_country == "EG"}>{"Egypt"}</option>
-                            <option value="GH" selected={current_country == "GH"}>{"Ghana"}</option>
-                            <option value="MA" selected={current_country == "MA"}>{"Morocco"}</option>
-                            <option value="TN" selected={current_country == "TN"}>{"Tunisia"}</option>
-                            <option value="TZ" selected={current_country == "TZ"}>{"Tanzania"}</option>
-                            <option value="UG" selected={current_country == "UG"}>{"Uganda"}</option>
                         </optgroup>
                     </select>
                 </div>
@@ -2030,7 +1991,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
                                         <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
                                     </optgroup>
-                                    <optgroup label="Notification Only (US number)">
+                                    <optgroup label="Europe">
                                         <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
                                         <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
                                         <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
@@ -2045,7 +2006,31 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
                                         <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
                                         <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
+                                        <option value="GR" selected={props.selected_country == "GR"}>{"Greece"}</option>
+                                        <option value="HU" selected={props.selected_country == "HU"}>{"Hungary"}</option>
+                                        <option value="RO" selected={props.selected_country == "RO"}>{"Romania"}</option>
+                                        <option value="SK" selected={props.selected_country == "SK"}>{"Slovakia"}</option>
+                                        <option value="BG" selected={props.selected_country == "BG"}>{"Bulgaria"}</option>
+                                        <option value="HR" selected={props.selected_country == "HR"}>{"Croatia"}</option>
+                                        <option value="SI" selected={props.selected_country == "SI"}>{"Slovenia"}</option>
+                                        <option value="LT" selected={props.selected_country == "LT"}>{"Lithuania"}</option>
+                                        <option value="LV" selected={props.selected_country == "LV"}>{"Latvia"}</option>
+                                        <option value="EE" selected={props.selected_country == "EE"}>{"Estonia"}</option>
+                                        <option value="LU" selected={props.selected_country == "LU"}>{"Luxembourg"}</option>
+                                        <option value="MT" selected={props.selected_country == "MT"}>{"Malta"}</option>
+                                        <option value="CY" selected={props.selected_country == "CY"}>{"Cyprus"}</option>
+                                        <option value="IS" selected={props.selected_country == "IS"}>{"Iceland"}</option>
+                                    </optgroup>
+                                    <optgroup label="Asia-Pacific">
                                         <option value="NZ" selected={props.selected_country == "NZ"}>{"New Zealand"}</option>
+                                        <option value="JP" selected={props.selected_country == "JP"}>{"Japan"}</option>
+                                        <option value="KR" selected={props.selected_country == "KR"}>{"South Korea"}</option>
+                                        <option value="SG" selected={props.selected_country == "SG"}>{"Singapore"}</option>
+                                        <option value="HK" selected={props.selected_country == "HK"}>{"Hong Kong"}</option>
+                                        <option value="TW" selected={props.selected_country == "TW"}>{"Taiwan"}</option>
+                                    </optgroup>
+                                    <optgroup label="Middle East">
+                                        <option value="IL" selected={props.selected_country == "IL"}>{"Israel"}</option>
                                     </optgroup>
                                     <optgroup label="Other">
                                         <option value="Other" selected={props.selected_country == "Other"}>{"Other (bring your own number)"}</option>
@@ -2137,10 +2122,10 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             // Notification-only countries - reframe as proactive-first
                             vec![
                                 Feature {
-                                    text: "Proactive notifications from US number".to_string(),
+                                    text: "Proactive notifications".to_string(),
                                     sub_items: vec![
-                                        "Service notifies you - rarely need to text back".to_string(),
-                                        "Texting back possible (may cost extra)".to_string()
+                                        "Choose sender: US, CA, FI, NL, GB, or AU number".to_string(),
+                                        "Texting back possible (international rates may apply)".to_string()
                                     ]
                                 },
                                 Feature { text: "All features included".to_string(), sub_items: vec![] },
