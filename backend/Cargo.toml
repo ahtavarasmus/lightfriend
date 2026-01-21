@@ -72,3 +72,4 @@ phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsi
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables
+wiremock = "0.6"  # For mock HTTP server tests

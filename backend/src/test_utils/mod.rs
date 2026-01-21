@@ -1,6 +1,8 @@
-//! Test utilities for SMS e2e tests
+//! Test utilities for SMS e2e tests and Matrix integration tests.
 //!
-//! Provides mock LLM responses and test state setup for integration tests.
+//! Provides mock LLM responses, test state setup, and Matrix test server utilities.
+
+pub mod matrix_test_server;
 
 use crate::UserCoreOps;
 use dashmap::DashMap;
