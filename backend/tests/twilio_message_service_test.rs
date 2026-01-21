@@ -384,6 +384,9 @@ async fn test_send_sms_notification_only_default_flow() {
 #[tokio::test]
 #[serial]
 async fn test_send_sms_skips_in_development() {
+    // Save original environment value
+    let original_env = std::env::var("ENVIRONMENT").ok();
+
     // Set to development environment
     std::env::set_var("ENVIRONMENT", "development");
 
@@ -405,8 +408,11 @@ async fn test_send_sms_skips_in_development() {
         "Should not call Twilio in development"
     );
 
-    // Reset environment
-    std::env::set_var("ENVIRONMENT", "test");
+    // Restore original environment
+    match original_env {
+        Some(val) => std::env::set_var("ENVIRONMENT", val),
+        None => std::env::remove_var("ENVIRONMENT"),
+    }
 }
 
 // =========================================================================
