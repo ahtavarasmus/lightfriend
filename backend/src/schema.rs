@@ -436,6 +436,7 @@ diesel::table! {
         next_billing_date_timestamp -> Nullable<Integer>,
         magic_token -> Nullable<Text>,
         plan_type -> Nullable<Text>,
+        matrix_e2ee_enabled -> Bool,
     }
 }
 

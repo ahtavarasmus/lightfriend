@@ -59,7 +59,7 @@ oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
 tower = "0.4"
 mockall = "0.11"
-matrix-sdk = { version = "0.13.0", features = ["sqlite"] }
+matrix-sdk = { version = "0.13.0", features = ["sqlite", "e2e-encryption"] }
 thiserror = "1.0"
 async-trait = "0.1"
 p256 = { version = "0.13", features = ["pem"] }

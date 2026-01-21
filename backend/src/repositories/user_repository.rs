@@ -1633,6 +1633,41 @@ impl UserRepository {
         Ok(())
     }
 
+    /// Enable or disable Matrix E2EE for a user
+    pub fn set_matrix_e2ee_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(users::table.find(user_id))
+            .set(users::matrix_e2ee_enabled.eq(enabled))
+            .execute(&mut conn)?;
+
+        tracing::info!("Set matrix_e2ee_enabled={} for user {}", enabled, user_id);
+        Ok(())
+    }
+
+    /// Stores the encrypted secret storage recovery key for a user
+    pub fn set_matrix_secret_storage_recovery_key(
+        &self,
+        user_id: i32,
+        recovery_key: &str,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let encrypted_key = encrypt(recovery_key).map_err(|_| {
+            DieselError::SerializationError(Box::new(std::io::Error::other("Encryption failed")))
+        })?;
+
+        diesel::update(users::table.find(user_id))
+            .set(users::encrypted_matrix_secret_storage_recovery_key.eq(Some(encrypted_key)))
+            .execute(&mut conn)?;
+
+        tracing::info!(
+            "Stored Matrix secret storage recovery key for user {}",
+            user_id
+        );
+        Ok(())
+    }
+
     pub fn update_bridge_last_seen_online(
         &self,
         user_id: i32,

@@ -719,6 +719,18 @@ async fn monitor_signal_connection(
                                 };
                                 state.user_repository.delete_bridge(user_id, "signal")?;
                                 state.user_repository.create_bridge(new_bridge)?;
+
+                                // Enable E2EE for this user when connecting a bridge
+                                if let Err(e) =
+                                    state.user_repository.set_matrix_e2ee_enabled(user_id, true)
+                                {
+                                    tracing::warn!(
+                                        "Failed to enable E2EE for user {}: {}",
+                                        user_id,
+                                        e
+                                    );
+                                }
+
                                 // Add client to app state and start sync
                                 let mut matrix_clients = state.matrix_clients.lock().await;
                                 let mut sync_tasks = state.matrix_sync_tasks.lock().await;

@@ -10,6 +10,7 @@ use reqwest::Client as HttpClient;
 use serde_json::json;
 use sha1::Sha1;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 use url::Url;
 use uuid::Uuid;
 
@@ -143,6 +144,178 @@ pub async fn login_with_password(
     }
     tracing::info!("✅ Login with password completed successfully");
     Ok(())
+}
+
+/// Sets up encryption backups for a Matrix client
+async fn setup_backups(client: &MatrixClient, encrypted_key: Option<&String>) -> Result<bool> {
+    tracing::info!("Checking encryption backups");
+    let mut backups_enabled = client.encryption().backups().are_enabled().await;
+    let mut needs_secret_storage_update = false;
+
+    if !backups_enabled {
+        tracing::debug!("Backups not enabled, attempting to restore");
+        if let Some(key) = encrypted_key {
+            if client.encryption().secret_storage().is_enabled().await? {
+                let passphrase = decrypt(key)?;
+                let secret_store = client
+                    .encryption()
+                    .secret_storage()
+                    .open_secret_store(&passphrase)
+                    .await?;
+                secret_store.import_secrets().await?;
+
+                backups_enabled = client.encryption().backups().are_enabled().await;
+                if !backups_enabled {
+                    needs_secret_storage_update = true;
+                }
+            } else {
+                needs_secret_storage_update = true;
+            }
+        } else {
+            needs_secret_storage_update = true;
+        }
+    }
+
+    Ok(needs_secret_storage_update)
+}
+
+/// Sets up cross-signing for a Matrix client
+async fn setup_cross_signing(
+    client: &MatrixClient,
+    username: &str,
+    password: &str,
+    encrypted_key: Option<&String>,
+) -> Result<bool> {
+    let mut needs_secret_storage_update = false;
+
+    if let Some(cross_signing_status) = client.encryption().cross_signing_status().await {
+        if !cross_signing_status.has_master
+            || !cross_signing_status.has_self_signing
+            || !cross_signing_status.has_user_signing
+        {
+            if let Some(encrypted_key) = encrypted_key {
+                if client.encryption().secret_storage().is_enabled().await? {
+                    let passphrase = decrypt(encrypted_key)?;
+                    let secret_store = client
+                        .encryption()
+                        .secret_storage()
+                        .open_secret_store(&passphrase)
+                        .await?;
+                    secret_store.import_secrets().await?;
+
+                    if let Some(status) = client.encryption().cross_signing_status().await {
+                        if !status.has_master
+                            || !status.has_self_signing
+                            || !status.has_user_signing
+                        {
+                            needs_secret_storage_update =
+                                try_bootstrap_cross_signing(client, username, password).await?;
+                        }
+                    }
+                } else {
+                    needs_secret_storage_update = true;
+                }
+            } else {
+                needs_secret_storage_update =
+                    try_bootstrap_cross_signing(client, username, password).await?;
+            }
+        }
+    } else {
+        needs_secret_storage_update =
+            try_bootstrap_cross_signing(client, username, password).await?;
+    }
+
+    Ok(needs_secret_storage_update)
+}
+
+/// Attempts to bootstrap cross-signing, handling authentication if needed
+async fn try_bootstrap_cross_signing(
+    client: &MatrixClient,
+    username: &str,
+    password: &str,
+) -> Result<bool> {
+    tracing::info!("Bootstrapping cross-signing keys");
+
+    async fn clear_store(username: &str) -> Result<()> {
+        let store_path = format!(
+            "{}/{}",
+            std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+                .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
+            username
+        );
+        if std::path::Path::new(&store_path).exists() {
+            tokio::fs::remove_dir_all(&store_path).await?;
+            tokio::fs::create_dir_all(&store_path).await?;
+        }
+        Ok(())
+    }
+
+    fn is_key_conflict(e: &matrix_sdk::Error) -> bool {
+        let error_str = e.to_string().to_lowercase();
+        error_str.contains("one time key") && error_str.contains("already exists")
+            || error_str.contains("m_invalid_signature")
+            || error_str.contains("already exists")
+    }
+
+    let mut retry_count = 0;
+    let max_retries = 3;
+
+    loop {
+        match client.encryption().bootstrap_cross_signing(None).await {
+            Ok(_) => {
+                tracing::info!("Successfully bootstrapped cross-signing");
+                return Ok(true);
+            }
+            Err(e) => {
+                if let Some(response) = e.as_uiaa_response() {
+                    let user_identifier =
+                        matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
+                            username.to_string(),
+                        );
+                    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(
+                        user_identifier,
+                        password.to_string(),
+                    );
+                    password_auth.session = response.session.clone();
+
+                    match client
+                        .encryption()
+                        .bootstrap_cross_signing(Some(
+                            matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth),
+                        ))
+                        .await
+                    {
+                        Ok(_) => return Ok(true),
+                        Err(e) => {
+                            if is_key_conflict(&e) {
+                                if retry_count >= max_retries {
+                                    return Err(anyhow!(
+                                        "Failed to bootstrap after {} retries",
+                                        max_retries
+                                    ));
+                                }
+                                let _ = clear_store(username).await;
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                retry_count += 1;
+                                continue;
+                            }
+                            return Err(anyhow!("Failed to bootstrap cross-signing: {}", e));
+                        }
+                    }
+                } else if is_key_conflict(&e) {
+                    if retry_count >= max_retries {
+                        return Err(anyhow!("Failed to bootstrap after {} retries", max_retries));
+                    }
+                    let _ = clear_store(username).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    retry_count += 1;
+                    continue;
+                } else {
+                    return Err(anyhow!("Failed to bootstrap cross-signing: {}", e));
+                }
+            }
+        }
+    }
 }
 
 pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
@@ -297,6 +470,74 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
     }
     tracing::info!("✅ Authentication complete - client is logged already in");
     // here we should have client store, our db and server synced with the same device id and access token
+
+    // Handle encryption keys if user has E2EE enabled
+    if user.matrix_e2ee_enabled {
+        tracing::info!(
+            "Setting up encryption keys and secret storage for user {}",
+            user_id
+        );
+        let mut redo_secret_storage = false;
+
+        // Handle cross-signing setup
+        match setup_cross_signing(
+            &client,
+            &username,
+            &password,
+            user.encrypted_matrix_secret_storage_recovery_key.as_ref(),
+        )
+        .await
+        {
+            Ok(should_update_storage) => {
+                if should_update_storage {
+                    redo_secret_storage = true;
+                }
+            }
+            Err(e) => return Err(e),
+        }
+
+        // Handle backups setup
+        match setup_backups(
+            &client,
+            user.encrypted_matrix_secret_storage_recovery_key.as_ref(),
+        )
+        .await
+        {
+            Ok(should_update_storage) => {
+                if should_update_storage {
+                    redo_secret_storage = true;
+                }
+            }
+            Err(e) => return Err(e),
+        }
+
+        if redo_secret_storage {
+            if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
+                let passphrase = decrypt(&encrypted_key)?;
+                client
+                    .encryption()
+                    .recovery()
+                    .enable()
+                    .with_passphrase(&passphrase)
+                    .await?;
+            } else {
+                let recovery = client.encryption().recovery();
+                let enable = recovery.enable().wait_for_backups_to_upload();
+                let recovery_key = enable.await?;
+                state
+                    .user_repository
+                    .set_matrix_secret_storage_recovery_key(user.id, &recovery_key)?;
+            }
+        }
+
+        // Initial sync for room keys
+        client
+            .sync_once(matrix_sdk::config::SyncSettings::new())
+            .await?;
+        sleep(Duration::from_secs(2)).await;
+    } else {
+        tracing::debug!("Skipping E2EE setup for user {} (not enabled)", user_id);
+    }
 
     tracing::info!("✅ Matrix client fully initialized for user {}", user_id);
     Ok(client)
