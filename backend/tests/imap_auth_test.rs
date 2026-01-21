@@ -1,6 +1,9 @@
 //! Tests for IMAP authentication and server detection
 
-use backend::handlers::imap_auth::detect_imap_server;
+use backend::handlers::imap_auth::{
+    detect_imap_config, detect_imap_server, extract_email_domain, is_known_email_provider,
+    is_valid_email,
+};
 
 // ============================================================
 // IMAP Server Detection Tests
@@ -141,4 +144,140 @@ fn test_detect_imap_server_invalid_email_no_at() {
 fn test_detect_imap_server_empty_string() {
     // Empty string defaults to Gmail
     assert_eq!(detect_imap_server(""), ("imap.gmail.com", 993));
+}
+
+// ============================================================
+// Email Validation Tests
+// ============================================================
+
+#[test]
+fn test_is_valid_email_valid() {
+    assert!(is_valid_email("user@example.com"));
+    assert!(is_valid_email("user.name@example.com"));
+    assert!(is_valid_email("user+tag@example.com"));
+    assert!(is_valid_email("user@sub.domain.com"));
+    assert!(is_valid_email("user123@example.co.uk"));
+}
+
+#[test]
+fn test_is_valid_email_invalid_no_at() {
+    assert!(!is_valid_email("userexample.com"));
+    assert!(!is_valid_email("user"));
+}
+
+#[test]
+fn test_is_valid_email_invalid_multiple_at() {
+    assert!(!is_valid_email("user@@example.com"));
+    assert!(!is_valid_email("user@name@example.com"));
+}
+
+#[test]
+fn test_is_valid_email_invalid_empty_parts() {
+    assert!(!is_valid_email("@example.com"));
+    assert!(!is_valid_email("user@"));
+    assert!(!is_valid_email("@"));
+}
+
+#[test]
+fn test_is_valid_email_invalid_no_dot_in_domain() {
+    assert!(!is_valid_email("user@example"));
+    assert!(!is_valid_email("user@localhost"));
+}
+
+#[test]
+fn test_is_valid_email_invalid_domain_dot_position() {
+    assert!(!is_valid_email("user@.example.com"));
+    assert!(!is_valid_email("user@example.com."));
+    assert!(!is_valid_email("user@example..com"));
+}
+
+#[test]
+fn test_is_valid_email_empty() {
+    assert!(!is_valid_email(""));
+}
+
+// ============================================================
+// Extract Email Domain Tests
+// ============================================================
+
+#[test]
+fn test_extract_email_domain_valid() {
+    assert_eq!(
+        extract_email_domain("user@example.com"),
+        Some("example.com")
+    );
+    assert_eq!(
+        extract_email_domain("user@sub.domain.co.uk"),
+        Some("sub.domain.co.uk")
+    );
+}
+
+#[test]
+fn test_extract_email_domain_invalid() {
+    assert_eq!(extract_email_domain("userexample.com"), None);
+    assert_eq!(extract_email_domain(""), None);
+}
+
+// ============================================================
+// Detect IMAP Config Tests (struct-based)
+// ============================================================
+
+#[test]
+fn test_detect_imap_config_gmail() {
+    let config = detect_imap_config("user@gmail.com").unwrap();
+    assert_eq!(config.host, "imap.gmail.com");
+    assert_eq!(config.port, 993);
+    assert!(config.tls);
+}
+
+#[test]
+fn test_detect_imap_config_icloud() {
+    let config = detect_imap_config("user@icloud.com").unwrap();
+    assert_eq!(config.host, "imap.mail.me.com");
+    assert_eq!(config.port, 993);
+    assert!(config.tls);
+}
+
+#[test]
+fn test_detect_imap_config_outlook() {
+    let config = detect_imap_config("user@outlook.com").unwrap();
+    assert_eq!(config.host, "outlook.office365.com");
+    assert_eq!(config.port, 993);
+}
+
+#[test]
+fn test_detect_imap_config_unknown() {
+    assert!(detect_imap_config("user@unknown-provider.xyz").is_none());
+}
+
+#[test]
+fn test_detect_imap_config_invalid_email() {
+    assert!(detect_imap_config("not-an-email").is_none());
+}
+
+// ============================================================
+// Is Known Email Provider Tests
+// ============================================================
+
+#[test]
+fn test_is_known_email_provider_known() {
+    assert!(is_known_email_provider("user@gmail.com"));
+    assert!(is_known_email_provider("user@icloud.com"));
+    assert!(is_known_email_provider("user@outlook.com"));
+    assert!(is_known_email_provider("user@yahoo.com"));
+    assert!(is_known_email_provider("user@aol.com"));
+    assert!(is_known_email_provider("user@zoho.com"));
+    assert!(is_known_email_provider("user@fastmail.com"));
+}
+
+#[test]
+fn test_is_known_email_provider_unknown() {
+    assert!(!is_known_email_provider("user@custom-domain.com"));
+    assert!(!is_known_email_provider("user@mycompany.org"));
+}
+
+#[test]
+fn test_is_known_email_provider_invalid() {
+    assert!(!is_known_email_provider("not-an-email"));
+    assert!(!is_known_email_provider(""));
 }

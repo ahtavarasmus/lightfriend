@@ -1,3 +1,10 @@
+use crate::api::matrix_client::MatrixClientInterface;
+// Re-export trait types and pure functions for external use
+pub use crate::api::matrix_client::{
+    infer_service_from_room, is_disconnection_message, is_error_message, is_health_check_message,
+    should_process_message, IncomingBridgeEvent, IncomingMessageContent, MatrixClientWrapper,
+    RoomInterface, RoomWrapper,
+};
 use crate::UserCoreOps;
 use anyhow::{anyhow, Result};
 use matrix_sdk::{
@@ -24,7 +31,7 @@ pub struct BridgeRoom {
 use chrono::DateTime;
 use chrono_tz::Tz;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeMessage {
     pub sender: String,
     pub sender_display_name: String,
@@ -109,7 +116,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
     let joined_rooms = client.joined_rooms();
     let sender_prefix = get_sender_prefix(service);
     let service_cap = capitalize(service);
-    let skip_terms = vec![
+    let skip_terms = [
         format!("{}bot", service),
         format!("{}-bridge", service),
         format!("{} Bridge", service_cap),
@@ -163,6 +170,180 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
     rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
     Ok(rooms)
 }
+
+// ============================================================================
+// Trait-Based Functions (for testability)
+// ============================================================================
+
+/// Get service rooms using the trait interface (testable version)
+pub async fn get_service_rooms_trait(
+    client: &dyn MatrixClientInterface,
+    service: &str,
+) -> Result<Vec<BridgeRoom>> {
+    let joined_rooms = client.get_joined_rooms().await?;
+    let sender_prefix = get_sender_prefix(service);
+    let service_cap = capitalize(service);
+    let skip_terms = [
+        format!("{}bot", service),
+        format!("{}-bridge", service),
+        format!("{} Bridge", service_cap),
+        format!("{} bridge bot", service_cap),
+    ];
+
+    let mut rooms = Vec::new();
+    for room_info in joined_rooms {
+        // Skip management rooms
+        if skip_terms
+            .iter()
+            .any(|t| room_info.display_name.contains(t))
+        {
+            continue;
+        }
+
+        // Get the room for more details
+        if let Some(room) = client.get_room(&room_info.room_id).await {
+            // Check membership for service users
+            let members = match room.get_members().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            let has_service_member = members
+                .iter()
+                .any(|member| member.localpart.starts_with(&sender_prefix));
+
+            if !has_service_member {
+                continue;
+            }
+
+            let last_activity = room.get_last_activity().await;
+            rooms.push(BridgeRoom {
+                room_id: room_info.room_id,
+                display_name: room_info.display_name,
+                last_activity,
+                last_activity_formatted: format_timestamp(last_activity, None),
+            });
+        }
+    }
+
+    rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
+    Ok(rooms)
+}
+
+/// Send a bridge message using the trait interface (testable version)
+pub async fn send_bridge_message_trait(
+    client: &dyn MatrixClientInterface,
+    service: &str,
+    chat_name: &str,
+    message: &str,
+    media_url: Option<String>,
+    timezone: Option<String>,
+) -> Result<BridgeMessage> {
+    let service_rooms = get_service_rooms_trait(client, service).await?;
+    let exact_room = find_exact_room(&service_rooms, chat_name);
+
+    let room = match exact_room {
+        Some(room_info) => client
+            .get_room(&room_info.room_id)
+            .await
+            .ok_or_else(|| anyhow!("Room not found"))?,
+        None => {
+            let suggestions = get_best_matches(&service_rooms, chat_name);
+            let error_msg = if suggestions.is_empty() {
+                format!(
+                    "Could not find exact matching {} room for '{}'",
+                    capitalize(service),
+                    chat_name
+                )
+            } else {
+                format!(
+                    "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
+                    capitalize(service),
+                    chat_name,
+                    suggestions.join("\n")
+                )
+            };
+            return Err(anyhow!(error_msg));
+        }
+    };
+
+    let is_image = media_url.is_some();
+    if let Some(url) = media_url {
+        // Download and upload image
+        let resp = reqwest::get(&url).await?;
+        let mime_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let bytes = resp.bytes().await?;
+        let size = bytes.len() as u64;
+
+        let mxc_uri = client.upload_media(&mime_type, bytes.to_vec()).await?;
+        room.send_image(&mxc_uri, message, size).await?;
+    } else {
+        room.send_text(message).await?;
+    }
+
+    let room_name = room.display_name().await?;
+    let current_timestamp = chrono::Utc::now().timestamp();
+    Ok(BridgeMessage {
+        sender: "You".to_string(),
+        sender_display_name: "You".to_string(),
+        content: message.to_string(),
+        timestamp: current_timestamp,
+        formatted_timestamp: format_timestamp(current_timestamp, timezone),
+        message_type: if is_image { "image" } else { "text" }.to_string(),
+        room_name,
+        media_url: None,
+    })
+}
+
+/// Fetch bridge messages using the trait interface (testable version)
+pub async fn fetch_bridge_messages_trait(
+    client: &dyn MatrixClientInterface,
+    service: &str,
+    start_time: i64,
+    timezone: Option<String>,
+) -> Result<Vec<BridgeMessage>> {
+    let service_rooms = get_service_rooms_trait(client, service).await?;
+    let sender_prefix = get_sender_prefix(service);
+
+    let mut all_messages = Vec::new();
+
+    // Process top 5 most active rooms
+    for room_info in service_rooms.into_iter().take(5) {
+        if let Some(room) = client.get_room(&room_info.room_id).await {
+            // Skip muted rooms
+            if room.is_muted().await {
+                continue;
+            }
+
+            let room_name = remove_bridge_suffix(&room_info.display_name);
+
+            // Fetch messages with the service prefix filter
+            if let Ok(mut messages) = room.fetch_messages(50, Some(&sender_prefix)).await {
+                // Filter by timestamp and format
+                for msg in &mut messages {
+                    if msg.timestamp > start_time {
+                        msg.formatted_timestamp = format_timestamp(msg.timestamp, timezone.clone());
+                        msg.room_name = room_name.clone();
+                        all_messages.push(msg.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by timestamp (most recent first)
+    all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(all_messages)
+}
+
+// ============================================================================
+// Original Functions (maintained for backward compatibility)
+// ============================================================================
 
 pub fn find_exact_room(bridge_rooms: &[BridgeRoom], search_term: &str) -> Option<BridgeRoom> {
     let search_term_lower = search_term.trim().to_lowercase();
@@ -1039,20 +1220,12 @@ pub async fn handle_bridge_message(
         tracing::info!("Skipping message from a muted room");
         return;
     }
-    // Check message age
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    let message_ts = event.origin_server_ts.0;
-    let age_ms = now.saturating_sub(message_ts.into()); // Use saturating_sub to handle any potential clock skew
+
+    // Check message age using pure function
     const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
-    if age_ms > HALF_HOUR_MS {
-        tracing::info!(
-            "Skipping old message: age {} ms (event ID: {})",
-            age_ms,
-            event.event_id
-        );
+    let message_ts: u64 = event.origin_server_ts.0.into();
+    if !should_process_message(message_ts, HALF_HOUR_MS) {
+        tracing::info!("Skipping old message (event ID: {})", event.event_id);
         return;
     }
 
@@ -1172,37 +1345,14 @@ pub async fn handle_bridge_message(
         );
 
         // Skip health check related messages - these are handled by the health check endpoint
-        let lower_content_check = content.to_lowercase();
-        if lower_content_check.contains("already logged in")
-            || lower_content_check.contains("successfully logged in")
-            || lower_content_check.contains("queued sync")
-            || lower_content_check.contains("unknown command")
-        {
+        if is_health_check_message(&content) {
             tracing::info!("⏭️ Skipping health check / status message in management room");
             return;
         }
 
-        // Define disconnection patterns (customize per bridge if needed)
-        let disconnection_patterns = [
-            "disconnected",
-            "connection lost",
-            "logged out",
-            "authentication failed",
-            "login failed",
-            "timeout",
-            "invalid",
-            "bad_credentials",
-            "wa-logged-out",
-            "wa-not-logged-in",
-            "device_removed",
-            "relogin to continue",
-        ];
+        // Check for disconnection patterns using the pure function
         tracing::info!("📝 Bot message content: {}", content);
-        let lower_content = content.to_lowercase();
-        if disconnection_patterns
-            .iter()
-            .any(|p| lower_content.contains(p))
-        {
+        if is_disconnection_message(&content) {
             tracing::info!(
                 "🚨 Detected disconnection in {} bridge for user {}: {}",
                 bridge.bridge_type,
@@ -1638,12 +1788,8 @@ pub async fn handle_bridge_message(
             );
         }
     }
-    // Skip error messages
-    if content.contains("Failed to bridge media")
-        || content.contains("media no longer available")
-        || content.contains("Decrypting message from WhatsApp failed")
-        || content.starts_with("* Failed to")
-    {
+    // Skip error messages using pure function
+    if is_error_message(&content) {
         tracing::debug!("Skipping error message because content contained error messages");
         return;
     }

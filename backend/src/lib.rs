@@ -74,7 +74,9 @@ pub mod tool_call_utils {
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
+    pub mod matrix_client;
     pub mod tesla;
+    pub mod tesla_client;
     pub mod twilio_availability;
     pub mod twilio_client;
     pub mod twilio_pricing;
@@ -117,6 +119,10 @@ pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
 pub mod test_utils;
 
 // Re-export key types for external use
+pub use api::matrix_client::{
+    IncomingBridgeEvent, IncomingMessageContent, MatrixClientInterface, MatrixClientWrapper,
+    MockMatrixCalls, MockMatrixClient, MockRoom, RoomInfo, RoomInterface, RoomMember, RoomWrapper,
+};
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::totp_repository::TotpRepository;
@@ -124,6 +130,12 @@ pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
 pub use services::twilio_message_service::TwilioMessageService;
+
+// Tesla client trait and pure functions
+pub use api::tesla_client::{
+    format_battery_status, is_actively_charging, is_charging_complete, is_charging_stopped,
+    is_climate_ready, should_wake_vehicle, wake_retry_delay, TeslaClientInterface,
+};
 
 // AppState and related types - needed by all handler modules
 use dashmap::DashMap;
