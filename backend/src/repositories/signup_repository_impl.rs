@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::handlers::auth_dtos::NewUser;
 use crate::models::user_models::User;
 use crate::repositories::signup_repository::{SignupRepository, SignupRepositoryError};
-use crate::repositories::user_core::UserCore;
+use crate::repositories::user_core::{UserCore, UserCoreOps};
 use crate::repositories::user_repository::UserRepository;
 
 /// Composite repository that delegates to UserCore and UserRepository.

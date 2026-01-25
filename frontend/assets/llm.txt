@@ -1,0 +1,39 @@
+# Lightfriend
+
+## What it is
+AI assistant for dumbphone/feature phone users. Access smartphone capabilities via SMS and voice calls without the addictive apps.
+
+## Problem it solves
+Dumbphones lack WhatsApp, email, calendar, web search. Lightfriend bridges this gap through text and voice.
+
+## Integrations
+- WhatsApp (send, receive, monitor)
+- Telegram (send, receive, monitor)
+- Signal (send, receive, monitor)
+- Email (Gmail, Outlook - fetch, send, monitor)
+- Google Calendar (view, create, reminders)
+
+## Features
+- Voice calling interface
+- SMS chat interface
+- Web search (Perplexity AI)
+- Weather (7-day forecast)
+- Directions (Google Maps)
+- Photo analysis & translation (US, CA, AUS)
+- QR code scanning (US, CA, AUS)
+- Tesla vehicle control
+- 24/7 critical message monitoring
+- Morning/day/evening digests
+- Priority sender notifications
+
+## Availability
+Local number included: US, Canada, UK, Finland, Netherlands, Australia
+Also available (choose from US/CA/UK/FI/NL/AU number): Germany, France, Spain, Italy, Portugal, Belgium, Austria, Switzerland, Sweden, Norway, Denmark, Ireland, Poland, Czech Republic, Greece, Hungary, Romania, Slovakia, Bulgaria, Croatia, Slovenia, Lithuania, Latvia, Estonia, Luxembourg, Malta, Cyprus, Iceland, New Zealand, Japan, South Korea, Singapore, Hong Kong, Taiwan, Israel
+
+## Pricing
+See https://lightfriend.ai/pricing
+
+## Technical
+- Works with any phone that can call or text
+- No internet required on phone
+- Open source: https://github.com/ahtavarasmus/lightfriend

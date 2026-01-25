@@ -1,5 +1,6 @@
 use crate::utils::country::get_country_code_from_phone;
 use crate::AppState;
+use crate::UserCoreOps;
 use std::sync::Arc;
 
 /// Helper to check if a phone number is US/CA
@@ -34,8 +35,8 @@ pub async fn check_user_credits(
         );
     }
 
-    // BYOT users with their own Twilio credentials pay Twilio directly - no credit check
-    if state.user_core.has_twilio_credentials(user.id) {
+    // BYOT users pay Twilio directly - no credit check
+    if state.user_core.is_byot_user(user.id) {
         return Ok(());
     }
 
@@ -204,8 +205,8 @@ pub fn deduct_user_credits(
         }
     };
 
-    // BYOT users with their own Twilio credentials pay Twilio directly - no credit deduction
-    if state.user_core.has_twilio_credentials(user_id) {
+    // BYOT users pay Twilio directly - no credit deduction
+    if state.user_core.is_byot_user(user_id) {
         return Ok(());
     }
 

@@ -1,7 +1,10 @@
-//! Test utilities for SMS e2e tests
+//! Test utilities for SMS e2e tests and Matrix integration tests.
 //!
-//! Provides mock LLM responses and test state setup for integration tests.
+//! Provides mock LLM responses, test state setup, and Matrix test server utilities.
 
+pub mod matrix_test_server;
+
+use crate::UserCoreOps;
 use dashmap::DashMap;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
@@ -578,6 +581,598 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
         .expect("Failed to get user")
         .expect("User not found");
     user.credits + user.credits_left
+}
+
+// =============================================================================
+// Mock UserCore for Unit Testing
+// =============================================================================
+
+pub mod mock_user_core {
+    use crate::handlers::filter_handlers::PriorityNotificationInfo;
+    use crate::handlers::profile_handlers::CriticalNotificationInfo;
+    use crate::models::user_models::{User, UserInfo, UserSettings};
+    use crate::repositories::user_core::{DigestSettings, UpdateProfileParams, UserCoreOps};
+    use diesel::result::Error as DieselError;
+    use std::collections::HashMap;
+    use std::error::Error;
+    use std::sync::Mutex;
+
+    /// Records all calls made to MockUserCore for assertions
+    #[derive(Debug, Clone, Default)]
+    pub struct MockCallRecord {
+        pub find_by_id_calls: Vec<i32>,
+        pub find_by_email_calls: Vec<String>,
+        pub find_by_phone_number_calls: Vec<String>,
+        pub is_byot_user_calls: Vec<i32>,
+        pub get_phone_service_active_calls: Vec<i32>,
+        pub get_user_settings_calls: Vec<i32>,
+        pub get_user_info_calls: Vec<i32>,
+        pub create_user_calls: Vec<String>, // email
+        pub update_preferred_number_calls: Vec<(i32, String)>,
+    }
+
+    /// Mock implementation of UserCoreOps for testing
+    pub struct MockUserCore {
+        pub calls: Mutex<MockCallRecord>,
+
+        // Configurable responses
+        pub users: Mutex<HashMap<i32, User>>,
+        pub users_by_phone: Mutex<HashMap<String, User>>,
+        pub users_by_email: Mutex<HashMap<String, User>>,
+        pub user_settings: Mutex<HashMap<i32, UserSettings>>,
+        pub user_info: Mutex<HashMap<i32, UserInfo>>,
+        pub byot_users: Mutex<Vec<i32>>,
+        pub phone_service_active: Mutex<HashMap<i32, bool>>,
+
+        // Error injection
+        pub find_by_id_error: Mutex<Option<DieselError>>,
+        pub find_by_phone_error: Mutex<Option<DieselError>>,
+    }
+
+    impl Default for MockUserCore {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl MockUserCore {
+        pub fn new() -> Self {
+            Self {
+                calls: Mutex::new(MockCallRecord::default()),
+                users: Mutex::new(HashMap::new()),
+                users_by_phone: Mutex::new(HashMap::new()),
+                users_by_email: Mutex::new(HashMap::new()),
+                user_settings: Mutex::new(HashMap::new()),
+                user_info: Mutex::new(HashMap::new()),
+                byot_users: Mutex::new(Vec::new()),
+                phone_service_active: Mutex::new(HashMap::new()),
+                find_by_id_error: Mutex::new(None),
+                find_by_phone_error: Mutex::new(None),
+            }
+        }
+
+        // Builder methods for test setup
+        pub fn with_user(self, user: User) -> Self {
+            let id = user.id;
+            let phone = user.phone_number.clone();
+            let email = user.email.clone();
+            self.users.lock().unwrap().insert(id, user.clone());
+            self.users_by_phone
+                .lock()
+                .unwrap()
+                .insert(phone, user.clone());
+            self.users_by_email.lock().unwrap().insert(email, user);
+            self
+        }
+
+        pub fn with_byot_user(self, user_id: i32) -> Self {
+            self.byot_users.lock().unwrap().push(user_id);
+            self
+        }
+
+        pub fn with_phone_service_active(self, user_id: i32, active: bool) -> Self {
+            self.phone_service_active
+                .lock()
+                .unwrap()
+                .insert(user_id, active);
+            self
+        }
+
+        pub fn with_user_settings(self, user_id: i32, settings: UserSettings) -> Self {
+            self.user_settings.lock().unwrap().insert(user_id, settings);
+            self
+        }
+
+        pub fn with_user_info(self, user_id: i32, info: UserInfo) -> Self {
+            self.user_info.lock().unwrap().insert(user_id, info);
+            self
+        }
+
+        pub fn get_calls(&self) -> MockCallRecord {
+            self.calls.lock().unwrap().clone()
+        }
+
+        pub fn clear_calls(&self) {
+            *self.calls.lock().unwrap() = MockCallRecord::default();
+        }
+    }
+
+    impl UserCoreOps for MockUserCore {
+        fn find_by_id(&self, user_id: i32) -> Result<Option<User>, DieselError> {
+            self.calls.lock().unwrap().find_by_id_calls.push(user_id);
+            if let Some(err) = self.find_by_id_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            Ok(self.users.lock().unwrap().get(&user_id).cloned())
+        }
+
+        fn find_by_email(&self, email: &str) -> Result<Option<User>, DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .find_by_email_calls
+                .push(email.to_string());
+            Ok(self.users_by_email.lock().unwrap().get(email).cloned())
+        }
+
+        fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .find_by_phone_number_calls
+                .push(phone.to_string());
+            if let Some(err) = self.find_by_phone_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            Ok(self.users_by_phone.lock().unwrap().get(phone).cloned())
+        }
+
+        fn find_by_magic_token(&self, _token: &str) -> Result<Option<User>, DieselError> {
+            Ok(None)
+        }
+
+        fn get_all_users(&self) -> Result<Vec<User>, DieselError> {
+            Ok(self.users.lock().unwrap().values().cloned().collect())
+        }
+
+        fn get_users_by_tier(&self, tier: &str) -> Result<Vec<User>, DieselError> {
+            let users: Vec<User> = self
+                .users
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|u| u.sub_tier.as_deref() == Some(tier))
+                .cloned()
+                .collect();
+            Ok(users)
+        }
+
+        fn create_user(
+            &self,
+            new_user: crate::handlers::auth_dtos::NewUser,
+        ) -> Result<(), DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .create_user_calls
+                .push(new_user.email.clone());
+            Ok(())
+        }
+
+        fn delete_user(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn verify_user(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_password(&self, _user_id: i32, _password_hash: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_phone_number(&self, _user_id: i32, _phone: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_nickname(&self, _user_id: i32, _nickname: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_preferred_number(&self, user_id: i32, number: &str) -> Result<(), DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .update_preferred_number_calls
+                .push((user_id, number.to_string()));
+            Ok(())
+        }
+
+        fn update_discount_tier(
+            &self,
+            _user_id: i32,
+            _tier: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn ensure_user_info_exists(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError> {
+            self.calls.lock().unwrap().get_user_info_calls.push(user_id);
+            self.user_info
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .cloned()
+                .ok_or(DieselError::NotFound)
+        }
+
+        fn update_info(&self, _user_id: i32, _info: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_location(&self, _user_id: i32, _location: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_nearby_places(&self, _user_id: i32, _places: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_timezone(&self, _user_id: i32, _tz: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_timezone_auto(&self, _user_id: i32, _auto: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn ensure_user_settings_exist(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_user_settings(&self, user_id: i32) -> Result<UserSettings, DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .get_user_settings_calls
+                .push(user_id);
+            self.user_settings
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .cloned()
+                .ok_or(DieselError::NotFound)
+        }
+
+        fn update_notify(&self, _user_id: i32, _notify: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_agent_language(&self, _user_id: i32, _lang: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_save_context(&self, _user_id: i32, _ctx: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_notification_type(
+            &self,
+            _user_id: i32,
+            _ntype: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_llm_provider(&self, _user_id: i32, _provider: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_llm_provider(&self, _user_id: i32) -> Result<Option<String>, DieselError> {
+            Ok(None)
+        }
+
+        fn update_phone_service_active(
+            &self,
+            _user_id: i32,
+            _active: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_service_active(&self, user_id: i32) -> Result<bool, DieselError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .get_phone_service_active_calls
+                .push(user_id);
+            Ok(*self
+                .phone_service_active
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .unwrap_or(&true))
+        }
+
+        fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {
+            Ok("critical".to_string())
+        }
+
+        fn set_default_notification_mode(
+            &self,
+            _user_id: i32,
+            _mode: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_default_notification_type(&self, _user_id: i32) -> Result<String, DieselError> {
+            Ok("sms".to_string())
+        }
+
+        fn set_default_notification_type(
+            &self,
+            _user_id: i32,
+            _ntype: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_default_notify_on_call(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
+        fn set_default_notify_on_call(
+            &self,
+            _user_id: i32,
+            _notify: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_call_notify(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
+        fn update_call_notify(&self, _user_id: i32, _notify: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_digests(
+            &self,
+            _user_id: i32,
+            _morning: Option<&str>,
+            _day: Option<&str>,
+            _evening: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_digests(&self, _user_id: i32) -> Result<DigestSettings, DieselError> {
+            Ok((None, None, None))
+        }
+
+        fn get_last_instant_digest_time(&self, _user_id: i32) -> Result<Option<i32>, DieselError> {
+            Ok(None)
+        }
+
+        fn set_last_instant_digest_time(&self, _user_id: i32, _ts: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_proactive_agent_on(
+            &self,
+            _user_id: i32,
+            _enabled: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_proactive_agent_on(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
+        fn update_critical_enabled(
+            &self,
+            _user_id: i32,
+            _enabled: Option<String>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_action_on_critical_message(
+            &self,
+            _user_id: i32,
+            _action: Option<String>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_critical_notification_info(
+            &self,
+            _user_id: i32,
+        ) -> Result<CriticalNotificationInfo, DieselError> {
+            Ok(CriticalNotificationInfo {
+                enabled: Some("sms".to_string()),
+                average_critical_per_day: 1.0,
+                estimated_monthly_price: 5.0,
+                call_notify: true,
+                action_on_critical_message: None,
+            })
+        }
+
+        fn get_priority_notification_info(
+            &self,
+            _user_id: i32,
+        ) -> Result<PriorityNotificationInfo, DieselError> {
+            Ok(PriorityNotificationInfo {
+                average_per_day: 0.5,
+                estimated_monthly_price: 2.0,
+            })
+        }
+
+        fn update_profile(&self, _params: UpdateProfileParams<'_>) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_twilio_credentials(
+            &self,
+            _user_id: i32,
+        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+            Ok(("test_sid".to_string(), "test_token".to_string()))
+        }
+
+        fn has_twilio_credentials(&self, _user_id: i32) -> bool {
+            false
+        }
+
+        fn is_byot_user(&self, user_id: i32) -> bool {
+            self.calls.lock().unwrap().is_byot_user_calls.push(user_id);
+            self.byot_users.lock().unwrap().contains(&user_id)
+        }
+
+        fn update_twilio_credentials(
+            &self,
+            _user_id: i32,
+            _sid: &str,
+            _token: &str,
+        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+            Ok(())
+        }
+
+        fn clear_twilio_credentials(
+            &self,
+            _user_id: i32,
+        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+            Ok(())
+        }
+
+        fn get_textbee_credentials(
+            &self,
+            _user_id: i32,
+        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+            Err("Not found".into())
+        }
+
+        fn update_textbee_credentials(
+            &self,
+            _user_id: i32,
+            _device_id: &str,
+            _api_key: &str,
+        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+            Ok(())
+        }
+
+        fn get_openrouter_api_key(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, Box<dyn Error + Send + Sync>> {
+            Err("Not found".into())
+        }
+
+        fn get_elevenlabs_phone_number_id(
+            &self,
+            _user_id: i32,
+        ) -> Result<Option<String>, DieselError> {
+            Ok(None)
+        }
+
+        fn set_elevenlabs_phone_number_id(
+            &self,
+            _user_id: i32,
+            _id: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_subscription_tier(
+            &self,
+            _user_id: i32,
+            _tier: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_next_billing_date(&self, _user_id: i32, _ts: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_next_billing_date(&self, _user_id: i32) -> Result<Option<i32>, DieselError> {
+            Ok(None)
+        }
+
+        fn update_last_credits_notification(
+            &self,
+            _user_id: i32,
+            _ts: i32,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn clear_last_credits_notification(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_auto_topup(
+            &self,
+            _user_id: i32,
+            _active: bool,
+            _amount: Option<f32>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn increment_monthly_message_count(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn reset_monthly_message_count(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn email_exists(&self, email: &str) -> Result<bool, DieselError> {
+            Ok(self.users_by_email.lock().unwrap().contains_key(email))
+        }
+
+        fn phone_number_exists(&self, phone: &str) -> Result<bool, DieselError> {
+            Ok(self.users_by_phone.lock().unwrap().contains_key(phone))
+        }
+
+        fn is_admin(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(false)
+        }
+
+        fn update_sub_country(
+            &self,
+            _user_id: i32,
+            _country: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn set_preferred_number_to_us_default(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, Box<dyn Error + Send + Sync>> {
+            Ok("+14155551234".to_string())
+        }
+
+        fn set_preferred_number_for_country(
+            &self,
+            _user_id: i32,
+            _country: &str,
+        ) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+            Ok(Some("+14155551234".to_string()))
+        }
+
+        fn set_magic_token(&self, _user_id: i32, _token: &str) -> Result<(), DieselError> {
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

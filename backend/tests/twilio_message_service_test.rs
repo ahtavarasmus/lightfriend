@@ -8,6 +8,7 @@ use backend::test_utils::{
     create_test_state, create_test_user, set_byot_credentials, set_preferred_number,
     setup_test_encryption, TestUserParams,
 };
+use backend::UserCoreOps;
 use serial_test::serial;
 use std::sync::Arc;
 
@@ -70,6 +71,7 @@ fn test_send_config_creation() {
 // =========================================================================
 
 #[test]
+#[serial]
 fn test_resolve_credentials_byot_user_uses_own_credentials() {
     setup_test_env();
     setup_test_encryption();
@@ -93,6 +95,7 @@ fn test_resolve_credentials_byot_user_uses_own_credentials() {
 }
 
 #[test]
+#[serial]
 fn test_resolve_credentials_local_number_country_uses_global() {
     setup_test_env();
     let state = create_test_state();
@@ -113,6 +116,7 @@ fn test_resolve_credentials_local_number_country_uses_global() {
 }
 
 #[test]
+#[serial]
 fn test_resolve_credentials_notification_only_uses_global() {
     setup_test_env();
     let state = create_test_state();
@@ -133,6 +137,7 @@ fn test_resolve_credentials_notification_only_uses_global() {
 }
 
 #[test]
+#[serial]
 fn test_resolve_credentials_finland_uses_global() {
     setup_test_env();
     let state = create_test_state();
@@ -149,6 +154,7 @@ fn test_resolve_credentials_finland_uses_global() {
 }
 
 #[test]
+#[serial]
 fn test_resolve_credentials_canada_uses_global() {
     setup_test_env();
     let state = create_test_state();
@@ -169,6 +175,7 @@ fn test_resolve_credentials_canada_uses_global() {
 // =========================================================================
 
 #[test]
+#[serial]
 fn test_strategy_us_user_uses_messaging_service() {
     setup_test_env();
     let state = create_test_state();
@@ -196,6 +203,7 @@ fn test_strategy_us_user_uses_messaging_service() {
 }
 
 #[test]
+#[serial]
 fn test_strategy_ca_user_uses_preferred_number() {
     setup_test_env();
     let state = create_test_state();
@@ -227,6 +235,7 @@ fn test_strategy_ca_user_uses_preferred_number() {
 }
 
 #[test]
+#[serial]
 fn test_strategy_ca_user_no_preferred_uses_can_phone_env() {
     setup_test_env();
     let state = create_test_state();
@@ -255,6 +264,7 @@ fn test_strategy_ca_user_no_preferred_uses_can_phone_env() {
 // =========================================================================
 
 #[test]
+#[serial]
 fn test_strategy_noti_country_default_uses_us_messaging_service() {
     setup_test_env();
     let state = create_test_state();
@@ -383,6 +393,9 @@ async fn test_send_sms_notification_only_default_flow() {
 #[tokio::test]
 #[serial]
 async fn test_send_sms_skips_in_development() {
+    // Save original environment value
+    let original_env = std::env::var("ENVIRONMENT").ok();
+
     // Set to development environment
     std::env::set_var("ENVIRONMENT", "development");
 
@@ -404,8 +417,11 @@ async fn test_send_sms_skips_in_development() {
         "Should not call Twilio in development"
     );
 
-    // Reset environment
-    std::env::set_var("ENVIRONMENT", "test");
+    // Restore original environment
+    match original_env {
+        Some(val) => std::env::set_var("ENVIRONMENT", val),
+        None => std::env::remove_var("ENVIRONMENT"),
+    }
 }
 
 // =========================================================================

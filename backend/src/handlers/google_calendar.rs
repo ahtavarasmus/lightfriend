@@ -1,4 +1,5 @@
 use crate::handlers::auth_middleware::AuthUser;
+use crate::UserCoreOps;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -13,6 +14,63 @@ use serde_json::json;
 use std::sync::Arc;
 
 use crate::AppState;
+
+// ============================================================
+// Pure Functions for Testability
+// ============================================================
+
+/// Check if two time ranges overlap.
+/// Returns true if event overlaps with the given range.
+pub fn events_overlap(
+    event_start: DateTime<Utc>,
+    event_end: DateTime<Utc>,
+    range_start: DateTime<Utc>,
+    range_end: DateTime<Utc>,
+) -> bool {
+    event_start < range_end && event_end > range_start
+}
+
+/// Calculate event duration in minutes from start and end times.
+/// Returns 0 if either time is missing (e.g., all-day events).
+pub fn calculate_event_duration_minutes(
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+) -> i64 {
+    match (start, end) {
+        (Some(s), Some(e)) => {
+            let duration = e.signed_duration_since(s);
+            duration.num_minutes()
+        }
+        _ => 0,
+    }
+}
+
+/// Format a datetime with timezone conversion for display.
+/// If timezone is provided, converts to that timezone.
+pub fn format_datetime_for_display(dt: DateTime<Utc>, timezone: Option<Tz>) -> String {
+    match timezone {
+        Some(tz) => dt.with_timezone(&tz).to_rfc3339(),
+        None => dt.to_rfc3339(),
+    }
+}
+
+/// Parse RFC3339 datetime string to UTC DateTime.
+/// Returns error message if parsing fails.
+pub fn parse_datetime_rfc3339(datetime_str: &str) -> Result<DateTime<Utc>, &'static str> {
+    chrono::DateTime::parse_from_rfc3339(datetime_str)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .map_err(|_| "Invalid datetime format")
+}
+
+/// Validate that a time range is valid (start before end).
+pub fn is_valid_time_range(start: DateTime<Utc>, end: DateTime<Utc>) -> bool {
+    start < end
+}
+
+/// Calculate end time from start time and duration in minutes.
+pub fn calculate_end_time(start: DateTime<Utc>, duration_minutes: i64) -> DateTime<Utc> {
+    start + Duration::minutes(duration_minutes)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct TimeframeQuery {

@@ -57,6 +57,7 @@ impl MockUser {
             next_billing_date_timestamp: None,
             magic_token: self.magic_token.clone(),
             plan_type: None,
+            matrix_e2ee_enabled: false,
         }
     }
 }

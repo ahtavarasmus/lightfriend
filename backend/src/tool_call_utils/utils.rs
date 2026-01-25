@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::UserCoreOps;
 use openai_api_rs::v1::{api::OpenAIClient, chat_completion, types};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

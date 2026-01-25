@@ -1,6 +1,7 @@
 use crate::handlers::imap_handlers::{fetch_emails_imap, fetch_single_email_imap};
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::middleware;
 use axum::{
     body::Body,
@@ -14,6 +15,96 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
+
+// ============================================================
+// Pure Functions for Testability
+// ============================================================
+
+/// Validate webhook secret header value against expected secret.
+/// Returns true if header matches expected secret, false otherwise.
+pub fn validate_webhook_secret_value(header_value: Option<&str>, expected_secret: &str) -> bool {
+    match header_value {
+        Some(value) => value == expected_secret,
+        None => false,
+    }
+}
+
+/// Build conversation variables from user context.
+/// Returns a HashMap suitable for ElevenLabs dynamic variables.
+#[allow(clippy::too_many_arguments)]
+pub fn build_conversation_variables(
+    user_id: i32,
+    nickname: &str,
+    user_info: &str,
+    location: &str,
+    nearby_places: &str,
+    timezone: &str,
+    timezone_offset: &str,
+    recent_conversation: &str,
+) -> HashMap<String, Value> {
+    let mut vars = HashMap::new();
+    vars.insert("name".to_string(), json!(nickname));
+    vars.insert("user_info".to_string(), json!(user_info));
+    vars.insert("nearby_places".to_string(), json!(nearby_places));
+    vars.insert("location".to_string(), json!(location));
+    vars.insert("user_id".to_string(), json!(user_id));
+    vars.insert("email_id".to_string(), json!("-1".to_string()));
+    vars.insert("content_type".to_string(), json!("".to_string()));
+    vars.insert("notification_message".to_string(), json!("".to_string()));
+    vars.insert("timezone".to_string(), json!(timezone));
+    vars.insert(
+        "timezone_offset_from_utc".to_string(),
+        json!(timezone_offset),
+    );
+    vars.insert(
+        "recent_conversation".to_string(),
+        json!(recent_conversation),
+    );
+    vars
+}
+
+/// Format timezone offset string from hours and minutes.
+/// Returns formatted offset like "+02:00" or "-05:30".
+pub fn format_timezone_offset(hours: i32, minutes: i32) -> String {
+    format!(
+        "{}{:02}:{:02}",
+        if hours >= 0 { "+" } else { "-" },
+        hours.abs(),
+        minutes.abs()
+    )
+}
+
+/// Determine voice ID based on language setting.
+pub fn get_voice_id_for_language<'a>(
+    language: &str,
+    us_voice_id: &'a str,
+    fi_voice_id: &'a str,
+    de_voice_id: &'a str,
+) -> &'a str {
+    match language {
+        "fi" => fi_voice_id,
+        "de" => de_voice_id,
+        _ => us_voice_id,
+    }
+}
+
+/// Get first message based on language setting.
+pub fn get_first_message_for_language(language: &str, nickname: &str) -> String {
+    match language {
+        "fi" => format!("Moi {}!", nickname),
+        "de" => format!("Hallo {}!", nickname),
+        _ => format!("Hello {}!", nickname),
+    }
+}
+
+/// Get welcome message (for newly verified users) based on language.
+pub fn get_welcome_message_for_language(language: &str) -> &'static str {
+    match language {
+        "fi" => "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?",
+        "de" => "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?",
+        _ => "Welcome! Your number is now verified. Anyways, how can I help?",
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct LocationCallPayload {

@@ -2,6 +2,7 @@ use crate::models::user_models::{ContactProfile, Task};
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use crate::ModelPurpose;
+use crate::UserCoreOps;
 use openai_api_rs::v1::{chat_completion, types};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

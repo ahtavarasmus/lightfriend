@@ -3,6 +3,7 @@
 //! This service handles credential resolution, message sending, and database logging,
 //! separating business logic from the underlying Twilio API calls.
 
+use crate::UserCoreOps;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -152,8 +153,24 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         let mut use_messaging_service = false;
         let mut update_preferred = false;
 
+        // BYOT users always use their own preferred number (regardless of country)
+        if has_byot_credentials {
+            if !preferred.is_empty() {
+                from_number = Some(preferred.to_string());
+                tracing::info!(
+                    "BYOT user {} using their preferred number {}",
+                    user.id,
+                    preferred
+                );
+            } else {
+                tracing::warn!(
+                    "BYOT user {} has no preferred_number set - message may fail",
+                    user.id
+                );
+            }
+        }
         // Notification-only countries without BYOT: check if user selected US or local number
-        if is_notification_only && !has_byot_credentials {
+        else if is_notification_only {
             let us_phone = env::var("USA_PHONE").ok();
             if preferred.is_empty() || us_phone.as_deref() == Some(preferred) {
                 use_messaging_service = true;
@@ -230,12 +247,12 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                     }
                 }
                 _ => {
-                    // For other countries with BYOT credentials, use their preferred number
-                    if has_byot_credentials && !preferred.is_empty() {
-                        from_number = Some(preferred.to_string());
-                    } else {
-                        tracing::info!("Using empty from_number for unsupported country: {}", c);
-                    }
+                    // Unsupported country without BYOT - no From number available
+                    tracing::warn!(
+                        "No From number configured for country {} (user {})",
+                        c,
+                        user.id
+                    );
                 }
             }
         }

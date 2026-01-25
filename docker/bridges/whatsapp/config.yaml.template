@@ -26,6 +26,17 @@ bridge:
         "*": user
         "matrix.local": user
 
+encryption:
+    allow: true
+    default: true
+    appservice: false
+    require: false
+    allow_key_sharing: true
+    verification_levels:
+        receive: unverified
+        send: unverified
+        share: cross-signed-tofu
+
 double_puppet:
     servers:
         matrix.local: "${DOUBLE_PUPPET_SECRET}"

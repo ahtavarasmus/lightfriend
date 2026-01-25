@@ -169,6 +169,7 @@
       "Bash(sudo *)"
     ],
     "ask": [
+      "Edit(backend/tests/**)",
       "Bash(git push*)",
       "Bash(git reset --hard*)",
       "Bash(cargo install*)",

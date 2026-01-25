@@ -1,5 +1,6 @@
 use crate::handlers::auth_middleware::AuthUser;
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
 use std::sync::Arc;
 

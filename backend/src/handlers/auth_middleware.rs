@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::{
     body::Body,
     extract::{FromRequestParts, State},

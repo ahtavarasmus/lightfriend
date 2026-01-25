@@ -1,4 +1,5 @@
 use crate::handlers::auth_middleware::AuthUser;
+use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;

@@ -199,6 +199,34 @@ pub fn landing() -> Html {
                 <img src="/assets/rasmus-story.png" alt="Rasmus story" loading="lazy" />
             </section>
 
+            <section class="capabilities-summary">
+                <div class="capabilities-content">
+                    <p class="capabilities-tagline">{"Lightfriend is an AI assistant that gives dumbphone users access to WhatsApp, email, calendar, web search, and more via SMS and voice calls."}</p>
+                    <div class="capabilities-grid">
+                        <div class="capability-category">
+                            <h3>{"Integrations"}</h3>
+                            <p>{"WhatsApp, Telegram, Signal, Email, Google Calendar"}</p>
+                        </div>
+                        <div class="capability-category">
+                            <h3>{"Interfaces"}</h3>
+                            <p>{"Voice calls, SMS"}</p>
+                        </div>
+                        <div class="capability-category">
+                            <h3>{"Features"}</h3>
+                            <p>{"Web search, directions, image translation, QR scanning"}</p>
+                        </div>
+                        <div class="capability-category">
+                            <h3>{"Works with"}</h3>
+                            <p>{"Any phone that can call or text"}</p>
+                        </div>
+                    </div>
+                    <div class="availability-info">
+                        <p><strong>{"Full service: "}</strong>{"US, Canada, UK, Finland, Netherlands, Australia"}</p>
+                        <p><strong>{"Also available: "}</strong>{"15+ EU countries and more"}</p>
+                    </div>
+                </div>
+            </section>
+
             <div class="difference-section">
                 <div class="difference-content">
                     <div class="difference-text">
@@ -213,28 +241,6 @@ pub fn landing() -> Html {
             <div class="filter-concept">
                 <div class="filter-content">
                     <AnimationComponent />
-                </div>
-            </div>
-            <div class="difference-section">
-                <div class="difference-content">
-                    <div class="difference-text">
-                        <h2>{"Willpower is not the solution."}</h2>
-                        <p>{"Your mind burns energy just knowing you could scroll. "}<span class="highlight">{"Make it impossible"}</span>{"."}</p>
-                    </div>
-                    <div class="difference-image">
-                        <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
-                    </div>
-                </div>
-            </div>
-            <div class="difference-section">
-                <div class="difference-content">
-                    <div class="difference-text">
-                        <h2>{"Every castle has a wall"}</h2>
-                        <p>{"Companies that make their money selling ads are incentivized to manipulate your attention. You can keep constantly fighting them, or just let lightfriend be the virtual (and physical) wall where only the signal gets through."}</p>
-                    </div>
-                    <div class="difference-image">
-                        <img src="/assets/human_looking_at_field.webp" alt="Human looking at field" loading="lazy" />
-                    </div>
                 </div>
             </div>
             <section class="features-section">
@@ -430,17 +436,9 @@ pub fn landing() -> Html {
             </section>
             <section class="trust-proof">
                 <div class="section-intro">
-                    <h2>{"Why I'm Building Lightfriend"}</h2>
+                    <h2>{"About the Developer"}</h2>
                     <img src="/assets/rasmus-pfp.png" alt="Rasmus, the developer" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"Hi, I'm Rasmus, a solo developer behind this project and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
-                    <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
-                    <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
-                    <p>{"Now I’m juggling a CS master's, high-level sports, part-time work, and building Lightfriend every day. And I never feel rushed. I can direct my attention where I want it."}</p>
-                    <p>{"I've been using the Light Phone for 3 years, starting with the Light Phone 2 and upgrading to the Light Phone 3 this summer. It's beautifully designed and I love using it. It has maps and hotspot, but that's about it. I needed to access WhatsApp messages while on the go. I needed email. I needed internet search. The issue is that dumbphones can't have these features directly - if a phone has an app store to download WhatsApp, then you can download any app from it, which defeats the whole purpose of avoiding distractions."}</p>
-                    <p>{"So I built Lightfriend as my own assistant. Something I could call or text from a dumbphone to check WhatsApp messages, send replies, search the web, get calendar updates, and handle email. The magic is that I can access what I need without having the infinite scroll right there in my pocket."}</p>
-                    <p>{"I posted the first version on Reddit. It only had voice-activated AI search. The number one request was WhatsApp integration. Then email. Then calendar. Then QR code reader. I realized I could help other people too."}</p>
-                    <p>{"I use Lightfriend daily and rely on it to stay updated. I wouldn't go back to a smartphone, not even close. When you make scrolling physically impossible, you can finally relax. You don't have to fight the addiction anymore. It's such an insane feeling when you experience it. The phone had been draining my brain like an anti-virus software slowing down a computer. Books started to feel entertaining again. I want others to experience it too."}</p>
-                    <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project is open-source, and 55 developers have starred it on GitHub. I'm trying to make it better every day and I'm always open to feedback. You can reach me at rasmus@ahtava.com."}</p>
+                    <p>{"I'm Rasmus, a solo developer who uses Lightfriend daily on my Light Phone 3. I built it because dumbphones can't have WhatsApp or email directly - that would defeat the purpose. The project is open-source on GitHub with 55+ stars. Reach me at rasmus@ahtava.com."}</p>
                 </div>
             </section>
             <section class="testimonials-section">
@@ -1614,6 +1612,81 @@ pub fn landing() -> Html {
         height: auto;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .capabilities-summary {
+        padding: 3rem 2rem;
+        max-width: 900px;
+        margin: 0 auto;
+        position: relative;
+        z-index: 2;
+    }
+    .capabilities-content {
+        background: rgba(126, 178, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(126, 178, 255, 0.15);
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 0 25px rgba(126, 178, 255, 0.08);
+    }
+    .capabilities-tagline {
+        font-size: 1.3rem;
+        color: #fff;
+        text-align: center;
+        margin-bottom: 2rem;
+        line-height: 1.6;
+        font-weight: 500;
+    }
+    .capabilities-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .capability-category {
+        text-align: center;
+        padding: 1rem;
+    }
+    .capability-category h3 {
+        font-size: 0.85rem;
+        color: #7EB2FF;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .capability-category p {
+        font-size: 1rem;
+        color: #ddd;
+        margin: 0;
+        line-height: 1.5;
+    }
+    .availability-info {
+        text-align: center;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(126, 178, 255, 0.1);
+    }
+    .availability-info p {
+        font-size: 0.95rem;
+        color: #bbb;
+        margin: 0.5rem 0;
+    }
+    .availability-info strong {
+        color: #7EB2FF;
+    }
+    @media (max-width: 768px) {
+        .capabilities-summary {
+            padding: 2rem 1rem;
+        }
+        .capabilities-tagline {
+            font-size: 1.1rem;
+        }
+        .capabilities-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+        .capability-category {
+            padding: 0.75rem;
+        }
     }
     .story-grid {
         display: grid;

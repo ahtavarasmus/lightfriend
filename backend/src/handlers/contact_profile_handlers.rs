@@ -1,3 +1,4 @@
+use crate::UserCoreOps;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,

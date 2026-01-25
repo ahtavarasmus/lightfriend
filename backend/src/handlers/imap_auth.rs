@@ -11,6 +11,114 @@ use serde_json::json;
 use std::error::Error;
 use std::sync::Arc;
 
+// ============================================================
+// Pure Functions for Testability
+// ============================================================
+
+/// Validate email format using basic rules.
+/// Returns true if email appears to be valid format.
+/// Note: This is a basic validation, not a full RFC 5322 check.
+pub fn is_valid_email(email: &str) -> bool {
+    // Check for exactly one @ symbol
+    let parts: Vec<&str> = email.split('@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    let local_part = parts[0];
+    let domain_part = parts[1];
+
+    // Local part cannot be empty
+    if local_part.is_empty() {
+        return false;
+    }
+
+    // Domain must contain at least one dot
+    if !domain_part.contains('.') {
+        return false;
+    }
+
+    // Domain cannot start or end with a dot
+    if domain_part.starts_with('.') || domain_part.ends_with('.') {
+        return false;
+    }
+
+    // Domain parts cannot be empty (no consecutive dots)
+    let domain_parts: Vec<&str> = domain_part.split('.').collect();
+    if domain_parts.iter().any(|p| p.is_empty()) {
+        return false;
+    }
+
+    true
+}
+
+/// Extract domain from email address.
+/// Returns None if email is invalid.
+pub fn extract_email_domain(email: &str) -> Option<&str> {
+    email.split('@').nth(1)
+}
+
+/// IMAP server configuration
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImapConfig {
+    pub host: &'static str,
+    pub port: u16,
+    pub tls: bool,
+}
+
+/// Detect IMAP server configuration from email address.
+/// Returns ImapConfig with server details, or None if unknown provider.
+/// This is an alternative to detect_imap_server that returns a struct.
+pub fn detect_imap_config(email: &str) -> Option<ImapConfig> {
+    let domain = extract_email_domain(email)?.to_lowercase();
+
+    let config = match domain.as_str() {
+        "icloud.com" | "me.com" | "mac.com" => ImapConfig {
+            host: "imap.mail.me.com",
+            port: 993,
+            tls: true,
+        },
+        "gmail.com" | "googlemail.com" => ImapConfig {
+            host: "imap.gmail.com",
+            port: 993,
+            tls: true,
+        },
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" => ImapConfig {
+            host: "outlook.office365.com",
+            port: 993,
+            tls: true,
+        },
+        "yahoo.com" | "yahoo.co.uk" | "yahoo.fr" | "yahoo.de" => ImapConfig {
+            host: "imap.mail.yahoo.com",
+            port: 993,
+            tls: true,
+        },
+        "aol.com" => ImapConfig {
+            host: "imap.aol.com",
+            port: 993,
+            tls: true,
+        },
+        "zoho.com" | "zohomail.com" => ImapConfig {
+            host: "imap.zoho.com",
+            port: 993,
+            tls: true,
+        },
+        "fastmail.com" | "fastmail.fm" => ImapConfig {
+            host: "imap.fastmail.com",
+            port: 993,
+            tls: true,
+        },
+        _ => return None,
+    };
+
+    Some(config)
+}
+
+/// Check if an email provider is a known supported provider.
+pub fn is_known_email_provider(email: &str) -> bool {
+    detect_imap_config(email).is_some()
+}
+
 // Struct to deserialize the incoming IMAP credentials from the frontend
 #[derive(Deserialize)]
 pub struct ImapCredentials {
@@ -22,6 +130,31 @@ pub struct ImapCredentials {
     imap_port: Option<u16>, // e.g., 993
 }
 
+/// Detects the IMAP server based on email domain.
+/// Returns (server, port) tuple.
+pub fn detect_imap_server(email: &str) -> (&'static str, u16) {
+    let domain = email.split('@').nth(1).unwrap_or("").to_lowercase();
+
+    match domain.as_str() {
+        // iCloud
+        "icloud.com" | "me.com" | "mac.com" => ("imap.mail.me.com", 993),
+        // Google
+        "gmail.com" | "googlemail.com" => ("imap.gmail.com", 993),
+        // Microsoft
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" => ("outlook.office365.com", 993),
+        // Yahoo
+        "yahoo.com" | "yahoo.co.uk" | "yahoo.fr" | "yahoo.de" => ("imap.mail.yahoo.com", 993),
+        // AOL
+        "aol.com" => ("imap.aol.com", 993),
+        // Zoho
+        "zoho.com" | "zohomail.com" => ("imap.zoho.com", 993),
+        // FastMail
+        "fastmail.com" | "fastmail.fm" => ("imap.fastmail.com", 993),
+        // Default to Gmail (legacy behavior, but log warning)
+        _ => ("imap.gmail.com", 993),
+    }
+}
+
 // Struct to serialize the IMAP status response
 #[derive(Serialize)]
 pub struct ImapStatus {
@@ -31,7 +164,7 @@ pub struct ImapStatus {
 
 use native_tls::TlsStream;
 
-// Function to establish an IMAP connection to Gmail for credential verification
+// Function to establish an IMAP connection for credential verification
 async fn connect_imap(
     email: &str,
     password: &str,
@@ -40,8 +173,18 @@ async fn connect_imap(
 ) -> Result<Session<TlsStream<std::net::TcpStream>>, Box<dyn Error>> {
     let tls = TlsConnector::builder().build()?;
 
-    let server = imap_server.unwrap_or("imap.gmail.com");
-    let port = imap_port.unwrap_or(993);
+    // Use provided server/port or auto-detect from email domain
+    let (detected_server, detected_port) = detect_imap_server(email);
+    let server = imap_server.unwrap_or(detected_server);
+    let port = imap_port.unwrap_or(detected_port);
+
+    tracing::debug!(
+        "Connecting to IMAP server {} on port {} for email {}",
+        server,
+        port,
+        email
+    );
+
     let client = imap::connect((server, port), server, &tls)?;
 
     match client.login(email, password) {

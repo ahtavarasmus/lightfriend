@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::time::Duration;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TeslaVehicle {
     pub id: i64,
     pub vehicle_id: i64,
@@ -19,7 +19,7 @@ pub struct TeslaVehicle {
     pub vehicle_state: Option<VehicleState>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ChargeState {
     pub battery_level: i32,
     pub battery_range: f64,
@@ -81,12 +81,12 @@ pub struct NearbySitesResponse {
     pub response: NearbySitesData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct NearbySitesData {
     pub superchargers: Vec<ChargingSite>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ChargingSite {
     pub location: ChargingLocation,
     pub name: String,
@@ -95,7 +95,7 @@ pub struct ChargingSite {
     pub id: Option<i64>, // Supercharger ID for navigation_sc_request
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ChargingLocation {
     pub lat: f64,
     pub long: f64,

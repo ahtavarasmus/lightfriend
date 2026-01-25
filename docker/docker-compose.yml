@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_MULTIPLE_DATABASES: synapse_db,whatsapp_db,signal_db,messenger_db,instagram_db
+      POSTGRES_MULTIPLE_DATABASES: synapse_db,whatsapp_db,signal_db,messenger_db,instagram_db,telegram_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
@@ -131,6 +131,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Telegram bridge
+  mautrix-telegram:
+    image: dock.mau.dev/mautrix/telegram:latest
+    container_name: lightfriend-telegram
+    volumes:
+      - telegram_data:/data
+      - ./bridges/telegram/config.yaml:/data/config.yaml
+    networks:
+      - lightfriend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      synapse:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Lightfriend Core (Rust backend + frontend)
   core:
     image: eddiepease1/lightfriend-core:latest
@@ -165,6 +181,7 @@ services:
       SIGNAL_BRIDGE_BOT: "@signalbot:matrix.local"
       MESSENGER_BRIDGE_BOT: "@messengerbot:matrix.local"
       INSTAGRAM_BRIDGE_BOT: "@igbot:matrix.local"
+      TELEGRAM_BRIDGE_BOT: "@telegrambot:matrix.local"
       GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
       GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       GOOGLE_TASKS_CLIENT_ID: ${GOOGLE_TASKS_CLIENT_ID:-}
@@ -215,6 +232,7 @@ volumes:
   signal_data:
   messenger_data:
   instagram_data:
+  telegram_data:
   core_data:
   core_uploads:
   core_matrix_store:
