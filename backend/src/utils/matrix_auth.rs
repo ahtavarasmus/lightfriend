@@ -332,32 +332,36 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         .map_err(|_| anyhow!("MATRIX_SHARED_SECRET not set"))?;
 
     // Get or register Matrix credentials
-    let (username, password, device_id, access_token) = if user.matrix_username.is_none() {
-        tracing::info!("🆕 Registering new Matrix user");
-        let (username, access_token, device_id, password) =
-            register_user(&homeserver_url, &shared_secret).await?;
-        state.user_repository.set_matrix_credentials(
-            user.id,
-            &username,
-            &access_token,
-            &device_id,
-            &password,
-        )?;
-        (username, password, Some(device_id), Some(access_token))
-    } else {
-        tracing::debug!("✓ Existing Matrix credentials found");
-        let access_token = user
-            .encrypted_matrix_access_token
-            .as_ref()
-            .map(|t| decrypt(t))
-            .transpose()?;
-        (
-            user.matrix_username.unwrap(),
-            decrypt(user.encrypted_matrix_password.as_ref().unwrap())?,
-            user.matrix_device_id,
-            access_token,
-        )
-    };
+    let (username, password, device_id, access_token) =
+        match (&user.matrix_username, &user.encrypted_matrix_password) {
+            (Some(existing_username), Some(encrypted_password)) => {
+                tracing::debug!("✓ Existing Matrix credentials found");
+                let access_token = user
+                    .encrypted_matrix_access_token
+                    .as_ref()
+                    .map(|t| decrypt(t))
+                    .transpose()?;
+                (
+                    existing_username.clone(),
+                    decrypt(encrypted_password)?,
+                    user.matrix_device_id.clone(),
+                    access_token,
+                )
+            }
+            _ => {
+                tracing::info!("🆕 Registering new Matrix user");
+                let (username, access_token, device_id, password) =
+                    register_user(&homeserver_url, &shared_secret).await?;
+                state.user_repository.set_matrix_credentials(
+                    user.id,
+                    &username,
+                    &access_token,
+                    &device_id,
+                    &password,
+                )?;
+                (username, password, Some(device_id), Some(access_token))
+            }
+        };
 
     let store_path = format!(
         "{}/{}",
