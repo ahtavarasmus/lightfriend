@@ -29,19 +29,46 @@ pub struct WebhookData {
     pub conversation_id: String,
     pub status: String,
     pub metadata: Metadata,
-    pub analysis: Analysis,
+    #[serde(default)]
+    pub analysis: Option<Analysis>,
     pub conversation_initiation_client_data: ConversationInitiationClientDataWebhook,
+    // Additional fields ElevenLabs may send - ignored but allowed
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub transcript: Option<serde_json::Value>,
+    #[serde(default)]
+    pub has_audio: Option<bool>,
+    #[serde(default)]
+    pub has_user_audio: Option<bool>,
+    #[serde(default)]
+    pub has_response_audio: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Metadata {
+    #[serde(default)]
     pub call_duration_secs: i32,
+    // Additional metadata fields ElevenLabs may send
+    #[serde(default)]
+    pub start_time_unix_secs: Option<i64>,
+    #[serde(default)]
+    pub end_time_unix_secs: Option<i64>,
+    #[serde(default)]
+    pub cost: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Analysis {
-    pub call_successful: String,
-    pub transcript_summary: String,
+    #[serde(default)]
+    pub call_successful: Option<String>,
+    #[serde(default)]
+    pub transcript_summary: Option<String>,
+    // Additional analysis fields ElevenLabs may send
+    #[serde(default)]
+    pub evaluation_criteria_results: Option<serde_json::Value>,
+    #[serde(default)]
+    pub data_collection_results: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -253,7 +280,13 @@ async fn handle_post_call_transcription(
 
     let conversation_id = payload.data.conversation_id;
     let call_duration_secs = payload.data.metadata.call_duration_secs;
-    let call_successful = payload.data.analysis.call_successful;
+    // Extract call_successful from optional analysis, defaulting to "unknown"
+    let call_successful = payload
+        .data
+        .analysis
+        .as_ref()
+        .and_then(|a| a.call_successful.clone())
+        .unwrap_or_else(|| "unknown".to_string());
     // Note: transcript_summary is available but not stored for privacy
     let user_id: Option<String> = payload
         .data
