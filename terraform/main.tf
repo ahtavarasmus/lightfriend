@@ -6,10 +6,10 @@ terraform {
   required_version = ">= 1.5.0"
 
   cloud {
-    organization = "lightfriend" # Update via TF_CLOUD_ORG env var or terraform.tfvars
+    organization = "lightfriend-ai"
 
     workspaces {
-      tags = ["lightfriend"]
+      name = "lightfriend-prod"
     }
   }
 
