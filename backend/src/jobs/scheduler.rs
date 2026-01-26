@@ -249,8 +249,10 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
         let now_local = now.with_timezone(&tz);
         let current_ts = now.timestamp() as i32;
 
-        // Helper to create digest task
-        let create_digest_task = |digest_time: &str, _digest_name: &str| {
+        // Helper to create digest task - returns Option to handle DST/invalid time gracefully
+        let create_digest_task = |digest_time: &str,
+                                  _digest_name: &str|
+         -> Option<crate::models::user_models::NewTask> {
             // Parse hour from "HH:00" format
             let hour: u32 = digest_time
                 .split(':')
@@ -258,16 +260,17 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
                 .and_then(|h| h.parse().ok())
                 .unwrap_or(8);
 
-            // Calculate next occurrence
-            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0).unwrap();
-            if now_local.time() >= chrono::NaiveTime::from_hms_opt(hour, 0, 0).unwrap() {
+            // Calculate next occurrence - use ? to handle DST transitions gracefully
+            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
+            let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
+            if now_local.time() >= check_time {
                 // Already past this time today, schedule for tomorrow
                 next_time += chrono::Duration::days(1);
             }
-            let next_dt = tz.from_local_datetime(&next_time).single().unwrap();
+            let next_dt = tz.from_local_datetime(&next_time).single()?;
             let trigger_ts = next_dt.timestamp() as i32;
 
-            crate::models::user_models::NewTask {
+            Some(crate::models::user_models::NewTask {
                 user_id,
                 trigger: format!("once_{}", trigger_ts),
                 condition: None,
@@ -280,35 +283,86 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
                 recurrence_time: Some(digest_time.to_string()), // "HH:00" format
                 sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
                 source_lookback_hours: Some(24),
-            }
+            })
         };
+
+        // Idempotency check: skip if user already has digest tasks
+        let existing_tasks = state
+            .user_repository
+            .get_user_tasks(user_id)
+            .unwrap_or_default();
+        let has_digest_tasks = existing_tasks
+            .iter()
+            .any(|t| t.action == "generate_digest" && t.is_permanent == Some(1));
+
+        if has_digest_tasks {
+            tracing::debug!(
+                "User {} already has digest tasks, skipping migration",
+                user_id
+            );
+            continue;
+        }
 
         // Create tasks for each enabled digest
         let mut created_tasks = Vec::new();
+        let mut failed_tasks = Vec::new();
 
         if let Some(ref time) = morning {
-            let task = create_digest_task(time, "morning");
-            if state.user_repository.create_task(&task).is_ok() {
-                created_tasks.push("morning");
+            if let Some(task) = create_digest_task(time, "morning") {
+                match state.user_repository.create_task(&task) {
+                    Ok(_) => created_tasks.push("morning"),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create morning digest task for user {}: {}",
+                            user_id,
+                            e
+                        );
+                        failed_tasks.push("morning");
+                    }
+                }
+            } else {
+                tracing::warn!("Invalid time format for morning digest: {}", time);
             }
         }
 
         if let Some(ref time) = day {
-            let task = create_digest_task(time, "day");
-            if state.user_repository.create_task(&task).is_ok() {
-                created_tasks.push("day");
+            if let Some(task) = create_digest_task(time, "day") {
+                match state.user_repository.create_task(&task) {
+                    Ok(_) => created_tasks.push("day"),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create day digest task for user {}: {}",
+                            user_id,
+                            e
+                        );
+                        failed_tasks.push("day");
+                    }
+                }
+            } else {
+                tracing::warn!("Invalid time format for day digest: {}", time);
             }
         }
 
         if let Some(ref time) = evening {
-            let task = create_digest_task(time, "evening");
-            if state.user_repository.create_task(&task).is_ok() {
-                created_tasks.push("evening");
+            if let Some(task) = create_digest_task(time, "evening") {
+                match state.user_repository.create_task(&task) {
+                    Ok(_) => created_tasks.push("evening"),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create evening digest task for user {}: {}",
+                            user_id,
+                            e
+                        );
+                        failed_tasks.push("evening");
+                    }
+                }
+            } else {
+                tracing::warn!("Invalid time format for evening digest: {}", time);
             }
         }
 
-        if !created_tasks.is_empty() {
-            // Clear old digest settings
+        // Only clear old settings if we created at least one task AND had no failures
+        if !created_tasks.is_empty() && failed_tasks.is_empty() {
             if let Err(e) = state.user_core.update_digests(user_id, None, None, None) {
                 tracing::warn!(
                     "Failed to clear digest settings for user {}: {}",
@@ -324,6 +378,12 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
                     created_tasks
                 );
             }
+        } else if !failed_tasks.is_empty() {
+            tracing::warn!(
+                "Skipping digest settings clear for user {} due to failures: {:?}",
+                user_id,
+                failed_tasks
+            );
         }
     }
 

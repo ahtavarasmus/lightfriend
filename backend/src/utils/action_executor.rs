@@ -51,7 +51,7 @@ pub async fn fetch_sources(
                     true,     // preview_only
                     Some(20), // limit
                     false,    // unprocessed
-                    false,    // unread_only - get all recent
+                    true,     // unread_only - consistent with bridge messages for digests
                 )
                 .await
                 {
@@ -83,6 +83,7 @@ pub async fn fetch_sources(
                     }
                     Err(e) => {
                         tracing::warn!("Failed to fetch emails for user {}: {:?}", user_id, e);
+                        context_parts.push("EMAIL: (fetch failed)".to_string());
                     }
                 }
             }
@@ -123,6 +124,7 @@ pub async fn fetch_sources(
                             user_id,
                             e
                         );
+                        context_parts.push(format!("{}: (fetch failed)", source.to_uppercase()));
                     }
                 }
             }
@@ -275,10 +277,10 @@ Based on the task results, create a concise, friendly message.
     let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
 
     match client.chat_completion(request).await {
-        Ok(result) => Ok(result.choices[0]
-            .message
-            .content
-            .clone()
+        Ok(result) => Ok(result
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
             .unwrap_or_else(|| action_result.to_string())),
         Err(e) => {
             tracing::warn!("Failed to generate notification: {}", e);
@@ -339,10 +341,10 @@ Be strict - only return true if there's a clear match."#;
 
     match client.chat_completion(request).await {
         Ok(result) => {
-            let content = result.choices[0]
-                .message
-                .content
-                .clone()
+            let content = result
+                .choices
+                .first()
+                .and_then(|c| c.message.content.clone())
                 .unwrap_or_default();
 
             #[derive(Deserialize)]
@@ -406,7 +408,28 @@ pub async fn execute_action_spec(
         if !src.is_empty() {
             let lookback = source_lookback_hours.unwrap_or(24);
             match fetch_sources(state, user_id, src, lookback).await {
-                Ok(data) => data,
+                Ok(data) => {
+                    // Check if all sources failed (data only contains failure placeholders)
+                    let all_failed = !data.is_empty()
+                        && data
+                            .lines()
+                            .filter(|l| !l.is_empty() && !l.starts_with("---"))
+                            .all(|l| l.contains("(fetch failed)"));
+
+                    if all_failed {
+                        tracing::error!("All source fetches failed for user {} task", user_id);
+                        if let Err(e) = state.admin_alert_repository.create_alert(
+                            "task_sources_failed",
+                            "warning",
+                            &format!("All sources ({}) failed for user {}", src, user_id),
+                            "action_executor",
+                            "execute_action_spec",
+                        ) {
+                            tracing::error!("Failed to create admin alert: {}", e);
+                        }
+                    }
+                    data
+                }
                 Err(e) => {
                     tracing::warn!("Failed to fetch sources: {}", e);
                     String::new()
@@ -440,22 +463,38 @@ pub async fn execute_action_spec(
         }
     }
 
-    // Step 3: Parse and execute action
+    // Step 3: Parse and execute action (continue even on failure)
     let (tool_name, param) = parse_action(action_spec);
+    let mut action_failed = false;
     let action_result =
         match execute_direct_tool(state, user_id, &tool_name, param.as_deref(), &source_data).await
         {
             Ok(result) => result,
             Err(e) => {
-                tracing::error!("Action execution failed: {}", e);
-                return ActionResult::Failed {
-                    error: format!("Action failed: {}", e),
-                };
+                tracing::error!("Action execution failed for user {}: {}", user_id, e);
+                action_failed = true;
+
+                // Create admin alert (no sensitive content)
+                if let Err(alert_err) = state.admin_alert_repository.create_alert(
+                    "task_action_failed",
+                    "warning",
+                    &format!(
+                        "Action '{}' failed for user {}: {}",
+                        action_spec, user_id, e
+                    ),
+                    "action_executor",
+                    "execute_action_spec",
+                ) {
+                    tracing::error!("Failed to create admin alert: {}", alert_err);
+                }
+
+                // Continue with error message - we'll still try to notify user
+                format!("Task action failed: {}", e)
             }
         };
 
-    // Step 4: Generate notification message
-    let notification_message = if tool_name == "generate_digest" {
+    // Step 4: Generate notification message (with fallbacks)
+    let notification_message = if tool_name == "generate_digest" && !action_failed {
         // Digest already formatted, use directly
         action_result.clone()
     } else {
@@ -465,12 +504,18 @@ pub async fn execute_action_spec(
             Ok(msg) => msg,
             Err(e) => {
                 tracing::warn!("Failed to generate notification message: {}", e);
-                action_result.clone()
+                // Fallback: use source data summary or action result
+                if !source_data.is_empty() && source_data.len() > 20 {
+                    let preview_len = source_data.len().min(150);
+                    format!("Digest: {}", &source_data[..preview_len])
+                } else {
+                    action_result.clone()
+                }
             }
         }
     };
 
-    // Step 5: Send notification
+    // Step 5: Always send notification - user should know their task ran
     let noti_type = format!("task_{}", notification_type);
     let first_message = if notification_type == "call" {
         Some("Hey, here's an update from your scheduled task.".to_string())
@@ -497,7 +542,13 @@ pub async fn execute_action_spec(
         }
     );
 
-    ActionResult::Success {
-        message: notification_message,
+    if action_failed {
+        ActionResult::Failed {
+            error: action_result,
+        }
+    } else {
+        ActionResult::Success {
+            message: notification_message,
+        }
     }
 }
