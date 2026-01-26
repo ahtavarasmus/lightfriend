@@ -35,3 +35,6 @@ docker/postgres-init/init-databases.sh
 
 # Matrix store
 backend/matrix_store/
+
+# Claude safety guard override flags (one-time use)
+.claude/.allow-*

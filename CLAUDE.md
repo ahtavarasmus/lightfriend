@@ -85,6 +85,19 @@ See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
 Do NOT add "Generated with Claude Code" or Co-Authored-By lines mentioning Claude/AI. Keep commit messages clean and focused on what changed.
 
+## Safety Guards
+
+Hooks protect against accidental destructive changes:
+
+1. **Migration Guard** - Blocks destructive SQL (DROP, TRUNCATE, DELETE, RENAME, ALTER TYPE)
+2. **Protected Files Guard** - Blocks edits to `encryption.rs`, `auth_middleware.rs`, `stripe_webhooks.rs`
+
+**When a hook blocks your edit with `OVERRIDE: touch <path>`:**
+1. Ask the user: "This change requires approval: [describe what you're changing]. Should I proceed?"
+2. If user approves, run `touch <path>` to create the one-time override flag, then retry the edit
+3. If user declines, abandon the change
+4. The flag file is auto-deleted after one use
+
 ## Common Tasks
 
 For step-by-step guides, use skills in `.claude/skills/`:
