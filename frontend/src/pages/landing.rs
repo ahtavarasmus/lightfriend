@@ -1,6 +1,7 @@
 use crate::components::notification::AnimationComponent;
 use crate::Route;
 use crate::utils::api::Api;
+use chrono::Utc;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
@@ -76,6 +77,26 @@ pub fn landing() -> Html {
             (),
         );
     }
+
+    // Calculate days smartphone-free (since March 1, 2022)
+    let days_smartphone_free = {
+        let now = Utc::now();
+        let start = chrono::NaiveDate::from_ymd_opt(2022, 3, 1).unwrap()
+            .and_hms_opt(0, 0, 0).unwrap()
+            .and_utc();
+        let days = (now - start).num_days();
+        // Format with thousands separator
+        let s = days.to_string();
+        let mut result = String::new();
+        for (i, c) in s.chars().rev().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                result.insert(0, ',');
+            }
+            result.insert(0, c);
+        }
+        result
+    };
+
     let feature_css = r#"
         .feature-list {
             padding: 4rem 2rem;
@@ -436,9 +457,16 @@ pub fn landing() -> Html {
             </section>
             <section class="trust-proof">
                 <div class="section-intro">
-                    <h2>{"About the Developer"}</h2>
-                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, the developer" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I'm Rasmus, a solo developer who uses Lightfriend daily on my Light Phone 3. I built it because dumbphones can't have WhatsApp or email directly - that would defeat the purpose. The project is open-source on GitHub with 55+ stars. Reach me at rasmus@ahtava.com."}</p>
+                    <h2>{"Why this exists"}</h2>
+                    <img src="/assets/rasmus-pfp.png" alt="Rasmus" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
+                    <p class="why-lead">{"This isn't a compromise. It's what made things possible."}</p>
+                    <p>{"I'm Rasmus. I've lived without a smartphone for over three years. During that time, I finished a computer science degree, won an international skiing medal, built three startups, and work as a software engineer."}</p>
+                    <p>{"Lightfriend is my fourth startup - and the first one with paying customers. Not because it's the cleverest idea, but because it's the one I actually needed."}</p>
+                    <p>{"I didn't do those things despite using a dumbphone. I did them because of it."}</p>
+                    <div class="days-counter">
+                        <span class="days-label">{"Days smartphone-free: "}</span>
+                        <span class="days-number">{days_smartphone_free.clone()}</span>
+                    </div>
                 </div>
             </section>
             <section class="testimonials-section">
@@ -729,6 +757,32 @@ pub fn landing() -> Html {
         line-height: 1.8;
         font-weight: 400;
         margin-bottom: 1.5rem;
+    }
+    .trust-proof .why-lead {
+        font-size: 1.5rem;
+        color: #fff;
+        font-weight: 500;
+        font-style: italic;
+        margin-bottom: 2rem;
+    }
+    .days-counter {
+        margin-top: 2rem;
+        padding: 1.5rem 2rem;
+        background: rgba(126, 178, 255, 0.08);
+        border-radius: 12px;
+        border: 1px solid rgba(126, 178, 255, 0.2);
+        display: inline-block;
+    }
+    .days-number {
+        font-size: 2rem;
+        font-weight: 700;
+        background: linear-gradient(45deg, #7EB2FF, #4169E1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .days-label {
+        font-size: 1.1rem;
+        color: #bbb;
     }
     @media (max-width: 768px) {
         .trust-proof h2 {
