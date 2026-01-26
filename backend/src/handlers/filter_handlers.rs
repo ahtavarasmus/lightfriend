@@ -265,16 +265,30 @@ pub async fn create_task(
         (8, 0) // Default to 8:00 AM
     };
 
-    // Calculate next occurrence
-    let mut next_time = now_local.date_naive().and_hms_opt(hour, minute, 0).unwrap();
-    if now_local.time() >= chrono::NaiveTime::from_hms_opt(hour, minute, 0).unwrap() {
+    // Calculate next occurrence - handle DST transitions gracefully
+    let mut next_time = now_local
+        .date_naive()
+        .and_hms_opt(hour, minute, 0)
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid time specified"})),
+            )
+        })?;
+    let check_time = chrono::NaiveTime::from_hms_opt(hour, minute, 0).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid time specified"})),
+        )
+    })?;
+    if now_local.time() >= check_time {
         // Already past this time today, schedule for tomorrow
         next_time += chrono::Duration::days(1);
     }
     let next_dt = tz.from_local_datetime(&next_time).single().ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid time for timezone"})),
+            Json(json!({"error": "Invalid time for timezone (DST transition?)"})),
         )
     })?;
     let trigger_ts = next_dt.timestamp() as i32;
