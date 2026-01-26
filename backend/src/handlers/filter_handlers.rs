@@ -43,6 +43,8 @@ pub struct TaskResponse {
     is_permanent: Option<i32>,
     recurrence_rule: Option<String>,
     recurrence_time: Option<String>,
+    sources: Option<String>,
+    source_lookback_hours: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +52,17 @@ pub struct SetPermanenceRequest {
     pub is_permanent: bool,
     pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
     pub recurrence_time: Option<String>, // "09:00" (HH:MM)
+}
+
+#[derive(Deserialize)]
+pub struct CreateTaskRequest {
+    pub action: String,                     // "generate_digest" or other action
+    pub recurrence_rule: Option<String>,    // "daily", "weekly:1,3,5"
+    pub recurrence_time: Option<String>,    // "08:00" (HH:MM in user timezone)
+    pub sources: Option<String>,            // "email,whatsapp,telegram,signal,calendar"
+    pub source_lookback_hours: Option<i32>, // Default 24
+    pub notification_type: Option<String>,  // "sms" or "call"
+    pub condition: Option<String>,          // Optional condition to check
 }
 
 #[derive(Serialize)]
@@ -203,10 +216,123 @@ pub async fn get_tasks(
             is_permanent: task.is_permanent,
             recurrence_rule: task.recurrence_rule,
             recurrence_time: task.recurrence_time,
+            sources: task.sources,
+            source_lookback_hours: task.source_lookback_hours,
         })
         .collect();
 
     Ok(Json(response))
+}
+
+/// Create a new scheduled/recurring task from the frontend
+pub async fn create_task(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<CreateTaskRequest>,
+) -> Result<Json<TaskResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use chrono::TimeZone;
+
+    let user_id = auth_user.user_id;
+    tracing::debug!("Creating task for user {}: {:?}", user_id, request.action);
+
+    // Get user timezone for trigger calculation
+    let user_tz_str = state
+        .user_core
+        .get_user_info(user_id)
+        .ok()
+        .and_then(|info| info.timezone)
+        .unwrap_or_else(|| "UTC".to_string());
+
+    let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
+
+    // Calculate initial trigger timestamp
+    let now = chrono::Utc::now();
+    let now_local = now.with_timezone(&tz);
+    let current_ts = now.timestamp() as i32;
+
+    // Parse recurrence_time to get hour and minute
+    let (hour, minute) = if let Some(ref time_str) = request.recurrence_time {
+        let parts: Vec<&str> = time_str.split(':').collect();
+        if parts.len() >= 2 {
+            (
+                parts[0].parse::<u32>().unwrap_or(8),
+                parts[1].parse::<u32>().unwrap_or(0),
+            )
+        } else {
+            (8, 0)
+        }
+    } else {
+        (8, 0) // Default to 8:00 AM
+    };
+
+    // Calculate next occurrence
+    let mut next_time = now_local.date_naive().and_hms_opt(hour, minute, 0).unwrap();
+    if now_local.time() >= chrono::NaiveTime::from_hms_opt(hour, minute, 0).unwrap() {
+        // Already past this time today, schedule for tomorrow
+        next_time += chrono::Duration::days(1);
+    }
+    let next_dt = tz.from_local_datetime(&next_time).single().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid time for timezone"})),
+        )
+    })?;
+    let trigger_ts = next_dt.timestamp() as i32;
+
+    let new_task = crate::models::user_models::NewTask {
+        user_id,
+        trigger: format!("once_{}", trigger_ts),
+        condition: request.condition,
+        action: request.action,
+        notification_type: request.notification_type.or(Some("sms".to_string())),
+        status: "active".to_string(),
+        created_at: current_ts,
+        is_permanent: Some(1), // Recurring tasks are permanent
+        recurrence_rule: request.recurrence_rule,
+        recurrence_time: request.recurrence_time,
+        sources: request.sources,
+        source_lookback_hours: request.source_lookback_hours.or(Some(24)),
+    };
+
+    state.user_repository.create_task(&new_task).map_err(|e| {
+        tracing::error!("Failed to create task for user {}: {}", user_id, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create task: {}", e)})),
+        )
+    })?;
+
+    // Return the created task (fetch it back to get the ID)
+    let tasks = state.user_repository.get_user_tasks(user_id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+
+    // Find the most recently created task
+    let created_task = tasks.into_iter().next().ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Task not found after creation"})),
+        )
+    })?;
+
+    Ok(Json(TaskResponse {
+        id: created_task.id,
+        user_id: created_task.user_id,
+        trigger: created_task.trigger,
+        condition: created_task.condition,
+        action: created_task.action,
+        notification_type: created_task.notification_type,
+        status: created_task.status,
+        created_at: created_task.created_at,
+        is_permanent: created_task.is_permanent,
+        recurrence_rule: created_task.recurrence_rule,
+        recurrence_time: created_task.recurrence_time,
+        sources: created_task.sources,
+        source_lookback_hours: created_task.source_lookback_hours,
+    }))
 }
 
 // Priority Senders handlers

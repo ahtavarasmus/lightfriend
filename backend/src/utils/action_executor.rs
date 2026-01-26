@@ -1,335 +1,503 @@
 //! Action Executor for Task Runtime
 //!
-//! This module handles executing task action_specs at runtime using AI + tools.
+//! This module handles executing task actions at runtime.
 //! It's called by the scheduler when scheduled tasks are due, or when recurring
 //! task conditions are matched.
+//!
+//! Flow:
+//! 1. Fetch sources (if configured) - emails, messages, calendar
+//! 2. If condition set, evaluate condition against source data
+//! 3. Execute action tool (if any) - e.g., generate_digest, control_tesla
+//! 4. Generate notification message using AI
+//! 5. Send notification via SMS/call
 
 use crate::tool_call_utils::utils::create_openai_client_for_user;
 use crate::AppState;
 use crate::ModelPurpose;
-use crate::UserCoreOps;
 use openai_api_rs::v1::chat_completion;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Result of executing a task's action_spec
+/// Result of executing a task's action
 pub enum ActionResult {
     Success { message: String },
     Failed { error: String },
+    Skipped { reason: String }, // Condition not met
 }
 
-/// Get the tools available for task runtime execution.
-/// This is a subset of SMS tools plus send_reminder, excluding recursive tools.
-fn get_task_runtime_tools() -> Vec<chat_completion::Tool> {
-    vec![
-        // send_reminder - the key tool for notifications
-        crate::tool_call_utils::management::get_send_reminder_tool(),
-        // Tesla control
-        crate::tool_call_utils::tesla::get_tesla_control_tool(),
-        // Weather
-        crate::tool_call_utils::internet::get_weather_tool(),
-        // Chat messaging
-        crate::tool_call_utils::bridge::get_send_chat_message_tool(),
-        // Email
-        crate::tool_call_utils::email::get_send_email_tool(),
-        // Calendar
-        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
-        // Web search
-        crate::tool_call_utils::internet::get_ask_perplexity_tool(),
-    ]
+/// Fetch data from configured sources
+///
+/// Sources can be: email, whatsapp, telegram, signal, calendar
+/// Returns formatted string with all source data
+pub async fn fetch_sources(
+    state: &Arc<AppState>,
+    user_id: i32,
+    sources: &str,
+    lookback_hours: i32,
+) -> Result<String, String> {
+    let mut context_parts = Vec::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let since = now - (lookback_hours as i64 * 3600);
+
+    for source in sources.split(',').map(|s| s.trim().to_lowercase()) {
+        match source.as_str() {
+            "email" => {
+                match crate::handlers::imap_handlers::fetch_emails_imap(
+                    state,
+                    user_id,
+                    true,     // preview_only
+                    Some(20), // limit
+                    false,    // unprocessed
+                    false,    // unread_only - get all recent
+                )
+                .await
+                {
+                    Ok(emails) => {
+                        // Filter by timestamp (date is DateTime<Utc>)
+                        let recent: Vec<_> = emails
+                            .into_iter()
+                            .filter(|e| e.date.map(|d| d.timestamp() > since).unwrap_or(false))
+                            .collect();
+                        if !recent.is_empty() {
+                            let email_str = recent
+                                .iter()
+                                .map(|e| {
+                                    format!(
+                                        "- From: {}, Subject: {}, Date: {}",
+                                        e.from.as_deref().unwrap_or("unknown"),
+                                        e.subject.as_deref().unwrap_or("(no subject)"),
+                                        e.date_formatted.as_deref().unwrap_or("unknown")
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            context_parts.push(format!(
+                                "EMAIL ({} messages):\n{}",
+                                recent.len(),
+                                email_str
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to fetch emails for user {}: {:?}", user_id, e);
+                    }
+                }
+            }
+            "whatsapp" | "telegram" | "signal" => {
+                match crate::utils::bridge::fetch_bridge_messages(
+                    &source, state, user_id, since, true, // unread_only
+                )
+                .await
+                {
+                    Ok(messages) => {
+                        if !messages.is_empty() {
+                            let msg_str = messages
+                                .iter()
+                                .take(15)
+                                .map(|m| {
+                                    format!(
+                                        "- {} in {}: {} ({})",
+                                        m.sender_display_name,
+                                        m.room_name,
+                                        m.content,
+                                        m.formatted_timestamp
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            context_parts.push(format!(
+                                "{} ({} messages):\n{}",
+                                source.to_uppercase(),
+                                messages.len(),
+                                msg_str
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to fetch {} messages for user {}: {:?}",
+                            source,
+                            user_id,
+                            e
+                        );
+                    }
+                }
+            }
+            "calendar" => {
+                // Calendar fetches next 24 hours, not affected by lookback
+                let calendar_result =
+                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
+                        state, user_id, "{}",
+                    )
+                    .await;
+                if !calendar_result.contains("No events")
+                    && !calendar_result.contains("not connected")
+                {
+                    context_parts.push(format!("CALENDAR:\n{}", calendar_result));
+                }
+            }
+            _ => {
+                tracing::warn!("Unknown source type: {}", source);
+            }
+        }
+    }
+
+    if context_parts.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(context_parts.join("\n\n---\n\n"))
+    }
 }
 
-/// Execute a single tool call and return the result
-async fn execute_tool_call(
+/// Parse action string into tool name and optional parameter
+/// Examples:
+/// - "generate_digest" -> ("generate_digest", None)
+/// - "control_tesla(climate_on)" -> ("control_tesla", Some("climate_on"))
+fn parse_action(action: &str) -> (String, Option<String>) {
+    let action = action.trim();
+    if action.is_empty() {
+        return (String::new(), None);
+    }
+
+    if let Some(idx) = action.find('(') {
+        if action.ends_with(')') {
+            let tool = action[..idx].to_string();
+            let param = action[idx + 1..action.len() - 1].to_string();
+            return (tool, Some(param));
+        }
+    }
+    (action.to_string(), None)
+}
+
+/// Execute a single tool call directly (without AI)
+async fn execute_direct_tool(
     state: &Arc<AppState>,
     user_id: i32,
     tool_name: &str,
-    arguments: &str,
-    notification_type: &str,
+    param: Option<&str>,
+    source_data: &str,
 ) -> Result<String, String> {
     match tool_name {
-        "send_reminder" => crate::tool_call_utils::management::handle_send_reminder(
-            state,
-            user_id,
-            arguments,
-            notification_type,
-        )
-        .await
-        .map_err(|e| e.to_string()),
+        "generate_digest" => {
+            crate::tool_call_utils::management::handle_generate_digest(state, user_id, source_data)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "control_tesla" => {
+            let command = param.unwrap_or("status");
+            let args = serde_json::json!({ "command": command }).to_string();
             Ok(crate::tool_call_utils::tesla::handle_tesla_command(
-                state, user_id, arguments, true, // silent mode - don't send extra notification
+                state, user_id, &args, true, // silent mode
             )
             .await)
         }
         "get_weather" => {
-            #[derive(Deserialize)]
-            struct WeatherArgs {
-                location: String,
-                units: Option<String>,
-                forecast_type: Option<String>,
-            }
-            let args: WeatherArgs = serde_json::from_str(arguments).map_err(|e| e.to_string())?;
-            let units = args.units.unwrap_or_else(|| "metric".to_string());
-            let forecast_type = args.forecast_type.unwrap_or_else(|| "current".to_string());
-            crate::utils::tool_exec::get_weather(
-                state,
-                &args.location,
-                &units,
-                &forecast_type,
-                user_id,
-            )
-            .await
-            .map_err(|e| e.to_string())
-        }
-        "send_chat_message" => {
-            // Get user info for send_chat_message
-            let user = state
-                .user_core
-                .find_by_id(user_id)
-                .map_err(|e| format!("Failed to get user: {:?}", e))?
-                .ok_or_else(|| "User not found".to_string())?;
-            match crate::tool_call_utils::bridge::handle_send_chat_message(
-                state, user_id, arguments, &user, None,
-            )
-            .await
-            {
-                Ok((_, _, json_resp)) => Ok(json_resp.message.clone()),
-                Err(e) => Err(format!("Failed to send chat message: {}", e)),
-            }
-        }
-        "send_email" => {
-            let user = state
-                .user_core
-                .find_by_id(user_id)
-                .map_err(|e| format!("Failed to get user: {:?}", e))?
-                .ok_or_else(|| "User not found".to_string())?;
-            match crate::tool_call_utils::email::handle_send_email(state, user_id, arguments, &user)
-                .await
-            {
-                Ok((_, _, json_resp)) => Ok(json_resp.message.clone()),
-                Err(e) => Err(format!("Failed to send email: {}", e)),
-            }
-        }
-        "fetch_calendar_events" => Ok(
-            crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                state, user_id, arguments,
-            )
-            .await,
-        ),
-        "ask_perplexity" => {
-            #[derive(Deserialize)]
-            struct PerplexityArgs {
-                query: String,
-            }
-            let args: PerplexityArgs =
-                serde_json::from_str(arguments).map_err(|e| e.to_string())?;
-            let sys_prompt =
-                "You are helping with a scheduled task. Provide concise, actionable information.";
-            crate::utils::tool_exec::ask_perplexity(state, &args.query, sys_prompt)
+            let location = param.unwrap_or("current location");
+            crate::utils::tool_exec::get_weather(state, location, "metric", "current", user_id)
                 .await
                 .map_err(|e| e.to_string())
         }
-        _ => Err(format!("Unknown tool: {}", tool_name)),
+        "fetch_calendar_events" => Ok(
+            crate::tool_call_utils::calendar::handle_fetch_calendar_events(state, user_id, "{}")
+                .await,
+        ),
+        "" => {
+            // Empty action - just return source data summary
+            if source_data.is_empty() {
+                Ok("No source data available.".to_string())
+            } else {
+                Ok(source_data.to_string())
+            }
+        }
+        _ => Err(format!("Unknown action tool: {}", tool_name)),
     }
 }
 
-/// Execute a task's action_spec using AI + tools.
-///
-/// This function:
-/// 1. Calls AI with the action_spec and available tools
-/// 2. Executes up to 2 tool calls
-/// 3. Returns the result
-///
-/// `trigger_context` - Optional context about what triggered the task (e.g., the incoming message)
-pub async fn execute_action_spec(
+/// Generate a notification message based on task results
+async fn generate_notification_message(
     state: &Arc<AppState>,
     user_id: i32,
-    action_spec: &str,
-    notification_type: &str,
-    trigger_context: Option<&str>,
-) -> ActionResult {
-    tracing::debug!(
-        "Executing action_spec for user {}: {}",
-        user_id,
-        action_spec
+    source_data: &str,
+    condition: Option<&str>,
+    action_result: &str,
+) -> Result<String, String> {
+    // If action result looks like a digest, use it directly
+    if action_result.len() > 50
+        && (action_result.contains("WhatsApp:")
+            || action_result.contains("Email:")
+            || action_result.contains("Telegram:"))
+    {
+        return Ok(action_result.to_string());
+    }
+
+    let (client, provider) = create_openai_client_for_user(state, user_id)
+        .map_err(|e| format!("Failed to create AI client: {}", e))?;
+
+    let system_prompt = r#"You are generating a brief SMS notification (max 160 chars) for the user.
+Based on the task results, create a concise, friendly message.
+- Be specific about what happened
+- Include key details (who, what)
+- Plain text only, no markdown or emojis
+- Return ONLY the notification text, nothing else"#;
+
+    let user_content = format!(
+        "Task completed. Generate notification:\n\nAction result: {}\n\nSource data summary: {}\n\nCondition matched: {}",
+        action_result,
+        if source_data.len() > 500 { &source_data[..500] } else { source_data },
+        condition.unwrap_or("none")
     );
-
-    // Create AI client for this user
-    let (client, provider) = match create_openai_client_for_user(state, user_id) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to create AI client for user {}: {}", user_id, e);
-            return ActionResult::Failed {
-                error: format!("Failed to create AI client: {}", e),
-            };
-        }
-    };
-
-    let system_prompt = format!(
-        "You are a task executor. Execute the following task instructions using the available tools.\n\n\
-        IMPORTANT:\n\
-        - You MUST use tools to complete the task\n\
-        - Maximum 2 tool calls allowed\n\
-        - Use send_reminder to notify the user about results or reminders\n\
-        - Be concise and action-oriented\n\
-        - When sending notifications, ALWAYS include WHY the action was triggered (the trigger context) along with what action was taken. \
-        For example: 'Ville messaged about leaving soon, so I turned on your Tesla climate.' NOT just 'Turned on Tesla climate.'\n\n\
-        Notification preference: {}",
-        notification_type
-    );
-
-    // Build the user message with task and optional trigger context
-    let user_message = if let Some(context) = trigger_context {
-        format!(
-            "Execute this task:\n\n{}\n\n---\nTrigger context (the event that triggered this task):\n{}",
-            action_spec, context
-        )
-    } else {
-        format!("Execute this task:\n\n{}", action_spec)
-    };
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(system_prompt),
+            content: chat_completion::Content::Text(system_prompt.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(user_message),
+            content: chat_completion::Content::Text(user_content),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
     ];
 
-    let tools = get_task_runtime_tools();
     let model = state
         .ai_config
         .model(provider, ModelPurpose::Default)
         .to_string();
 
-    // First AI call - get tool calls
-    let request = chat_completion::ChatCompletionRequest::new(model.clone(), messages.clone())
-        .tools(tools)
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .max_tokens(300);
+    let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
 
-    let result = match client.chat_completion(request).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("AI call failed for task execution: {}", e);
-            return ActionResult::Failed {
-                error: format!("AI call failed: {}", e),
-            };
-        }
-    };
-
-    // Extract tool calls
-    let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
-        Some(calls) => calls,
-        None => {
-            tracing::warn!("No tool calls returned for action_spec");
-            return ActionResult::Failed {
-                error: "AI did not return any tool calls".to_string(),
-            };
-        }
-    };
-
-    // Execute tool calls (max 2)
-    let mut tool_answers: HashMap<String, String> = HashMap::new();
-    let mut executed_count = 0;
-
-    for tool_call in tool_calls.iter().take(2) {
-        let tool_call_id = tool_call.id.clone();
-        let tool_name = match &tool_call.function.name {
-            Some(n) => n,
-            None => continue,
-        };
-        let arguments = match &tool_call.function.arguments {
-            Some(a) => a,
-            None => continue,
-        };
-
-        tracing::debug!(
-            "Executing tool call: {} with args: {}",
-            tool_name,
-            arguments
-        );
-
-        match execute_tool_call(state, user_id, tool_name, arguments, notification_type).await {
-            Ok(answer) => {
-                tracing::debug!("Tool {} succeeded: {}", tool_name, answer);
-                tool_answers.insert(tool_call_id, answer);
-                executed_count += 1;
-            }
-            Err(e) => {
-                tracing::error!("Tool {} failed: {}", tool_name, e);
-                tool_answers.insert(tool_call_id, format!("Error: {}", e));
-            }
-        }
-    }
-
-    if executed_count == 0 {
-        return ActionResult::Failed {
-            error: "No tools executed successfully".to_string(),
-        };
-    }
-
-    // Build follow-up messages with tool results
-    let mut follow_up_messages = messages;
-    follow_up_messages.push(chat_completion::ChatCompletionMessage {
-        role: chat_completion::MessageRole::assistant,
-        content: chat_completion::Content::Text(
-            result.choices[0]
-                .message
-                .content
-                .clone()
-                .unwrap_or_default(),
-        ),
-        name: None,
-        tool_calls: result.choices[0].message.tool_calls.clone(),
-        tool_call_id: None,
-    });
-
-    // Add tool responses
-    for tool_call in tool_calls.iter().take(2) {
-        let tool_answer = tool_answers.get(&tool_call.id).cloned().unwrap_or_default();
-        follow_up_messages.push(chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::tool,
-            content: chat_completion::Content::Text(tool_answer),
-            name: None,
-            tool_calls: None,
-            tool_call_id: Some(tool_call.id.clone()),
-        });
-    }
-
-    // Follow-up AI call for summary
-    let follow_up_request =
-        chat_completion::ChatCompletionRequest::new(model, follow_up_messages).max_tokens(150);
-
-    let final_response = match client.chat_completion(follow_up_request).await {
-        Ok(r) => r.choices[0]
+    match client.chat_completion(request).await {
+        Ok(result) => Ok(result.choices[0]
             .message
             .content
             .clone()
-            .unwrap_or_else(|| "Task completed".to_string()),
+            .unwrap_or_else(|| action_result.to_string())),
         Err(e) => {
-            tracing::warn!("Follow-up AI call failed, using default response: {}", e);
-            "Task completed".to_string()
+            tracing::warn!("Failed to generate notification: {}", e);
+            Ok(action_result.to_string())
+        }
+    }
+}
+
+/// Evaluate if condition matches source data
+async fn evaluate_condition(
+    state: &Arc<AppState>,
+    user_id: i32,
+    condition: &str,
+    source_data: &str,
+) -> Result<bool, String> {
+    if source_data.is_empty() {
+        return Ok(false);
+    }
+
+    let (client, provider) = create_openai_client_for_user(state, user_id)
+        .map_err(|e| format!("Failed to create AI client: {}", e))?;
+
+    let system_prompt = r#"You are evaluating if source data matches a condition.
+Return JSON with:
+- "matches": true/false
+- "reason": brief explanation (max 50 chars)
+
+Be strict - only return true if there's a clear match."#;
+
+    let user_content = format!(
+        "Condition to check: \"{}\"\n\nSource data:\n{}",
+        condition, source_data
+    );
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(user_content),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let model = state
+        .ai_config
+        .model(provider, ModelPurpose::Default)
+        .to_string();
+
+    let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            let content = result.choices[0]
+                .message
+                .content
+                .clone()
+                .unwrap_or_default();
+
+            #[derive(Deserialize)]
+            struct ConditionResult {
+                matches: bool,
+            }
+
+            // Try to parse JSON from the response
+            if let Ok(parsed) = serde_json::from_str::<ConditionResult>(&content) {
+                return Ok(parsed.matches);
+            }
+
+            // Fallback: check if response contains "true" or positive indicators
+            Ok(content.to_lowercase().contains("\"matches\": true")
+                || content.to_lowercase().contains("\"matches\":true"))
+        }
+        Err(e) => {
+            tracing::warn!("Failed to evaluate condition: {}", e);
+            Ok(false) // Default to not matching on error
+        }
+    }
+}
+
+/// Execute a task's action with optional sources.
+///
+/// This function:
+/// 1. Fetches sources if configured
+/// 2. Evaluates condition if set
+/// 3. Executes the action tool
+/// 4. Generates notification message
+/// 5. Sends notification
+///
+/// Arguments:
+/// - `action_spec` - Tool call like "generate_digest" or "control_tesla(climate_on)" or empty
+/// - `notification_type` - "sms" or "call"
+/// - `trigger_context` - Optional context about what triggered the task
+/// - `sources` - Optional comma-separated sources like "email,whatsapp"
+/// - `source_lookback_hours` - How many hours back to fetch (default 24)
+/// - `condition` - Optional condition to evaluate against source data
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_action_spec(
+    state: &Arc<AppState>,
+    user_id: i32,
+    action_spec: &str,
+    notification_type: &str,
+    _trigger_context: Option<&str>, // Reserved for future use with recurring tasks
+    sources: Option<&str>,
+    source_lookback_hours: Option<i32>,
+    condition: Option<&str>,
+) -> ActionResult {
+    tracing::debug!(
+        "Executing task for user {}: action={}, sources={:?}, condition={:?}",
+        user_id,
+        action_spec,
+        sources,
+        condition
+    );
+
+    // Step 1: Fetch sources if configured
+    let source_data = if let Some(src) = sources {
+        if !src.is_empty() {
+            let lookback = source_lookback_hours.unwrap_or(24);
+            match fetch_sources(state, user_id, src, lookback).await {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::warn!("Failed to fetch sources: {}", e);
+                    String::new()
+                }
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Step 2: Evaluate condition if set
+    if let Some(cond) = condition {
+        if !cond.is_empty() {
+            match evaluate_condition(state, user_id, cond, &source_data).await {
+                Ok(matches) => {
+                    if !matches {
+                        tracing::debug!("Condition not met for user {}: {}", user_id, cond);
+                        return ActionResult::Skipped {
+                            reason: format!("Condition not met: {}", cond),
+                        };
+                    }
+                    tracing::debug!("Condition matched for user {}: {}", user_id, cond);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to evaluate condition: {}", e);
+                    // Continue anyway on evaluation error
+                }
+            }
+        }
+    }
+
+    // Step 3: Parse and execute action
+    let (tool_name, param) = parse_action(action_spec);
+    let action_result =
+        match execute_direct_tool(state, user_id, &tool_name, param.as_deref(), &source_data).await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::error!("Action execution failed: {}", e);
+                return ActionResult::Failed {
+                    error: format!("Action failed: {}", e),
+                };
+            }
+        };
+
+    // Step 4: Generate notification message
+    let notification_message = if tool_name == "generate_digest" {
+        // Digest already formatted, use directly
+        action_result.clone()
+    } else {
+        match generate_notification_message(state, user_id, &source_data, condition, &action_result)
+            .await
+        {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::warn!("Failed to generate notification message: {}", e);
+                action_result.clone()
+            }
         }
     };
+
+    // Step 5: Send notification
+    let noti_type = format!("task_{}", notification_type);
+    let first_message = if notification_type == "call" {
+        Some("Hey, here's an update from your scheduled task.".to_string())
+    } else {
+        None
+    };
+
+    crate::proactive::utils::send_notification(
+        state,
+        user_id,
+        &notification_message,
+        noti_type,
+        first_message,
+    )
+    .await;
 
     tracing::info!(
         "Task execution completed for user {}: {}",
         user_id,
-        final_response
+        if notification_message.len() > 100 {
+            format!("{}...", &notification_message[..100])
+        } else {
+            notification_message.clone()
+        }
     );
+
     ActionResult::Success {
-        message: final_response,
+        message: notification_message,
     }
 }

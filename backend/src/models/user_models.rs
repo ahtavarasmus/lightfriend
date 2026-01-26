@@ -376,7 +376,8 @@ pub struct NewCalendarNotification {
 /// Unified task model for scheduled and recurring tasks
 /// trigger: "once_<timestamp>" or "recurring_email" or "recurring_messaging"
 /// condition: optional natural language condition checked at runtime
-/// action: natural language description of what to do
+/// action: tool call or empty (e.g., "generate_digest", "control_tesla(climate_on)", "")
+/// sources: comma-separated list of data sources to fetch before action (e.g., "email,whatsapp,telegram")
 #[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
 #[diesel(table_name = tasks)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -385,7 +386,7 @@ pub struct Task {
     pub user_id: i32,
     pub trigger: String, // "once_<timestamp>", "recurring_email", "recurring_messaging"
     pub condition: Option<String>, // natural language condition (optional)
-    pub action: String,  // natural language action (required)
+    pub action: String,  // tool call like "generate_digest" or empty for just notification
     pub notification_type: Option<String>, // "sms" or "call"
     pub status: Option<String>, // "active", "completed", "cancelled"
     pub created_at: i32,
@@ -393,6 +394,8 @@ pub struct Task {
     pub is_permanent: Option<i32>, // 0 or 1, set via dashboard only
     pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
     pub recurrence_time: Option<String>, // "09:00" (HH:MM in user timezone)
+    pub sources: Option<String>,   // "email,whatsapp,telegram,signal,calendar"
+    pub source_lookback_hours: Option<i32>, // How many hours back to fetch (default 24)
 }
 
 #[derive(Insertable)]
@@ -405,6 +408,11 @@ pub struct NewTask {
     pub notification_type: Option<String>,
     pub status: String,
     pub created_at: i32,
+    pub is_permanent: Option<i32>,
+    pub recurrence_rule: Option<String>,
+    pub recurrence_time: Option<String>,
+    pub sources: Option<String>,
+    pub source_lookback_hours: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]

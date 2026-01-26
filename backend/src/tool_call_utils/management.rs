@@ -253,6 +253,11 @@ pub async fn handle_create_task(
         notification_type: args.notification_type.or(Some(default_noti_type)),
         status: "active".to_string(),
         created_at: now,
+        is_permanent: None,
+        recurrence_rule: None,
+        recurrence_time: None,
+        sources: None,
+        source_lookback_hours: None,
     };
 
     state
@@ -327,66 +332,148 @@ fn parse_datetime_to_timestamp(time_str: &str, tz: &Tz) -> Result<i32, Box<dyn E
     Ok(local_dt.timestamp() as i32)
 }
 
-/// Tool definition for send_reminder - ONLY available to task runtime AI, not SMS conversation
-pub fn get_send_reminder_tool() -> openai_api_rs::v1::chat_completion::Tool {
+/// Tool definition for generate_digest - processes source data into digest format
+/// This is a task runtime tool only (not available in SMS conversation)
+pub fn get_generate_digest_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
-    use std::collections::HashMap;
 
-    let mut reminder_properties = HashMap::new();
-    reminder_properties.insert(
-        "message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "The reminder message to send to the user via SMS or call.".to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-
+    // No parameters needed - uses source data passed via context
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("send_reminder"),
+            name: String::from("generate_digest"),
             description: Some(String::from(
-                "Sends a notification/reminder message to the user via SMS or phone call. \
-                Use this tool when the task requires notifying or reminding the user about something. \
-                The message will be delivered immediately to the user's phone."
+                "Generates a concise digest summary from the source data provided in context. \
+                Use this when the task needs to summarize emails, messages, and calendar events \
+                into a brief SMS-friendly notification. The source data is automatically fetched \
+                before this tool is called.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
-                properties: Some(reminder_properties),
-                required: Some(vec![String::from("message")]),
+                properties: None,
+                required: None,
             },
         },
     }
 }
 
-#[derive(Deserialize)]
-pub struct SendReminderArgs {
-    pub message: String,
-}
-
-/// Handle the send_reminder tool call - sends notification to user
-pub async fn handle_send_reminder(
+/// Handle the generate_digest tool call - creates a digest from source data
+/// The source_data should already be fetched and passed in by the action executor
+pub async fn handle_generate_digest(
     state: &Arc<AppState>,
     user_id: i32,
-    args: &str,
-    notification_type: &str,
-) -> Result<String, Box<dyn Error>> {
-    let args: SendReminderArgs = serde_json::from_str(args)?;
+    source_data: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::tool_call_utils::utils::create_openai_client_for_user;
+    use crate::ModelPurpose;
+    use openai_api_rs::v1::{chat_completion, types};
 
-    let noti_type = format!("task_reminder_{}", notification_type);
-    let first_message = Some("Hey, here's your scheduled reminder.".to_string());
+    if source_data.is_empty() {
+        return Ok("No source data available to generate digest.".to_string());
+    }
 
-    crate::proactive::utils::send_notification(
-        state,
-        user_id,
-        &args.message,
-        noti_type,
-        first_message,
-    )
-    .await;
+    let (client, provider) = create_openai_client_for_user(state, user_id).map_err(
+        |e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::other(e.to_string()))
+        },
+    )?;
 
-    Ok(format!("Reminder sent: {}", args.message))
+    // Use a simplified digest prompt for the tool
+    let digest_prompt = r#"You are creating a brief SMS digest of messages and events.
+
+Rules:
+- Maximum 480 characters total
+- Plain text only (no markdown, emojis, or links)
+- Start each platform group on a new line (e.g., "WhatsApp: ...")
+- Include timestamps using relative terms (today 3pm, yesterday 8am)
+- Put important/urgent items first
+- Be concise - tease content, don't fully summarize
+
+Return JSON with a single field:
+- `digest` - the plain-text SMS message
+"#;
+
+    let user_content = format!(
+        "Current datetime: {}\n\nSource data to summarize:\n{}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+        source_data
+    );
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(digest_prompt.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(user_content),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "digest".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The SMS-friendly digest message".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("create_digest"),
+            description: Some(String::from(
+                "Creates a concise digest of messages and calendar events",
+            )),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![String::from("digest")]),
+            },
+        },
+    }];
+
+    let model = state
+        .ai_config
+        .model(provider, ModelPurpose::Default)
+        .to_string();
+
+    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .max_tokens(350);
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                if let Some(first_call) = tool_calls.first() {
+                    if let Some(args) = &first_call.function.arguments {
+                        #[derive(serde::Deserialize)]
+                        struct DigestResponse {
+                            digest: String,
+                        }
+                        if let Ok(resp) = serde_json::from_str::<DigestResponse>(args) {
+                            return Ok(resp.digest);
+                        }
+                    }
+                }
+            }
+            Ok("Failed to generate digest format.".to_string())
+        }
+        Err(e) => {
+            tracing::error!("Failed to generate digest: {}", e);
+            Err(Box::new(std::io::Error::other(format!(
+                "AI call failed: {}",
+                e
+            ))))
+        }
+    }
 }

@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::UserCoreOps;
+use chrono::TimeZone;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error};
@@ -201,7 +202,141 @@ async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
     }
 }
 
+/// Migrate existing digest settings to tasks (one-time migration)
+/// This converts morning_digest, day_digest, evening_digest from user_settings
+/// into recurring tasks with sources.
+async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
+    tracing::info!("Starting digest migration to tasks...");
+
+    let users = match state.user_core.get_all_users() {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("Failed to get users for digest migration: {}", e);
+            return;
+        }
+    };
+
+    let mut migrated_count = 0;
+
+    for user in users {
+        let user_id = user.id;
+
+        // Get digest settings
+        let (morning, day, evening) = match state.user_core.get_digests(user_id) {
+            Ok(d) => d,
+            Err(_) => continue, // Skip users without settings
+        };
+
+        // Skip if no digests configured
+        if morning.is_none() && day.is_none() && evening.is_none() {
+            continue;
+        }
+
+        // Get user timezone for trigger calculation
+        let user_tz = state
+            .user_core
+            .get_user_info(user_id)
+            .ok()
+            .and_then(|info| info.timezone)
+            .unwrap_or_else(|| "UTC".to_string());
+
+        let tz: chrono_tz::Tz = match user_tz.parse() {
+            Ok(t) => t,
+            Err(_) => chrono_tz::UTC,
+        };
+
+        let now = chrono::Utc::now();
+        let now_local = now.with_timezone(&tz);
+        let current_ts = now.timestamp() as i32;
+
+        // Helper to create digest task
+        let create_digest_task = |digest_time: &str, _digest_name: &str| {
+            // Parse hour from "HH:00" format
+            let hour: u32 = digest_time
+                .split(':')
+                .next()
+                .and_then(|h| h.parse().ok())
+                .unwrap_or(8);
+
+            // Calculate next occurrence
+            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0).unwrap();
+            if now_local.time() >= chrono::NaiveTime::from_hms_opt(hour, 0, 0).unwrap() {
+                // Already past this time today, schedule for tomorrow
+                next_time += chrono::Duration::days(1);
+            }
+            let next_dt = tz.from_local_datetime(&next_time).single().unwrap();
+            let trigger_ts = next_dt.timestamp() as i32;
+
+            crate::models::user_models::NewTask {
+                user_id,
+                trigger: format!("once_{}", trigger_ts),
+                condition: None,
+                action: "generate_digest".to_string(),
+                notification_type: Some("sms".to_string()),
+                status: "active".to_string(),
+                created_at: current_ts,
+                is_permanent: Some(1), // Permanent recurring task
+                recurrence_rule: Some("daily".to_string()),
+                recurrence_time: Some(digest_time.to_string()), // "HH:00" format
+                sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+                source_lookback_hours: Some(24),
+            }
+        };
+
+        // Create tasks for each enabled digest
+        let mut created_tasks = Vec::new();
+
+        if let Some(ref time) = morning {
+            let task = create_digest_task(time, "morning");
+            if state.user_repository.create_task(&task).is_ok() {
+                created_tasks.push("morning");
+            }
+        }
+
+        if let Some(ref time) = day {
+            let task = create_digest_task(time, "day");
+            if state.user_repository.create_task(&task).is_ok() {
+                created_tasks.push("day");
+            }
+        }
+
+        if let Some(ref time) = evening {
+            let task = create_digest_task(time, "evening");
+            if state.user_repository.create_task(&task).is_ok() {
+                created_tasks.push("evening");
+            }
+        }
+
+        if !created_tasks.is_empty() {
+            // Clear old digest settings
+            if let Err(e) = state.user_core.update_digests(user_id, None, None, None) {
+                tracing::warn!(
+                    "Failed to clear digest settings for user {}: {}",
+                    user_id,
+                    e
+                );
+            } else {
+                migrated_count += 1;
+                tracing::info!(
+                    "Migrated {} digest(s) to tasks for user {}: {:?}",
+                    created_tasks.len(),
+                    user_id,
+                    created_tasks
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        "Digest migration complete: {} users migrated",
+        migrated_count
+    );
+}
+
 pub async fn start_scheduler(state: Arc<AppState>) {
+    // One-time migration: convert digest settings to tasks
+    migrate_digests_to_tasks(&state).await;
+
     // Initialize matrix clients and sync tasks once on startup
     tracing::debug!("Initializing Matrix clients and sync tasks...");
     initialize_matrix_clients(Arc::clone(&state)).await;
@@ -387,9 +522,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                 &action_spec,
                                                                 &notification_type,
                                                                 Some(&trigger_context),
+                                                                None, // No sources for recurring email tasks
+                                                                None, // No source lookback
+                                                                None, // Condition already matched
                                                             ).await {
                                                                 crate::utils::action_executor::ActionResult::Success { message } => {
                                                                     tracing::debug!("Email task {} completed successfully: {}", task_id, message);
+                                                                }
+                                                                crate::utils::action_executor::ActionResult::Skipped { reason } => {
+                                                                    tracing::debug!("Email task {} skipped: {}", task_id, reason);
                                                                 }
                                                                 crate::utils::action_executor::ActionResult::Failed { error } => {
                                                                     tracing::error!("Email task {} failed: {}", task_id, error);
@@ -763,19 +904,27 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             .clone()
                             .unwrap_or_else(|| "sms".to_string());
 
+                        // Clone task fields for use in async block
+                        let sources = task.sources.clone();
+                        let source_lookback = task.source_lookback_hours;
+                        let condition = task.condition.clone();
+
                         tokio::spawn(async move {
                             debug!(
                                 "Executing scheduled task {} for user {}: {}",
                                 task_id, user_id, action
                             );
 
-                            // Execute the action_spec through AI + tools (no trigger context for time-based tasks)
+                            // Execute the action with sources, condition, and auto-notification
                             match crate::utils::action_executor::execute_action_spec(
                                 &state,
                                 user_id,
                                 &action,
                                 &notification_type,
-                                None, // No trigger context for scheduled tasks
+                                None, // No trigger context for time-based tasks
+                                sources.as_deref(),
+                                source_lookback,
+                                condition.as_deref(),
                             )
                             .await
                             {
@@ -783,6 +932,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     message,
                                 } => {
                                     debug!("Task {} completed successfully: {}", task_id, message);
+                                }
+                                crate::utils::action_executor::ActionResult::Skipped { reason } => {
+                                    debug!("Task {} skipped: {}", task_id, reason);
                                 }
                                 crate::utils::action_executor::ActionResult::Failed { error } => {
                                     error!("Task {} failed: {}", task_id, error);
