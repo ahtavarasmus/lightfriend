@@ -1,765 +1,444 @@
 use yew::prelude::*;
-use log::info;
 use wasm_bindgen_futures::spawn_local;
 use serde::{Deserialize, Serialize};
 use crate::utils::api::Api;
+use web_sys::HtmlInputElement;
 
 #[derive(Clone, PartialEq)]
-pub enum FieldSaveState {
+pub enum SaveState {
     Idle,
     Saving,
     Success,
     Error(String),
 }
 
-fn render_save_indicator(state: &FieldSaveState) -> Html {
-    match state {
-        FieldSaveState::Idle => html! {},
-        FieldSaveState::Saving => html! {
-            <span class="save-indicator">
-                <span class="save-spinner"></span>
-            </span>
-        },
-        FieldSaveState::Success => html! {
-            <span class="save-indicator save-success">{"✓"}</span>
-        },
-        FieldSaveState::Error(msg) => html! {
-            <span class="save-indicator save-error" title={msg.clone()}>{"✗"}</span>
-        },
-    }
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct TaskResponse {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub trigger: String,
+    pub condition: Option<String>,
+    pub action: String,
+    pub notification_type: Option<String>,
+    pub status: Option<String>,
+    pub created_at: i32,
+    pub is_permanent: Option<i32>,
+    pub recurrence_rule: Option<String>,
+    pub recurrence_time: Option<String>,
+    pub sources: Option<String>,
+    pub source_lookback_hours: Option<i32>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DigestsResponse {
-    morning_digest_time: Option<String>, // RFC3339 time string or None
-    day_digest_time: Option<String>, // RFC3339 time string or None
-    evening_digest_time: Option<String>, // RFC3339 time string or None
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CreateTaskRequest {
+    pub action: String,
+    pub recurrence_rule: Option<String>,
+    pub recurrence_time: Option<String>,
+    pub sources: Option<String>,
+    pub source_lookback_hours: Option<i32>,
+    pub notification_type: Option<String>,
+    pub condition: Option<String>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UpdateDigestsRequest {
-    morning_digest_time: Option<String>, // RFC3339 time string or None
-    day_digest_time: Option<String>, // RFC3339 time string or None
-    evening_digest_time: Option<String>, // RFC3339 time string or None
-}
+
 #[derive(Properties, PartialEq)]
 pub struct DigestSectionProps {
     pub phone_number: String,
     #[prop_or(false)]
     pub disabled: bool,
 }
+
+/// Format sources list for display
+fn format_sources(sources: &Option<String>) -> String {
+    match sources {
+        Some(s) if !s.is_empty() => {
+            s.split(',')
+                .map(|src| match src.trim() {
+                    "email" => "Email",
+                    "whatsapp" => "WhatsApp",
+                    "telegram" => "Telegram",
+                    "signal" => "Signal",
+                    "calendar" => "Calendar",
+                    other => other,
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        _ => "None".to_string(),
+    }
+}
+
+/// Format time for display (HH:MM -> human readable)
+fn format_time(time: &Option<String>) -> String {
+    match time {
+        Some(t) => t.clone(),
+        None => "Not set".to_string(),
+    }
+}
+
 #[function_component(DigestSection)]
 pub fn digest_section(props: &DigestSectionProps) -> Html {
-    let morning_digest_time = use_state(|| None::<String>);
-    let day_digest_time = use_state(|| None::<String>);
-    let evening_digest_time = use_state(|| None::<String>);
-    let show_info = use_state(|| false);
-    // Per-field save states for visual feedback
-    let morning_save_state = use_state(|| FieldSaveState::Idle);
-    let day_save_state = use_state(|| FieldSaveState::Idle);
-    let evening_save_state = use_state(|| FieldSaveState::Idle);
-    // Load digest settings when component mounts
+    let tasks = use_state(Vec::<TaskResponse>::new);
+    let loading = use_state(|| true);
+    let save_state = use_state(|| SaveState::Idle);
+    let show_create_form = use_state(|| false);
+
+    // Form state for creating new digest
+    let new_time = use_state(|| "08:00".to_string());
+    let new_sources_email = use_state(|| true);
+    let new_sources_whatsapp = use_state(|| true);
+    let new_sources_telegram = use_state(|| true);
+    let new_sources_signal = use_state(|| true);
+    let new_sources_calendar = use_state(|| true);
+
+    // Load tasks on mount
     {
-        let morning_digest_time = morning_digest_time.clone();
-        let day_digest_time = day_digest_time.clone();
-        let evening_digest_time = evening_digest_time.clone();
+        let tasks = tasks.clone();
+        let loading = loading.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
-                    if let Ok(resp) = Api::get("/api/profile/digests")
-                        .send()
-                        .await
-                    {
-                        if let Ok(digests) = resp.json::<DigestsResponse>().await {
-                            info!("Received digests from backend: {:?}", digests);
-                            morning_digest_time.set(digests.morning_digest_time);
-                            day_digest_time.set(digests.day_digest_time);
-                            evening_digest_time.set(digests.evening_digest_time);
+                    if let Ok(resp) = Api::get("/api/filters/tasks").send().await {
+                        if let Ok(all_tasks) = resp.json::<Vec<TaskResponse>>().await {
+                            // Filter to show only digest tasks (recurring with generate_digest action)
+                            let digest_tasks: Vec<TaskResponse> = all_tasks
+                                .into_iter()
+                                .filter(|t| {
+                                    t.action == "generate_digest"
+                                        && t.is_permanent == Some(1)
+                                        && t.recurrence_rule.is_some()
+                                })
+                                .collect();
+                            tasks.set(digest_tasks);
                         }
                     }
+                    loading.set(false);
                 });
                 || ()
             },
             (),
         );
     }
-    // Create save callback for morning digest
-    let save_morning = {
-        let morning_digest_time = morning_digest_time.clone();
-        let day_digest_time = day_digest_time.clone();
-        let evening_digest_time = evening_digest_time.clone();
-        let save_state = morning_save_state.clone();
-        Callback::from(move |new_time: Option<String>| {
-            let morning = new_time.clone();
-            let day = (*day_digest_time).clone();
-            let evening = (*evening_digest_time).clone();
+
+    // Create digest task callback
+    let on_create = {
+        let tasks = tasks.clone();
+        let save_state = save_state.clone();
+        let show_create_form = show_create_form.clone();
+        let new_time = new_time.clone();
+        let new_sources_email = new_sources_email.clone();
+        let new_sources_whatsapp = new_sources_whatsapp.clone();
+        let new_sources_telegram = new_sources_telegram.clone();
+        let new_sources_signal = new_sources_signal.clone();
+        let new_sources_calendar = new_sources_calendar.clone();
+
+        Callback::from(move |_| {
+            let tasks = tasks.clone();
             let save_state = save_state.clone();
-            let morning_digest_time = morning_digest_time.clone();
-            save_state.set(FieldSaveState::Saving);
+            let show_create_form = show_create_form.clone();
+
+            // Build sources string
+            let mut sources = Vec::new();
+            if *new_sources_email {
+                sources.push("email");
+            }
+            if *new_sources_whatsapp {
+                sources.push("whatsapp");
+            }
+            if *new_sources_telegram {
+                sources.push("telegram");
+            }
+            if *new_sources_signal {
+                sources.push("signal");
+            }
+            if *new_sources_calendar {
+                sources.push("calendar");
+            }
+            let sources_str = if sources.is_empty() {
+                None
+            } else {
+                Some(sources.join(","))
+            };
+
+            let time = (*new_time).clone();
+
+            save_state.set(SaveState::Saving);
+
             spawn_local(async move {
-                let request = UpdateDigestsRequest {
-                    morning_digest_time: morning.clone(),
-                    day_digest_time: day,
-                    evening_digest_time: evening,
+                let request = CreateTaskRequest {
+                    action: "generate_digest".to_string(),
+                    recurrence_rule: Some("daily".to_string()),
+                    recurrence_time: Some(time),
+                    sources: sources_str,
+                    source_lookback_hours: Some(24),
+                    notification_type: Some("sms".to_string()),
+                    condition: None,
                 };
-                match Api::post("/api/profile/digests")
+
+                match Api::post("/api/filters/tasks")
                     .json(&request)
                     .unwrap()
                     .send()
                     .await
                 {
                     Ok(response) if response.ok() => {
-                        morning_digest_time.set(morning);
-                        info!("Successfully updated morning digest time");
-                        save_state.set(FieldSaveState::Success);
+                        if let Ok(created_task) = response.json::<TaskResponse>().await {
+                            let mut current_tasks = (*tasks).clone();
+                            current_tasks.insert(0, created_task);
+                            tasks.set(current_tasks);
+                        }
+                        save_state.set(SaveState::Success);
+                        show_create_form.set(false);
+
+                        // Reset to idle after a delay
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
                             gloo_timers::future::TimeoutFuture::new(2000).await;
-                            save_state_clone.set(FieldSaveState::Idle);
+                            save_state_clone.set(SaveState::Idle);
                         });
-                    },
+                    }
                     Ok(_) => {
-                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                    },
-                    Err(_) => {
-                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                        save_state.set(SaveState::Error("Failed to create".to_string()));
+                    }
+                    Err(e) => {
+                        save_state.set(SaveState::Error(format!("Error: {}", e)));
                     }
                 }
             });
         })
     };
 
-    // Create save callback for day digest
-    let save_day = {
-        let morning_digest_time = morning_digest_time.clone();
-        let day_digest_time = day_digest_time.clone();
-        let evening_digest_time = evening_digest_time.clone();
-        let save_state = day_save_state.clone();
-        Callback::from(move |new_time: Option<String>| {
-            let morning = (*morning_digest_time).clone();
-            let day = new_time.clone();
-            let evening = (*evening_digest_time).clone();
-            let save_state = save_state.clone();
-            let day_digest_time = day_digest_time.clone();
-            save_state.set(FieldSaveState::Saving);
+    // Delete task callback
+    let on_delete = {
+        let tasks = tasks.clone();
+        Callback::from(move |task_id: i32| {
+            let tasks = tasks.clone();
             spawn_local(async move {
-                let request = UpdateDigestsRequest {
-                    morning_digest_time: morning,
-                    day_digest_time: day.clone(),
-                    evening_digest_time: evening,
-                };
-                match Api::post("/api/profile/digests")
-                    .json(&request)
-                    .unwrap()
+                if let Ok(resp) = Api::delete(&format!("/api/filters/task/{}", task_id))
                     .send()
                     .await
                 {
-                    Ok(response) if response.ok() => {
-                        day_digest_time.set(day);
-                        info!("Successfully updated day digest time");
-                        save_state.set(FieldSaveState::Success);
-                        let save_state_clone = save_state.clone();
-                        spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                            save_state_clone.set(FieldSaveState::Idle);
-                        });
-                    },
-                    Ok(_) => {
-                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                    },
-                    Err(_) => {
-                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    if resp.ok() {
+                        let filtered: Vec<TaskResponse> = (*tasks)
+                            .iter()
+                            .filter(|t| t.id != Some(task_id))
+                            .cloned()
+                            .collect();
+                        tasks.set(filtered);
                     }
                 }
             });
         })
     };
 
-    // Create save callback for evening digest
-    let save_evening = {
-        let morning_digest_time = morning_digest_time.clone();
-        let day_digest_time = day_digest_time.clone();
-        let evening_digest_time = evening_digest_time.clone();
-        let save_state = evening_save_state.clone();
-        Callback::from(move |new_time: Option<String>| {
-            let morning = (*morning_digest_time).clone();
-            let day = (*day_digest_time).clone();
-            let evening = new_time.clone();
-            let save_state = save_state.clone();
-            let evening_digest_time = evening_digest_time.clone();
-            save_state.set(FieldSaveState::Saving);
-            spawn_local(async move {
-                let request = UpdateDigestsRequest {
-                    morning_digest_time: morning,
-                    day_digest_time: day,
-                    evening_digest_time: evening.clone(),
-                };
-                match Api::post("/api/profile/digests")
-                    .json(&request)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        evening_digest_time.set(evening);
-                        info!("Successfully updated evening digest time");
-                        save_state.set(FieldSaveState::Success);
-                        let save_state_clone = save_state.clone();
-                        spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                            save_state_clone.set(FieldSaveState::Idle);
-                        });
-                    },
-                    Ok(_) => {
-                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                    },
-                    Err(_) => {
-                        save_state.set(FieldSaveState::Error("Network error".to_string()));
-                    }
-                }
-            });
-        })
-    };
-    let digest_extra: Html = html! {};
+    let disabled = props.disabled;
+
     html! {
-        <>
-        <style>
-            {r#"
-                .filter-header {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 0.5rem;
-                    margin-bottom: 1.5rem;
-                }
-                .filter-title {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                }
-                .filter-title h3 {
-                    margin: 0;
-                    color: #F59E0B;
-                    font-size: 1.2rem;
-                }
-                .info-button {
-                    background: none;
-                    border: none;
-                    color: #F59E0B;
-                    font-size: 1.2rem;
-                    cursor: pointer;
-                    padding: 0.5rem;
-                    border-radius: 50%;
-                    width: 32px;
-                    height: 32px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: all 0.3s ease;
-                }
-                .info-button:hover {
-                    background: rgba(245, 158, 11, 0.1);
-                    transform: scale(1.1);
-                }
-                .flow-description {
-                    color: #999;
-                    font-size: 0.9rem;
-                }
-                .cost-description {
-                    color: #999;
-                    font-size: 0.9rem;
-                }
-                .info-section {
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid rgba(245, 158, 11, 0.1);
-                    border-radius: 12px;
-                    padding: 1.5rem;
-                    margin-top: 1rem;
-                }
-                .info-section h4 {
-                    color: #F59E0B;
-                    margin: 0 0 1rem 0;
-                    font-size: 1rem;
-                }
-                .info-subsection {
-                    color: #999;
-                    font-size: 0.9rem;
-                }
-                .info-subsection ul {
-                    margin: 0;
-                    padding-left: 1.5rem;
-                }
-                .info-subsection li {
-                    margin-bottom: 0.5rem;
-                }
-                .digest-options {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 1rem;
-                    margin-top: 1rem;
-                }
-                .digest-option {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 1rem;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid rgba(245, 158, 11, 0.1);
-                    border-radius: 12px;
-                }
-                .digest-label {
-                    color: #fff;
-                    font-size: 0.9rem;
-                }
-                /* Mobile responsiveness */
-                @media (max-width: 480px) {
-                    .filter-header {
-                        margin-bottom: 1rem;
-                    }
-                    .filter-title h3 {
-                        font-size: 1.1rem;
-                    }
-                    .flow-description {
-                        font-size: 0.85rem;
-                    }
-                    .digest-option {
-                        flex-direction: column;
-                        align-items: flex-start;
-                        gap: 0.75rem;
-                        padding: 0.75rem;
-                    }
-                    .digest-time {
-                        width: 100%;
-                        justify-content: space-between;
-                    }
-                    .time-input {
-                        width: 150px;
-                        padding: 0.4rem;
-                        font-size: 0.9rem;
-                    }
-                    .info-section {
-                        padding: 1rem;
-                    }
-                    .info-section h4 {
-                        font-size: 0.95rem;
-                    }
-                    .info-subsection {
-                        font-size: 0.85rem;
-                    }
-                    .info-subsection ul {
-                        padding-left: 1.2rem;
-                    }
-                    .status-text {
-                        font-size: 0.75rem;
-                    }
-                }
-                .switch {
-                    position: relative;
-                    display: inline-block;
-                    width: 48px;
-                    height: 24px;
-                }
-                .switch input {
-                    opacity: 0;
-                    width: 0;
-                    height: 0;
-                }
-                .slider {
-                    position: absolute;
-                    cursor: pointer;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid rgba(245, 158, 11, 0.2);
-                    transition: .4s;
-                    border-radius: 24px;
-                }
-                .slider:before {
-                    position: absolute;
-                    content: "";
-                    height: 16px;
-                    width: 16px;
-                    left: 4px;
-                    bottom: 3px;
-                    background-color: #fff;
-                    transition: .4s;
-                    border-radius: 50%;
-                }
-                input:checked + .slider {
-                    background: #F59E0B;
-                    border-color: #F59E0B;
-                }
-                input:checked + .slider:before {
-                    transform: translateX(24px);
-                }
-                .digest-time {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                }
-                .time-input {
-                    background: rgba(30, 30, 30, 0.9);
-                    color: #fff;
-                    padding: 0.5rem;
-                    font-size: 1rem;
-                    width: 150px;
-                    cursor: pointer;
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    border-radius: 8px;
-                    appearance: none;
-                    -webkit-appearance: none;
-                }
-                /* Improve visibility of the time picker */
-                .time-input::-webkit-calendar-picker-indicator {
-                    background-color: rgba(245, 158, 11, 0.8);
-                    padding: 4px;
-                    cursor: pointer;
-                    border-radius: 4px;
-                }
-                .time-input:hover {
-                    border-color: #F59E0B;
-                }
-                .time-input:focus {
-                    outline: none;
-                    border-color: #F59E0B;
-                    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
-                }
-                /* Force 24-hour format */
-                .time-input::-webkit-datetime-edit-ampm-field {
-                    display: none;
-                }
-               
-                .time-input::-moz-time-select {
-                    -moz-appearance: textfield;
-                }
-                .digest-option.active {
-                    border-color: rgba(34, 197, 94, 0.4);
-                    background: rgba(34, 197, 94, 0.1);
-                }
-                .digest-option.inactive {
-                    border-color: rgba(245, 158, 11, 0.1);
-                    background: rgba(0, 0, 0, 0.2);
-                }
-                .status-text {
-                    font-size: 0.8rem;
-                    margin-left: 1rem;
-                }
-                .status-text.active {
-                    color: #22C55E;
-                }
-                .status-text.inactive {
-                    color: #999;
-                }
-                .save-button {
-                    background: #F59E0B;
-                    color: #000;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 0.5rem 1rem;
-                    font-size: 0.9rem;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                    margin-top: 1rem;
-                    width: 100%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 0.5rem;
-                }
-                .save-button:hover {
-                    background: #D97706;
-                }
-                .save-button:disabled {
-                    background: #666;
-                    cursor: not-allowed;
-                }
-                .save-button.saving {
-                    opacity: 0.7;
-                    cursor: wait;
-                }
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                .spinner {
-                    border: 2px solid #000;
-                    border-top: 2px solid transparent;
-                    border-radius: 50%;
-                    width: 16px;
-                    height: 16px;
-                    animation: spin 1s linear infinite;
-                }
-                .save-indicator {
-                    min-width: 24px;
-                    height: 24px;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin-left: 8px;
-                }
-                .save-spinner {
-                    width: 16px;
-                    height: 16px;
-                    border: 2px solid rgba(245, 158, 11, 0.3);
-                    border-top-color: #F59E0B;
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                }
-                .save-success {
-                    color: #22C55E;
-                    font-size: 18px;
-                }
-                .save-error {
-                    color: #EF4444;
-                    cursor: help;
-                    font-size: 18px;
-                }
-                .digest-label-row {
-                    display: flex;
-                    align-items: center;
-                }
-                .warning-modal {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background: rgba(0, 0, 0, 0.7);
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    z-index: 1000;
-                }
-                .warning-content {
-                    background: #1A1A1A;
-                    border: 1px solid rgba(245, 158, 11, 0.2);
-                    border-radius: 12px;
-                    padding: 1.5rem;
-                    max-width: 90%;
-                    width: 400px;
-                }
-                .warning-header {
-                    color: #F59E0B;
-                    font-size: 1.1rem;
-                    margin-bottom: 1rem;
-                }
-                .warning-message {
-                    color: #999;
-                    font-size: 0.9rem;
-                    margin-bottom: 1.5rem;
-                    line-height: 1.5;
-                }
-                .warning-buttons {
-                    display: flex;
-                    gap: 1rem;
-                    justify-content: flex-end;
-                }
-                .warning-button {
-                    padding: 0.5rem 1rem;
-                    border-radius: 6px;
-                    font-size: 0.9rem;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                }
-                .warning-button.confirm {
-                    background: #F59E0B;
-                    color: #000;
-                    border: none;
-                }
-                .warning-button.confirm:hover {
-                    background: #D97706;
-                }
-                .warning-button.cancel {
-                    background: transparent;
-                    color: #999;
-                    border: 1px solid #666;
-                }
-                .warning-button.cancel:hover {
-                    border-color: #999;
-                    color: #fff;
-                }
-                .digest-section-wrapper {
-                    transition: opacity 0.3s ease;
-                }
-                .digest-section-wrapper.disabled {
-                    opacity: 0.5;
-                    pointer-events: none;
-                }
-            "#}
-        </style>
-        <div class={classes!("digest-section-wrapper", if props.disabled { "disabled" } else { "" })}>
-        <div class="filter-header">
-            <div class="filter-title">
-                <i class="fas fa-newspaper" style="color: #4ECDC4;"></i>
-                <h3>{"Daily Digests"}</h3>
-                <button
-                    class="info-button"
-                    onclick={Callback::from({
-                        let show_info = show_info.clone();
-                        move |_| show_info.set(!*show_info)
-                    })}
-                >
-                    {"ⓘ"}
-                </button>
-            </div>
-            <div class="flow-description">
-                {"Get summarized updates about messages you might have missed and upcoming events at specific times of the day"}
-            </div>
-            <div class="cost-description">
-                {digest_extra}
-            </div>
-            <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
-                <h4>{"How It Works"}</h4>
-                <div class="info-subsection">
-                    <ul>
-                        <li>{"Morning Digest: Get a summary of messages received overnight and about upcoming events"}</li>
-                        <li>{"Day Digest: Receive a midday update of possible unread important messages and about upcoming events"}</li>
-                        <li>{"Evening Digest: Receive an evening update of unread important messages since midday and events you have scheduled for the next day."}</li>
-                    </ul>
-                    <p style="margin-top: 1rem; font-style: italic;">{"Note: Digests are only sent when there are new unread messages or upcoming events to report. If you don't receive a digest at your scheduled time, it means there was nothing new to summarize."}</p>
+        <div class="digest-section">
+            <div class="service-header">
+                <div class="service-name">
+                    <i class="fa-solid fa-clock"></i>
+                    {"Scheduled Digests"}
                 </div>
             </div>
+            <p class="service-description">
+                {"Get a daily summary of your messages and calendar at scheduled times. Each digest pulls from your selected sources."}
+            </p>
+
+            if *loading {
+                <div class="loading-spinner">{"Loading..."}</div>
+            } else {
+                // Existing digest tasks
+                if !tasks.is_empty() {
+                    <div class="digest-tasks-list">
+                        { for (*tasks).iter().map(|task| {
+                            let task_id = task.id.unwrap_or(0);
+                            let on_delete = on_delete.clone();
+                            html! {
+                                <div class="digest-task-item" key={task_id}>
+                                    <div class="digest-task-info">
+                                        <div class="digest-task-time">
+                                            <i class="fa-regular fa-clock"></i>
+                                            {" "}{format_time(&task.recurrence_time)}
+                                            {" daily"}
+                                        </div>
+                                        <div class="digest-task-sources">
+                                            <i class="fa-solid fa-database"></i>
+                                            {" Sources: "}{format_sources(&task.sources)}
+                                        </div>
+                                    </div>
+                                    <button
+                                        class="delete-task-btn"
+                                        onclick={Callback::from(move |_| on_delete.emit(task_id))}
+                                        disabled={disabled}
+                                        title="Remove this digest"
+                                    >
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            }
+                        })}
+                    </div>
+                }
+
+                // Create new digest form
+                if *show_create_form {
+                    <div class="create-digest-form">
+                        <h4>{"Add New Digest"}</h4>
+
+                        <div class="form-group">
+                            <label>{"Time (your local timezone)"}</label>
+                            <input
+                                type="time"
+                                value={(*new_time).clone()}
+                                onchange={{
+                                    let new_time = new_time.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        new_time.set(input.value());
+                                    })
+                                }}
+                                disabled={disabled}
+                            />
+                        </div>
+
+                        <div class="form-group">
+                            <label>{"Sources to include"}</label>
+                            <div class="source-checkboxes">
+                                <label class="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={*new_sources_email}
+                                        onchange={{
+                                            let new_sources_email = new_sources_email.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_sources_email.set(input.checked());
+                                            })
+                                        }}
+                                        disabled={disabled}
+                                    />
+                                    {"Email"}
+                                </label>
+                                <label class="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={*new_sources_whatsapp}
+                                        onchange={{
+                                            let new_sources_whatsapp = new_sources_whatsapp.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_sources_whatsapp.set(input.checked());
+                                            })
+                                        }}
+                                        disabled={disabled}
+                                    />
+                                    {"WhatsApp"}
+                                </label>
+                                <label class="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={*new_sources_telegram}
+                                        onchange={{
+                                            let new_sources_telegram = new_sources_telegram.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_sources_telegram.set(input.checked());
+                                            })
+                                        }}
+                                        disabled={disabled}
+                                    />
+                                    {"Telegram"}
+                                </label>
+                                <label class="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={*new_sources_signal}
+                                        onchange={{
+                                            let new_sources_signal = new_sources_signal.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_sources_signal.set(input.checked());
+                                            })
+                                        }}
+                                        disabled={disabled}
+                                    />
+                                    {"Signal"}
+                                </label>
+                                <label class="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={*new_sources_calendar}
+                                        onchange={{
+                                            let new_sources_calendar = new_sources_calendar.clone();
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                new_sources_calendar.set(input.checked());
+                                            })
+                                        }}
+                                        disabled={disabled}
+                                    />
+                                    {"Calendar"}
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button
+                                class="btn-primary"
+                                onclick={on_create}
+                                disabled={disabled || matches!(*save_state, SaveState::Saving)}
+                            >
+                                {
+                                    match &*save_state {
+                                        SaveState::Saving => "Creating...",
+                                        _ => "Create Digest"
+                                    }
+                                }
+                            </button>
+                            <button
+                                class="btn-secondary"
+                                onclick={{
+                                    let show_create_form = show_create_form.clone();
+                                    Callback::from(move |_| show_create_form.set(false))
+                                }}
+                                disabled={disabled}
+                            >
+                                {"Cancel"}
+                            </button>
+                        </div>
+
+                        {
+                            match &*save_state {
+                                SaveState::Error(msg) => html! {
+                                    <div class="error-message">{msg}</div>
+                                },
+                                SaveState::Success => html! {
+                                    <div class="success-message">{"Digest created!"}</div>
+                                },
+                                _ => html! {}
+                            }
+                        }
+                    </div>
+                } else {
+                    <button
+                        class="add-digest-btn"
+                        onclick={{
+                            let show_create_form = show_create_form.clone();
+                            Callback::from(move |_| show_create_form.set(true))
+                        }}
+                        disabled={disabled}
+                    >
+                        <i class="fa-solid fa-plus"></i>
+                        {" Add Scheduled Digest"}
+                    </button>
+                }
+
+                if tasks.is_empty() && !*show_create_form {
+                    <p class="no-digests-message">
+                        {"No scheduled digests yet. Add one to get daily summaries of your messages and calendar."}
+                    </p>
+                }
+            }
         </div>
-        <div class="digest-options">
-            <div class={classes!("digest-option", if morning_digest_time.is_some() { "active" } else { "inactive" })}>
-                <div class="digest-label-row">
-                    <span class="digest-label">{"Morning Digest"}</span>
-                    {render_save_indicator(&*morning_save_state)}
-                </div>
-                <div class="digest-time">
-                    <select
-                        class="time-input"
-                        value={morning_digest_time.as_ref().cloned().unwrap_or("none".to_string())}
-                        onchange={Callback::from({
-                            let save_morning = save_morning.clone();
-                            move |e: Event| {
-                                let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-                                let time = select.value();
-                                save_morning.emit(if time == "none" { None } else { Some(time) });
-                            }
-                        })}
-                    >
-                        <option value="none" selected={morning_digest_time.is_none()}>{"Inactive"}</option>
-                        <option value="00:00" selected={morning_digest_time.as_ref() == Some(&"00:00".to_string())}>{"00:00 (12:00 AM)"}</option>
-                        <option value="01:00" selected={morning_digest_time.as_ref() == Some(&"01:00".to_string())}>{"01:00 (1:00 AM)"}</option>
-                        <option value="02:00" selected={morning_digest_time.as_ref() == Some(&"02:00".to_string())}>{"02:00 (2:00 AM)"}</option>
-                        <option value="03:00" selected={morning_digest_time.as_ref() == Some(&"03:00".to_string())}>{"03:00 (3:00 AM)"}</option>
-                        <option value="04:00" selected={morning_digest_time.as_ref() == Some(&"04:00".to_string())}>{"04:00 (4:00 AM)"}</option>
-                        <option value="05:00" selected={morning_digest_time.as_ref() == Some(&"05:00".to_string())}>{"05:00 (5:00 AM)"}</option>
-                        <option value="06:00" selected={morning_digest_time.as_ref() == Some(&"06:00".to_string())}>{"06:00 (6:00 AM)"}</option>
-                        <option value="07:00" selected={morning_digest_time.as_ref() == Some(&"07:00".to_string())}>{"07:00 (7:00 AM)"}</option>
-                        <option value="08:00" selected={morning_digest_time.as_ref() == Some(&"08:00".to_string())}>{"08:00 (8:00 AM)"}</option>
-                        <option value="09:00" selected={morning_digest_time.as_ref() == Some(&"09:00".to_string())}>{"09:00 (9:00 AM)"}</option>
-                        <option value="10:00" selected={morning_digest_time.as_ref() == Some(&"10:00".to_string())}>{"10:00 (10:00 AM)"}</option>
-                        <option value="11:00" selected={morning_digest_time.as_ref() == Some(&"11:00".to_string())}>{"11:00 (11:00 AM)"}</option>
-                        <option value="12:00" selected={morning_digest_time.as_ref() == Some(&"12:00".to_string())}>{"12:00 (12:00 PM)"}</option>
-                        <option value="13:00" selected={morning_digest_time.as_ref() == Some(&"13:00".to_string())}>{"13:00 (1:00 PM)"}</option>
-                        <option value="14:00" selected={morning_digest_time.as_ref() == Some(&"14:00".to_string())}>{"14:00 (2:00 PM)"}</option>
-                        <option value="15:00" selected={morning_digest_time.as_ref() == Some(&"15:00".to_string())}>{"15:00 (3:00 PM)"}</option>
-                        <option value="16:00" selected={morning_digest_time.as_ref() == Some(&"16:00".to_string())}>{"16:00 (4:00 PM)"}</option>
-                        <option value="17:00" selected={morning_digest_time.as_ref() == Some(&"17:00".to_string())}>{"17:00 (5:00 PM)"}</option>
-                        <option value="18:00" selected={morning_digest_time.as_ref() == Some(&"18:00".to_string())}>{"18:00 (6:00 PM)"}</option>
-                        <option value="19:00" selected={morning_digest_time.as_ref() == Some(&"19:00".to_string())}>{"19:00 (7:00 PM)"}</option>
-                        <option value="20:00" selected={morning_digest_time.as_ref() == Some(&"20:00".to_string())}>{"20:00 (8:00 PM)"}</option>
-                        <option value="21:00" selected={morning_digest_time.as_ref() == Some(&"21:00".to_string())}>{"21:00 (9:00 PM)"}</option>
-                        <option value="22:00" selected={morning_digest_time.as_ref() == Some(&"22:00".to_string())}>{"22:00 (10:00 PM)"}</option>
-                        <option value="23:00" selected={morning_digest_time.as_ref() == Some(&"23:00".to_string())}>{"23:00 (11:00 PM)"}</option>
-                    </select>
-                </div>
-            </div>
-            <div class={classes!("digest-option", if day_digest_time.is_some() { "active" } else { "inactive" })}>
-                <div class="digest-label-row">
-                    <span class="digest-label">{"Day Digest"}</span>
-                    {render_save_indicator(&*day_save_state)}
-                </div>
-                <div class="digest-time">
-                    <select
-                        class="time-input"
-                        value={day_digest_time.as_ref().cloned().unwrap_or("none".to_string())}
-                        onchange={Callback::from({
-                            let save_day = save_day.clone();
-                            move |e: Event| {
-                                let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-                                let time = select.value();
-                                save_day.emit(if time == "none" { None } else { Some(time) });
-                            }
-                        })}
-                    >
-                        <option value="none" selected={day_digest_time.is_none()}>{"Inactive"}</option>
-                        <option value="00:00" selected={day_digest_time.as_ref() == Some(&"00:00".to_string())}>{"00:00 (12:00 AM)"}</option>
-                        <option value="01:00" selected={day_digest_time.as_ref() == Some(&"01:00".to_string())}>{"01:00 (1:00 AM)"}</option>
-                        <option value="02:00" selected={day_digest_time.as_ref() == Some(&"02:00".to_string())}>{"02:00 (2:00 AM)"}</option>
-                        <option value="03:00" selected={day_digest_time.as_ref() == Some(&"03:00".to_string())}>{"03:00 (3:00 AM)"}</option>
-                        <option value="04:00" selected={day_digest_time.as_ref() == Some(&"04:00".to_string())}>{"04:00 (4:00 AM)"}</option>
-                        <option value="05:00" selected={day_digest_time.as_ref() == Some(&"05:00".to_string())}>{"05:00 (5:00 AM)"}</option>
-                        <option value="06:00" selected={day_digest_time.as_ref() == Some(&"06:00".to_string())}>{"06:00 (6:00 AM)"}</option>
-                        <option value="07:00" selected={day_digest_time.as_ref() == Some(&"07:00".to_string())}>{"07:00 (7:00 AM)"}</option>
-                        <option value="08:00" selected={day_digest_time.as_ref() == Some(&"08:00".to_string())}>{"08:00 (8:00 AM)"}</option>
-                        <option value="09:00" selected={day_digest_time.as_ref() == Some(&"09:00".to_string())}>{"09:00 (9:00 AM)"}</option>
-                        <option value="10:00" selected={day_digest_time.as_ref() == Some(&"10:00".to_string())}>{"10:00 (10:00 AM)"}</option>
-                        <option value="11:00" selected={day_digest_time.as_ref() == Some(&"11:00".to_string())}>{"11:00 (11:00 AM)"}</option>
-                        <option value="12:00" selected={day_digest_time.as_ref() == Some(&"12:00".to_string())}>{"12:00 (12:00 PM)"}</option>
-                        <option value="13:00" selected={day_digest_time.as_ref() == Some(&"13:00".to_string())}>{"13:00 (1:00 PM)"}</option>
-                        <option value="14:00" selected={day_digest_time.as_ref() == Some(&"14:00".to_string())}>{"14:00 (2:00 PM)"}</option>
-                        <option value="15:00" selected={day_digest_time.as_ref() == Some(&"15:00".to_string())}>{"15:00 (3:00 PM)"}</option>
-                        <option value="16:00" selected={day_digest_time.as_ref() == Some(&"16:00".to_string())}>{"16:00 (4:00 PM)"}</option>
-                        <option value="17:00" selected={day_digest_time.as_ref() == Some(&"17:00".to_string())}>{"17:00 (5:00 PM)"}</option>
-                        <option value="18:00" selected={day_digest_time.as_ref() == Some(&"18:00".to_string())}>{"18:00 (6:00 PM)"}</option>
-                        <option value="19:00" selected={day_digest_time.as_ref() == Some(&"19:00".to_string())}>{"19:00 (7:00 PM)"}</option>
-                        <option value="20:00" selected={day_digest_time.as_ref() == Some(&"20:00".to_string())}>{"20:00 (8:00 PM)"}</option>
-                        <option value="21:00" selected={day_digest_time.as_ref() == Some(&"21:00".to_string())}>{"21:00 (9:00 PM)"}</option>
-                        <option value="22:00" selected={day_digest_time.as_ref() == Some(&"22:00".to_string())}>{"22:00 (10:00 PM)"}</option>
-                        <option value="23:00" selected={day_digest_time.as_ref() == Some(&"23:00".to_string())}>{"23:00 (11:00 PM)"}</option>
-                    </select>
-                </div>
-            </div>
-            <div class={classes!("digest-option", if evening_digest_time.is_some() { "active" } else { "inactive" })}>
-                <div class="digest-label-row">
-                    <span class="digest-label">{"Evening Digest"}</span>
-                    {render_save_indicator(&*evening_save_state)}
-                </div>
-                <div class="digest-time">
-                    <select
-                        class="time-input"
-                        value={evening_digest_time.as_ref().cloned().unwrap_or("none".to_string())}
-                        onchange={Callback::from({
-                            let save_evening = save_evening.clone();
-                            move |e: Event| {
-                                let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-                                let time = select.value();
-                                save_evening.emit(if time == "none" { None } else { Some(time) });
-                            }
-                        })}
-                    >
-                        <option value="none" selected={evening_digest_time.is_none()}>{"Inactive"}</option>
-                        <option value="00:00" selected={evening_digest_time.as_ref() == Some(&"00:00".to_string())}>{"00:00 (12:00 AM)"}</option>
-                        <option value="01:00" selected={evening_digest_time.as_ref() == Some(&"01:00".to_string())}>{"01:00 (1:00 AM)"}</option>
-                        <option value="02:00" selected={evening_digest_time.as_ref() == Some(&"02:00".to_string())}>{"02:00 (2:00 AM)"}</option>
-                        <option value="03:00" selected={evening_digest_time.as_ref() == Some(&"03:00".to_string())}>{"03:00 (3:00 AM)"}</option>
-                        <option value="04:00" selected={evening_digest_time.as_ref() == Some(&"04:00".to_string())}>{"04:00 (4:00 AM)"}</option>
-                        <option value="05:00" selected={evening_digest_time.as_ref() == Some(&"05:00".to_string())}>{"05:00 (5:00 AM)"}</option>
-                        <option value="06:00" selected={evening_digest_time.as_ref() == Some(&"06:00".to_string())}>{"06:00 (6:00 AM)"}</option>
-                        <option value="07:00" selected={evening_digest_time.as_ref() == Some(&"07:00".to_string())}>{"07:00 (7:00 AM)"}</option>
-                        <option value="08:00" selected={evening_digest_time.as_ref() == Some(&"08:00".to_string())}>{"08:00 (8:00 AM)"}</option>
-                        <option value="09:00" selected={evening_digest_time.as_ref() == Some(&"09:00".to_string())}>{"09:00 (9:00 AM)"}</option>
-                        <option value="10:00" selected={evening_digest_time.as_ref() == Some(&"10:00".to_string())}>{"10:00 (10:00 AM)"}</option>
-                        <option value="11:00" selected={evening_digest_time.as_ref() == Some(&"11:00".to_string())}>{"11:00 (11:00 AM)"}</option>
-                        <option value="12:00" selected={evening_digest_time.as_ref() == Some(&"12:00".to_string())}>{"12:00 (12:00 PM)"}</option>
-                        <option value="13:00" selected={evening_digest_time.as_ref() == Some(&"13:00".to_string())}>{"13:00 (1:00 PM)"}</option>
-                        <option value="14:00" selected={evening_digest_time.as_ref() == Some(&"14:00".to_string())}>{"14:00 (2:00 PM)"}</option>
-                        <option value="15:00" selected={evening_digest_time.as_ref() == Some(&"15:00".to_string())}>{"15:00 (3:00 PM)"}</option>
-                        <option value="16:00" selected={evening_digest_time.as_ref() == Some(&"16:00".to_string())}>{"16:00 (4:00 PM)"}</option>
-                        <option value="17:00" selected={evening_digest_time.as_ref() == Some(&"17:00".to_string())}>{"17:00 (5:00 PM)"}</option>
-                        <option value="18:00" selected={evening_digest_time.as_ref() == Some(&"18:00".to_string())}>{"18:00 (6:00 PM)"}</option>
-                        <option value="19:00" selected={evening_digest_time.as_ref() == Some(&"19:00".to_string())}>{"19:00 (7:00 PM)"}</option>
-                        <option value="20:00" selected={evening_digest_time.as_ref() == Some(&"20:00".to_string())}>{"20:00 (8:00 PM)"}</option>
-                        <option value="21:00" selected={evening_digest_time.as_ref() == Some(&"21:00".to_string())}>{"21:00 (9:00 PM)"}</option>
-                        <option value="22:00" selected={evening_digest_time.as_ref() == Some(&"22:00".to_string())}>{"22:00 (10:00 PM)"}</option>
-                        <option value="23:00" selected={evening_digest_time.as_ref() == Some(&"23:00".to_string())}>{"23:00 (11:00 PM)"}</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        </div> // Close digest-section-wrapper
-        </>
     }
 }

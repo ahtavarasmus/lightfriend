@@ -87,6 +87,7 @@
       "Bash(diesel migration list*)",
       "Bash(diesel print-schema*)",
       "Bash(diesel setup*)",
+      "Bash(diesel migration run*)",
       "Bash(trunk serve*)",
       "Bash(trunk build*)",
       "Bash(trunk clean*)",
@@ -153,7 +154,8 @@
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/agent_on.rs)",
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/constant_monitoring.rs)",
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/profile/billing_payments.rs)",
-      "Bash(rustc:*)"
+      "Bash(rustc:*)",
+      "Bash(git rev-parse:*)"
     ],
     "deny": [
       "Read(.env)",
@@ -168,12 +170,13 @@
       "Bash(sudo *)"
     ],
     "ask": [
+      "Bash(touch */.claude/.allow-*)",
+      "Bash(touch .claude/.allow-*)",
       "Edit(backend/tests/**)",
       "Bash(git push*)",
       "Bash(git reset --hard*)",
       "Bash(cargo install*)",
       "Bash(cargo add*)",
-      "Bash(diesel migration run*)",
       "Bash(npm install*)",
       "Bash(yarn add*)",
       "Bash(docker rm*)",
@@ -201,6 +204,19 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/pre-commit-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/migration-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/protected-files-guard.sh"
           }
         ]
       }

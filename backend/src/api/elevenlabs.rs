@@ -546,6 +546,10 @@ pub async fn handle_create_task_tool_call(
         notification_type: payload.notification_type.or(Some("sms".to_string())),
         status: "active".to_string(),
         created_at: now,
+        is_permanent: None,
+        recurrence_rule: None,
+        recurrence_time: None,
+        sources: None,
     };
 
     // Build confirmation message (use a short summary, not full action_spec)

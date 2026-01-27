@@ -1685,6 +1685,8 @@ pub async fn handle_bridge_message(
                         &action_spec,
                         &notification_type,
                         Some(&trigger_context),
+                        None, // No sources for recurring messaging tasks
+                        None, // Condition already matched by check_task_condition_match
                     )
                     .await
                     {
@@ -1694,6 +1696,9 @@ pub async fn handle_bridge_message(
                                 task_id,
                                 message
                             );
+                        }
+                        crate::utils::action_executor::ActionResult::Skipped { reason } => {
+                            tracing::debug!("Messaging task {} skipped: {}", task_id, reason);
                         }
                         crate::utils::action_executor::ActionResult::Failed { error } => {
                             tracing::error!("Messaging task {} failed: {}", task_id, error);

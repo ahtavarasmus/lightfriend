@@ -1663,3 +1663,282 @@ button[type="submit"].loading::after {
 .image-attach-button i {
     font-size: 1rem;
 }
+
+/* Digest Section Styles */
+.digest-section {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.15);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.digest-section .service-header {
+    margin-bottom: 0.75rem;
+}
+
+.digest-section .service-name {
+    color: #7EB2FF;
+    font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.digest-section .service-description {
+    color: #999;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.5;
+}
+
+.digest-tasks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.digest-task-item {
+    background: rgba(30, 144, 255, 0.08);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease;
+}
+
+.digest-task-item:hover {
+    background: rgba(30, 144, 255, 0.12);
+    border-color: rgba(30, 144, 255, 0.35);
+}
+
+.digest-task-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.digest-task-time {
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.digest-task-time i {
+    color: #7EB2FF;
+    font-size: 0.95rem;
+}
+
+.digest-task-sources {
+    color: #888;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.digest-task-sources i {
+    color: #666;
+    font-size: 0.8rem;
+}
+
+.delete-task-btn {
+    background: rgba(255, 82, 82, 0.1);
+    border: 1px solid rgba(255, 82, 82, 0.25);
+    color: #ff6b6b;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.delete-task-btn:hover:not(:disabled) {
+    background: rgba(255, 82, 82, 0.2);
+    border-color: rgba(255, 82, 82, 0.5);
+    color: #ff5252;
+}
+
+.delete-task-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.delete-task-btn i {
+    font-size: 0.9rem;
+}
+
+.add-digest-btn {
+    background: rgba(30, 144, 255, 0.1);
+    border: 1px dashed rgba(30, 144, 255, 0.4);
+    color: #7EB2FF;
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s ease;
+    width: 100%;
+    justify-content: center;
+}
+
+.add-digest-btn:hover:not(:disabled) {
+    background: rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.6);
+}
+
+.add-digest-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.no-digests-message {
+    color: #666;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 1rem;
+    margin-top: 0.5rem;
+}
+
+/* Create Digest Form */
+.create-digest-form {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.15);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-top: 1rem;
+}
+
+.create-digest-form h4 {
+    color: #7EB2FF;
+    font-size: 1.1rem;
+    margin-bottom: 1.25rem;
+    font-weight: 500;
+}
+
+.create-digest-form .form-group {
+    margin-bottom: 1.25rem;
+}
+
+.create-digest-form .form-group label {
+    display: block;
+    color: #bbb;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.create-digest-form input[type="time"] {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    color: #fff;
+    font-size: 1rem;
+    width: 120px;
+}
+
+.create-digest-form input[type="time"]:focus {
+    outline: none;
+    border-color: rgba(30, 144, 255, 0.5);
+}
+
+.source-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    margin-top: 0.5rem;
+}
+
+.source-checkboxes .checkbox-label {
+    font-size: 0.9rem;
+    color: #ccc;
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.form-actions .btn-primary {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.7rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.form-actions .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+}
+
+.form-actions .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.form-actions .btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #999;
+    padding: 0.7rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.form-actions .btn-secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #ccc;
+}
+
+.loading-spinner {
+    color: #7EB2FF;
+    text-align: center;
+    padding: 1.5rem;
+}
+
+/* Responsive adjustments for digest section */
+@media (max-width: 480px) {
+    .digest-task-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .delete-task-btn {
+        align-self: flex-end;
+    }
+
+    .source-checkboxes {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .form-actions {
+        flex-direction: column;
+    }
+
+    .form-actions button {
+        width: 100%;
+    }
+}

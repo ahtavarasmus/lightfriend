@@ -202,6 +202,9 @@ services:
       PORT: 3000
       ENVIRONMENT: ${ENVIRONMENT:-development}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # VSOCK proxy (only for Nitro Enclave deployment, leave empty for normal mode)
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
     volumes:
       - core_data:/app/data
       - core_uploads:/app/uploads

@@ -275,6 +275,7 @@ diesel::table! {
         is_permanent -> Nullable<Integer>,
         recurrence_rule -> Nullable<Text>,
         recurrence_time -> Nullable<Text>,
+        sources -> Nullable<Text>,
     }
 }
 
