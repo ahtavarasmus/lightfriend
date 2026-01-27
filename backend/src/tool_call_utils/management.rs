@@ -257,7 +257,6 @@ pub async fn handle_create_task(
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
-        source_lookback_hours: None,
     };
 
     state

@@ -753,6 +753,26 @@ impl UserRepository {
         .execute(&mut conn)
     }
 
+    /// Get the timestamp of the last completed task with the given action for a user.
+    /// Returns None if no completed task found.
+    pub fn get_last_completed_task_time(
+        &self,
+        user_id: i32,
+        action: &str,
+    ) -> Result<Option<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        tasks::table
+            .filter(tasks::user_id.eq(user_id))
+            .filter(tasks::action.eq(action))
+            .filter(tasks::status.eq("completed"))
+            .filter(tasks::completed_at.is_not_null())
+            .select(tasks::completed_at)
+            .order(tasks::completed_at.desc())
+            .first::<Option<i32>>(&mut conn)
+            .optional()
+            .map(|opt| opt.flatten())
+    }
+
     /// Delete old message status logs (for database cleanup)
     /// Keeps logs for diagnostics but removes old entries to prevent bloat
     pub fn delete_old_message_status_logs(

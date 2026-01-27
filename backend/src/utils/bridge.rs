@@ -1686,7 +1686,6 @@ pub async fn handle_bridge_message(
                         &notification_type,
                         Some(&trigger_context),
                         None, // No sources for recurring messaging tasks
-                        None, // No source lookback
                         None, // Condition already matched by check_task_condition_match
                     )
                     .await

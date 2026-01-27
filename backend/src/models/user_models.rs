@@ -395,7 +395,6 @@ pub struct Task {
     pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
     pub recurrence_time: Option<String>, // "09:00" (HH:MM in user timezone)
     pub sources: Option<String>,   // "email,whatsapp,telegram,signal,calendar"
-    pub source_lookback_hours: Option<i32>, // How many hours back to fetch (default 24)
 }
 
 #[derive(Insertable)]
@@ -412,7 +411,6 @@ pub struct NewTask {
     pub recurrence_rule: Option<String>,
     pub recurrence_time: Option<String>,
     pub sources: Option<String>,
-    pub source_lookback_hours: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]

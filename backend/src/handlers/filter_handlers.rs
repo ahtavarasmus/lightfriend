@@ -44,7 +44,6 @@ pub struct TaskResponse {
     recurrence_rule: Option<String>,
     recurrence_time: Option<String>,
     sources: Option<String>,
-    source_lookback_hours: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -56,13 +55,12 @@ pub struct SetPermanenceRequest {
 
 #[derive(Deserialize)]
 pub struct CreateTaskRequest {
-    pub action: String,                     // "generate_digest" or other action
-    pub recurrence_rule: Option<String>,    // "daily", "weekly:1,3,5"
-    pub recurrence_time: Option<String>,    // "08:00" (HH:MM in user timezone)
-    pub sources: Option<String>,            // "email,whatsapp,telegram,signal,calendar"
-    pub source_lookback_hours: Option<i32>, // Default 24
-    pub notification_type: Option<String>,  // "sms" or "call"
-    pub condition: Option<String>,          // Optional condition to check
+    pub action: String,                    // "generate_digest" or other action
+    pub recurrence_rule: Option<String>,   // "daily", "weekly:1,3,5"
+    pub recurrence_time: Option<String>,   // "08:00" (HH:MM in user timezone)
+    pub sources: Option<String>,           // "email,whatsapp,telegram,signal,calendar"
+    pub notification_type: Option<String>, // "sms" or "call"
+    pub condition: Option<String>,         // Optional condition to check
 }
 
 #[derive(Serialize)]
@@ -217,7 +215,6 @@ pub async fn get_tasks(
             recurrence_rule: task.recurrence_rule,
             recurrence_time: task.recurrence_time,
             sources: task.sources,
-            source_lookback_hours: task.source_lookback_hours,
         })
         .collect();
 
@@ -305,7 +302,6 @@ pub async fn create_task(
         recurrence_rule: request.recurrence_rule,
         recurrence_time: request.recurrence_time,
         sources: request.sources,
-        source_lookback_hours: request.source_lookback_hours.or(Some(24)),
     };
 
     state.user_repository.create_task(&new_task).map_err(|e| {
@@ -345,7 +341,6 @@ pub async fn create_task(
         recurrence_rule: created_task.recurrence_rule,
         recurrence_time: created_task.recurrence_time,
         sources: created_task.sources,
-        source_lookback_hours: created_task.source_lookback_hours,
     }))
 }
 

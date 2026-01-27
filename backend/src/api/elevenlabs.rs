@@ -550,7 +550,6 @@ pub async fn handle_create_task_tool_call(
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
-        source_lookback_hours: None,
     };
 
     // Build confirmation message (use a short summary, not full action_spec)

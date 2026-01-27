@@ -1175,6 +1175,188 @@ pub mod mock_user_core {
     }
 }
 
+// =============================================================================
+// Task Testing Helpers
+// =============================================================================
+
+/// Builder for test task parameters
+#[derive(Debug, Clone)]
+pub struct TestTaskParams {
+    pub user_id: i32,
+    pub trigger: String,
+    pub action: String,
+    pub notification_type: Option<String>,
+    pub is_permanent: Option<i32>,
+    pub recurrence_rule: Option<String>,
+    pub recurrence_time: Option<String>,
+    pub sources: Option<String>,
+    pub condition: Option<String>,
+}
+
+impl TestTaskParams {
+    /// Create a one-time task with given trigger timestamp
+    pub fn once_task(user_id: i32, trigger_ts: i32) -> Self {
+        Self {
+            user_id,
+            trigger: format!("once_{}", trigger_ts),
+            action: "test_action".to_string(),
+            notification_type: Some("sms".to_string()),
+            is_permanent: Some(0),
+            recurrence_rule: None,
+            recurrence_time: None,
+            sources: None,
+            condition: None,
+        }
+    }
+
+    /// Create a permanent daily recurring task
+    pub fn permanent_daily(user_id: i32, time: &str) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        Self {
+            user_id,
+            trigger: format!("once_{}", now + 86400), // Tomorrow
+            action: "test_action".to_string(),
+            notification_type: Some("sms".to_string()),
+            is_permanent: Some(1),
+            recurrence_rule: Some("daily".to_string()),
+            recurrence_time: Some(time.to_string()),
+            sources: None,
+            condition: None,
+        }
+    }
+
+    /// Create a digest task (permanent daily with sources)
+    pub fn digest_task(user_id: i32, time: &str) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        Self {
+            user_id,
+            trigger: format!("once_{}", now + 86400),
+            action: "generate_digest".to_string(),
+            notification_type: Some("sms".to_string()),
+            is_permanent: Some(1),
+            recurrence_rule: Some("daily".to_string()),
+            recurrence_time: Some(time.to_string()),
+            sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+            condition: None,
+        }
+    }
+
+    /// Add sources to the task
+    pub fn with_sources(mut self, sources: &str) -> Self {
+        self.sources = Some(sources.to_string());
+        self
+    }
+
+    /// Add condition to the task
+    pub fn with_condition(mut self, condition: &str) -> Self {
+        self.condition = Some(condition.to_string());
+        self
+    }
+
+    /// Set the action
+    pub fn with_action(mut self, action: &str) -> Self {
+        self.action = action.to_string();
+        self
+    }
+
+    /// Set notification type
+    pub fn with_notification_type(mut self, ntype: &str) -> Self {
+        self.notification_type = Some(ntype.to_string());
+        self
+    }
+}
+
+/// Create a test task in the database from TestTaskParams
+pub fn create_test_task(
+    state: &Arc<crate::AppState>,
+    params: &TestTaskParams,
+) -> crate::models::user_models::Task {
+    use crate::models::user_models::NewTask;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_task = NewTask {
+        user_id: params.user_id,
+        trigger: params.trigger.clone(),
+        condition: params.condition.clone(),
+        action: params.action.clone(),
+        notification_type: params.notification_type.clone(),
+        status: "active".to_string(),
+        created_at: now,
+        is_permanent: params.is_permanent,
+        recurrence_rule: params.recurrence_rule.clone(),
+        recurrence_time: params.recurrence_time.clone(),
+        sources: params.sources.clone(),
+    };
+
+    state
+        .user_repository
+        .create_task(&new_task)
+        .expect("Failed to create test task");
+
+    // Return the created task (get most recent)
+    state
+        .user_repository
+        .get_user_tasks(params.user_id)
+        .expect("Failed to get user tasks")
+        .into_iter()
+        .next()
+        .expect("No tasks found after creation")
+}
+
+/// Set digest settings for a user (for migration testing)
+pub fn set_digest_settings(
+    state: &Arc<crate::AppState>,
+    user_id: i32,
+    morning: Option<&str>,
+    day: Option<&str>,
+    evening: Option<&str>,
+) {
+    state
+        .user_core
+        .update_digests(user_id, morning, day, evening)
+        .expect("Failed to set digest settings");
+}
+
+/// Set user timezone
+pub fn set_user_timezone(state: &Arc<crate::AppState>, user_id: i32, tz: &str) {
+    state
+        .user_core
+        .update_timezone(user_id, tz)
+        .expect("Failed to set user timezone");
+}
+
+/// Get all tasks for a user
+pub fn get_user_tasks(
+    state: &Arc<crate::AppState>,
+    user_id: i32,
+) -> Vec<crate::models::user_models::Task> {
+    state
+        .user_repository
+        .get_user_tasks(user_id)
+        .expect("Failed to get user tasks")
+}
+
+/// Get user's digest settings
+pub fn get_digest_settings(
+    state: &Arc<crate::AppState>,
+    user_id: i32,
+) -> (Option<String>, Option<String>, Option<String>) {
+    state
+        .user_core
+        .get_digests(user_id)
+        .expect("Failed to get digest settings")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

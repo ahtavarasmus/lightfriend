@@ -282,7 +282,6 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
                 recurrence_rule: Some("daily".to_string()),
                 recurrence_time: Some(digest_time.to_string()), // "HH:00" format
                 sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
-                source_lookback_hours: Some(24),
             })
         };
 
@@ -583,7 +582,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                 &notification_type,
                                                                 Some(&trigger_context),
                                                                 None, // No sources for recurring email tasks
-                                                                None, // No source lookback
                                                                 None, // Condition already matched
                                                             ).await {
                                                                 crate::utils::action_executor::ActionResult::Success { message } => {
@@ -966,7 +964,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                         // Clone task fields for use in async block
                         let sources = task.sources.clone();
-                        let source_lookback = task.source_lookback_hours;
                         let condition = task.condition.clone();
 
                         tokio::spawn(async move {
@@ -983,7 +980,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 &notification_type,
                                 None, // No trigger context for time-based tasks
                                 sources.as_deref(),
-                                source_lookback,
                                 condition.as_deref(),
                             )
                             .await

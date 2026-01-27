@@ -25,6 +25,36 @@ pub enum ActionResult {
     Skipped { reason: String }, // Condition not met
 }
 
+/// Calculate how many hours to look back for source data.
+///
+/// Returns hours since the last completed task of the same action type,
+/// capped at 24 hours. If no previous task found, defaults to 24 hours.
+fn calculate_lookback_hours(state: &Arc<AppState>, user_id: i32, action: &str) -> i32 {
+    const MAX_LOOKBACK_HOURS: i32 = 24;
+
+    // Get the last completed task time for this user and action
+    match state
+        .user_repository
+        .get_last_completed_task_time(user_id, action)
+    {
+        Ok(Some(completed_at)) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let hours_since = (now - completed_at) / 3600;
+
+            // Cap at max lookback
+            hours_since.clamp(1, MAX_LOOKBACK_HOURS)
+        }
+        Ok(None) | Err(_) => {
+            // No previous task or error - use default
+            MAX_LOOKBACK_HOURS
+        }
+    }
+}
+
 /// Fetch data from configured sources
 ///
 /// Sources can be: email, whatsapp, telegram, signal, calendar
@@ -382,9 +412,10 @@ Be strict - only return true if there's a clear match."#;
 /// - `notification_type` - "sms" or "call"
 /// - `trigger_context` - Optional context about what triggered the task
 /// - `sources` - Optional comma-separated sources like "email,whatsapp"
-/// - `source_lookback_hours` - How many hours back to fetch (default 24)
 /// - `condition` - Optional condition to evaluate against source data
-#[allow(clippy::too_many_arguments)]
+///
+/// Lookback hours are calculated automatically based on the last completed task
+/// of the same action type for this user, capped at 24 hours.
 pub async fn execute_action_spec(
     state: &Arc<AppState>,
     user_id: i32,
@@ -392,7 +423,6 @@ pub async fn execute_action_spec(
     notification_type: &str,
     _trigger_context: Option<&str>, // Reserved for future use with recurring tasks
     sources: Option<&str>,
-    source_lookback_hours: Option<i32>,
     condition: Option<&str>,
 ) -> ActionResult {
     tracing::debug!(
@@ -406,7 +436,14 @@ pub async fn execute_action_spec(
     // Step 1: Fetch sources if configured
     let source_data = if let Some(src) = sources {
         if !src.is_empty() {
-            let lookback = source_lookback_hours.unwrap_or(24);
+            // Calculate lookback dynamically: time since last completed task of same action, capped at 24h
+            let lookback = calculate_lookback_hours(state, user_id, action_spec);
+            tracing::debug!(
+                "Using lookback of {} hours for user {} action {}",
+                lookback,
+                user_id,
+                action_spec
+            );
             match fetch_sources(state, user_id, src, lookback).await {
                 Ok(data) => {
                     // Check if all sources failed (data only contains failure placeholders)
