@@ -3,7 +3,7 @@
 
 homeserver:
     address: http://synapse:8008
-    domain: matrix.local
+    domain: localhost
 
 appservice:
     address: http://mautrix-signal:29328
@@ -14,20 +14,33 @@ appservice:
         username: signalbot
         displayname: Signal Bridge
     ephemeral_events: true
+    async_transactions: true
 
 database:
     type: postgres
     uri: postgres://signal_user:signal_password@postgres:5432/signal_db?sslmode=disable
 
 signal:
-    socket_path: /signald/signald.sock
+    device_name: mautrix-signal
 
 bridge:
     username_template: signal_{{.}}
     displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}} (Signal)"
     permissions:
         "*": user
-        "matrix.local": user
+        "@admin:localhost": admin
+    cleanup_on_logout:
+        enabled: true
+        manual:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+        bad_credentials:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
 
 encryption:
     allow: true
@@ -41,10 +54,9 @@ encryption:
         share: cross-signed-tofu
 
 double_puppet:
-    servers:
-        matrix.local: "${DOUBLE_PUPPET_SECRET}"
+    servers: {}
     secrets:
-        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
+        localhost: as_token:${DOUBLE_PUPPET_SECRET}
 
 logging:
     min_level: info

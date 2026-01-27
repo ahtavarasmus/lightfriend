@@ -3,7 +3,7 @@
 
 homeserver:
     address: http://synapse:8008
-    domain: matrix.local
+    domain: localhost
 
 appservice:
     address: http://mautrix-telegram:29317
@@ -75,9 +75,23 @@ telegram:
 bridge:
     username_template: telegram_{{.}}
     displayname_template: "{{.DisplayName}} (TG)"
+    # Sync direct chats to Matrix
+    sync_direct_chats: true
+    sync_direct_chat_list: true
+    # Allow Matrix users to log in to Telegram
+    allow_matrix_login: true
+    # Sync messages with custom puppets for read receipts
+    sync_with_custom_puppets: true
+    # Double puppeting config (Python bridge format)
+    double_puppet_server_map:
+        localhost: http://synapse:8008
+    double_puppet_allow_discovery: true
+    # Shared secret for automatic double puppet login
+    login_shared_secret_map:
+        localhost: ${MATRIX_HOMESERVER_SHARED_SECRET}
     permissions:
         "*": user
-        "matrix.local": user
+        "@admin:localhost": admin
 
 encryption:
     allow: true
@@ -89,12 +103,6 @@ encryption:
         receive: unverified
         send: unverified
         share: cross-signed-tofu
-
-double_puppet:
-    servers:
-        matrix.local: "${DOUBLE_PUPPET_SECRET}"
-    secrets:
-        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
 
 logging:
     min_level: info
