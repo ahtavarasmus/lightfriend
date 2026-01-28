@@ -22,6 +22,8 @@ appservice:
 database:
     type: postgres
     uri: postgres://messenger_user:messenger_password@postgres:5432/messenger_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
 
 matrix:
     federate_rooms: false

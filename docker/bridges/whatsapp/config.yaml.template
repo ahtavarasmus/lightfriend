@@ -19,6 +19,8 @@ appservice:
 database:
     type: postgres
     uri: postgres://whatsapp_user:whatsapp_password@postgres:5432/whatsapp_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
 
 history_sync:
     max_initial_conversations: 0

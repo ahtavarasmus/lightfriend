@@ -19,6 +19,8 @@ appservice:
 database:
     type: postgres
     uri: postgres://signal_user:signal_password@postgres:5432/signal_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
 
 signal:
     device_name: mautrix-signal
