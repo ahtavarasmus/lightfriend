@@ -1,6 +1,19 @@
 # WhatsApp bridge configuration for Docker
 # Full config reference: https://github.com/mautrix/whatsapp/blob/master/example-config.yaml
 
+network:
+    os_name: lightfriend
+    displayname_template: "{{or .FullName .PushName .BusinessName .Phone}} (WA)"
+    call_start_notices: true
+    mute_status_broadcast: false
+    initial_auto_reconnect: true
+    history_sync:
+        max_initial_conversations: 0
+
+
+
+
+
 homeserver:
     address: http://synapse:8008
     domain: localhost
@@ -15,6 +28,8 @@ appservice:
         displayname: WhatsApp Bridge
     ephemeral_events: true
     async_transactions: true
+    username_template: whatsapp_{{.}}
+
 
 database:
     type: postgres

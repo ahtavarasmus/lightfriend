@@ -9,17 +9,15 @@ appservice:
     address: http://mautrix-telegram:29317
     hostname: 0.0.0.0
     port: 29317
+    max_body_size: 1
+    database: postgres://telegram_user:telegram_password@postgres:5432/telegram_db?sslmode=disable
+    database_opts:
+        min_size: 5
+        max_size: 25
     id: telegram
-    bot:
-        username: telegrambot
-        displayname: Telegram Bridge
+    bot_username: telegrambot
+    bot_displayname: Telegram Bridge
     ephemeral_events: true
-
-database:
-    type: postgres
-    uri: postgres://telegram_user:telegram_password@postgres:5432/telegram_db?sslmode=disable
-    max_open_conns: 25
-    max_idle_conns: 5
 
 telegram:
     # Get your own API keys at https://my.telegram.org/apps
@@ -47,7 +45,7 @@ telegram:
 
     # Device info sent to Telegram
     device_info:
-        device_model: lightfriend-hosted
+        device_model: lightfriend
         system_version: auto
         app_version: auto
         lang_code: en
@@ -56,17 +54,14 @@ telegram:
     # Custom server to connect to (disabled in production)
     server:
         enabled: false
-        dc: 2
-        ip: 149.154.167.40
-        port: 80
 
     # Telethon proxy configuration (DataImpulse residential proxy)
     # You must install PySocks from pip for proxies to work.
     proxy:
         # Allowed types: disabled, socks4, socks5, http, mtproxy
-        type: ${TELEGRAM_PROXY_TYPE:-disabled}
+        type: ${TELEGRAM_PROXY_TYPE:-socks5}
         # Proxy IP address and port
-        address: ${TELEGRAM_PROXY_ADDRESS:-}
+        address: ${TELEGRAM_PROXY_ADDRESS:-gw.dataimpulse.com}
         port: ${TELEGRAM_PROXY_PORT:-10000}
         # Whether or not to perform DNS resolving remotely
         rdns: true
@@ -75,36 +70,57 @@ telegram:
         password: ${TELEGRAM_PROXY_PASSWORD:-}
 
 bridge:
-    username_template: telegram_{{.}}
-    displayname_template: "{{.DisplayName}} (TG)"
+    username_template: telegram_{userid}
+    alias_template: telegram_{groupname}
+    displayname_template: "{displayname} (Telegram)"
+    displayname_preference:
+    - full name
+    - username
+    - phone number
+    displayname_max_length: 100
+    startup_sync: true
     # Sync direct chats to Matrix
     sync_direct_chats: true
     sync_direct_chat_list: true
     # Allow Matrix users to log in to Telegram
     allow_matrix_login: true
+    sync_matrix_state: true
+
     # Sync messages with custom puppets for read receipts
     sync_with_custom_puppets: true
     # Double puppeting config (Python bridge format)
     double_puppet_server_map:
         localhost: http://synapse:8008
-    double_puppet_allow_discovery: true
     # Shared secret for automatic double puppet login
     login_shared_secret_map:
         localhost: ${MATRIX_HOMESERVER_SHARED_SECRET}
-    permissions:
-        "*": user
-        "@admin:localhost": admin
 
-encryption:
-    allow: true
-    default: true
-    appservice: false
-    require: false
-    allow_key_sharing: true
-    verification_levels:
-        receive: unverified
-        send: unverified
-        share: cross-signed-tofu
+    caption_in_message: true
+    federate_rooms: false
+
+    encryption:
+        allow: true
+        default: true
+        appservice: false
+        require: false
+        allow_key_sharing: true
+        verification_levels:
+            receive: unverified
+            send: unverified
+            share: cross-signed-tofu
+
+    bridge_matrix_leave: false
+    kick_on_logout: true
+    create_group_on_invite: true
+
+    backfill:
+        enable: false
+
+    permissions:
+        '*': puppeting
+        '@admin:localhost': admin
+
+
 
 logging:
     min_level: info

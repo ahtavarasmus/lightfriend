@@ -4,6 +4,9 @@
 meta:
     mode: instagram
 
+network:
+    displayname_template: "{{.DisplayName}} (Instagram)"
+
 homeserver:
     address: http://synapse:8008
     domain: localhost
