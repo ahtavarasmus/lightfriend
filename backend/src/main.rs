@@ -221,6 +221,7 @@ async fn main() {
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
+    let metrics_repository = Arc::new(backend::MetricsRepository::new(pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -350,6 +351,7 @@ async fn main() {
         totp_repository,
         webauthn_repository,
         admin_alert_repository,
+        metrics_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -539,7 +541,12 @@ async fn main() {
             "/api/auth/set-password",
             post(auth_handlers::set_password_from_magic_link),
         )
-        .route("/api/waitlist", post(auth_handlers::add_to_waitlist));
+        .route("/api/waitlist", post(auth_handlers::add_to_waitlist))
+        // Public stats endpoint
+        .route(
+            "/api/stats/smartphone-free-days",
+            get(handlers::stats_handlers::get_smartphone_free_days),
+        );
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
         .route("/testing", post(auth_handlers::testing_handler))

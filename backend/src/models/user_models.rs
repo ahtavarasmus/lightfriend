@@ -873,3 +873,22 @@ pub struct NewDisabledAlertType {
     pub alert_type: String,
     pub disabled_at: i32,
 }
+
+// Site Metrics models for tracking site-wide statistics
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = crate::schema::site_metrics)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct SiteMetric {
+    pub id: Option<i32>,
+    pub metric_key: String,
+    pub metric_value: String,
+    pub updated_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = crate::schema::site_metrics)]
+pub struct NewSiteMetric {
+    pub metric_key: String,
+    pub metric_value: String,
+    pub updated_at: i32,
+}

@@ -29,6 +29,7 @@ pub mod handlers {
     pub mod signal_auth;
     pub mod signal_handlers;
     pub mod spotify;
+    pub mod stats_handlers;
     pub mod streamable;
     pub mod stripe_handlers;
     pub mod telegram_auth;
@@ -90,6 +91,7 @@ pub mod models {
 pub mod repositories {
     pub mod admin_alert_repository;
     pub mod connection_auth;
+    pub mod metrics_repository;
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
     pub mod signup_repository;
@@ -104,6 +106,7 @@ pub mod repositories {
 }
 pub mod services {
     pub mod country_service;
+    pub mod metrics_service;
     pub mod signup_service;
     pub mod twilio_message_service;
     pub mod twilio_status_service;
@@ -125,6 +128,7 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
+pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
@@ -206,6 +210,7 @@ pub struct AppState {
     pub totp_repository: Arc<TotpRepository>,
     pub webauthn_repository: Arc<WebauthnRepository>,
     pub admin_alert_repository: Arc<AdminAlertRepository>,
+    pub metrics_repository: Arc<MetricsRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)

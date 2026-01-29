@@ -80,6 +80,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     let admin_alert_repository = Arc::new(
         crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
     );
+    let metrics_repository =
+        Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pool.clone()));
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -119,6 +121,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         totp_repository,
         webauthn_repository,
         admin_alert_repository,
+        metrics_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
