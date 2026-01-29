@@ -18,6 +18,13 @@ pub fn landing() -> Html {
     let waitlist_success = use_state(|| false);
     let waitlist_error = use_state(|| None::<String>);
 
+    // Carousel state for proactive examples
+    let carousel_index = use_state(|| 0usize);
+    let carousel_images: Vec<(&str, &str)> = vec![
+        ("/assets/critical-noti-example.png", "Lightfriend texts you when something important happens"),
+        ("/assets/proactive-call-example.png", "Lightfriend can also call you for louder notifications"),
+    ];
+
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(
@@ -255,7 +262,42 @@ pub fn landing() -> Html {
                         <p>{"No need to reach out, unless you want to. Lightfriend will let you know when it's important!"}</p>
                     </div>
                     <div class="difference-image">
-                        <img src="/assets/critical-noti-example.png" alt="Lightfriend proactive notification" loading="lazy" />
+                        <div class="carousel-container">
+                            <div class="carousel-slide">
+                                <img src={carousel_images[*carousel_index].0} alt="Lightfriend proactive notification" loading="lazy" />
+                                <p class="carousel-caption">{carousel_images[*carousel_index].1}</p>
+                            </div>
+                            <div class="carousel-nav">
+                                <button class="carousel-btn" onclick={{
+                                    let carousel_index = carousel_index.clone();
+                                    let len = carousel_images.len();
+                                    Callback::from(move |_| {
+                                        let current = *carousel_index;
+                                        carousel_index.set(if current == 0 { len - 1 } else { current - 1 });
+                                    })
+                                }}>{"<"}</button>
+                                <div class="carousel-dots">
+                                    {carousel_images.iter().enumerate().map(|(i, _)| {
+                                        let carousel_index = carousel_index.clone();
+                                        let active = i == *carousel_index;
+                                        html! {
+                                            <button
+                                                class={classes!("carousel-dot", active.then_some("active"))}
+                                                onclick={Callback::from(move |_| carousel_index.set(i))}
+                                            />
+                                        }
+                                    }).collect::<Html>()}
+                                </div>
+                                <button class="carousel-btn" onclick={{
+                                    let carousel_index = carousel_index.clone();
+                                    let len = carousel_images.len();
+                                    Callback::from(move |_| {
+                                        let current = *carousel_index;
+                                        carousel_index.set((current + 1) % len);
+                                    })
+                                }}>{">"}</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -943,6 +985,65 @@ pub fn landing() -> Html {
     .difference-image img:hover {
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 35px rgba(126, 178, 255, 0.2);
         border-color: rgba(126, 178, 255, 0.25);
+    }
+    .carousel-container {
+        position: relative;
+        width: 100%;
+    }
+    .carousel-slide {
+        position: relative;
+    }
+    .carousel-caption {
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 1rem;
+        color: #999;
+        font-style: italic;
+    }
+    .carousel-nav {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    .carousel-btn {
+        background: rgba(126, 178, 255, 0.2);
+        border: 1px solid rgba(126, 178, 255, 0.3);
+        color: #fff;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 1.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+    }
+    .carousel-btn:hover {
+        background: rgba(126, 178, 255, 0.4);
+        border-color: rgba(126, 178, 255, 0.5);
+    }
+    .carousel-dots {
+        display: flex;
+        gap: 0.5rem;
+    }
+    .carousel-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(126, 178, 255, 0.3);
+        border: none;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .carousel-dot.active {
+        background: #7EB2FF;
+        transform: scale(1.2);
+    }
+    .carousel-dot:hover {
+        background: rgba(126, 178, 255, 0.5);
     }
     @media (max-width: 768px) {
         .difference-section {
