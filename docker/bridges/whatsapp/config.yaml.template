@@ -1,9 +1,22 @@
 # WhatsApp bridge configuration for Docker
 # Full config reference: https://github.com/mautrix/whatsapp/blob/master/example-config.yaml
 
+network:
+    os_name: lightfriend
+    displayname_template: "{{or .FullName .PushName .BusinessName .Phone}} (WA)"
+    call_start_notices: true
+    mute_status_broadcast: false
+    initial_auto_reconnect: true
+    history_sync:
+        max_initial_conversations: 0
+
+
+
+
+
 homeserver:
     address: http://synapse:8008
-    domain: matrix.local
+    domain: localhost
 
 appservice:
     address: http://mautrix-whatsapp:29318
@@ -14,17 +27,40 @@ appservice:
         username: whatsappbot
         displayname: WhatsApp Bridge
     ephemeral_events: true
+    async_transactions: true
+    username_template: whatsapp_{{.}}
+
 
 database:
     type: postgres
     uri: postgres://whatsapp_user:whatsapp_password@postgres:5432/whatsapp_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
+
+history_sync:
+    max_initial_conversations: 0
+
+backfill:
+    enabled: false
 
 bridge:
     username_template: whatsapp_{{.}}
     displayname_template: "{{if .BusinessName}}{{.BusinessName}}{{else if .PushName}}{{.PushName}}{{else}}{{.JID}}{{end}} (WA)"
     permissions:
         "*": user
-        "matrix.local": user
+        "@admin:localhost": admin
+    cleanup_on_logout:
+        enabled: true
+        manual:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+        bad_credentials:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
 
 encryption:
     allow: true
@@ -38,10 +74,9 @@ encryption:
         share: cross-signed-tofu
 
 double_puppet:
-    servers:
-        matrix.local: "${DOUBLE_PUPPET_SECRET}"
+    servers: {}
     secrets:
-        matrix.local: as_token:${DOUBLE_PUPPET_SECRET}
+        localhost: as_token:${DOUBLE_PUPPET_SECRET}
 
 logging:
     min_level: info

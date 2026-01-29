@@ -25,7 +25,7 @@ services:
     user: "0:0"  # Start as root to fix permissions, then run as synapse
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      SYNAPSE_SERVER_NAME: matrix.local
+      SYNAPSE_SERVER_NAME: localhost
       SYNAPSE_REPORT_STATS: "no"
       POSTGRES_USER: synapse_user
       POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD:-synapse_password}
@@ -48,20 +48,6 @@ services:
       test: ["CMD-SHELL", "curl -f http://localhost:8008/health || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-
-  # Signald (required for Signal bridge)
-  signald:
-    image: docker.io/signald/signald:latest
-    container_name: lightfriend-signald
-    volumes:
-      - signald_data:/signald
-    networks:
-      - lightfriend
-    healthcheck:
-      test: ["CMD-SHELL", "test -S /signald/signald.sock"]
-      interval: 10s
-      timeout: 5s
       retries: 3
 
   # WhatsApp bridge
@@ -87,15 +73,12 @@ services:
     volumes:
       - signal_data:/data
       - ./bridges/signal/config.yaml:/data/config.yaml
-      - signald_data:/signald
     networks:
       - lightfriend
     depends_on:
       postgres:
         condition: service_healthy
       synapse:
-        condition: service_healthy
-      signald:
         condition: service_healthy
     restart: unless-stopped
 
@@ -177,11 +160,11 @@ services:
       MATRIX_HOMESERVER: http://synapse:8008
       MATRIX_HOMESERVER_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
       MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
-      WHATSAPP_BRIDGE_BOT: "@whatsappbot:matrix.local"
-      SIGNAL_BRIDGE_BOT: "@signalbot:matrix.local"
-      MESSENGER_BRIDGE_BOT: "@messengerbot:matrix.local"
-      INSTAGRAM_BRIDGE_BOT: "@igbot:matrix.local"
-      TELEGRAM_BRIDGE_BOT: "@telegrambot:matrix.local"
+      WHATSAPP_BRIDGE_BOT: "@whatsappbot:localhost"
+      SIGNAL_BRIDGE_BOT: "@signalbot:localhost"
+      MESSENGER_BRIDGE_BOT: "@messengerbot:localhost"
+      INSTAGRAM_BRIDGE_BOT: "@igbot:localhost"
+      TELEGRAM_BRIDGE_BOT: "@telegrambot:localhost"
       GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
       GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       GOOGLE_TASKS_CLIENT_ID: ${GOOGLE_TASKS_CLIENT_ID:-}
@@ -230,7 +213,6 @@ networks:
 volumes:
   postgres_data:
   synapse_data:
-  signald_data:
   whatsapp_data:
   signal_data:
   messenger_data:
