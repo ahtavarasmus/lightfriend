@@ -5,7 +5,7 @@ meta:
     mode: messenger
 
 network:
-    displayname_template: "{{.DisplayName}} (Messenger)"
+    displayname_template: "{{.DisplayName}}"
 
 homeserver:
     address: http://synapse:8008
@@ -33,7 +33,7 @@ matrix:
 
 bridge:
     username_template: messenger_{{.}}
-    displayname_template: "{{.DisplayName}} (Messenger)"
+    displayname_template: "{{.DisplayName}}"
     permissions:
         "*": user
         "@admin:localhost": admin

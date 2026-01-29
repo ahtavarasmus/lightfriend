@@ -72,7 +72,7 @@ telegram:
 bridge:
     username_template: telegram_{userid}
     alias_template: telegram_{groupname}
-    displayname_template: "{displayname} (Telegram)"
+    displayname_template: "{displayname}"
     displayname_preference:
     - full name
     - username

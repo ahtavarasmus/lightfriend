@@ -2,7 +2,7 @@
 # Full config reference: https://github.com/mautrix/signal/blob/master/example-config.yaml
 
 network:
-    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber}} (Signal)"
+    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber}}"
 
 homeserver:
     address: http://synapse:8008
@@ -30,7 +30,7 @@ signal:
 
 bridge:
     username_template: signal_{{.}}
-    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}} (Signal)"
+    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}}"
     permissions:
         "*": user
         "@admin:localhost": admin
