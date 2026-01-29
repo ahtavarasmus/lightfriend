@@ -1,13 +1,18 @@
 use crate::components::notification::AnimationComponent;
 use crate::Route;
 use crate::utils::api::Api;
-use chrono::Utc;
+use serde::Deserialize;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::components::Link;
 use web_sys::HtmlInputElement;
 use serde_json::json;
+
+#[derive(Deserialize, Clone)]
+struct SmartphoneFreeDaysResponse {
+    days: i64,
+}
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
@@ -78,14 +83,32 @@ pub fn landing() -> Html {
         );
     }
 
-    // Calculate days smartphone-free (since March 1, 2022)
+    // State for smartphone-free days powered metric
+    let smartphone_free_days = use_state(|| None::<i64>);
+
+    // Fetch smartphone-free days metric from API
+    {
+        let smartphone_free_days = smartphone_free_days.clone();
+        use_effect_with_deps(
+            move |_| {
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Ok(response) = Api::get("/api/stats/smartphone-free-days").send().await {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<SmartphoneFreeDaysResponse>().await {
+                                smartphone_free_days.set(Some(data.days));
+                            }
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
+        );
+    }
+
+    // Format days with thousands separator
     let days_smartphone_free = {
-        let now = Utc::now();
-        let start = chrono::NaiveDate::from_ymd_opt(2022, 3, 1).unwrap()
-            .and_hms_opt(0, 0, 0).unwrap()
-            .and_utc();
-        let days = (now - start).num_days();
-        // Format with thousands separator
+        let days = (*smartphone_free_days).unwrap_or(0);
         let s = days.to_string();
         let mut result = String::new();
         for (i, c) in s.chars().rev().enumerate() {
@@ -200,11 +223,15 @@ pub fn landing() -> Html {
                         <p class="hero-subtitle">
                             {"An Assistant so useful you can live with a flip phone"}
                         </p>
-                    </div>
-                    <div class="hero-cta-group">
-                        <Link<Route> to={Route::Pricing} classes="forward-link">
-                            <button class="hero-cta">{"Get Started"}</button>
-                        </Link<Route>>
+                        <div class="hero-cta-group">
+                            <Link<Route> to={Route::Pricing} classes="forward-link">
+                                <button class="hero-cta">{"See Plans"}</button>
+                            </Link<Route>>
+                        </div>
+                        <div class="hero-metric">
+                            <span class="hero-metric-number">{days_smartphone_free.clone()}</span>
+                            <span class="hero-metric-label">{"smartphone-free days powered"}</span>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -463,10 +490,6 @@ pub fn landing() -> Html {
                     <p>{"I'm Rasmus. I've lived without a smartphone for over three years. During that time, I finished a computer science degree, won an international skiing medal, built three startups, and work as a software engineer."}</p>
                     <p>{"Lightfriend is my fourth startup - and the first one with paying customers. Not because it's the cleverest idea, but because it's the one I actually needed."}</p>
                     <p>{"I didn't do those things despite using a dumbphone. I did them because of it."}</p>
-                    <div class="days-counter">
-                        <span class="days-label">{"Days smartphone-free: "}</span>
-                        <span class="days-number">{days_smartphone_free.clone()}</span>
-                    </div>
                 </div>
             </section>
             <section class="testimonials-section">
@@ -764,25 +787,6 @@ pub fn landing() -> Html {
         font-weight: 500;
         font-style: italic;
         margin-bottom: 2rem;
-    }
-    .days-counter {
-        margin-top: 2rem;
-        padding: 1.5rem 2rem;
-        background: rgba(126, 178, 255, 0.08);
-        border-radius: 12px;
-        border: 1px solid rgba(126, 178, 255, 0.2);
-        display: inline-block;
-    }
-    .days-number {
-        font-size: 2rem;
-        font-weight: 700;
-        background: linear-gradient(45deg, #7EB2FF, #4169E1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    .days-label {
-        font-size: 1.1rem;
-        color: #bbb;
     }
     @media (max-width: 768px) {
         .trust-proof h2 {
@@ -1247,13 +1251,18 @@ pub fn landing() -> Html {
         width: 100%;
         height: 100%;
         display: flex;
-        justify-content: space-around;
+        flex-direction: column;
         pointer-events: auto;
+        padding: 0 2rem;
     }
     .hero-header {
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        text-align: center;
+        padding-top: 28vh;
     }
     .hero-background {
         position: fixed;
@@ -1302,10 +1311,10 @@ pub fn landing() -> Html {
         font-weight: 300;
         letter-spacing: 0.02em;
         max-width: 600px;
-        margin: 0 auto 3rem;
+        margin: 0 auto 1rem;
         line-height: 1.8;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        text-align: left;
+        text-align: center;
         background: linear-gradient(45deg, #fff, #7EB2FF);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -1322,8 +1331,7 @@ pub fn landing() -> Html {
     }
     @media (max-width: 768px) {
         .hero-content {
-            flex-direction: column;
-            justify-content: flex-end;
+            padding: 0 1rem;
         }
         .hero-title {
             font-size: 2rem;
@@ -1331,7 +1339,6 @@ pub fn landing() -> Html {
         .hero-subtitle {
             font-size: 1.1rem;
             line-height: 1.6;
-            margin-bottom: 2rem;
         }
         .highlight-icon {
             font-size: 1rem;
@@ -1401,7 +1408,45 @@ pub fn landing() -> Html {
         display: flex;
         flex-direction: row;
         align-items: center;
+        justify-content: center;
         gap: 1rem;
+        margin-top: 1rem;
+    }
+    .hero-metric {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1rem;
+        background: rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(126, 178, 255, 0.15);
+        border-radius: 30px;
+        margin-top: 1rem;
+    }
+    .hero-metric-number {
+        font-size: 1.3rem;
+        font-weight: 700;
+        background: linear-gradient(45deg, #7EB2FF, #fff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .hero-metric-label {
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.6);
+        font-weight: 400;
+    }
+    @media (max-width: 768px) {
+        .hero-metric {
+            padding: 0.5rem 0.9rem;
+            gap: 0.4rem;
+        }
+        .hero-metric-number {
+            font-size: 1.1rem;
+        }
+        .hero-metric-label {
+            font-size: 0.75rem;
+        }
     }
     .faq-link {
         color: #7EB2FF;

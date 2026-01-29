@@ -392,6 +392,53 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
     );
 }
 
+/// Initialize the smartphone-free days metric if it doesn't exist.
+/// This runs on startup to ensure the metric is available immediately.
+async fn initialize_smartphone_free_days_metric(state: Arc<AppState>) {
+    // Check if metric already exists
+    match state.metrics_repository.get_metric("smartphone_free_days") {
+        Ok(Some(_)) => {
+            tracing::debug!("smartphone_free_days metric already exists, skipping initialization");
+        }
+        Ok(None) => {
+            tracing::info!("smartphone_free_days metric not found, calculating initial value...");
+            match crate::services::metrics_service::calculate_smartphone_free_days().await {
+                Ok(days) => {
+                    match state
+                        .metrics_repository
+                        .upsert_metric("smartphone_free_days", &days.to_string())
+                    {
+                        Ok(()) => {
+                            tracing::info!(
+                                "Initialized smartphone_free_days metric to {} days",
+                                days
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to save initial smartphone_free_days metric: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to calculate initial smartphone-free days (will retry in cron job): {}",
+                        e
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to check for existing smartphone_free_days metric: {}",
+                e
+            );
+        }
+    }
+}
+
 pub async fn start_scheduler(state: Arc<AppState>) {
     // One-time migration: convert digest settings to tasks
     migrate_digests_to_tasks(&state).await;
@@ -399,6 +446,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     // Initialize matrix clients and sync tasks once on startup
     tracing::debug!("Initializing Matrix clients and sync tasks...");
     initialize_matrix_clients(Arc::clone(&state)).await;
+
+    // Initialize smartphone-free days metric if it doesn't exist
+    initialize_smartphone_free_days_metric(Arc::clone(&state)).await;
 
     let sched = JobScheduler::new()
         .await
@@ -1112,6 +1162,40 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(task_cleanup_job)
         .await
         .expect("Failed to add task cleanup job to scheduler");
+
+    // Smartphone-free days metric update - runs daily at 4am UTC
+    let state_clone = Arc::clone(&state);
+    let metrics_update_job = Job::new_async("0 0 4 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running smartphone-free days metric update...");
+
+            match crate::services::metrics_service::calculate_smartphone_free_days().await {
+                Ok(days) => {
+                    match state
+                        .metrics_repository
+                        .upsert_metric("smartphone_free_days", &days.to_string())
+                    {
+                        Ok(()) => {
+                            tracing::info!("Updated smartphone_free_days metric to {} days", days);
+                        }
+                        Err(e) => {
+                            error!("Failed to save smartphone_free_days metric: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to calculate smartphone-free days: {}", e);
+                }
+            }
+        })
+    })
+    .expect("Failed to create metrics update job");
+
+    sched
+        .add(metrics_update_job)
+        .await
+        .expect("Failed to add metrics update job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

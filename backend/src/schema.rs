@@ -244,6 +244,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    site_metrics (id) {
+        id -> Nullable<Integer>,
+        metric_key -> Text,
+        metric_value -> Text,
+        updated_at -> Integer,
+    }
+}
+
+diesel::table! {
     subaccounts (id) {
         id -> Integer,
         user_id -> Text,
@@ -534,6 +543,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     priority_senders,
     processed_emails,
     refund_info,
+    site_metrics,
     subaccounts,
     tasks,
     tesla,
