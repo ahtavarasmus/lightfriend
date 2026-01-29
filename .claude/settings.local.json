@@ -155,7 +155,9 @@
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/constant_monitoring.rs)",
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/profile/billing_payments.rs)",
       "Bash(rustc:*)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "Bash(git rev-list:*)",
+      "Bash(curl:*)"
     ],
     "deny": [
       "Read(.env)",
