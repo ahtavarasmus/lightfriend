@@ -3,6 +3,10 @@
 
 network:
     displayname_template: "{{or .ContactName .ProfileName .PhoneNumber}}"
+    sync_contacts_on_startup: true
+    device_name: lightfriend
+
+
 
 homeserver:
     address: http://synapse:8008
@@ -15,9 +19,13 @@ appservice:
     id: signal
     bot:
         username: signalbot
-        displayname: Signal Bridge
+        displayname: Signal bridge
     ephemeral_events: true
     async_transactions: true
+    username_template: signal_{{.}}
+
+backfill: 
+    enabled: false
 
 database:
     type: postgres
@@ -25,12 +33,11 @@ database:
     max_open_conns: 25
     max_idle_conns: 5
 
-signal:
-    device_name: mautrix-signal
-
 bridge:
     username_template: signal_{{.}}
     displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}}"
+    split_portals: true
+    bridge_matrix_leave: false
     permissions:
         "*": user
         "@admin:localhost": admin
@@ -46,6 +53,10 @@ bridge:
             relayed: delete
             shared_no_users: delete
             shared_has_users: kick
+
+matrix:
+    sync_direct_chat_list: true
+    federate_rooms: false
 
 encryption:
     allow: true
