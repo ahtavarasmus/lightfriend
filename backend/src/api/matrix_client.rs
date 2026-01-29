@@ -749,30 +749,32 @@ pub fn is_error_message(content: &str) -> bool {
         || content.starts_with("* Failed to")
 }
 
-/// Infer the service type from room name and sender localpart
-pub fn infer_service_from_room(room_name: &str, sender_localpart: &str) -> Option<String> {
-    let sender_localpart = sender_localpart.trim().to_lowercase();
-    let room_name = room_name.to_lowercase();
+/// Service prefixes for ghost user detection (bridged users from external platforms)
+pub const SERVICE_PREFIXES: &[(&str, &str)] = &[
+    ("whatsapp_", "whatsapp"),
+    ("telegram_", "telegram"),
+    ("signal_", "signal"),
+    ("messenger_", "messenger"),
+    ("instagram_", "instagram"),
+];
 
-    if room_name.contains("(wa)")
-        || sender_localpart.starts_with("whatsapp_")
-        || sender_localpart.starts_with("whatsapp")
-    {
-        return Some("whatsapp".to_string());
-    }
-    if room_name.contains("(tg)")
-        || sender_localpart.starts_with("telegram_")
-        || sender_localpart.starts_with("telegram")
-    {
-        return Some("telegram".to_string());
-    }
-    if room_name.contains("signal")
-        || sender_localpart.starts_with("signal_")
-        || sender_localpart.starts_with("signal")
-    {
-        return Some("signal".to_string());
+/// Infer service from sender localpart (fast, sync)
+pub fn infer_service_from_sender(sender_localpart: &str) -> Option<String> {
+    let sender_localpart = sender_localpart.trim().to_lowercase();
+
+    for (prefix, service) in SERVICE_PREFIXES {
+        if sender_localpart.starts_with(prefix) || sender_localpart == *service {
+            return Some(service.to_string());
+        }
     }
     None
+}
+
+/// Infer the service type from room name and sender localpart
+/// Legacy function - delegates to infer_service_from_sender
+pub fn infer_service_from_room(room_name: &str, sender_localpart: &str) -> Option<String> {
+    let _ = room_name; // No longer used for detection
+    infer_service_from_sender(sender_localpart)
 }
 
 // ============================================================================
@@ -839,20 +841,27 @@ mod tests {
 
     #[test]
     fn test_infer_service_from_room_whatsapp() {
+        // Detection is now based only on sender localpart
         assert_eq!(
-            infer_service_from_room("John (WA)", "whatsapp_123"),
+            infer_service_from_room("Any Room", "whatsapp_123"),
             Some("whatsapp".to_string())
         );
         assert_eq!(
-            infer_service_from_room("John (wa)", "user"),
+            infer_service_from_room("Any Room", "whatsapp"),
             Some("whatsapp".to_string())
         );
+        // Room name alone should NOT detect
+        assert_eq!(infer_service_from_room("John (WA)", "user"), None);
     }
 
     #[test]
     fn test_infer_service_from_room_telegram() {
         assert_eq!(
-            infer_service_from_room("John (TG)", "telegram_123"),
+            infer_service_from_room("Any Room", "telegram_123"),
+            Some("telegram".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Any Room", "telegram"),
             Some("telegram".to_string())
         );
     }
@@ -860,14 +869,45 @@ mod tests {
     #[test]
     fn test_infer_service_from_room_signal() {
         assert_eq!(
-            infer_service_from_room("Signal Chat", "signal_456"),
+            infer_service_from_room("Any Room", "signal_456"),
             Some("signal".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Any Room", "signal"),
+            Some("signal".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_service_from_room_messenger() {
+        assert_eq!(
+            infer_service_from_room("Any Room", "messenger_123"),
+            Some("messenger".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Any Room", "messenger"),
+            Some("messenger".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_service_from_room_instagram() {
+        assert_eq!(
+            infer_service_from_room("Any Room", "instagram_123"),
+            Some("instagram".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Any Room", "instagram"),
+            Some("instagram".to_string())
         );
     }
 
     #[test]
     fn test_infer_service_from_room_none() {
         assert_eq!(infer_service_from_room("Random Room", "random_user"), None);
+        // Room name patterns should NOT match without sender prefix
+        assert_eq!(infer_service_from_room("John (WA)", "regular_user"), None);
+        assert_eq!(infer_service_from_room("Chat (TG)", "regular_user"), None);
     }
 
     #[test]

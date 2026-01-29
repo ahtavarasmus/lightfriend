@@ -158,17 +158,7 @@ mod pure_function_tests {
 
     #[test]
     fn test_infer_service_from_room_whatsapp() {
-        // Room name patterns
-        assert_eq!(
-            infer_service_from_room("John Smith (WA)", "user123"),
-            Some("whatsapp".to_string())
-        );
-        assert_eq!(
-            infer_service_from_room("Family Group (wa)", "user123"),
-            Some("whatsapp".to_string())
-        );
-
-        // Sender localpart patterns
+        // Sender localpart patterns (room name no longer used for detection)
         assert_eq!(
             infer_service_from_room("Some Room", "whatsapp_1234567890"),
             Some("whatsapp".to_string())
@@ -177,39 +167,66 @@ mod pure_function_tests {
             infer_service_from_room("Some Room", "whatsapp"),
             Some("whatsapp".to_string())
         );
+        // Room name alone should NOT detect service
+        assert_eq!(infer_service_from_room("John Smith (WA)", "user123"), None);
     }
 
     #[test]
     fn test_infer_service_from_room_telegram() {
-        // Room name patterns
-        assert_eq!(
-            infer_service_from_room("John Smith (TG)", "user123"),
-            Some("telegram".to_string())
-        );
-        assert_eq!(
-            infer_service_from_room("Work Chat (tg)", "user123"),
-            Some("telegram".to_string())
-        );
-
         // Sender localpart patterns
         assert_eq!(
             infer_service_from_room("Some Room", "telegram_1234567890"),
             Some("telegram".to_string())
         );
+        assert_eq!(
+            infer_service_from_room("Some Room", "telegram"),
+            Some("telegram".to_string())
+        );
+        // Room name alone should NOT detect service
+        assert_eq!(infer_service_from_room("Work Chat (TG)", "user123"), None);
     }
 
     #[test]
     fn test_infer_service_from_room_signal() {
-        // Room name patterns (note: Signal uses different pattern)
-        assert_eq!(
-            infer_service_from_room("Signal Chat with John", "user123"),
-            Some("signal".to_string())
-        );
-
         // Sender localpart patterns
         assert_eq!(
             infer_service_from_room("Some Room", "signal_1234567890"),
             Some("signal".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Some Room", "signal"),
+            Some("signal".to_string())
+        );
+        // Room name alone should NOT detect service
+        assert_eq!(
+            infer_service_from_room("Signal Chat with John", "user123"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_infer_service_from_room_messenger() {
+        // Sender localpart patterns
+        assert_eq!(
+            infer_service_from_room("Some Room", "messenger_1234567890"),
+            Some("messenger".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Some Room", "messenger"),
+            Some("messenger".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_service_from_room_instagram() {
+        // Sender localpart patterns
+        assert_eq!(
+            infer_service_from_room("Some Room", "instagram_1234567890"),
+            Some("instagram".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Some Room", "instagram"),
+            Some("instagram".to_string())
         );
     }
 
@@ -218,6 +235,62 @@ mod pure_function_tests {
         assert_eq!(infer_service_from_room("Random Room", "random_user"), None);
         assert_eq!(infer_service_from_room("Work Meeting", "john_doe"), None);
         assert_eq!(infer_service_from_room("Family Chat", "mom"), None);
+        // Room names with service patterns should NOT match without matching sender
+        assert_eq!(infer_service_from_room("John (WA)", "regular_user"), None);
+        assert_eq!(infer_service_from_room("Chat (TG)", "regular_user"), None);
+    }
+
+    #[test]
+    fn test_infer_service_exact_match_no_underscore() {
+        // Test exact service name match (no underscore)
+        assert_eq!(
+            infer_service_from_room("Room", "whatsapp"),
+            Some("whatsapp".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "telegram"),
+            Some("telegram".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "signal"),
+            Some("signal".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "messenger"),
+            Some("messenger".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "instagram"),
+            Some("instagram".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_service_case_insensitive() {
+        assert_eq!(
+            infer_service_from_room("Room", "WHATSAPP_123"),
+            Some("whatsapp".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "WhatsApp_456"),
+            Some("whatsapp".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "TELEGRAM"),
+            Some("telegram".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_service_with_whitespace() {
+        assert_eq!(
+            infer_service_from_room("Room", "  whatsapp_123  "),
+            Some("whatsapp".to_string())
+        );
+        assert_eq!(
+            infer_service_from_room("Room", "\ttelegram_456\n"),
+            Some("telegram".to_string())
+        );
     }
 }
 
@@ -896,5 +969,154 @@ mod workflow_tests {
             .unwrap();
         assert_eq!(tg_messages.len(), 1);
         assert_eq!(tg_messages[0].content, "Telegram message");
+    }
+}
+
+// ============================================================================
+// Room Member Fallback Detection Tests
+// ============================================================================
+// These tests verify that service detection works via ghost users (bridged users)
+// in the room when the message sender doesn't have a service prefix.
+
+mod room_member_fallback_tests {
+    use backend::api::matrix_client::{MockMatrixClient, MockRoom, RoomMember};
+    use backend::utils::bridge::get_service_rooms_trait;
+
+    // Helper to create a mock room member
+    fn member(localpart: &str) -> RoomMember {
+        RoomMember {
+            user_id: format!("@{}:server.com", localpart),
+            localpart: localpart.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_detects_whatsapp_room_via_ghost_user() {
+        // Room with a WhatsApp ghost user but non-service sender
+        let room = MockRoom::new("!wa:server", "John Smith (WA)")
+            .with_members(vec![member("whatsapp_12345"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "John Smith (WA)");
+    }
+
+    #[tokio::test]
+    async fn test_detects_telegram_room_via_ghost_user() {
+        let room = MockRoom::new("!tg:server", "Work Chat (TG)")
+            .with_members(vec![member("telegram_67890"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "telegram").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "Work Chat (TG)");
+    }
+
+    #[tokio::test]
+    async fn test_detects_signal_room_via_ghost_user() {
+        let room = MockRoom::new("!sig:server", "Private Chat (Signal)")
+            .with_members(vec![member("signal_abc123"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "signal").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "Private Chat (Signal)");
+    }
+
+    #[tokio::test]
+    async fn test_detects_messenger_room_via_ghost_user() {
+        let room = MockRoom::new("!msg:server", "FB Chat")
+            .with_members(vec![member("messenger_999"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "messenger").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "FB Chat");
+    }
+
+    #[tokio::test]
+    async fn test_detects_instagram_room_via_ghost_user() {
+        let room = MockRoom::new("!ig:server", "IG DM")
+            .with_members(vec![member("instagram_user123"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "instagram").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "IG DM");
+    }
+
+    #[tokio::test]
+    async fn test_room_without_ghost_user_not_detected() {
+        // Room with only regular members (no service prefix)
+        let room = MockRoom::new("!regular:server", "Regular Chat")
+            .with_members(vec![member("john_doe"), member("jane_doe"), member("me")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        // Should not find any WhatsApp rooms
+        let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+        assert!(rooms.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_ghost_users_in_room() {
+        // Group chat with multiple WhatsApp ghost users
+        let room = MockRoom::new("!group:server", "Family Group (WA)")
+            .with_members(vec![
+                member("whatsapp_mom"),
+                member("whatsapp_dad"),
+                member("whatsapp_sibling"),
+                member("me"),
+            ])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![room]);
+
+        let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "Family Group (WA)");
+    }
+
+    #[tokio::test]
+    async fn test_mixed_services_detected_correctly() {
+        // Multiple rooms with different services
+        let wa_room = MockRoom::new("!wa:server", "WA Chat")
+            .with_members(vec![member("whatsapp_1"), member("me")])
+            .with_last_activity(1000);
+
+        let tg_room = MockRoom::new("!tg:server", "TG Chat")
+            .with_members(vec![member("telegram_2"), member("me")])
+            .with_last_activity(2000);
+
+        let sig_room = MockRoom::new("!sig:server", "Signal Chat")
+            .with_members(vec![member("signal_3"), member("me")])
+            .with_last_activity(3000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![wa_room, tg_room, sig_room]);
+
+        // Each service query should only return matching rooms
+        let wa_rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+        assert_eq!(wa_rooms.len(), 1);
+        assert_eq!(wa_rooms[0].display_name, "WA Chat");
+
+        let tg_rooms = get_service_rooms_trait(&client, "telegram").await.unwrap();
+        assert_eq!(tg_rooms.len(), 1);
+        assert_eq!(tg_rooms[0].display_name, "TG Chat");
+
+        let sig_rooms = get_service_rooms_trait(&client, "signal").await.unwrap();
+        assert_eq!(sig_rooms.len(), 1);
+        assert_eq!(sig_rooms[0].display_name, "Signal Chat");
     }
 }

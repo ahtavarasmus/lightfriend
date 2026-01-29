@@ -83,33 +83,36 @@ pub fn remove_bridge_suffix(chat_name: &str) -> String {
     }
 }
 
-fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
-    let sender_localpart = sender_localpart.trim().to_lowercase();
-    let room_name = room_name.to_lowercase();
+// Import shared service detection from matrix_client
+use crate::api::matrix_client::{infer_service_from_sender, SERVICE_PREFIXES};
 
-    if room_name.contains("(wa)")
-        || sender_localpart.starts_with("whatsapp_")
-        || sender_localpart.starts_with("whatsapp")
-    {
-        println!("Detected WhatsApp");
-        return Some("whatsapp".to_string());
+/// Infer service from room members (fallback, async)
+/// Checks if any room member is a ghost user (bridged user) with a service prefix
+async fn infer_service_from_room_members(room: &Room) -> Option<String> {
+    let members = room.members(matrix_sdk::RoomMemberships::JOIN).await.ok()?;
+
+    for member in members {
+        let localpart = member.user_id().localpart().to_lowercase();
+        for (prefix, service) in SERVICE_PREFIXES {
+            if localpart.starts_with(prefix) {
+                println!("Detected {} via ghost user in room", service);
+                return Some(service.to_string());
+            }
+        }
     }
-    if room_name.contains("(tg)")
-        || sender_localpart.starts_with("telegram_")
-        || sender_localpart.starts_with("telegram")
-    {
-        println!("Detected Telegram");
-        return Some("telegram".to_string());
-    }
-    if room_name.contains("Signal")
-        || sender_localpart.starts_with("signal_")
-        || sender_localpart.starts_with("signal")
-    {
-        println!("Detected Signal");
-        return Some("signal".to_string());
-    }
-    println!("No service detected");
     None
+}
+
+/// Main detection: try sender first, then room members as fallback
+async fn infer_service_with_fallback(sender_localpart: &str, room: &Room) -> Option<String> {
+    // Fast path: check sender localpart
+    if let Some(service) = infer_service_from_sender(sender_localpart) {
+        println!("Detected {} via sender", service);
+        return Some(service);
+    }
+
+    // Fallback: check room members for ghost users (bridged users)
+    infer_service_from_room_members(room).await
 }
 
 pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<Vec<BridgeRoom>> {
@@ -1423,7 +1426,7 @@ pub async fn handle_bridge_message(
         }
     };
     let sender_localpart = event.sender.localpart().to_string();
-    let service = match infer_service(&room_name, &sender_localpart) {
+    let service = match infer_service_with_fallback(&sender_localpart, &room).await {
         Some(s) => s,
         None => {
             tracing::error!("Could not infer service, skipping");
