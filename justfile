@@ -205,6 +205,56 @@ dev-frontend:
 test-backend:
     cd backend && cargo test
 
-# Development: Run tests for frontend  
+# Development: Run tests for frontend
 test-frontend:
     cd frontend && cargo test
+
+# =============================================================================
+# Bridge Config Diff Commands
+# =============================================================================
+# These commands fetch the latest example configs from upstream and compare
+# them to your templates. Use these when updating bridge versions to see
+# what config format changes you need to apply.
+
+# Diff telegram bridge config against upstream
+diff-telegram:
+    #!/usr/bin/env bash
+    echo "Fetching latest mautrix-telegram example config..."
+    curl -s https://raw.githubusercontent.com/mautrix/telegram/master/mautrix_telegram/example-config.yaml > /tmp/telegram-example.yaml
+    echo "Comparing to docker/bridges/telegram/config.yaml.template:"
+    echo "==========================================================="
+    diff -u docker/bridges/telegram/config.yaml.template /tmp/telegram-example.yaml || true
+
+# Diff whatsapp bridge config against upstream
+diff-whatsapp:
+    #!/usr/bin/env bash
+    echo "Fetching latest mautrix-whatsapp example config..."
+    curl -s https://raw.githubusercontent.com/mautrix/whatsapp/main/example-config.yaml > /tmp/whatsapp-example.yaml
+    echo "Comparing to docker/bridges/whatsapp/config.yaml.template:"
+    echo "==========================================================="
+    diff -u docker/bridges/whatsapp/config.yaml.template /tmp/whatsapp-example.yaml || true
+
+# Diff signal bridge config against upstream
+diff-signal:
+    #!/usr/bin/env bash
+    echo "Fetching latest mautrix-signal example config..."
+    curl -s https://raw.githubusercontent.com/mautrix/signal/main/example-config.yaml > /tmp/signal-example.yaml
+    echo "Comparing to docker/bridges/signal/config.yaml.template:"
+    echo "==========================================================="
+    diff -u docker/bridges/signal/config.yaml.template /tmp/signal-example.yaml || true
+
+# Diff meta (messenger/instagram) bridge config against upstream
+diff-meta:
+    #!/usr/bin/env bash
+    echo "Fetching latest mautrix-meta example config..."
+    curl -s https://raw.githubusercontent.com/mautrix/meta/main/example-config.yaml > /tmp/meta-example.yaml
+    echo "Comparing to docker/bridges/messenger/config.yaml.template:"
+    echo "==========================================================="
+    diff -u docker/bridges/messenger/config.yaml.template /tmp/meta-example.yaml || true
+    echo ""
+    echo "Comparing to docker/bridges/instagram/config.yaml.template:"
+    echo "==========================================================="
+    diff -u docker/bridges/instagram/config.yaml.template /tmp/meta-example.yaml || true
+
+# Diff all bridge configs against upstream
+diff-all-bridges: diff-telegram diff-whatsapp diff-signal diff-meta

@@ -56,11 +56,13 @@ rm -f bridges/whatsapp/config.yaml 2>/dev/null || true
 rm -f bridges/signal/config.yaml 2>/dev/null || true
 rm -f bridges/messenger/config.yaml 2>/dev/null || true
 rm -f bridges/instagram/config.yaml 2>/dev/null || true
+rm -f bridges/telegram/config.yaml 2>/dev/null || true
 rm -f bridges/doublepuppet.yaml 2>/dev/null || true
 rm -f bridges/whatsapp/whatsapp-registration.yaml 2>/dev/null || true
 rm -f bridges/signal/signal-registration.yaml 2>/dev/null || true
 rm -f bridges/messenger/messenger-registration.yaml 2>/dev/null || true
 rm -f bridges/instagram/instagram-registration.yaml 2>/dev/null || true
+rm -f bridges/telegram/telegram-registration.yaml 2>/dev/null || true
 rm -f postgres-init/init-databases.sh 2>/dev/null || true
 
 echo "Generating configuration files from templates..."
@@ -79,6 +81,8 @@ substitute_vars() {
         "SYNAPSE_DB_PASSWORD"
         "POSTGRES_PASSWORD"
         "DOUBLE_PUPPET_SECRET"
+        "TELEGRAM_API_ID"
+        "TELEGRAM_API_HASH"
     )
 
     # Substitute each variable
@@ -100,7 +104,7 @@ if [ -f "synapse/homeserver.yaml.template" ]; then
 fi
 
 # Generate bridge configs
-for bridge in whatsapp signal messenger instagram; do
+for bridge in whatsapp signal messenger instagram telegram; do
     if [ -f "bridges/${bridge}/config.yaml.template" ]; then
         substitute_vars "bridges/${bridge}/config.yaml.template" "bridges/${bridge}/config.yaml"
         echo "✓ Generated bridges/${bridge}/config.yaml"
@@ -135,6 +139,9 @@ get_bridge_image() {
         messenger|instagram)
             echo "dock.mau.dev/mautrix/meta:latest"
             ;;
+        telegram)
+            echo "dock.mau.dev/mautrix/telegram:latest"
+            ;;
         *)
             echo "Unknown bridge: $1" >&2
             return 1
@@ -154,6 +161,9 @@ get_bridge_executable() {
         messenger|instagram)
             echo "/usr/bin/mautrix-meta"
             ;;
+        telegram)
+            echo "/usr/bin/mautrix-telegram"
+            ;;
         *)
             echo "Unknown bridge: $1" >&2
             return 1
@@ -162,7 +172,7 @@ get_bridge_executable() {
 }
 
 # Generate registration file for each bridge
-for bridge in whatsapp signal messenger instagram; do
+for bridge in whatsapp signal messenger instagram telegram; do
     config_file="bridges/${bridge}/config.yaml"
     reg_file="bridges/${bridge}/${bridge}-registration.yaml"
 
@@ -195,7 +205,7 @@ echo "Validating generated configuration files..."
 
 # Check for placeholder values in config files
 validation_errors=()
-for bridge in whatsapp signal messenger instagram; do
+for bridge in whatsapp signal messenger instagram telegram; do
     config_file="bridges/${bridge}/config.yaml"
 
     if [ -f "$config_file" ]; then
