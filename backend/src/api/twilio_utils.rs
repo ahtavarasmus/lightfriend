@@ -21,6 +21,20 @@ use std::sync::Arc;
 use tracing;
 use url::form_urlencoded;
 
+/// Check if request has valid internal routing API key
+/// Returns true if this is a trusted internal request from another Lightfriend server
+fn is_valid_internal_request(headers: &axum::http::HeaderMap) -> bool {
+    let expected = match std::env::var("INTERNAL_ROUTING_API_KEY") {
+        Ok(key) if !key.is_empty() => key,
+        _ => return false,
+    };
+
+    match headers.get("X-Internal-Api-Key") {
+        Some(header) => header.to_str().map(|h| h == expected).unwrap_or(false),
+        None => false,
+    }
+}
+
 #[derive(Deserialize)]
 struct ElevenLabsResponse {
     phone_number_id: String,
@@ -145,6 +159,12 @@ pub async fn validate_twilio_signature(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
+    // Check for internal routing key first (from new/old server during migration)
+    if is_valid_internal_request(request.headers()) {
+        tracing::info!("Twilio request validated via internal API key");
+        return Ok(next.run(request).await);
+    }
+
     tracing::info!("\n=== Starting Twilio Signature Validation ===");
 
     // Get the Twilio signature from headers
@@ -275,6 +295,29 @@ pub async fn validate_twilio_signature(
 
     tracing::info!("✅ Signature validation successful");
 
+    // Check migration status - proxy to old VPS if user not migrated
+    if !user.migrated_to_new_server {
+        tracing::info!("User {} not migrated, proxying to old VPS", user.id);
+        match crate::utils::migration_proxy::proxy_form_to_old_vps("/api/sms/server", &params_str)
+            .await
+        {
+            Ok(response) => {
+                let status = axum::http::StatusCode::from_u16(response.status().as_u16())
+                    .unwrap_or(axum::http::StatusCode::OK);
+                let body = response.text().await.unwrap_or_default();
+                return Ok(Response::builder()
+                    .status(status)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap());
+            }
+            Err(e) => {
+                tracing::error!("Failed to proxy to old VPS: {}", e);
+                return Err(StatusCode::BAD_GATEWAY);
+            }
+        }
+    }
+
     // Rebuild request and pass to next handler
     let request = Request::from_parts(parts, Body::from(params_str));
 
@@ -290,6 +333,12 @@ pub async fn validate_twilio_status_callback_signature(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
+    // Check for internal routing key first (from new/old server during migration)
+    if is_valid_internal_request(request.headers()) {
+        tracing::debug!("Status callback validated via internal API key");
+        return Ok(next.run(request).await);
+    }
+
     tracing::debug!("=== Starting Twilio Status Callback Signature Validation ===");
 
     // Get the Twilio signature from headers

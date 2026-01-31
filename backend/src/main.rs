@@ -460,7 +460,8 @@ async fn main() {
             "/api/webhook/elevenlabs",
             post(elevenlabs_webhook::elevenlabs_webhook),
         )
-        .route_layer(middleware::from_fn(
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
             elevenlabs_webhook::validate_elevenlabs_hmac,
         ));
     let auth_built_in_webhook_routes = Router::new()

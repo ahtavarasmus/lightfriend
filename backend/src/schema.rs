@@ -447,6 +447,7 @@ diesel::table! {
         magic_token -> Nullable<Text>,
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
+        migrated_to_new_server -> Bool,
     }
 }
 
