@@ -59,15 +59,15 @@ telegram:
     # You must install PySocks from pip for proxies to work.
     proxy:
         # Allowed types: disabled, socks4, socks5, http, mtproxy
-        type: ${TELEGRAM_PROXY_TYPE:-socks5}
+        type: ${TELEGRAM_PROXY_TYPE}
         # Proxy IP address and port
-        address: ${TELEGRAM_PROXY_ADDRESS:-gw.dataimpulse.com}
-        port: ${TELEGRAM_PROXY_PORT:-10000}
+        address: ${TELEGRAM_PROXY_ADDRESS}
+        port: ${TELEGRAM_PROXY_PORT}
         # Whether or not to perform DNS resolving remotely
         rdns: true
         # Proxy authentication
-        username: ${TELEGRAM_PROXY_USERNAME:-}
-        password: ${TELEGRAM_PROXY_PASSWORD:-}
+        username: ${TELEGRAM_PROXY_USERNAME}
+        password: ${TELEGRAM_PROXY_PASSWORD}
 
 bridge:
     username_template: telegram_{userid}
