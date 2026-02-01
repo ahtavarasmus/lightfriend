@@ -85,6 +85,39 @@ See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
 Do NOT add "Generated with Claude Code" or Co-Authored-By lines mentioning Claude/AI. Keep commit messages clean and focused on what changed.
 
+## Git Worktrees
+
+When asked to create a new worktree or start parallel work on a new feature, do both steps:
+
+**Step 1: Create the worktree**
+```bash
+git worktree add ../lf-<short-name> -b <branch-name> master
+```
+
+**Step 2: Open new iTerm2 tab with Claude session**
+```bash
+osascript -e 'tell application "iTerm2"
+    tell current window
+        create tab with default profile
+        tell current session
+            write text "cd ~/Developer/sites/lf-<short-name> && claude"
+        end tell
+    end tell
+end tell'
+```
+
+This keeps the user in their current tab with unstaged changes intact, while a fresh Claude session starts in the new worktree.
+
+**Removing a worktree** (when asked to clean up or remove a worktree):
+```bash
+git worktree remove ../lf-<short-name> && git branch -d <branch-name>
+```
+
+**List worktrees:**
+```bash
+git worktree list
+```
+
 ## Safety Guards
 
 Hooks protect against accidental destructive changes:
