@@ -160,6 +160,9 @@ services:
       MATRIX_HOMESERVER: http://synapse:8008
       MATRIX_HOMESERVER_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
       MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
+      # Bridge database URLs for encrypted backup (optional - backup disabled if not set)
+      WHATSAPP_DB_URL: ${WHATSAPP_DB_URL:-postgres://whatsapp_user:whatsapp_password@postgres:5432/whatsapp_db}
+      WHATSAPP_BACKUP_DB_URL: ${WHATSAPP_BACKUP_DB_URL:-}
       WHATSAPP_BRIDGE_BOT: "@whatsappbot:localhost"
       SIGNAL_BRIDGE_BOT: "@signalbot:localhost"
       MESSENGER_BRIDGE_BOT: "@messengerbot:localhost"

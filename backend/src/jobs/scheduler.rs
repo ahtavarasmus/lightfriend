@@ -1197,6 +1197,104 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add metrics update job to scheduler");
 
+    // Encrypted backup job - runs every 5 minutes for users with active backup sessions
+    let state_clone = Arc::clone(&state);
+    let backup_job = Job::new_async("0 */5 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running encrypted backup job...");
+
+            // Get all users with active session keys (in-memory)
+            let session_keys = state.session_key_store.get_all().await;
+
+            if session_keys.is_empty() {
+                debug!("No active backup sessions, skipping backup job");
+                return;
+            }
+
+            debug!(
+                "Processing encrypted backups for {} users",
+                session_keys.len()
+            );
+
+            // Get backup paths from environment or use defaults
+            let matrix_stores_dir =
+                std::env::var("MATRIX_STORES_DIR").unwrap_or_else(|_| "/matrix_stores".to_string());
+            let encrypted_backup_dir = std::env::var("ENCRYPTED_BACKUP_DIR")
+                .unwrap_or_else(|_| "/backup-storage/matrix_stores".to_string());
+
+            for (user_id, session_key) in session_keys {
+                // Encrypt Matrix store for this user
+                match crate::services::matrix_store_encryption::encrypt_matrix_store(
+                    user_id,
+                    &session_key.key,
+                    &matrix_stores_dir,
+                    &encrypted_backup_dir,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        debug!("Successfully backed up Matrix store for user {}", user_id);
+
+                        // Update last_backup_at timestamp
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i32;
+
+                        if let Err(e) = state.user_repository.set_last_backup_at(user_id, now) {
+                            error!("Failed to update last_backup_at for user {}: {}", user_id, e);
+                        }
+                    }
+                    Err(
+                        crate::services::matrix_store_encryption::MatrixStoreEncryptionError::StoreNotFound(
+                            _,
+                        ),
+                    ) => {
+                        // User may not have a Matrix store yet (no bridges connected)
+                        debug!("No Matrix store to backup for user {}", user_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to backup Matrix store for user {}: {}", user_id, e);
+                    }
+                }
+            }
+
+            // After Matrix store backups, run bridge database backup
+            // This copies the entire whatsapp_db to backup DB and encrypts sensitive values
+            debug!("Running bridge database backup...");
+            match crate::services::bridge_backup::run_bridge_backup(&state).await {
+                Ok(stats) => {
+                    if stats.tables_copied > 0 {
+                        debug!(
+                            "Bridge backup complete: {} tables, {} rows copied, {} values encrypted",
+                            stats.tables_copied, stats.rows_copied, stats.values_encrypted
+                        );
+                    }
+                }
+                Err(crate::services::bridge_backup::BridgeBackupError::NoSourceDb) => {
+                    // Source database not configured - this is expected if WHATSAPP_DB_URL is not set
+                    debug!("Bridge backup skipped: source database not configured");
+                }
+                Err(crate::services::bridge_backup::BridgeBackupError::NoBackupDb) => {
+                    // Backup database not configured - this is expected if WHATSAPP_BACKUP_DB_URL is not set
+                    debug!("Bridge backup skipped: backup database not configured");
+                }
+                Err(e) => {
+                    error!("Bridge backup failed: {}", e);
+                }
+            }
+
+            debug!("Encrypted backup job completed");
+        })
+    })
+    .expect("Failed to create encrypted backup job");
+
+    sched
+        .add(backup_job)
+        .await
+        .expect("Failed to add encrypted backup job to scheduler");
+
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 

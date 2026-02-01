@@ -1,0 +1,3 @@
+-- Add backup tracking columns to users table
+ALTER TABLE users ADD COLUMN last_backup_at INTEGER;
+ALTER TABLE users ADD COLUMN backup_session_active BOOLEAN NOT NULL DEFAULT FALSE;

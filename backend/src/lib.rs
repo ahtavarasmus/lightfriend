@@ -5,6 +5,7 @@ pub mod handlers {
     pub mod auth_dtos;
     pub mod auth_handlers;
     pub mod auth_middleware;
+    pub mod backup_key;
     pub mod billing_handlers;
     pub mod bluesky;
     pub mod bridge_auth_common;
@@ -106,8 +107,13 @@ pub mod repositories {
     pub mod webauthn_repository;
 }
 pub mod services {
+    pub mod bridge_backup;
+    pub mod bridge_db_client;
+    pub mod bridge_encryption;
     pub mod country_service;
+    pub mod matrix_store_encryption;
     pub mod metrics_service;
+    pub mod session_keys;
     pub mod signup_service;
     pub mod twilio_message_service;
     pub mod twilio_status_service;
@@ -219,4 +225,6 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    /// In-memory session keys for encrypted backup (one per user with active browser session)
+    pub session_key_store: services::session_keys::SessionKeyStore,
 }

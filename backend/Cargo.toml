@@ -64,6 +64,8 @@ thiserror = "1.0"
 async-trait = "0.1"
 p256 = { version = "0.13", features = ["pem"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4"] }
+deadpool-postgres = "0.14"
 async-stream = "0.3"
 tokio-stream = "0.1"
 resend-rs = "0.9"
@@ -73,3 +75,4 @@ phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsi
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables
 wiremock = "0.6"  # For mock HTTP server tests
+tempfile = "3.10"  # For temporary directories in tests
