@@ -15,10 +15,7 @@ use gloo_console::log;
 use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{
-    Crypto, CryptoKey, IdbDatabase, IdbObjectStore, IdbOpenDbRequest, IdbRequest, IdbTransaction,
-    SubtleCrypto,
-};
+use web_sys::{Crypto, CryptoKey, IdbDatabase, IdbOpenDbRequest, SubtleCrypto};
 
 const DB_NAME: &str = "lightfriend_backup";
 const STORE_NAME: &str = "keys";
@@ -60,7 +57,7 @@ fn get_crypto() -> Result<Crypto, BackupCryptoError> {
 
 /// Get SubtleCrypto
 fn get_subtle() -> Result<SubtleCrypto, BackupCryptoError> {
-    get_crypto()?.subtle()
+    Ok(get_crypto()?.subtle())
 }
 
 /// Generate random bytes
@@ -119,7 +116,7 @@ async fn encrypt_with_key(
     let data = Uint8Array::from(plaintext);
     let promise = subtle.encrypt_with_object_and_buffer_source(&algorithm, key, &data)?;
     let result = JsFuture::from(promise).await?;
-    let ciphertext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?);
+    let ciphertext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?.into());
 
     // Combine IV + ciphertext
     let mut combined = iv;
@@ -156,7 +153,7 @@ async fn decrypt_with_key(
     // Decrypt
     let promise = subtle.decrypt_with_object_and_buffer_source(&algorithm, key, &encrypted_array)?;
     let result = JsFuture::from(promise).await?;
-    let plaintext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?);
+    let plaintext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?.into());
 
     Ok(plaintext.to_vec())
 }
@@ -204,7 +201,7 @@ async fn derive_session_key(master_key: &[u8]) -> Result<Vec<u8>, BackupCryptoEr
 
     let promise = subtle.derive_bits_with_object(&derive_params, &base_key, 256)?;
     let bits = JsFuture::from(promise).await?;
-    let derived = Uint8Array::new(&bits.dyn_into::<ArrayBuffer>()?);
+    let derived = Uint8Array::new(&bits.dyn_into::<ArrayBuffer>()?.into());
 
     Ok(derived.to_vec())
 }
@@ -238,7 +235,7 @@ async fn open_database() -> Result<IdbDatabase, BackupCryptoError> {
             .unwrap()
             .dyn_into()
             .unwrap();
-        if !db.object_store_names().contains(&STORE_NAME.into()) {
+        if !db.object_store_names().contains(STORE_NAME) {
             db.create_object_store(STORE_NAME).unwrap();
         }
     }) as Box<dyn FnOnce(_)>);
@@ -258,13 +255,8 @@ async fn open_database() -> Result<IdbDatabase, BackupCryptoError> {
     request.set_onsuccess(Some(onsuccess.as_ref().unchecked_ref()));
     onsuccess.forget();
 
-    let mut tx_opt2 = None::<futures_channel::oneshot::Sender<_>>;
     let onerror = Closure::once(Box::new(move |event: web_sys::Event| {
-        if let Some(tx) = tx_opt2.take() {
-            let _ = tx.send(Err(BackupCryptoError {
-                message: format!("Database error: {:?}", event),
-            }));
-        }
+        gloo_console::error!(format!("Database error: {:?}", event));
     }) as Box<dyn FnOnce(_)>);
     request.set_onerror(Some(onerror.as_ref().unchecked_ref()));
     onerror.forget();

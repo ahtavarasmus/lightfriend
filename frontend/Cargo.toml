@@ -38,7 +38,22 @@ web-sys = { version = "0.3", features = [
     "MessageEvent",
     "CustomEvent",
     "EventTarget",
+    # Web Crypto API
+    "Crypto",
+    "CryptoKey",
+    "SubtleCrypto",
+    # IndexedDB
+    "IdbDatabase",
+    "IdbFactory",
+    "IdbObjectStore",
+    "IdbObjectStoreParameters",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "DomStringList",
 ] }
+futures-channel = "0.3"
 js-sys = "0.3"
 gloo-net = "0.2"
 gloo-timers = { version = "0.2", features = ["futures"] }
