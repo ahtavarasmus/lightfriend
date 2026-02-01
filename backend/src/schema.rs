@@ -448,6 +448,8 @@ diesel::table! {
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
         migrated_to_new_server -> Bool,
+        last_backup_at -> Nullable<Integer>,
+        backup_session_active -> Bool,
     }
 }
 

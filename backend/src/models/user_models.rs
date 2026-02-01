@@ -65,6 +65,8 @@ pub struct User {
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
     pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
+    pub last_backup_at: Option<i32>, // Unix timestamp of last encrypted backup
+    pub backup_session_active: bool, // whether browser has established backup session key
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

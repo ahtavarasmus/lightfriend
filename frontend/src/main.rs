@@ -7,8 +7,9 @@ use wasm_bindgen::JsCast;
 mod config;
 mod utils {
     pub mod api;
-    pub mod webauthn;
+    pub mod backup_crypto;
     pub mod elevenlabs_web;
+    pub mod webauthn;
 }
 mod profile {
     pub mod stripe;

@@ -127,6 +127,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        session_key_store: crate::services::session_keys::SessionKeyStore::new(),
     })
 }
 

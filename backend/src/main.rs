@@ -27,12 +27,12 @@ use backend::{
     WebauthnRepository,
 };
 use handlers::{
-    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    filter_handlers, google_calendar, google_calendar_auth, imap_auth, imap_handlers,
-    instagram_auth, instagram_handlers, messenger_auth, messenger_handlers, profile_handlers,
-    refund_handlers, self_host_handlers, signal_auth, signal_handlers, stripe_handlers,
-    telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    admin_handlers, auth_handlers, backup_key, billing_handlers, bridge_auth_common,
+    contact_profile_handlers, filter_handlers, google_calendar, google_calendar_auth, imap_auth,
+    imap_handlers, instagram_auth, instagram_handlers, messenger_auth, messenger_handlers,
+    profile_handlers, refund_handlers, self_host_handlers, signal_auth, signal_handlers,
+    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth,
+    whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -357,6 +357,7 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        session_key_store: backend::services::session_keys::SessionKeyStore::new(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -1164,6 +1165,13 @@ async fn main() {
             "/api/auth/matrix/reset",
             delete(bridge_auth_common::reset_matrix_connection),
         )
+        // Encrypted backup session routes
+        .route("/api/backup/establish-key", post(backup_key::establish_key))
+        .route(
+            "/api/backup/session-status",
+            get(backup_key::session_status),
+        )
+        .route("/api/backup/session", delete(backup_key::clear_session))
         // Task routes (reminders and message monitoring)
         .route(
             "/api/filters/tasks",
