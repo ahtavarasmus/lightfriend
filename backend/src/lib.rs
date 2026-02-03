@@ -76,6 +76,7 @@ pub mod tool_call_utils {
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
+    pub mod internal_routing;
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;
