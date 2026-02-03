@@ -54,6 +54,7 @@ pub mod utils {
     pub mod email;
     pub mod encryption;
     pub mod matrix_auth;
+    pub mod migration_proxy;
     pub mod notification_utils;
     pub mod tesla_keys;
     pub mod tool_exec;
@@ -75,6 +76,7 @@ pub mod tool_call_utils {
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
+    pub mod internal_routing;
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;

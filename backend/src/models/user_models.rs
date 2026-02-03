@@ -64,6 +64,7 @@ pub struct User {
     pub magic_token: Option<String>, // token for magic link login/password setup
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
+    pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

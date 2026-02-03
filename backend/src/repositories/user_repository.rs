@@ -1740,10 +1740,16 @@ impl UserRepository {
 
     pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
         use crate::schema::bridges;
+        use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::insert_into(bridges::table)
             .values(&new_bridge)
+            .execute(&mut conn)?;
+
+        // Mark user as migrated when they connect a bridge
+        diesel::update(users::table.filter(users::id.eq(new_bridge.user_id)))
+            .set(users::migrated_to_new_server.eq(true))
             .execute(&mut conn)?;
 
         Ok(())

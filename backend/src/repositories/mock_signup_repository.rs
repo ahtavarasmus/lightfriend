@@ -58,6 +58,7 @@ impl MockUser {
             magic_token: self.magic_token.clone(),
             plan_type: None,
             matrix_e2ee_enabled: false,
+            migrated_to_new_server: true,
         }
     }
 }
