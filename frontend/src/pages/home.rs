@@ -15,6 +15,7 @@ use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
 use crate::controls::tesla_controls::TeslaControls;
 use crate::media::youtube_hub::YouTubeHub;
+use crate::components::backup_key_sender::BackupKeySender;
 
 #[derive(Deserialize)]
 struct TotpStatusResponse {
@@ -692,6 +693,8 @@ pub fn Home() -> Html {
             };
         html! {
             <>
+                // Background component: sends backup session key every 5 minutes
+                <BackupKeySender />
                 // First-time subscriber onboarding overlay
                 {
                     if *show_onboarding {

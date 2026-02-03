@@ -7,6 +7,9 @@ pub mod login {
     use crate::Route;
     use crate::config;
     use crate::utils::webauthn;
+    use crate::utils::backup_crypto;
+    use crate::utils::api::Api;
+    use crate::profile::billing_models::UserProfile;
     use gloo_console::log;
 
     #[derive(Serialize)]
@@ -64,6 +67,7 @@ pub mod login {
         let is_verifying = use_state(|| false);
         let show_totp_form = use_state(|| false); // Which 2FA method is currently shown
         let webauthn_supported = use_state(|| webauthn::is_webauthn_supported());
+        let password_for_backup = use_state(String::new); // Preserve password for backup init after 2FA
 
         let onsubmit = {
             let email = email.clone();
@@ -75,6 +79,7 @@ pub mod login {
             let webauthn_enabled = webauthn_enabled.clone();
             let login_token = login_token.clone();
             let show_totp_form = show_totp_form.clone();
+            let password_for_backup = password_for_backup.clone();
 
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
@@ -87,6 +92,8 @@ pub mod login {
                 let webauthn_enabled = webauthn_enabled.clone();
                 let login_token = login_token.clone();
                 let show_totp_form = show_totp_form.clone();
+                let password_for_backup = password_for_backup.clone();
+                let password_clone = password.clone(); // For backup initialization
 
                 wasm_bindgen_futures::spawn_local(async move {
                     log!("Attempting login for email:", &email);
@@ -109,6 +116,8 @@ pub mod login {
                                                 totp_enabled.set(resp.totp_enabled);
                                                 webauthn_enabled.set(resp.webauthn_enabled);
                                                 login_token.set(resp.login_token);
+                                                // Save password for backup initialization after 2FA
+                                                password_for_backup.set(password_clone.clone());
                                                 // Default to TOTP form if both are enabled and webauthn not supported
                                                 // Otherwise prefer WebAuthn
                                                 show_totp_form.set(!resp.webauthn_enabled || (resp.totp_enabled && !webauthn::is_webauthn_supported()));
@@ -124,6 +133,8 @@ pub mod login {
                                                 totp_enabled.set(true);
                                                 webauthn_enabled.set(false);
                                                 login_token.set(totp_resp.totp_token);
+                                                // Save password for backup initialization after 2FA
+                                                password_for_backup.set(password_clone.clone());
                                                 show_totp_form.set(true);
                                                 return;
                                             }
@@ -134,6 +145,24 @@ pub mod login {
                                 log!("Login request successful, cookies set by backend");
                                 error_setter.set(None);
                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
+
+                                // Initialize backup encryption with password
+                                let backup_password = password_clone.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    // Get user profile to get user_id
+                                    if let Ok(response) = Api::get("/api/profile").send().await {
+                                        if let Ok(profile) = response.json::<UserProfile>().await {
+                                            // Initialize backup with password
+                                            if let Ok(session_key) = backup_crypto::initialize_backup_with_password(&backup_password, profile.id).await {
+                                                log!("Backup initialized, sending session key to backend");
+                                                let _ = Api::post("/api/backup/establish-key")
+                                                    .json(&serde_json::json!({ "session_key": session_key }))
+                                                    .ok()
+                                                    .map(|r| r.send());
+                                            }
+                                        }
+                                    }
+                                });
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
@@ -169,6 +198,7 @@ pub mod login {
             let error_setter = error.clone();
             let success_setter = success.clone();
             let is_verifying = is_verifying.clone();
+            let password_for_backup = password_for_backup.clone();
 
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
@@ -178,6 +208,7 @@ pub mod login {
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 let is_verifying = is_verifying.clone();
+                let backup_password = (*password_for_backup).clone();
 
                 if code.is_empty() {
                     error_setter.set(Some("Please enter a code".to_string()));
@@ -202,6 +233,22 @@ pub mod login {
                                 log!("TOTP verification successful");
                                 error_setter.set(None);
                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
+
+                                // Initialize backup encryption with password
+                                let backup_pwd = backup_password.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    if let Ok(response) = Api::get("/api/profile").send().await {
+                                        if let Ok(profile) = response.json::<UserProfile>().await {
+                                            if let Ok(session_key) = backup_crypto::initialize_backup_with_password(&backup_pwd, profile.id).await {
+                                                log!("Backup initialized after TOTP, sending session key");
+                                                let _ = Api::post("/api/backup/establish-key")
+                                                    .json(&serde_json::json!({ "session_key": session_key }))
+                                                    .ok()
+                                                    .map(|r| r.send());
+                                            }
+                                        }
+                                    }
+                                });
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
@@ -233,12 +280,14 @@ pub mod login {
             let error_setter = error.clone();
             let success_setter = success.clone();
             let is_verifying = is_verifying.clone();
+            let password_for_backup = password_for_backup.clone();
 
             Callback::from(move |_: MouseEvent| {
                 let token = (*login_token).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 let is_verifying = is_verifying.clone();
+                let backup_password = (*password_for_backup).clone();
 
                 is_verifying.set(true);
                 error_setter.set(None);
@@ -313,6 +362,22 @@ pub mod login {
                                 log!("WebAuthn verification successful");
                                 error_setter.set(None);
                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
+
+                                // Initialize backup encryption with password
+                                let backup_pwd = backup_password.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    if let Ok(response) = Api::get("/api/profile").send().await {
+                                        if let Ok(profile) = response.json::<UserProfile>().await {
+                                            if let Ok(session_key) = backup_crypto::initialize_backup_with_password(&backup_pwd, profile.id).await {
+                                                log!("Backup initialized after WebAuthn, sending session key");
+                                                let _ = Api::post("/api/backup/establish-key")
+                                                    .json(&serde_json::json!({ "session_key": session_key }))
+                                                    .ok()
+                                                    .map(|r| r.send());
+                                            }
+                                        }
+                                    }
+                                });
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {

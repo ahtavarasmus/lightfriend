@@ -42,6 +42,7 @@ mod pages {
 mod components {
     pub mod notification;
     pub mod feature_preview;
+    pub mod backup_key_sender;
 }
 mod proactive {
     pub mod common;

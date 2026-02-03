@@ -1,26 +1,32 @@
 //! Browser-side cryptographic key management for encrypted backups.
 //!
 //! This module handles:
-//! 1. Generating a non-extractable wrapper_key (AES-256-GCM) via Web Crypto
-//! 2. Generating and encrypting a master_key stored in IndexedDB
-//! 3. Deriving a session_key from master_key to send to the enclave
+//! 1. Deriving a master_key from user password via PBKDF2
+//! 2. Generating a non-extractable wrapper_key (AES-256-GCM) via Web Crypto
+//! 3. Wrapping the master_key with the wrapper_key for IndexedDB storage
+//! 4. Deriving a session_key from master_key to send to the enclave
 //!
 //! Key properties:
 //! - wrapper_key: Non-extractable CryptoKey (XSS can use but not export)
-//! - master_key: Encrypted at rest in IndexedDB
+//! - master_key: Derived from password, wrapped at rest in IndexedDB
 //! - session_key: Derived from master_key and sent to enclave
+//!
+//! Security: Same password = same master_key on all devices
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use gloo_console::log;
 use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
+use pbkdf2::pbkdf2_hmac;
+use sha2::Sha256;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Crypto, CryptoKey, IdbDatabase, IdbOpenDbRequest, SubtleCrypto};
 
 const DB_NAME: &str = "lightfriend_backup";
 const STORE_NAME: &str = "keys";
-const MASTER_KEY_ID: &str = "master_key";
+const WRAPPED_MASTER_KEY_ID: &str = "wrapped_master_key";
 const WRAPPER_KEY_ID: &str = "wrapper_key";
+const PBKDF2_ITERATIONS: u32 = 100_000;
 
 /// Error type for backup crypto operations
 #[derive(Debug, Clone)]
@@ -94,68 +100,6 @@ async fn generate_wrapper_key() -> Result<CryptoKey, BackupCryptoError> {
         .map_err(|_| BackupCryptoError {
             message: "Failed to cast to CryptoKey".to_string(),
         })
-}
-
-/// Encrypt data with a CryptoKey using AES-GCM
-async fn encrypt_with_key(
-    key: &CryptoKey,
-    plaintext: &[u8],
-) -> Result<Vec<u8>, BackupCryptoError> {
-    let subtle = get_subtle()?;
-
-    // Generate IV (12 bytes for AES-GCM)
-    let iv = generate_random_bytes(12)?;
-    let iv_array = Uint8Array::from(&iv[..]);
-
-    // Algorithm parameters
-    let algorithm = Object::new();
-    Reflect::set(&algorithm, &"name".into(), &"AES-GCM".into())?;
-    Reflect::set(&algorithm, &"iv".into(), &iv_array)?;
-
-    // Encrypt
-    let data = Uint8Array::from(plaintext);
-    let promise = subtle.encrypt_with_object_and_buffer_source(&algorithm, key, &data)?;
-    let result = JsFuture::from(promise).await?;
-    let ciphertext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?.into());
-
-    // Combine IV + ciphertext
-    let mut combined = iv;
-    combined.extend(ciphertext.to_vec());
-
-    Ok(combined)
-}
-
-/// Decrypt data with a CryptoKey using AES-GCM
-async fn decrypt_with_key(
-    key: &CryptoKey,
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, BackupCryptoError> {
-    if ciphertext.len() < 12 {
-        return Err(BackupCryptoError {
-            message: "Ciphertext too short".to_string(),
-        });
-    }
-
-    let subtle = get_subtle()?;
-
-    // Extract IV and ciphertext
-    let iv = &ciphertext[..12];
-    let encrypted = &ciphertext[12..];
-
-    let iv_array = Uint8Array::from(iv);
-    let encrypted_array = Uint8Array::from(encrypted);
-
-    // Algorithm parameters
-    let algorithm = Object::new();
-    Reflect::set(&algorithm, &"name".into(), &"AES-GCM".into())?;
-    Reflect::set(&algorithm, &"iv".into(), &iv_array)?;
-
-    // Decrypt
-    let promise = subtle.decrypt_with_object_and_buffer_source(&algorithm, key, &encrypted_array)?;
-    let result = JsFuture::from(promise).await?;
-    let plaintext = Uint8Array::new(&result.dyn_into::<ArrayBuffer>()?.into());
-
-    Ok(plaintext.to_vec())
 }
 
 /// Derive a session key from master key using HKDF
@@ -333,27 +277,273 @@ async fn load_from_idb(db: &IdbDatabase, key: &str) -> Result<Option<Vec<u8>>, B
     })?
 }
 
-/// Initialize backup keys and return the session key to send to the enclave.
+/// Store a CryptoKey directly in IndexedDB (preserves non-extractable property)
+async fn store_crypto_key_in_idb(
+    db: &IdbDatabase,
+    key: &str,
+    crypto_key: &CryptoKey,
+) -> Result<(), BackupCryptoError> {
+    let transaction = db
+        .transaction_with_str_and_mode(STORE_NAME, web_sys::IdbTransactionMode::Readwrite)
+        .map_err(|e| BackupCryptoError {
+            message: format!("Transaction error: {:?}", e),
+        })?;
+
+    let store = transaction.object_store(STORE_NAME).map_err(|e| {
+        BackupCryptoError {
+            message: format!("Store error: {:?}", e),
+        }
+    })?;
+
+    // Store the CryptoKey directly - IndexedDB's structured clone will preserve it
+    store
+        .put_with_key(crypto_key, &key.into())
+        .map_err(|e| BackupCryptoError {
+            message: format!("Put CryptoKey error: {:?}", e),
+        })?;
+
+    Ok(())
+}
+
+/// Load a CryptoKey from IndexedDB
+async fn load_crypto_key_from_idb(
+    db: &IdbDatabase,
+    key: &str,
+) -> Result<Option<CryptoKey>, BackupCryptoError> {
+    let transaction = db
+        .transaction_with_str(STORE_NAME)
+        .map_err(|e| BackupCryptoError {
+            message: format!("Transaction error: {:?}", e),
+        })?;
+
+    let store = transaction.object_store(STORE_NAME).map_err(|e| {
+        BackupCryptoError {
+            message: format!("Store error: {:?}", e),
+        }
+    })?;
+
+    let request = store.get(&key.into()).map_err(|e| BackupCryptoError {
+        message: format!("Get error: {:?}", e),
+    })?;
+
+    // Wait for result
+    let (tx, rx) = futures_channel::oneshot::channel();
+    let mut tx_opt = Some(tx);
+    let request_clone = request.clone();
+    let onsuccess = Closure::once(Box::new(move |_event: web_sys::Event| {
+        if let Some(tx) = tx_opt.take() {
+            let result = request_clone.result().ok();
+            let value = result.and_then(|v| {
+                if v.is_undefined() || v.is_null() {
+                    None
+                } else {
+                    v.dyn_into::<CryptoKey>().ok()
+                }
+            });
+            let _ = tx.send(Ok(value));
+        }
+    }) as Box<dyn FnOnce(_)>);
+    request.set_onsuccess(Some(onsuccess.as_ref().unchecked_ref()));
+    onsuccess.forget();
+
+    rx.await.map_err(|_| BackupCryptoError {
+        message: "IDB get CryptoKey cancelled".to_string(),
+    })?
+}
+
+/// Derive master key from password using PBKDF2-HMAC-SHA256
+///
+/// Uses a deterministic salt based on user_id so the same password
+/// always produces the same master key across devices.
+pub fn derive_master_key_from_password(
+    password: &str,
+    user_id: i32,
+) -> Result<[u8; 32], BackupCryptoError> {
+    // Deterministic salt: prefix + user_id
+    let mut salt = b"lightfriend-backup-v1".to_vec();
+    salt.extend_from_slice(&user_id.to_le_bytes());
+
+    let mut master_key = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut master_key);
+
+    Ok(master_key)
+}
+
+/// Wrap a master key using Web Crypto API with AES-GCM
+/// Returns IV (12 bytes) + wrapped key
+async fn wrap_master_key(
+    wrapper_key: &CryptoKey,
+    master_key: &[u8; 32],
+) -> Result<Vec<u8>, BackupCryptoError> {
+    let subtle = get_subtle()?;
+
+    // Generate IV for wrapping
+    let iv = generate_random_bytes(12)?;
+    let iv_array = Uint8Array::from(&iv[..]);
+
+    // First import the master key as a raw key for wrapping
+    let key_data = Uint8Array::from(&master_key[..]);
+    let import_algorithm = Object::new();
+    Reflect::set(&import_algorithm, &"name".into(), &"AES-GCM".into())?;
+    Reflect::set(&import_algorithm, &"length".into(), &256.into())?;
+
+    let usages = Array::new();
+    usages.push(&"encrypt".into());
+    usages.push(&"decrypt".into());
+
+    // Import as extractable so we can wrap it
+    let promise = subtle.import_key_with_object(
+        "raw",
+        &key_data.buffer(),
+        &import_algorithm,
+        true, // extractable for wrapping
+        &usages,
+    )?;
+    let key_to_wrap = JsFuture::from(promise)
+        .await?
+        .dyn_into::<CryptoKey>()
+        .map_err(|_| BackupCryptoError {
+            message: "Failed to import key for wrapping".to_string(),
+        })?;
+
+    // Wrap using AES-GCM
+    let wrap_algorithm = Object::new();
+    Reflect::set(&wrap_algorithm, &"name".into(), &"AES-GCM".into())?;
+    Reflect::set(&wrap_algorithm, &"iv".into(), &iv_array)?;
+
+    let promise = subtle.wrap_key_with_object("raw", &key_to_wrap, wrapper_key, &wrap_algorithm)?;
+    let wrapped = JsFuture::from(promise).await?;
+    let wrapped_bytes = Uint8Array::new(&wrapped.dyn_into::<ArrayBuffer>()?.into());
+
+    // Combine IV + wrapped key
+    let mut result = iv;
+    result.extend(wrapped_bytes.to_vec());
+
+    Ok(result)
+}
+
+/// Unwrap a master key as HKDF key material (non-extractable)
+/// Input: IV (12 bytes) + wrapped key
+/// Returns a CryptoKey that can only be used for deriveBits - cannot be exported
+async fn unwrap_master_key_for_hkdf(
+    wrapper_key: &CryptoKey,
+    wrapped_data: &[u8],
+) -> Result<CryptoKey, BackupCryptoError> {
+    if wrapped_data.len() < 12 {
+        return Err(BackupCryptoError {
+            message: "Wrapped data too short".to_string(),
+        });
+    }
+
+    let subtle = get_subtle()?;
+
+    // Extract IV and wrapped key
+    let iv = &wrapped_data[..12];
+    let wrapped_key = &wrapped_data[12..];
+
+    let iv_array = Uint8Array::from(iv);
+    let wrapped_array = Uint8Array::from(wrapped_key);
+
+    // Unwrap algorithm (AES-GCM decryption)
+    let unwrap_algorithm = Object::new();
+    Reflect::set(&unwrap_algorithm, &"name".into(), &"AES-GCM".into())?;
+    Reflect::set(&unwrap_algorithm, &"iv".into(), &iv_array)?;
+
+    // Key algorithm: HKDF for derivation
+    let key_algorithm = Object::new();
+    Reflect::set(&key_algorithm, &"name".into(), &"HKDF".into())?;
+
+    // Usages: only deriveBits
+    let usages = Array::new();
+    usages.push(&"deriveBits".into());
+
+    // Non-extractable: XSS cannot export the key material
+    let promise = subtle.unwrap_key_with_buffer_source_and_object_and_object(
+        "raw",
+        &wrapped_array.into(),
+        wrapper_key,
+        &unwrap_algorithm,
+        &key_algorithm,
+        false, // non-extractable - this is the security benefit
+        &usages,
+    )?;
+    let unwrapped = JsFuture::from(promise).await?;
+
+    unwrapped.dyn_into::<CryptoKey>().map_err(|_| BackupCryptoError {
+        message: "Failed to unwrap master key as HKDF".to_string(),
+    })
+}
+
+/// Derive session key directly from an HKDF CryptoKey (non-extractable)
+async fn derive_session_key_from_crypto_key(
+    hkdf_key: &CryptoKey,
+) -> Result<Vec<u8>, BackupCryptoError> {
+    let subtle = get_subtle()?;
+
+    // HKDF derivation parameters
+    let derive_params = Object::new();
+    Reflect::set(&derive_params, &"name".into(), &"HKDF".into())?;
+    Reflect::set(&derive_params, &"hash".into(), &"SHA-256".into())?;
+    Reflect::set(
+        &derive_params,
+        &"salt".into(),
+        &Uint8Array::from(&b"lightfriend-backup-salt"[..]),
+    )?;
+    Reflect::set(
+        &derive_params,
+        &"info".into(),
+        &Uint8Array::from(&b"session"[..]),
+    )?;
+
+    let promise = subtle.derive_bits_with_object(&derive_params, hkdf_key, 256)?;
+    let bits = JsFuture::from(promise).await?;
+    let derived = Uint8Array::new(&bits.dyn_into::<ArrayBuffer>()?.into());
+
+    Ok(derived.to_vec())
+}
+
+/// Initialize backup with password - called after login
 ///
 /// This function:
-/// 1. Opens IndexedDB
-/// 2. Generates or loads the wrapper key (non-extractable)
-/// 3. Generates or loads/decrypts the master key
+/// 1. Derives master key from password using PBKDF2
+/// 2. Gets or creates a non-extractable wrapper key
+/// 3. Wraps the master key and stores in IndexedDB
 /// 4. Derives and returns the session key
 ///
 /// Returns the base64-encoded session key ready to send to the enclave.
-pub async fn initialize_backup_session() -> Result<String, BackupCryptoError> {
-    log!("Initializing backup session...");
+pub async fn initialize_backup_with_password(
+    password: &str,
+    user_id: i32,
+) -> Result<String, BackupCryptoError> {
+    log!("Initializing backup with password...");
 
-    // For this implementation, we'll generate a fresh master key and session key
-    // each time since we can't persist the non-extractable wrapper key across sessions
-    // in a simple way. A production implementation would use IndexedDB properly.
+    // Step 1: Derive master key from password
+    let master_key = derive_master_key_from_password(password, user_id)?;
+    log!("Derived master key from password");
 
-    // Generate 256-bit master key
-    let master_key = generate_random_bytes(32)?;
-    log!("Generated master key");
+    // Step 2: Open IndexedDB
+    let db = open_database().await?;
 
-    // Derive session key from master key
+    // Step 3: Get or create wrapper key
+    let wrapper_key = match load_crypto_key_from_idb(&db, WRAPPER_KEY_ID).await? {
+        Some(key) => {
+            log!("Loaded existing wrapper key");
+            key
+        }
+        None => {
+            log!("Generating new wrapper key");
+            let key = generate_wrapper_key().await?;
+            store_crypto_key_in_idb(&db, WRAPPER_KEY_ID, &key).await?;
+            key
+        }
+    };
+
+    // Step 4: Wrap and store the master key
+    let wrapped_master_key = wrap_master_key(&wrapper_key, &master_key).await?;
+    store_in_idb(&db, WRAPPED_MASTER_KEY_ID, &wrapped_master_key).await?;
+    log!("Stored wrapped master key");
+
+    // Step 5: Derive session key from master key
     let session_key = derive_session_key(&master_key).await?;
     log!("Derived session key");
 
@@ -363,21 +553,39 @@ pub async fn initialize_backup_session() -> Result<String, BackupCryptoError> {
     Ok(session_key_b64)
 }
 
-/// Check if a backup session can be established
-pub async fn can_establish_backup_session() -> bool {
-    // Check if Web Crypto is available
-    if get_subtle().is_err() {
-        return false;
-    }
+/// Get session key from storage (for periodic refresh)
+///
+/// This function:
+/// 1. Loads the wrapper key from IndexedDB
+/// 2. Loads and unwraps the master key as non-extractable HKDF key
+/// 3. Derives session key directly (no export needed)
+///
+/// Security: The master key is never extractable - XSS can derive session keys
+/// but cannot steal the master key material itself.
+pub async fn get_session_key_from_storage() -> Result<Option<String>, BackupCryptoError> {
+    // Open IndexedDB
+    let db = open_database().await?;
 
-    // Check if IndexedDB is available
-    if let Some(window) = web_sys::window() {
-        if window.indexed_db().is_err() {
-            return false;
-        }
-    } else {
-        return false;
-    }
+    // Load wrapper key
+    let wrapper_key = match load_crypto_key_from_idb(&db, WRAPPER_KEY_ID).await? {
+        Some(key) => key,
+        None => return Ok(None), // No backup initialized yet
+    };
 
-    true
+    // Load wrapped master key
+    let wrapped_master_key = match load_from_idb(&db, WRAPPED_MASTER_KEY_ID).await? {
+        Some(data) => data,
+        None => return Ok(None), // No backup initialized yet
+    };
+
+    // Unwrap master key as non-extractable HKDF key
+    let hkdf_key = unwrap_master_key_for_hkdf(&wrapper_key, &wrapped_master_key).await?;
+
+    // Derive session key directly from the CryptoKey (no export possible)
+    let session_key = derive_session_key_from_crypto_key(&hkdf_key).await?;
+
+    // Encode session key as base64
+    let session_key_b64 = BASE64.encode(&session_key);
+
+    Ok(Some(session_key_b64))
 }
