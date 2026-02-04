@@ -586,3 +586,288 @@ pub async fn delete_keyword(
         }
     }
 }
+
+// Task edit with AI
+#[derive(Deserialize)]
+pub struct TaskEditRequest {
+    pub instruction: String,
+}
+
+#[derive(Serialize)]
+pub struct TaskEditResponse {
+    pub message: String,
+    pub success: bool,
+}
+
+/// AI response structure for task editing
+#[derive(Deserialize)]
+struct AiTaskEditResult {
+    new_trigger_time: Option<String>,
+    new_condition: Option<String>,
+    explanation: String,
+}
+
+pub async fn edit_task_with_ai(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(task_id): Path<i32>,
+    Json(request): Json<TaskEditRequest>,
+) -> Result<Json<TaskEditResponse>, (StatusCode, Json<serde_json::Value>)> {
+    use openai_api_rs::v1::chat_completion::{
+        ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
+    };
+
+    tracing::info!(
+        "edit_task_with_ai called: task_id={}, user_id={}, instruction={}",
+        task_id,
+        auth_user.user_id,
+        request.instruction
+    );
+
+    // Get the task and verify ownership
+    let tasks = state
+        .user_repository
+        .get_user_tasks(auth_user.user_id)
+        .map_err(|e| {
+            tracing::error!("Failed to get user tasks: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    tracing::info!("Found {} tasks for user", tasks.len());
+
+    let task = tasks
+        .into_iter()
+        .find(|t| t.id == Some(task_id))
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Task not found"})),
+            )
+        })?;
+
+    // Get user timezone
+    let user_tz_str = state
+        .user_core
+        .get_user_info(auth_user.user_id)
+        .ok()
+        .and_then(|info| info.timezone)
+        .unwrap_or_else(|| "UTC".to_string());
+
+    // Parse trigger to get time display
+    let trigger_ts = task
+        .trigger
+        .strip_prefix("once_")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let current_time = chrono::DateTime::from_timestamp(trigger_ts, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    // Build AI prompt
+    let current_condition = task.condition.as_deref().unwrap_or("").trim();
+    let condition_display = if current_condition.is_empty() {
+        "(empty)"
+    } else {
+        current_condition
+    };
+
+    // Get available tools dynamically
+    let tools_prompt = crate::tool_call_utils::utils::get_runtime_tools_prompt();
+
+    let system_prompt = format!(
+        r#"You are editing a scheduled task that will be executed by an AI assistant.
+
+CURRENT TASK:
+- Scheduled time: {} (timezone: {})
+- Current instructions: {}
+
+USER'S EDIT REQUEST: "{}"
+
+{}
+IMPORTANT RULES:
+1. If the task is ONLY to remind/notify the user (no other action), use: send_reminder(message)
+2. For tasks with actual actions (Tesla, email, etc.), the user is automatically notified when the task completes - no need to add send_reminder
+3. Use exact tool names from the list above
+
+Return ONLY valid JSON (no markdown, no code blocks):
+{{
+  "new_trigger_time": "YYYY-MM-DDTHH:MM:SS" or null,
+  "new_condition": "updated instructions" or null,
+  "explanation": "Brief explanation"
+}}
+
+INSTRUCTION FORMAT (CRITICAL):
+- MUST use tool call syntax: "control_tesla(climate_on)" NOT natural language
+- For reminders: "send_reminder(Your message here)"
+- Multiple actions: separate with periods
+
+CRITICAL - REMINDER vs ACTION (read carefully!):
+- "remind me to X" = ONLY NOTIFY about X, use send_reminder(X) - user does X themselves
+- "do X" / "turn on X" = EXECUTE X automatically, use control_tesla(X)
+
+LANGUAGE: Never use 'you' or 'your' - use descriptive third-person text.
+
+CORRECT EXAMPLES:
+- User: "change to 11pm" -> new_trigger_time with 11pm, new_condition = null
+- User: "make it a reminder about the package" -> new_condition = "send_reminder(Package reminder)", new_trigger_time = null
+- User: "remind me to turn on tesla" -> send_reminder(Turn on Tesla climate)
+- User: "turn on tesla climate" -> control_tesla(climate_on)
+- User: "remind me to lock my car" -> send_reminder(Lock the Tesla)
+- User: "remind me about the meeting" -> send_reminder(Meeting reminder)
+
+WRONG:
+- send_reminder(Call you) - WRONG! Never use 'you'
+- Returning null for both fields when user clearly wants a change
+
+TIME RULES:
+- Calculate actual datetime for "tomorrow", "9am", "in 2 hours", etc.
+- Timezone: {}
+- Current time: {}
+- Return null if no time change
+
+CHANGE RULES:
+- Return null for unchanged fields
+- Time-only change: new_condition = null
+- Instruction-only change: new_trigger_time = null"#,
+        current_time,
+        user_tz_str,
+        condition_display,
+        request.instruction,
+        tools_prompt,
+        user_tz_str,
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+    );
+
+    // Call AI to interpret the edit instruction
+    tracing::info!("Calling AI to interpret edit instruction");
+    let ai_config = &state.ai_config;
+    let provider = ai_config.provider_for_user_with_preference(None);
+    tracing::info!("Using AI provider: {:?}", provider);
+    let client = ai_config.create_client(provider).map_err(|e| {
+        tracing::error!("Failed to create AI client: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "AI service unavailable"})),
+        )
+    })?;
+    tracing::info!("AI client created successfully");
+
+    let messages = vec![ChatCompletionMessage {
+        role: MessageRole::user,
+        content: Content::Text(system_prompt),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    }];
+
+    let model = ai_config.model(provider, crate::ai_config::ModelPurpose::Default);
+
+    let ai_request = ChatCompletionRequest::new(model.to_string(), messages)
+        .max_tokens(500)
+        .temperature(0.1);
+
+    tracing::info!("Sending request to AI...");
+    let response = client.chat_completion(ai_request).await.map_err(|e| {
+        tracing::error!("AI request failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("AI request failed: {}", e)})),
+        )
+    })?;
+    tracing::info!("AI response received");
+
+    let ai_response = response
+        .choices
+        .first()
+        .and_then(|c| c.message.content.clone())
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "No response from AI"})),
+            )
+        })?;
+
+    tracing::debug!("AI response for task edit: {}", ai_response);
+
+    // Clean up AI response - remove markdown code blocks if present
+    let cleaned_response = ai_response
+        .trim()
+        .strip_prefix("```json")
+        .or_else(|| ai_response.trim().strip_prefix("```"))
+        .unwrap_or(&ai_response)
+        .trim()
+        .strip_suffix("```")
+        .unwrap_or(&ai_response)
+        .trim();
+
+    // Parse the AI response
+    let edit_result: AiTaskEditResult = serde_json::from_str(cleaned_response).map_err(|e| {
+        tracing::error!(
+            "Failed to parse AI response: {} - Response was: {}",
+            e,
+            cleaned_response
+        );
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to understand edit instruction. Please try rephrasing."})),
+        )
+    })?;
+
+    // Apply the changes
+    let mut changes_made = false;
+
+    // Update trigger time if specified
+    if let Some(new_time_str) = &edit_result.new_trigger_time {
+        let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
+
+        // Parse the datetime string
+        if let Ok(naive_dt) =
+            chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S")
+        {
+            use chrono::TimeZone;
+            if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
+                let new_ts = local_dt.timestamp() as i32;
+                let new_trigger = format!("once_{}", new_ts);
+                state
+                    .user_repository
+                    .reschedule_task(task_id, &new_trigger)
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": format!("Failed to update task time: {}", e)})),
+                        )
+                    })?;
+                changes_made = true;
+            }
+        }
+    }
+
+    // Update condition if specified
+    if let Some(new_condition) = &edit_result.new_condition {
+        state
+            .user_repository
+            .update_task_condition(auth_user.user_id, task_id, new_condition)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to update task description: {}", e)})),
+                )
+            })?;
+        changes_made = true;
+    }
+
+    if changes_made {
+        Ok(Json(TaskEditResponse {
+            message: edit_result.explanation,
+            success: true,
+        }))
+    } else {
+        Ok(Json(TaskEditResponse {
+            message: "No changes were made. Please clarify what you'd like to change.".to_string(),
+            success: false,
+        }))
+    }
+}

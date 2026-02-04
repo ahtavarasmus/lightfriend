@@ -28,16 +28,17 @@ use backend::{
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    filter_handlers, google_calendar, google_calendar_auth, imap_auth, imap_handlers,
-    instagram_auth, instagram_handlers, messenger_auth, messenger_handlers, profile_handlers,
-    refund_handlers, self_host_handlers, signal_auth, signal_handlers, stripe_handlers,
-    telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    dashboard_handlers, filter_handlers, google_calendar, google_calendar_auth, imap_auth,
+    imap_handlers, instagram_auth, instagram_handlers, messenger_auth, messenger_handlers,
+    profile_handlers, refund_handlers, self_host_handlers, signal_auth, signal_handlers,
+    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth,
+    whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
     "OK"
 }
+
 pub fn validate_env() {
     // Core variables (always required regardless of environment)
     let core_vars = [
@@ -773,6 +774,14 @@ async fn main() {
             get(profile_handlers::get_proactive_agent_on),
         )
         .route(
+            "/api/profile/quiet-mode",
+            get(profile_handlers::get_quiet_mode),
+        )
+        .route(
+            "/api/profile/quiet-mode",
+            post(profile_handlers::set_quiet_mode),
+        )
+        .route(
             "/api/profile/get_nearby_places",
             get(profile_handlers::get_nearby_places),
         )
@@ -1178,6 +1187,11 @@ async fn main() {
             patch(filter_handlers::set_task_permanence),
         )
         .route(
+            "/api/tasks/{task_id}/edit-ai",
+            post(filter_handlers::edit_task_with_ai),
+        )
+        .route("/api/tasks/{task_id}", delete(filter_handlers::cancel_task))
+        .route(
             "/api/filters/monitored-contacts",
             get(filter_handlers::get_priority_senders),
         )
@@ -1208,6 +1222,11 @@ async fn main() {
         .route(
             "/api/filters/keyword/{service_type}/{keyword}",
             delete(filter_handlers::delete_keyword),
+        )
+        // Dashboard routes
+        .route(
+            "/api/dashboard/summary",
+            get(dashboard_handlers::get_dashboard_summary),
         )
         // Contact Profiles routes
         .route(

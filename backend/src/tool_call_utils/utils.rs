@@ -5,6 +5,62 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Available runtime tools for scheduled tasks.
+/// These are the tools that the AI can use when executing a task.
+/// Keep this list updated when adding new tools.
+pub struct RuntimeTool {
+    pub name: &'static str,
+    pub syntax: &'static str,
+    pub description: &'static str,
+}
+
+/// Returns the list of available runtime tools for task execution.
+/// This is the single source of truth - update this when adding new tools.
+pub fn get_available_runtime_tools() -> Vec<RuntimeTool> {
+    vec![
+        RuntimeTool {
+            name: "send_reminder",
+            syntax: "send_reminder(message)",
+            description: "Send a notification/reminder to the user. Use for reminder-only tasks.",
+        },
+        RuntimeTool {
+            name: "control_tesla",
+            syntax: "control_tesla(command)",
+            description: "Control Tesla vehicle. Commands: climate_on, climate_off, lock, unlock",
+        },
+        RuntimeTool {
+            name: "send_chat_message",
+            syntax: "send_chat_message(platform, contact, message)",
+            description: "Send message via WhatsApp, Telegram, or Signal",
+        },
+        RuntimeTool {
+            name: "send_email",
+            syntax: "send_email(to, subject, body)",
+            description: "Send an email",
+        },
+        RuntimeTool {
+            name: "fetch_calendar_events",
+            syntax: "fetch_calendar_events()",
+            description: "Check/fetch calendar events",
+        },
+        RuntimeTool {
+            name: "get_weather",
+            syntax: "get_weather(location)",
+            description: "Get weather information for a location",
+        },
+    ]
+}
+
+/// Returns a formatted string listing all available runtime tools for AI prompts.
+pub fn get_runtime_tools_prompt() -> String {
+    let tools = get_available_runtime_tools();
+    let mut result = String::from("AVAILABLE TOOLS (use these exact names in instructions):\n");
+    for tool in tools {
+        result.push_str(&format!("- {} - {}\n", tool.syntax, tool.description));
+    }
+    result
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,

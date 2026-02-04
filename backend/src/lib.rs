@@ -9,6 +9,7 @@ pub mod handlers {
     pub mod bluesky;
     pub mod bridge_auth_common;
     pub mod contact_profile_handlers;
+    pub mod dashboard_handlers;
     pub mod filter_handlers;
     pub mod google_calendar;
     pub mod google_calendar_auth;
@@ -72,6 +73,7 @@ pub mod tool_call_utils {
     pub mod management;
     pub mod tesla;
     pub mod utils;
+    pub mod youtube;
 }
 pub mod api {
     pub mod elevenlabs;

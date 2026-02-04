@@ -4,6 +4,13 @@ use log::{info, Level};
 use web_sys::MouseEvent;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum AuthState {
+    Checking,  // Initial - don't show Login or Logout
+    LoggedIn,
+    LoggedOut,
+}
 mod config;
 mod utils {
     pub mod api;
@@ -41,6 +48,18 @@ mod pages {
 mod components {
     pub mod notification;
     pub mod feature_preview;
+}
+mod dashboard {
+    pub mod dashboard_view;
+    pub mod chat_box;
+    pub mod triage_indicator;
+    pub mod next_scheduled;
+    pub mod timeline_view;
+    pub mod dashboard_footer;
+    pub mod settings_panel;
+    pub mod activity_panel;
+    pub mod quiet_mode;
+    pub mod media_panel;
 }
 mod proactive {
     pub mod common;
@@ -425,12 +444,11 @@ pub fn pricing_wrapper() -> Html {
 
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
-    pub logged_in: bool,
-    pub on_logout: Callback<()>,
+    pub auth_state: AuthState,
 }
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
-    let NavProps { logged_in, on_logout } = props;
+    let NavProps { auth_state } = props;
     let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
     {
@@ -453,13 +471,6 @@ pub fn nav(props: &NavProps) -> Html {
             }
         }, ());
     }
-   
-    let handle_logout = {
-        let on_logout = on_logout.clone();
-        Callback::from(move |_| {
-            on_logout.emit(());
-        })
-    };
     let toggle_menu = {
         let menu_open = menu_open.clone();
         Callback::from(move |e: MouseEvent| {
@@ -512,22 +523,9 @@ pub fn nav(props: &NavProps) -> Html {
                         </Link<Route>>
                     </div>
                     {
-                        if *logged_in {
-                            html! {
-                                <>
-                                    <button onclick={
-                                        let close = close_menu.clone();
-                                        let logout = handle_logout.clone();
-                                        Callback::from(move |e: MouseEvent| {
-                                            close.emit(e);
-                                            logout.emit(());
-                                        })
-                                    } class="nav-logout-button">
-                                        {"Logout"}
-                                    </button>
-                                </>
-                            }
-                        } else {
+                        // Only show Login button when we've confirmed user is logged out
+                        // When Checking or LoggedIn, don't show login button
+                        if *auth_state == AuthState::LoggedOut {
                             html! {
                                 <div onclick={close_menu.clone()}>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
@@ -535,6 +533,8 @@ pub fn nav(props: &NavProps) -> Html {
                                     </Link<Route>>
                                 </div>
                             }
+                        } else {
+                            html! {}
                         }
                     }
                 </div>
@@ -544,29 +544,29 @@ pub fn nav(props: &NavProps) -> Html {
 }
 #[function_component]
 fn App() -> Html {
-    let logged_in = use_state(|| false); // Default to false, will be checked via API
+    let auth_state = use_state(|| AuthState::Checking); // Start in checking state
     let auth_check_started = use_state(|| false); // Track if auth check has started
 
     // Check authentication status with automatic token refresh
     {
-        let logged_in = logged_in.clone();
+        let auth_state = auth_state.clone();
         let auth_check_started = auth_check_started.clone();
         use_effect_with_deps(move |_| {
             // Only run if we haven't started the check yet
             if !*auth_check_started {
                 auth_check_started.set(true);
 
-                let logged_in = logged_in.clone();
+                let auth_state = auth_state.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     if let Ok(response) = Api::get("/api/auth/status").send().await
                     {
                         if response.ok() {
-                            logged_in.set(true);
+                            auth_state.set(AuthState::LoggedIn);
                         } else {
-                            logged_in.set(false);
+                            auth_state.set(AuthState::LoggedOut);
                         }
                     } else {
-                        logged_in.set(false);
+                        auth_state.set(AuthState::LoggedOut);
                     }
                 });
             }
@@ -574,30 +574,10 @@ fn App() -> Html {
         }, ());
     }
 
-    let handle_logout = {
-        let logged_in = logged_in.clone();
-        Callback::from(move |_| {
-            let logged_in = logged_in.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                // Call backend logout endpoint to clear cookies
-                let _ = utils::api::Api::post("/api/logout")
-                    .send()
-                    .await;
-
-                logged_in.set(false);
-
-                // Reload the page to reset state
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().reload();
-                }
-            });
-        })
-    };
-
     html! {
         <>
             <BrowserRouter>
-                <Nav logged_in={*logged_in} on_logout={handle_logout} />
+                <Nav auth_state={*auth_state} />
                 <Switch<Route> render={switch} />
             </BrowserRouter>
         </>

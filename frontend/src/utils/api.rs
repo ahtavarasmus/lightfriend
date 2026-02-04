@@ -112,9 +112,11 @@ impl RequestWrapper {
                     }
                     .credentials(RequestCredentials::Include);
 
-                    // Re-add body if present
+                    // Re-add body and Content-Type header if present
                     if let Some(body) = self.body_data {
-                        retry_request = retry_request.body(body);
+                        retry_request = retry_request
+                            .header("Content-Type", "application/json")
+                            .body(body);
                     }
 
                     let retry_response = retry_request.send().await?;

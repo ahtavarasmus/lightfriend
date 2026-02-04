@@ -118,26 +118,32 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
     );
 
     // action_spec: detailed step-by-step instructions for runtime AI
+    // Get the dynamic tools list
+    let tools_prompt = crate::tool_call_utils::utils::get_runtime_tools_prompt();
+
     task_properties.insert(
         "action_spec".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Detailed step-by-step instructions for what to do when triggered. \
-                Another AI will execute these instructions using tools, so be specific and unambiguous.\n\n\
-                Available runtime tools:\n\
-                - send_reminder(message): Send notification to user\n\
-                - control_tesla(command): Control Tesla (climate_on, climate_off, lock, unlock)\n\
-                - get_weather(location): Get weather info\n\
-                - send_chat_message(platform, contact, message): Send message via WhatsApp/Telegram/Signal\n\
-                - send_email(to, subject, body): Send email\n\
-                - fetch_calendar_events(): Check calendar\n\n\
-                Examples:\n\
-                - 'Use send_reminder to notify user about picking up the package'\n\
-                - 'Use control_tesla to turn on climate control'\n\
-                - 'Step 1: Use get_weather to check temperature. Step 2: If below 10C, use control_tesla to turn on climate. Otherwise use send_reminder to inform user weather is warm.'\n\
-                - 'Use send_chat_message to send \"just checking in\" to mom on WhatsApp'".to_string()
-            ),
+            description: Some(format!(
+                "The action to execute when triggered. Use tool call format.\n\n\
+                CRITICAL - REMINDER vs ACTION:\n\
+                - User says 'remind me to X' -> use send_reminder(X) - just NOTIFY, don't do X\n\
+                - User says 'do X' or 'turn on X' -> use control_tesla(X) - actually EXECUTE X\n\n\
+                LANGUAGE: Always use third person ('the user'), NEVER 'you'. These are AI instructions.\n\n\
+                {}\n\
+                CORRECT EXAMPLES:\n\
+                - 'call me at midnight' -> send_reminder(Scheduled check-in)\n\
+                - 'remind me to turn on tesla' -> send_reminder(Turn on Tesla climate)\n\
+                - 'turn on tesla climate' -> control_tesla(climate_on)\n\
+                - 'remind me to call mom' -> send_reminder(Call mom)\n\
+                - 'remind me about the meeting' -> send_reminder(Meeting reminder)\n\
+                - 'remind me to lock my tesla' -> send_reminder(Lock the Tesla)\n\n\
+                WRONG (don't do this):\n\
+                - send_reminder(Call you) - WRONG! Never use 'you', use descriptive text like 'Scheduled check-in'\n\
+                - 'remind me to X' -> control_tesla(...) WRONG! User wants reminder, not action",
+                tools_prompt
+            )),
             ..Default::default()
         }),
     );
@@ -163,13 +169,24 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
             name: String::from("create_task"),
             description: Some(String::from(
                 "Creates a scheduled task or sets up monitoring for future events.\n\n\
+                NOTIFICATION METHOD (how to notify user):\n\
+                - 'call me at X' = notify via phone CALL at X -> send_reminder(Scheduled check-in) + notification_type='call'\n\
+                - 'text me at X' = notify via SMS at X -> send_reminder(...) + notification_type='sms'\n\
+                - Default is SMS if not specified\n\n\
+                REMINDER vs ACTION (what to do):\n\
+                - 'remind me to X' = ONLY notify about X (use send_reminder) - user does X themselves\n\
+                - 'do X' / 'turn on X' = EXECUTE action automatically (use control_tesla, etc.)\n\n\
+                LANGUAGE: Always use 'the user' (third person), NEVER 'you' or 'me'. These are instructions for an AI.\n\n\
+                EXAMPLES:\n\
+                - 'call me at midnight' -> send_reminder(Scheduled check-in) + notification_type='call'\n\
+                - 'remind me at 10pm to turn on tesla' -> send_reminder(Turn on Tesla climate)\n\
+                - 'turn on tesla at 10pm' -> control_tesla(climate_on)\n\
+                - 'text me at 3pm about the meeting' -> send_reminder(Meeting reminder) + notification_type='sms'\n\n\
                 USE CASES:\n\
-                1. Time-based reminders: 'remind me at 1pm about the package'\n\
-                2. Scheduled actions: 'turn on tesla climate in 3 hours'\n\
-                3. Message monitoring: 'notify me when mom messages'\n\
-                4. Email monitoring: 'let me know when I get an email about my job application'\n\
-                5. Conditional actions: 'if mom hasn't replied by 8pm, send her a follow up'\n\n\
-                For monitoring tasks, the condition describes what to look for.\n\
+                1. Phone call check-in: 'call me at midnight' -> send_reminder + notification_type='call'\n\
+                2. Reminders: 'remind me at 1pm about the package' -> send_reminder\n\
+                3. Scheduled actions: 'turn on tesla in 3 hours' -> control_tesla\n\
+                4. Message monitoring: 'notify me when mom messages'\n\n\
                 For scheduled tasks, use trigger_type='once' with trigger_time.",
             )),
             parameters: types::FunctionParameters {
