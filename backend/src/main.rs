@@ -5,8 +5,8 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
+use diesel::pg::PgConnection;
 use diesel::r2d2::{self, ConnectionManager};
-use diesel::SqliteConnection;
 use dotenvy::dotenv;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
@@ -22,9 +22,8 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
-    SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
-    WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, TotpRepository, UserCore,
+    UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
@@ -205,9 +204,8 @@ async fn main() {
 
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in environment");
-    let manager = ConnectionManager::<SqliteConnection>::new(database_url);
+    let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = r2d2::Pool::builder()
-        .connection_customizer(Box::new(SqliteConnectionCustomizer))
         .build(manager)
         .expect("Failed to create pool");
     let user_core = Arc::new(UserCore::new(pool.clone()));

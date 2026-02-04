@@ -145,7 +145,7 @@ pub use api::tesla_client::{
 
 // AppState and related types - needed by all handler modules
 use dashmap::DashMap;
-use diesel::prelude::*;
+use diesel::pg::PgConnection;
 use diesel::r2d2::{self, ConnectionManager};
 use governor::{clock::DefaultClock, state::keyed::DefaultKeyedStateStore, RateLimiter};
 use oauth2::{basic::BasicClient, EndpointNotSet, EndpointSet};
@@ -154,23 +154,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
 
-pub type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
-
-/// SQLite connection customizer that sets busy_timeout on each connection.
-/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
-#[derive(Debug)]
-pub struct SqliteConnectionCustomizer;
-
-impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error>
-    for SqliteConnectionCustomizer
-{
-    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-        diesel::sql_query("PRAGMA busy_timeout = 5000;")
-            .execute(conn)
-            .map_err(diesel::r2d2::Error::QueryError)?;
-        Ok(())
-    }
-}
+pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 pub type GoogleOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;

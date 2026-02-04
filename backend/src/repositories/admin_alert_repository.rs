@@ -42,17 +42,12 @@ impl AdminAlertRepository {
             created_at: current_time,
         };
 
-        diesel::insert_into(admin_alerts::table)
+        let id: Option<i32> = diesel::insert_into(admin_alerts::table)
             .values(&new_alert)
-            .execute(&mut conn)?;
+            .returning(admin_alerts::id)
+            .get_result(&mut conn)?;
 
-        // Get the last inserted id
-        let id: i32 = diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>(
-            "last_insert_rowid()",
-        ))
-        .get_result(&mut conn)?;
-
-        Ok(id)
+        Ok(id.unwrap_or(0))
     }
 
     /// Get alerts with pagination and optional severity filter
@@ -137,9 +132,11 @@ impl AdminAlertRepository {
             disabled_at: current_time,
         };
 
-        // Use INSERT OR IGNORE to handle duplicates gracefully
-        diesel::insert_or_ignore_into(disabled_alert_types::table)
+        // Use ON CONFLICT DO NOTHING to handle duplicates gracefully (PostgreSQL)
+        diesel::insert_into(disabled_alert_types::table)
             .values(&new_disabled)
+            .on_conflict(disabled_alert_types::alert_type)
+            .do_nothing()
             .execute(&mut conn)?;
 
         Ok(())

@@ -1,0 +1,47 @@
+-- Drop all tables in reverse dependency order
+
+DROP INDEX IF EXISTS idx_message_status_log_user_id;
+DROP INDEX IF EXISTS idx_message_status_log_message_sid;
+DROP INDEX IF EXISTS idx_tasks_user_id;
+DROP INDEX IF EXISTS idx_usage_logs_user_id;
+DROP INDEX IF EXISTS idx_message_history_conversation_id;
+DROP INDEX IF EXISTS idx_message_history_user_id;
+DROP INDEX IF EXISTS idx_bridges_user_id;
+DROP INDEX IF EXISTS idx_users_phone_number;
+DROP INDEX IF EXISTS idx_users_email;
+
+DROP TABLE IF EXISTS youtube;
+DROP TABLE IF EXISTS webauthn_credentials;
+DROP TABLE IF EXISTS webauthn_challenges;
+DROP TABLE IF EXISTS waitlist;
+DROP TABLE IF EXISTS user_settings;
+DROP TABLE IF EXISTS user_info;
+DROP TABLE IF EXISTS usage_logs;
+DROP TABLE IF EXISTS uber;
+DROP TABLE IF EXISTS totp_secrets;
+DROP TABLE IF EXISTS totp_backup_codes;
+DROP TABLE IF EXISTS tesla;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS subaccounts;
+DROP TABLE IF EXISTS site_metrics;
+DROP TABLE IF EXISTS refund_info;
+DROP TABLE IF EXISTS processed_emails;
+DROP TABLE IF EXISTS priority_senders;
+DROP TABLE IF EXISTS message_status_log;
+DROP TABLE IF EXISTS message_history;
+DROP TABLE IF EXISTS keywords;
+DROP TABLE IF EXISTS imap_connection;
+DROP TABLE IF EXISTS google_calendar;
+DROP TABLE IF EXISTS email_judgments;
+DROP TABLE IF EXISTS disabled_alert_types;
+DROP TABLE IF EXISTS digests;
+DROP TABLE IF EXISTS critical_categories;
+DROP TABLE IF EXISTS country_availability;
+DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS contact_profile_exceptions;
+DROP TABLE IF EXISTS contact_profiles;
+DROP TABLE IF EXISTS calendar_notifications;
+DROP TABLE IF EXISTS bridges;
+DROP TABLE IF EXISTS bridge_disconnection_events;
+DROP TABLE IF EXISTS admin_alerts;
+DROP TABLE IF EXISTS users;

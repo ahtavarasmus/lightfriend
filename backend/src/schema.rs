@@ -448,6 +448,7 @@ diesel::table! {
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
         migrated_to_new_server -> Bool,
+        active_enclave -> Nullable<Text>,
     }
 }
 

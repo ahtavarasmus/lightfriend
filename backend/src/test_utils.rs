@@ -17,25 +17,21 @@ use tower_sessions::MemoryStore;
 /// Embedded migrations for in-memory test database
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
-/// Create an in-memory SQLite connection pool with migrations applied
+/// Create a test PostgreSQL connection pool with migrations applied
 ///
-/// Uses shared cache mode with a unique database name so all connections
-/// from this pool share the same in-memory database, but different tests
-/// get isolated databases.
+/// Requires DATABASE_URL environment variable to point to a test PostgreSQL database.
+/// Each test gets a fresh schema by running migrations.
 pub fn create_test_pool() -> crate::DbPool {
+    use diesel::pg::PgConnection;
     use diesel::r2d2::{self, ConnectionManager};
-    use diesel::SqliteConnection;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
-    // Generate unique database name for this test
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let db_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let db_url = format!("file:testdb_{}?mode=memory&cache=shared", db_id);
+    // Use test database URL from environment
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/lightfriend_test".to_string());
 
-    let manager = ConnectionManager::<SqliteConnection>::new(&db_url);
+    let manager = ConnectionManager::<PgConnection>::new(&db_url);
     let pool = r2d2::Pool::builder()
-        .max_size(5) // Allow multiple connections with shared cache
-        .connection_customizer(Box::new(crate::SqliteConnectionCustomizer))
+        .max_size(5)
         .build(manager)
         .expect("Failed to create test pool");
 

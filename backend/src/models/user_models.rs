@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = users)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {
     pub id: i32,
     pub email: String,
@@ -65,11 +65,12 @@ pub struct User {
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
     pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
+    pub active_enclave: Option<String>, // NULL or "old" = route to old enclave, "new" = route to new enclave
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = user_info)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UserInfo {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -97,7 +98,7 @@ pub struct NewUserInfo {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = imap_connection)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ImapConnection {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -129,7 +130,7 @@ pub struct NewImapConnection {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = processed_emails)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProcessedEmail {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -147,7 +148,7 @@ pub struct NewProcessedEmail {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = email_judgments)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct EmailJudgment {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -171,7 +172,7 @@ pub struct NewEmailJudgment {
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = bridges)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Bridge {
     pub id: Option<i32>, // Assuming auto-incrementing primary key
     pub user_id: i32,
@@ -196,7 +197,7 @@ pub struct NewBridge {
 
 #[derive(Queryable, Selectable, Insertable, Debug, Clone)]
 #[diesel(table_name = bridge_disconnection_events)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BridgeDisconnectionEvent {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -214,7 +215,7 @@ pub struct NewBridgeDisconnectionEvent {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = usage_logs)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -249,7 +250,7 @@ pub struct NewUsageLog {
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = conversations)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Conversation {
     pub id: i32,
     pub user_id: i32,
@@ -275,7 +276,7 @@ pub struct NewConversation {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = uber)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Uber {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -303,7 +304,7 @@ pub struct NewUber {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = google_calendar)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct GoogleCalendar {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -331,7 +332,7 @@ pub struct NewGoogleCalendar {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = youtube)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct YouTube {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -381,7 +382,7 @@ pub struct NewCalendarNotification {
 /// sources: comma-separated list of data sources to fetch before action (e.g., "email,whatsapp,telegram")
 #[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
 #[diesel(table_name = tasks)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Task {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -416,7 +417,7 @@ pub struct NewTask {
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = priority_senders)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PrioritySender {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -439,7 +440,7 @@ pub struct NewPrioritySender {
 // Contact Profiles - unified notification settings per person/group
 #[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
 #[diesel(table_name = contact_profiles)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContactProfile {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -471,7 +472,7 @@ pub struct NewContactProfile {
 
 #[derive(Queryable, Selectable, Debug, Clone)]
 #[diesel(table_name = contact_profile_exceptions)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContactProfileException {
     pub platform: String,          // "whatsapp", "telegram", "signal", "email"
     pub notification_mode: String, // "all", "critical", "digest"
@@ -491,7 +492,7 @@ pub struct NewContactProfileException {
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = keywords)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Keyword {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -509,7 +510,7 @@ pub struct NewKeyword {
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = user_settings)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UserSettings {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -602,7 +603,7 @@ pub struct NewSubaccount {
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = message_history)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MessageHistory {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -630,7 +631,7 @@ pub struct NewMessageHistory {
 
 #[derive(Queryable, Selectable, Debug, Clone)]
 #[diesel(table_name = country_availability)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct CountryAvailability {
     pub has_local_numbers: bool,
     pub outbound_sms_price: Option<f32>,
@@ -654,7 +655,7 @@ pub struct NewCountryAvailability {
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = crate::schema::tesla)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Tesla {
     pub id: Option<i32>,
     pub user_id: i32,
@@ -689,7 +690,7 @@ pub struct NewTesla {
 // TOTP 2FA models
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = totp_secrets)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TotpSecret {
     pub encrypted_secret: String,
 }
@@ -705,7 +706,7 @@ pub struct NewTotpSecret {
 
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = totp_backup_codes)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TotpBackupCode {
     pub id: Option<i32>,
     pub code_hash: String,
@@ -722,7 +723,7 @@ pub struct NewTotpBackupCode {
 // WebAuthn models for passkeys (Touch ID, Face ID, etc.)
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = webauthn_credentials)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WebauthnCredential {
     pub credential_id: String,
     pub encrypted_public_key: String,
@@ -747,7 +748,7 @@ pub struct NewWebauthnCredential {
 
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = webauthn_challenges)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WebauthnChallenge {
     pub challenge: String,
     pub context: Option<String>, // e.g., "login", "tesla_unlock"
@@ -767,7 +768,7 @@ pub struct NewWebauthnChallenge {
 // Waitlist models for users who want updates but haven't subscribed
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = waitlist)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WaitlistEntry {
     pub email: String,
 }
@@ -782,7 +783,7 @@ pub struct NewWaitlistEntry {
 // Refund tracking models
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = crate::schema::refund_info)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct RefundInfo {
     pub has_refunded: i32, // 0 = no, 1 = yes (SQLite doesn't have bool)
 }
@@ -797,7 +798,7 @@ pub struct NewRefundInfo {
 // Message Status Log models for tracking SMS delivery metadata (no message content)
 #[derive(Queryable, Selectable, Clone, Debug, Serialize)]
 #[diesel(table_name = message_status_log)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MessageStatusLog {
     pub id: Option<i32>,
     pub message_sid: String,
@@ -834,7 +835,7 @@ pub struct NewMessageStatusLog {
 // Admin Alert models for tracking system alerts
 #[derive(Queryable, Selectable, Clone, Debug, Serialize)]
 #[diesel(table_name = crate::schema::admin_alerts)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AdminAlert {
     pub id: Option<i32>,
     pub alert_type: String,
@@ -861,7 +862,7 @@ pub struct NewAdminAlert {
 // Disabled Alert Types models for tracking which alerts are silenced
 #[derive(Queryable, Selectable, Clone, Debug, Serialize)]
 #[diesel(table_name = crate::schema::disabled_alert_types)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DisabledAlertType {
     pub id: Option<i32>,
     pub alert_type: String,
@@ -878,7 +879,7 @@ pub struct NewDisabledAlertType {
 // Site Metrics models for tracking site-wide statistics
 #[derive(Queryable, Selectable, Clone, Debug, Serialize)]
 #[diesel(table_name = crate::schema::site_metrics)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct SiteMetric {
     pub id: Option<i32>,
     pub metric_key: String,
