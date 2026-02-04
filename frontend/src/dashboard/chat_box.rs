@@ -419,6 +419,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                                     thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
                                                     duration: m["duration"].as_str().map(|s| s.to_string()),
                                                     channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                    original_url: None, // AI search results don't have original URLs
                                                 })
                                             }).collect();
                                             if !media_items.is_empty() {
@@ -683,12 +684,18 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         let url = cap.as_str();
                                         // Use the unified extract_video_id function
                                         if let Some((platform, video_id)) = extract_video_id(url) {
+                                            use crate::dashboard::media_panel::MediaPlatform;
                                             let platform_name = match platform {
-                                                crate::dashboard::media_panel::MediaPlatform::YouTube => "youtube",
-                                                crate::dashboard::media_panel::MediaPlatform::TikTok => "tiktok",
-                                                crate::dashboard::media_panel::MediaPlatform::Vimeo => "vimeo",
-                                                crate::dashboard::media_panel::MediaPlatform::Rumble => "rumble",
-                                                crate::dashboard::media_panel::MediaPlatform::Dailymotion => "dailymotion",
+                                                MediaPlatform::YouTube => "youtube",
+                                                MediaPlatform::TikTok => "tiktok",
+                                                MediaPlatform::Instagram => "instagram",
+                                                MediaPlatform::Twitter => "twitter",
+                                                MediaPlatform::Vimeo => "vimeo",
+                                                MediaPlatform::Rumble => "rumble",
+                                                MediaPlatform::Dailymotion => "dailymotion",
+                                                MediaPlatform::Reddit => "reddit",
+                                                MediaPlatform::Streamable => "streamable",
+                                                MediaPlatform::Spotify => "spotify",
                                                 _ => continue,
                                             };
                                             let thumbnail = match platform_name {
@@ -698,9 +705,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             let title = match platform_name {
                                                 "youtube" => format!("YouTube Video: {}", video_id),
                                                 "tiktok" => format!("TikTok Video: {}", video_id),
+                                                "instagram" => format!("Instagram Reel: {}", video_id),
+                                                "twitter" => format!("Twitter Video: {}", video_id),
                                                 "vimeo" => format!("Vimeo Video: {}", video_id),
                                                 "rumble" => format!("Rumble Video: {}", video_id),
                                                 "dailymotion" => format!("Dailymotion Video: {}", video_id),
+                                                "reddit" => format!("Reddit Post: {}", video_id),
+                                                "streamable" => format!("Streamable Video: {}", video_id),
+                                                "spotify" => format!("Spotify Track: {}", video_id),
                                                 _ => format!("Video: {}", video_id),
                                             };
                                             new_media.push(MediaItem {
@@ -710,6 +722,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                                 thumbnail,
                                                 duration: None,
                                                 channel: None,
+                                                original_url: Some(url.to_string()),
                                             });
                                         }
                                     }
