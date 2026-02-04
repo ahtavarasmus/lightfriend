@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Edit": [
+      {
+        "matcher": "tests/**/*.rs",
+        "command": "OVERRIDE_FLAG=\"/tmp/override-test-edit-$(echo \"$CLAUDE_FILE_PATH\" | md5 -q)\"; if [ -f \"$OVERRIDE_FLAG\" ]; then rm \"$OVERRIDE_FLAG\" && exit 0; fi; echo \"BLOCKED: Editing test files requires user approval. Tests are a safety net.\"; echo \"OVERRIDE: touch $OVERRIDE_FLAG\"; exit 1"
+      }
+    ]
+  }
+}

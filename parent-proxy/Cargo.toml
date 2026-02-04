@@ -1,0 +1,47 @@
+[package]
+name = "parent-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight proxy running on parent EC2 instance to route webhooks between enclaves via VSOCK"
+
+[dependencies]
+# Web server
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# VSOCK support for Nitro Enclaves (Linux only)
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = "0.5"
+nix = { version = "0.29", features = ["socket"] }
+
+# HTTP client for development/testing (non-Linux)
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Environment
+dotenvy = "0.15"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+[dev-dependencies]
+axum-test = "16"
+tempfile = "3"
