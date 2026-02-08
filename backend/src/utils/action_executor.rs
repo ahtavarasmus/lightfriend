@@ -90,7 +90,7 @@ fn calculate_lookback_hours(state: &Arc<AppState>, user_id: i32, action: &str) -
     }
 }
 
-/// Fetch data from configured sources
+/// Fetch data from configured sources (concurrently)
 ///
 /// Sources can be: email, whatsapp, telegram, signal, calendar
 /// Returns formatted string with all source data
@@ -100,138 +100,42 @@ pub async fn fetch_sources(
     sources: &str,
     lookback_hours: i32,
 ) -> Result<String, String> {
-    let mut context_parts = Vec::new();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     let since = now - (lookback_hours as i64 * 3600);
 
-    for source in sources.split(',').map(|s| s.trim().to_lowercase()) {
-        match source.as_str() {
-            "email" => {
-                match crate::handlers::imap_handlers::fetch_emails_imap(
-                    state,
-                    user_id,
-                    true,     // preview_only
-                    Some(20), // limit
-                    false,    // unprocessed
-                    true,     // unread_only - consistent with bridge messages for digests
-                )
-                .await
-                {
-                    Ok(emails) => {
-                        // Filter by timestamp (date is DateTime<Utc>)
-                        let recent: Vec<_> = emails
-                            .into_iter()
-                            .filter(|e| e.date.map(|d| d.timestamp() > since).unwrap_or(false))
-                            .collect();
-                        if !recent.is_empty() {
-                            let email_str = recent
-                                .iter()
-                                .map(|e| {
-                                    format!(
-                                        "- From: {}, Subject: {}, Date: {}",
-                                        e.from.as_deref().unwrap_or("unknown"),
-                                        e.subject.as_deref().unwrap_or("(no subject)"),
-                                        e.date_formatted.as_deref().unwrap_or("unknown")
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            context_parts.push(format!(
-                                "EMAIL ({} messages):\n{}",
-                                recent.len(),
-                                email_str
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to fetch emails for user {}: {:?}", user_id, e);
-                        context_parts.push("EMAIL: (fetch failed)".to_string());
-                    }
-                }
-            }
-            "whatsapp" | "telegram" | "signal" => {
-                match crate::utils::bridge::fetch_bridge_messages(
-                    &source, state, user_id, since, true, // unread_only
-                )
-                .await
-                {
-                    Ok(messages) => {
-                        if !messages.is_empty() {
-                            let msg_str = messages
-                                .iter()
-                                .take(15)
-                                .map(|m| {
-                                    format!(
-                                        "- {} in {}: {} ({})",
-                                        m.sender_display_name,
-                                        m.room_name,
-                                        m.content,
-                                        m.formatted_timestamp
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            context_parts.push(format!(
-                                "{} ({} messages):\n{}",
-                                source.to_uppercase(),
-                                messages.len(),
-                                msg_str
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to fetch {} messages for user {}: {:?}",
-                            source,
-                            user_id,
-                            e
-                        );
-                        context_parts.push(format!("{}: (fetch failed)", source.to_uppercase()));
-                    }
-                }
-            }
-            "calendar" => {
-                // Calendar fetches next 24 hours, not affected by lookback
-                let calendar_result =
-                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state, user_id, "{}",
-                    )
-                    .await;
-                if !calendar_result.contains("No events")
-                    && !calendar_result.contains("not connected")
-                {
-                    context_parts.push(format!("CALENDAR:\n{}", calendar_result));
-                }
-            }
-            "weather" => {
-                // Fetch weather using user's default location from settings
-                let user_info = state.user_core.get_user_info(user_id).ok();
-                let location = user_info
-                    .and_then(|u| u.location)
-                    .unwrap_or_else(|| "current location".to_string());
+    let source_list: Vec<String> = sources
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
 
-                match crate::utils::tool_exec::get_weather(
-                    state, &location, "metric", "current", user_id,
-                )
-                .await
-                {
-                    Ok(weather_data) => {
-                        context_parts.push(format!("WEATHER:\n{}", weather_data));
+    let futures: Vec<_> = source_list
+        .iter()
+        .map(|source| {
+            let state = state.clone();
+            let source = source.clone();
+            async move {
+                match source.as_str() {
+                    "email" => fetch_email_source(&state, user_id, since).await,
+                    "whatsapp" | "telegram" | "signal" => {
+                        fetch_bridge_source(&state, user_id, &source, since).await
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to fetch weather: {:?}", e);
-                        context_parts.push("WEATHER: (fetch failed)".to_string());
+                    "calendar" => fetch_calendar_source(&state, user_id).await,
+                    "weather" => fetch_weather_source(&state, user_id).await,
+                    _ => {
+                        tracing::warn!("Unknown source type: {}", source);
+                        None
                     }
                 }
             }
-            _ => {
-                tracing::warn!("Unknown source type: {}", source);
-            }
-        }
-    }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+    let context_parts: Vec<String> = results.into_iter().flatten().collect();
 
     if context_parts.is_empty() {
         Ok(String::new())
@@ -240,12 +144,125 @@ pub async fn fetch_sources(
     }
 }
 
+async fn fetch_email_source(state: &Arc<AppState>, user_id: i32, since: i64) -> Option<String> {
+    match crate::handlers::imap_handlers::fetch_emails_imap(
+        state,
+        user_id,
+        true,     // preview_only
+        Some(20), // limit
+        false,    // unprocessed
+        true,     // unread_only
+    )
+    .await
+    {
+        Ok(emails) => {
+            let recent: Vec<_> = emails
+                .into_iter()
+                .filter(|e| e.date.map(|d| d.timestamp() > since).unwrap_or(false))
+                .collect();
+            if recent.is_empty() {
+                None
+            } else {
+                let email_str = recent
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "- From: {}, Subject: {}, Date: {}",
+                            e.from.as_deref().unwrap_or("unknown"),
+                            e.subject.as_deref().unwrap_or("(no subject)"),
+                            e.date_formatted.as_deref().unwrap_or("unknown")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(format!("EMAIL ({} messages):\n{}", recent.len(), email_str))
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to fetch emails for user {}: {:?}", user_id, e);
+            Some("EMAIL: (fetch failed)".to_string())
+        }
+    }
+}
+
+async fn fetch_bridge_source(
+    state: &Arc<AppState>,
+    user_id: i32,
+    source: &str,
+    since: i64,
+) -> Option<String> {
+    match crate::utils::bridge::fetch_bridge_messages(
+        source, state, user_id, since, true, // unread_only
+    )
+    .await
+    {
+        Ok(messages) => {
+            if messages.is_empty() {
+                None
+            } else {
+                let msg_str = messages
+                    .iter()
+                    .take(15)
+                    .map(|m| {
+                        format!(
+                            "- {} in {}: {} ({})",
+                            m.sender_display_name, m.room_name, m.content, m.formatted_timestamp
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(format!(
+                    "{} ({} messages):\n{}",
+                    source.to_uppercase(),
+                    messages.len(),
+                    msg_str
+                ))
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to fetch {} messages for user {}: {:?}",
+                source,
+                user_id,
+                e
+            );
+            Some(format!("{}: (fetch failed)", source.to_uppercase()))
+        }
+    }
+}
+
+async fn fetch_calendar_source(state: &Arc<AppState>, user_id: i32) -> Option<String> {
+    let calendar_result =
+        crate::tool_call_utils::calendar::handle_fetch_calendar_events(state, user_id, "{}").await;
+    if calendar_result.contains("No events") || calendar_result.contains("not connected") {
+        None
+    } else {
+        Some(format!("CALENDAR:\n{}", calendar_result))
+    }
+}
+
+async fn fetch_weather_source(state: &Arc<AppState>, user_id: i32) -> Option<String> {
+    let user_info = state.user_core.get_user_info(user_id).ok();
+    let location = user_info
+        .and_then(|u| u.location)
+        .unwrap_or_else(|| "current location".to_string());
+
+    match crate::utils::tool_exec::get_weather(state, &location, "metric", "current", user_id).await
+    {
+        Ok(weather_data) => Some(format!("WEATHER:\n{}", weather_data)),
+        Err(e) => {
+            tracing::warn!("Failed to fetch weather: {:?}", e);
+            Some("WEATHER: (fetch failed)".to_string())
+        }
+    }
+}
+
 /// Parse an action string into a StructuredAction.
 /// Handles both new JSON format and old `tool(param)` format for backward compatibility.
 ///
 /// New format: `{"tool":"send_reminder","params":{"message":"Call mom"}}`
 /// Old format: `send_reminder(Call mom)` or `generate_digest`
-fn parse_action_structured(action: &str) -> StructuredAction {
+pub fn parse_action_structured(action: &str) -> StructuredAction {
     let action = action.trim();
     if action.is_empty() {
         return StructuredAction {
