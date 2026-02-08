@@ -65,6 +65,8 @@ pub struct User {
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
     pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
+    pub last_backup_at: Option<i32>, // Unix timestamp of last backup
+    pub backup_session_active: bool, // whether a backup session is currently active
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
@@ -81,6 +83,8 @@ pub struct UserInfo {
     pub recent_contacts: Option<String>,
     pub blocker_password_vault: Option<String>,
     pub lockbox_password_vault: Option<String>,
+    pub latitude: Option<f32>,
+    pub longitude: Option<f32>,
 }
 
 #[derive(Insertable)]
@@ -396,6 +400,7 @@ pub struct Task {
     pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
     pub recurrence_time: Option<String>, // "09:00" (HH:MM in user timezone)
     pub sources: Option<String>,   // "email,whatsapp,telegram,signal,calendar"
+    pub end_time: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -412,6 +417,7 @@ pub struct NewTask {
     pub recurrence_rule: Option<String>,
     pub recurrence_time: Option<String>,
     pub sources: Option<String>,
+    pub end_time: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
@@ -547,6 +553,7 @@ pub struct UserSettings {
     pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
     pub default_notify_on_call: i32,               // 1 = notify on incoming calls, 0 = don't notify
     pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - which LLM provider to use for SMS/chat
+    pub quiet_mode_until: Option<i32>, // NULL = active, 0 = indefinite quiet, >0 = quiet until that unix timestamp
 }
 
 #[derive(Insertable)]

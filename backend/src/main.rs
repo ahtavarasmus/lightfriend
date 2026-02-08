@@ -1190,7 +1190,10 @@ async fn main() {
             "/api/tasks/{task_id}/edit-ai",
             post(filter_handlers::edit_task_with_ai),
         )
-        .route("/api/tasks/{task_id}", delete(filter_handlers::cancel_task))
+        .route(
+            "/api/tasks/{task_id}",
+            get(filter_handlers::get_task).delete(filter_handlers::cancel_task),
+        )
         .route(
             "/api/filters/monitored-contacts",
             get(filter_handlers::get_priority_senders),
@@ -1268,6 +1271,32 @@ async fn main() {
         .route(
             "/api/call/web-check-credits",
             get(elevenlabs::check_web_call_credits),
+        )
+        // MCP Server routes (custom tool integrations)
+        .route(
+            "/api/mcp/servers",
+            get(handlers::mcp_handlers::list_mcp_servers)
+                .post(handlers::mcp_handlers::create_mcp_server),
+        )
+        .route(
+            "/api/mcp/servers/{id}",
+            delete(handlers::mcp_handlers::delete_mcp_server),
+        )
+        .route(
+            "/api/mcp/servers/{id}/tools",
+            get(handlers::mcp_handlers::list_server_tools),
+        )
+        .route(
+            "/api/mcp/servers/{id}/test",
+            post(handlers::mcp_handlers::test_server_connection),
+        )
+        .route(
+            "/api/mcp/servers/{id}/toggle",
+            patch(handlers::mcp_handlers::toggle_mcp_server),
+        )
+        .route(
+            "/api/mcp/test",
+            post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     let app = Router::new()
