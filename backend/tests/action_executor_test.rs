@@ -61,6 +61,7 @@ fn test_task_with_parameterized_action() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
@@ -102,6 +103,7 @@ fn test_task_with_empty_action() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: Some("email".to_string()),
+        end_time: None,
     };
     state
         .user_repository
@@ -145,6 +147,7 @@ fn test_task_with_empty_sources() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: Some("".to_string()),
+        end_time: None,
     };
     state
         .user_repository
@@ -260,6 +263,7 @@ fn test_task_notification_type_call() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
@@ -367,6 +371,7 @@ fn test_known_action_control_tesla() {
         recurrence_rule: params.recurrence_rule.clone(),
         recurrence_time: params.recurrence_time.clone(),
         sources: params.sources.clone(),
+        end_time: None,
     };
     state
         .user_repository
@@ -404,6 +409,7 @@ fn test_known_action_get_weather() {
         recurrence_rule: Some("daily".to_string()),
         recurrence_time: Some("07:00".to_string()),
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
@@ -441,6 +447,7 @@ fn test_known_action_fetch_calendar() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
