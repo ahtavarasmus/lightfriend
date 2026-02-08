@@ -270,6 +270,32 @@ const CHAT_STYLES: &str = r#"
     font-size: 0.75rem;
     margin-top: 0.5rem;
 }
+.chat-shortcut-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+.chat-shortcut-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 0.2rem 0.6rem;
+    color: #888;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.chat-shortcut-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #bbb;
+}
+.chat-shortcut-btn i {
+    font-size: 0.7rem;
+}
 "#;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -277,6 +303,8 @@ pub struct ChatBoxProps {
     pub on_usage_change: Callback<()>,
     #[prop_or(false)]
     pub youtube_connected: bool,
+    #[prop_or(false)]
+    pub tesla_connected: bool,
     #[prop_or_default]
     pub focused_task: Option<UpcomingTask>,
     #[prop_or_default]
@@ -666,6 +694,40 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         })
     };
 
+    // Connection shortcut icon callbacks
+    let show_shortcuts = props.focused_task.is_none()
+        && (props.tesla_connected || props.youtube_connected);
+    let tesla_shortcut_click = {
+        let chat_input = chat_input.clone();
+        let active_mention = active_mention.clone();
+        let chat_input_ref = chat_input_ref.clone();
+        Callback::from(move |_: MouseEvent| {
+            chat_input.set("@tesla ".to_string());
+            active_mention.set(Some("tesla".to_string()));
+            let chat_input_ref = chat_input_ref.clone();
+            gloo_timers::callback::Timeout::new(50, move || {
+                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                    let _ = input.focus();
+                }
+            }).forget();
+        })
+    };
+    let youtube_shortcut_click = {
+        let chat_input = chat_input.clone();
+        let active_mention = active_mention.clone();
+        let chat_input_ref = chat_input_ref.clone();
+        Callback::from(move |_: MouseEvent| {
+            chat_input.set("@youtube ".to_string());
+            active_mention.set(Some("youtube".to_string()));
+            let chat_input_ref = chat_input_ref.clone();
+            gloo_timers::callback::Timeout::new(50, move || {
+                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                    let _ = input.focus();
+                }
+            }).forget();
+        })
+    };
+
     html! {
         <>
             <style>{CHAT_STYLES}</style>
@@ -980,6 +1042,23 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         {"Send"}
                     </button>
                 </div>
+                // Connection shortcut icons below the input
+                if show_shortcuts {
+                    <div class="chat-shortcut-row">
+                        if props.tesla_connected {
+                            <button class="chat-shortcut-btn" onclick={tesla_shortcut_click}>
+                                <i class="fa-solid fa-car"></i>
+                                {"Tesla"}
+                            </button>
+                        }
+                        if props.youtube_connected {
+                            <button class="chat-shortcut-btn" onclick={youtube_shortcut_click}>
+                                <i class="fa-brands fa-youtube"></i>
+                                {"YouTube"}
+                            </button>
+                        }
+                    </div>
+                }
                 // Media panel for detected URLs and AI search results
                 // Hide media panel when editing a task (will reappear when task editing ends)
                 {

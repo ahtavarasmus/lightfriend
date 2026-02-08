@@ -156,6 +156,9 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 - send_reminder: {\"message\": \"Call mom\"}\n\
                 - control_tesla: {\"command\": \"climate_on\"}\n\
                 - send_chat_message: {\"platform\": \"whatsapp\", \"contact\": \"Mom\", \"message\": \"Hi\"}\n\
+                  (platform is optional - defaults to user's first connected platform;\n\
+                   contact is REQUIRED - the person or group to message.\n\
+                   If the user doesn't specify who to message, ask them.)\n\
                 - send_email: {\"to\": \"a@b.com\", \"subject\": \"Hi\", \"body\": \"...\"}\n\
                 - fetch_calendar_events: {}\n\
                 - get_weather: {\"location\": \"New York\"}\n\n\
@@ -274,7 +277,7 @@ pub async fn handle_create_task(
 
     // Normalize action_params to a JSON object
     // AI might send a string instead of an object - wrap it based on tool name
-    let params: Option<serde_json::Value> = if let Some(ref val) = args.action_params {
+    let mut params: Option<serde_json::Value> = if let Some(ref val) = args.action_params {
         if val.is_object() {
             Some(val.clone())
         } else if let Some(s) = val.as_str() {
@@ -311,6 +314,131 @@ pub async fn handle_create_task(
     } else {
         None
     };
+
+    // Resolve invalid platform for send_chat_message to the user's first connected bridge
+    if args.action_tool == "send_chat_message" {
+        if let Some(ref mut p) = params {
+            let valid_platforms = ["telegram", "whatsapp", "signal"];
+            let needs_default = match p.get("platform") {
+                Some(serde_json::Value::String(s)) => {
+                    !valid_platforms.contains(&s.to_lowercase().as_str())
+                }
+                None => true,
+                _ => true,
+            };
+            if needs_default {
+                if let Ok(Some(bridge)) = state.user_repository.get_first_connected_bridge(user_id)
+                {
+                    if let Some(obj) = p.as_object_mut() {
+                        obj.insert(
+                            "platform".to_string(),
+                            serde_json::Value::String(bridge.bridge_type),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve contact name for send_chat_message via contact profiles + Matrix bridge
+    if args.action_tool == "send_chat_message" {
+        if let Some(ref mut p) = params {
+            // Normalize: LLM sometimes uses "chat_name" instead of "contact"
+            if p.get("contact").is_none() {
+                if let Some(chat_name_val) =
+                    p.as_object_mut().and_then(|obj| obj.remove("chat_name"))
+                {
+                    if let Some(obj) = p.as_object_mut() {
+                        obj.insert("contact".to_string(), chat_name_val);
+                    }
+                }
+            }
+
+            if let Some(contact_val) = p
+                .get("contact")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+            {
+                if !contact_val.is_empty() {
+                    let platform = p
+                        .get("platform")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("whatsapp")
+                        .to_string();
+
+                    // Try resolving via contact profile nickname
+                    let profiles = state
+                        .user_repository
+                        .get_contact_profiles(user_id)
+                        .unwrap_or_default();
+                    let profile_chat = profiles.iter().find_map(|prof| {
+                        let nickname_lower = prof.nickname.to_lowercase();
+                        let contact_lower = contact_val.to_lowercase();
+                        if nickname_lower.contains(&contact_lower)
+                            || contact_lower.contains(&nickname_lower)
+                        {
+                            match platform.as_str() {
+                                "whatsapp" => prof.whatsapp_chat.clone(),
+                                "telegram" => prof.telegram_chat.clone(),
+                                "signal" => prof.signal_chat.clone(),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    });
+
+                    let search_term = profile_chat.unwrap_or_else(|| contact_val.clone());
+
+                    // Try to resolve via Matrix bridge rooms
+                    match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+                        Ok(client) => {
+                            match crate::utils::bridge::get_service_rooms(&client, &platform).await
+                            {
+                                Ok(rooms) => {
+                                    if let Some(best_match) =
+                                        crate::utils::bridge::search_best_match(
+                                            &rooms,
+                                            &search_term,
+                                        )
+                                    {
+                                        let resolved_name =
+                                            crate::utils::bridge::remove_bridge_suffix(
+                                                &best_match.display_name,
+                                            );
+                                        if let Some(obj) = p.as_object_mut() {
+                                            obj.insert(
+                                                "contact".to_string(),
+                                                serde_json::Value::String(resolved_name),
+                                            );
+                                        }
+                                    } else {
+                                        return Err(format!(
+                                            "Could not find contact '{}' on {}. Please check the name and try again.",
+                                            contact_val,
+                                            platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..]
+                                        ).into());
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(format!(
+                                        "Failed to verify contact on {}: {}. Please make sure your {} bridge is connected.",
+                                        platform, e, platform
+                                    ).into());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!(
+                                "Could not connect to messaging bridge: {}. Please make sure your {} bridge is connected.",
+                                e, platform
+                            ).into());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Build StructuredAction and serialize to JSON for the action column
     let structured = crate::utils::action_executor::StructuredAction {

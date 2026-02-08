@@ -223,6 +223,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // YouTube connection state for media panel comments
     let youtube_connected = use_state(|| false);
 
+    // Tesla connection state for shortcut icons
+    let tesla_connected = use_state(|| false);
+
     // Panel visibility state
     let settings_open = use_state(|| false);
     let activity_open = use_state(|| false);
@@ -325,6 +328,26 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         if let Ok(data) = response.json::<serde_json::Value>().await {
                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                 youtube_connected.set(connected);
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            || ()
+        }, ());
+    }
+
+    // Fetch Tesla connection status
+    {
+        let tesla_connected = tesla_connected.clone();
+        use_effect_with_deps(move |_| {
+            spawn_local(async move {
+                match Api::get("/api/auth/tesla/status").send().await {
+                    Ok(response) => {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(connected) = data.get("has_tesla").and_then(|v| v.as_bool()) {
+                                tesla_connected.set(connected);
                             }
                         }
                     }
@@ -694,6 +717,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     <ChatBox
                         on_usage_change={on_usage_change}
                         youtube_connected={*youtube_connected}
+                        tesla_connected={*tesla_connected}
                         focused_task={(*selected_task).clone()}
                         on_task_cleared={on_task_cleared}
                         on_task_created={on_task_created}
@@ -709,6 +733,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 <div class="task-detail-time">{&task.time_display}</div>
                                 if let Some(ref src) = task.sources_display {
                                     <div class="task-detail-source">{format!("Check: {}", src)}</div>
+                                    if src.to_lowercase().contains("weather") {
+                                        <div class="task-detail-note">{"Location from Settings > Account"}</div>
+                                    }
                                 }
                                 if let Some(ref cond) = task.condition {
                                     <div class="task-detail-condition">{format!("Condition: {}", cond)}</div>
@@ -720,7 +747,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         task.description.clone()
                                     }}
                                 </div>
-                                <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
+                                if task.trigger_type != "reminder" {
+                                    <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
+                                }
                             </div>
                             <button class="task-btn-delete" onclick={on_delete_task}>{"Delete"}</button>
                             <button class="task-btn-close" onclick={on_task_modal_close.clone()}>{"x"}</button>
@@ -730,11 +759,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
             // Main dashboard content - blurred when task focused
             <div class={if selected_task.is_some() { "peace-main task-focused" } else { "peace-main" }}>
-                // Triage indicator
-                <TriageIndicator
-                    attention_count={attention_count}
-                    attention_items={attention_items}
-                />
+                // Triage indicator (admin-only for now)
+                { if props.user_profile.id == 1 {
+                    html! {
+                        <TriageIndicator
+                            attention_count={attention_count}
+                            attention_items={attention_items}
+                        />
+                    }
+                } else {
+                    html! {}
+                }}
 
                 // Timeline view showing upcoming tasks and digests
                 <TimelineView
