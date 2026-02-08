@@ -282,6 +282,7 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
                 recurrence_rule: Some("daily".to_string()),
                 recurrence_time: Some(digest_time.to_string()), // "HH:00" format
                 sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+                end_time: None,
             })
         };
 
@@ -1002,6 +1003,19 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Ok(tasks) => {
                     debug!("Found {} due scheduled tasks", tasks.len());
                     for task in tasks {
+                        // Skip quiet_mode tasks - they're not executable actions.
+                        // Auto-complete expired ones.
+                        if crate::handlers::dashboard_handlers::is_quiet_mode_task(&task.action) {
+                            if let Some(end_ts) = task.end_time {
+                                if end_ts <= now {
+                                    let _ = state
+                                        .user_repository
+                                        .update_task_status(task.id.unwrap_or(0), "completed");
+                                }
+                            }
+                            continue;
+                        }
+
                         let state = state.clone();
                         let task_clone = task.clone();
                         let task_id = task.id.unwrap_or(0);

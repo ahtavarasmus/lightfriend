@@ -4,6 +4,31 @@ use diesel::result::Error as DieselError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Geocode a location name to lat/lon using Geoapify API
+async fn geocode_location(location: &str) -> Option<(f64, f64)> {
+    let api_key = std::env::var("GEOAPIFY_API_KEY").ok()?;
+    let client = reqwest::Client::new();
+
+    let url = format!(
+        "https://api.geoapify.com/v1/geocode/search?text={}&format=json&apiKey={}",
+        urlencoding::encode(location),
+        api_key
+    );
+
+    let response: serde_json::Value = client.get(&url).send().await.ok()?.json().await.ok()?;
+    let results = response["results"].as_array()?;
+
+    if results.is_empty() {
+        return None;
+    }
+
+    let result = &results[0];
+    let lat = result["lat"].as_f64()?;
+    let lon = result["lon"].as_f64()?;
+
+    Some((lat, lon))
+}
+
 #[derive(Deserialize)]
 pub struct ProactiveAgentEnabledRequest {
     enabled: bool,
@@ -527,6 +552,13 @@ pub async fn patch_profile_field(
                         Json(json!({"error": format!("Database error: {}", e)})),
                     )
                 })?;
+
+            // Geocode and store coordinates for sunrise/sunset calculation
+            if let Some((lat, lon)) = geocode_location(value).await {
+                let _ = state
+                    .user_core
+                    .update_user_coordinates(user_id, lat as f32, lon as f32);
+            }
         }
         "nearby_places" => {
             let value = request.value.as_str().ok_or_else(|| {
@@ -1548,6 +1580,135 @@ pub async fn get_proactive_agent_on(
     }
 }
 
+// Quiet Mode endpoints
+#[derive(Serialize)]
+pub struct QuietModeStatus {
+    pub is_quiet: bool,
+    pub until: Option<i32>,
+    pub until_display: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetQuietModeRequest {
+    pub until: Option<i32>, // None = disable quiet mode, 0 = indefinite, timestamp = until
+}
+
+/// GET /api/profile/quiet-mode
+pub async fn get_quiet_mode(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<QuietModeStatus>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_quiet_mode(auth_user.user_id) {
+        Ok(quiet_until) => {
+            let (is_quiet, until_display) = match quiet_until {
+                None => (false, None),
+                Some(0) => (true, Some("indefinitely".to_string())),
+                Some(ts) => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i32;
+
+                    if ts <= now {
+                        // Quiet mode expired, clear it
+                        let _ = state.user_core.set_quiet_mode(auth_user.user_id, None);
+                        (false, None)
+                    } else {
+                        // Still in quiet mode - format the display time
+                        let display = format_quiet_until_display(ts, auth_user.user_id, &state);
+                        (true, Some(display))
+                    }
+                }
+            };
+
+            Ok(Json(QuietModeStatus {
+                is_quiet,
+                until: if is_quiet { quiet_until } else { None },
+                until_display,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to get quiet mode: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get quiet mode: {}", e)})),
+            ))
+        }
+    }
+}
+
+/// POST /api/profile/quiet-mode
+pub async fn set_quiet_mode(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<SetQuietModeRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state
+        .user_core
+        .set_quiet_mode(auth_user.user_id, request.until)
+    {
+        Ok(_) => {
+            let message = match request.until {
+                None => "Quiet mode disabled",
+                Some(0) => "Quiet mode enabled indefinitely",
+                Some(_) => "Quiet mode enabled until specified time",
+            };
+            Ok(Json(json!({ "message": message })))
+        }
+        Err(e) => {
+            tracing::error!("Failed to set quiet mode: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to set quiet mode: {}", e)})),
+            ))
+        }
+    }
+}
+
+fn format_quiet_until_display(timestamp: i32, user_id: i32, state: &Arc<AppState>) -> String {
+    use chrono::TimeZone;
+
+    // Get user timezone
+    let tz_str = state
+        .user_core
+        .get_user_info(user_id)
+        .ok()
+        .and_then(|info| info.timezone)
+        .unwrap_or_else(|| "UTC".to_string());
+
+    let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+
+    let now = chrono::Utc::now();
+    let _now_ts = now.timestamp() as i32;
+
+    let target_dt = chrono::Utc
+        .timestamp_opt(timestamp as i64, 0)
+        .single()
+        .map(|t| t.with_timezone(&tz));
+
+    let now_local = now.with_timezone(&tz);
+
+    match target_dt {
+        Some(target) => {
+            let now_date = now_local.date_naive();
+            let target_date = target.date_naive();
+            let days_diff = (target_date - now_date).num_days();
+
+            let time_str = target.format("%l:%M%P").to_string().trim().to_string();
+
+            if days_diff == 0 {
+                format!("{} today", time_str)
+            } else if days_diff == 1 {
+                format!("{} tomorrow", time_str)
+            } else {
+                let day_name = target.format("%A").to_string();
+                format!("{} {}", time_str, day_name)
+            }
+        }
+        None => "unknown time".to_string(),
+    }
+}
+
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -1607,10 +1768,28 @@ pub struct WebChatRequest {
     pub message: String,
 }
 
+/// Media result from AI tool calls (YouTube, etc.)
+#[derive(Serialize, Clone)]
+pub struct MediaResult {
+    pub platform: String,
+    pub video_id: String,
+    pub title: String,
+    pub thumbnail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct WebChatResponse {
     pub message: String,
     pub credits_charged: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media: Option<Vec<MediaResult>>,
+    /// ID of task created during this chat (if any) - for auto-showing task preview
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_task_id: Option<i32>,
 }
 
 pub async fn web_chat(
@@ -1723,9 +1902,58 @@ pub async fn web_chat(
     .await;
 
     if status == StatusCode::OK {
+        // Extract media results from response if present
+        let mut message = response.message.clone();
+        let mut media: Option<Vec<MediaResult>> = None;
+
+        // Debug: Log response to check for media tags
+        tracing::debug!(
+            "web_chat response message (first 500 chars): {}",
+            &message.chars().take(500).collect::<String>()
+        );
+        tracing::debug!(
+            "web_chat response contains [MEDIA_RESULTS]: {}",
+            message.contains("[MEDIA_RESULTS]")
+        );
+
+        // Check for embedded media results from YouTube tool
+        if let Some(start_idx) = message.find("[MEDIA_RESULTS]") {
+            if let Some(end_idx) = message.find("[/MEDIA_RESULTS]") {
+                let json_str = &message[start_idx + 15..end_idx];
+                if let Ok(youtube_result) = serde_json::from_str::<
+                    crate::tool_call_utils::youtube::YouTubeToolResult,
+                >(json_str)
+                {
+                    let video_count = youtube_result.videos.len();
+                    media = Some(
+                        youtube_result
+                            .videos
+                            .into_iter()
+                            .map(|v| MediaResult {
+                                platform: "youtube".to_string(),
+                                video_id: v.video_id,
+                                title: v.title,
+                                thumbnail: v.thumbnail,
+                                duration: v.duration,
+                                channel: Some(v.channel),
+                            })
+                            .collect(),
+                    );
+                    // Replace verbose text list with clean message when showing visual results
+                    message = format!(
+                        "Here are {} video{} I found:",
+                        video_count,
+                        if video_count == 1 { "" } else { "s" }
+                    );
+                }
+            }
+        }
+
         Ok(Json(WebChatResponse {
-            message: response.message.clone(),
+            message,
             credits_charged: charged_amount,
+            media,
+            created_task_id: response.created_task_id,
         }))
     } else {
         // No refund - credits are consumed on attempt
@@ -1974,6 +2202,8 @@ pub async fn get_instant_digest(
         return Ok(Json(WebChatResponse {
             message: "Nothing new since your last check!".to_string(),
             credits_charged: charged_amount,
+            media: None,
+            created_task_id: None,
         }));
     }
 
@@ -2039,6 +2269,8 @@ pub async fn get_instant_digest(
     Ok(Json(WebChatResponse {
         message: digest_message,
         credits_charged: charged_amount,
+        media: None,
+        created_task_id: None,
     }))
 }
 
@@ -2236,9 +2468,43 @@ pub async fn web_chat_with_image(
     .await;
 
     if status == StatusCode::OK {
+        // Extract media results from response if present (for web_chat_with_image)
+        let mut message = response.message.clone();
+        let mut media: Option<Vec<MediaResult>> = None;
+
+        if let Some(start_idx) = message.find("[MEDIA_RESULTS]") {
+            if let Some(end_idx) = message.find("[/MEDIA_RESULTS]") {
+                let json_str = &message[start_idx + 15..end_idx];
+                if let Ok(youtube_result) = serde_json::from_str::<
+                    crate::tool_call_utils::youtube::YouTubeToolResult,
+                >(json_str)
+                {
+                    media = Some(
+                        youtube_result
+                            .videos
+                            .into_iter()
+                            .map(|v| MediaResult {
+                                platform: "youtube".to_string(),
+                                video_id: v.video_id,
+                                title: v.title,
+                                thumbnail: v.thumbnail,
+                                duration: v.duration,
+                                channel: Some(v.channel),
+                            })
+                            .collect(),
+                    );
+                }
+                message = format!("{}{}", &message[..start_idx], &message[end_idx + 16..])
+                    .trim()
+                    .to_string();
+            }
+        }
+
         Ok(Json(WebChatResponse {
-            message: response.message.clone(),
+            message,
             credits_charged: charged_amount,
+            media,
+            created_task_id: response.created_task_id,
         }))
     } else {
         // No refund - credits are consumed on attempt

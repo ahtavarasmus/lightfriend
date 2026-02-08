@@ -2353,6 +2353,28 @@ pub async fn send_notification(
         }
     };
 
+    // Check quiet mode - skip notification if user is in quiet mode
+    match state.user_core.get_quiet_mode(user_id) {
+        Ok(Some(0)) => {
+            tracing::debug!(
+                "Skipping notification for user {} - indefinite quiet mode",
+                user_id
+            );
+            return;
+        }
+        Ok(Some(ts)) if ts > current_time => {
+            tracing::debug!(
+                "Skipping notification for user {} - quiet mode until {}",
+                user_id,
+                ts
+            );
+            return;
+        }
+        _ => {
+            // No quiet mode or expired - proceed with notification
+        }
+    }
+
     let user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,
         Err(e) => {

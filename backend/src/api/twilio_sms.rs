@@ -83,11 +83,19 @@ impl SmsResult {
             SmsResult::Success { response } => (
                 StatusCode::OK,
                 headers,
-                axum::Json(TwilioResponse { message: response }),
+                axum::Json(TwilioResponse {
+                    message: response,
+                    created_task_id: None,
+                }),
             ),
-            SmsResult::UserError { message, status } => {
-                (status, headers, axum::Json(TwilioResponse { message }))
-            }
+            SmsResult::UserError { message, status } => (
+                status,
+                headers,
+                axum::Json(TwilioResponse {
+                    message,
+                    created_task_id: None,
+                }),
+            ),
             SmsResult::SystemError { log_msg } => {
                 tracing::error!("SMS system error: {}", log_msg);
                 (
@@ -95,13 +103,17 @@ impl SmsResult {
                     headers,
                     axum::Json(TwilioResponse {
                         message: tool_error_messages::INTERNAL_ERROR.to_string(),
+                        created_task_id: None,
                     }),
                 )
             }
             SmsResult::Cancelled { message } => (
                 StatusCode::OK,
                 headers,
-                axum::Json(TwilioResponse { message }),
+                axum::Json(TwilioResponse {
+                    message,
+                    created_task_id: None,
+                }),
             ),
         }
     }
@@ -175,6 +187,9 @@ pub struct TwilioWebhookPayload {
 pub struct TwilioResponse {
     #[serde(rename = "Message")]
     pub message: String,
+    /// ID of task created during this conversation (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_task_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -771,6 +786,7 @@ pub async fn process_sms(
 - Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
 - When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
 - CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
+- When users request conditional tasks that check data sources at a specific time (e.g. 'at 8am check my email and if...', 'at 7am check the weather and if...'), use trigger_type='once' with the specified trigger_time AND set the sources field. The system will automatically fetch the data at the scheduled time. For example, 'at 8am tomorrow check my email and if there is anything from my boss, remind me to reply' should use trigger_type='once', trigger_time='2026-02-08T08:00', sources='email', condition='email from boss'. Only use trigger_type='recurring_email' when the user wants to be notified on EVERY matching incoming email with no specific time.
 
 ### Date and Time Handling:
 - Always work with times in the user's timezone: {} with offset {}.
@@ -1051,8 +1067,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         });
     }
 
-    // Define tools
-    let tools = vec![
+    // Define static tools
+    let mut tools = vec![
         crate::tool_call_utils::bridge::get_send_chat_message_tool(),
         crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
         crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
@@ -1073,7 +1089,12 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         crate::tool_call_utils::tesla::get_tesla_control_tool(),
         crate::tool_call_utils::tesla::get_tesla_switch_vehicle_tool(),
         crate::tool_call_utils::internet::get_direct_response_tool(),
+        crate::tool_call_utils::youtube::get_youtube_tool(),
     ];
+
+    // Add dynamic MCP tools for this user
+    let mcp_tools = crate::tool_call_utils::mcp::get_mcp_tools_for_user(state, user.id).await;
+    tools.extend(mcp_tools);
 
     // Create client for the user's provider
     let client = match create_openai_client_for_user(state, user.id) {
@@ -1085,6 +1106,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to initialize AI service".to_string(),
+                    created_task_id: None,
                 }),
             );
         }
@@ -1113,28 +1135,58 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // so we always use the Default (tool-calling) model
     let model = get_model(state, provider, ModelPurpose::Default);
 
-    // Use mock response if provided (for testing), otherwise call real LLM
+    // Use mock response if provided (for testing), otherwise call real LLM with retry
     let result = if let Some(mock_response) = options.mock_llm_response {
         tracing::debug!("Using mock LLM response for testing");
         mock_response
     } else {
-        match client
-            .chat_completion(
-                chat_completion::ChatCompletionRequest::new(
-                    model.clone(),
-                    completion_messages.clone(),
-                )
-                .tools(tools)
-                .tool_choice(chat_completion::ToolChoiceType::Required)
-                .max_tokens(250),
+        const MAX_RETRIES: u32 = 3;
+        let mut last_error = String::new();
+        let mut attempt_result = None;
+
+        for attempt in 1..=MAX_RETRIES {
+            let request = chat_completion::ChatCompletionRequest::new(
+                model.clone(),
+                completion_messages.clone(),
             )
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!("Failed to get chat completion: {}", e);
+            .tools(tools.clone())
+            .tool_choice(chat_completion::ToolChoiceType::Required)
+            .max_tokens(250);
+
+            match client.chat_completion(request).await {
+                Ok(result) => {
+                    attempt_result = Some(result);
+                    break;
+                }
+                Err(e) => {
+                    last_error = format!("{}", e);
+                    tracing::warn!(
+                        "Chat completion attempt {}/{} failed: {}",
+                        attempt,
+                        MAX_RETRIES,
+                        e
+                    );
+                    if attempt < MAX_RETRIES {
+                        // Wait before retry: 500ms, 1000ms
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            500 * attempt as u64,
+                        ))
+                        .await;
+                    }
+                }
+            }
+        }
+
+        match attempt_result {
+            Some(result) => result,
+            None => {
+                tracing::error!(
+                    "Failed to get chat completion after {} attempts: {}",
+                    MAX_RETRIES,
+                    last_error
+                );
                 return SmsResult::SystemError {
-                    log_msg: format!("Failed to get chat completion: {}", e),
+                    log_msg: format!("Failed to get chat completion: {}", last_error),
                 }
                 .into_response();
             }
@@ -1143,6 +1195,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
+    let mut created_task_id: Option<i32> = None; // Track if a task was created during this conversation
     let final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
             tracing::debug!("Model provided direct response (no tool calls needed)");
@@ -1230,7 +1283,15 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         .into_response();
                     }
                 };
-                if name == "ask_perplexity" {
+                // Handle MCP tool calls (prefixed with "mcp:")
+                if crate::tool_call_utils::mcp::is_mcp_tool(name) {
+                    tracing::debug!("Executing MCP tool call: {}", name);
+                    let result = crate::tool_call_utils::mcp::handle_mcp_tool_call(
+                        state, user.id, name, arguments,
+                    )
+                    .await;
+                    tool_answers.insert(tool_call_id, result);
+                } else if name == "ask_perplexity" {
                     tracing::debug!("Executing ask_perplexity tool call");
                     #[derive(Deserialize, Serialize)]
                     struct PerplexityQuestion {
@@ -1576,6 +1637,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process email request".to_string(),
+                                    created_task_id: None,
                                 }),
                             );
                         }
@@ -1655,22 +1717,33 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process respond_to_email request"
                                         .to_string(),
+                                    created_task_id: None,
                                 }),
                             );
                         }
                     }
                 } else if name == "create_task" {
                     tracing::debug!("Executing create_task tool call");
-                    match crate::tool_call_utils::management::handle_create_task(
-                        state, user.id, arguments,
+                    let assistant_content = result.choices[0].message.content.as_deref();
+                    match crate::tool_call_utils::management::handle_create_task_with_retry(
+                        state,
+                        user.id,
+                        arguments,
+                        &client,
+                        &model,
+                        &tools,
+                        &completion_messages,
+                        tool_call,
+                        assistant_content,
                     )
                     .await
                     {
-                        Ok(answer) => {
-                            tool_answers.insert(tool_call_id, answer);
+                        Ok(task_result) => {
+                            created_task_id = Some(task_result.task_id);
+                            tool_answers.insert(tool_call_id, task_result.message);
                         }
                         Err(e) => {
-                            tracing::error!("Failed to create task: {}", e);
+                            tracing::error!("Failed to create task after retry: {}", e);
                             tool_answers.insert(
                                 tool_call_id,
                                 format!("Sorry, I couldn't create the task: {}", e),
@@ -1765,6 +1838,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process calendar event request".to_string(),
+                                    created_task_id: None,
                                 }),
                             );
                         }
@@ -1868,6 +1942,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
                                     message: "Failed to process chat message request".to_string(),
+                                    created_task_id: None,
                                 }),
                             );
                         }
@@ -1910,6 +1985,34 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         tool_call_id,
                         "No external data needed for this question. Answer the user's question directly and helpfully from your own knowledge.".to_string()
                     );
+                } else if name == "youtube" {
+                    tracing::debug!("Executing youtube tool call");
+                    #[derive(serde::Deserialize)]
+                    struct YouTubeQuery {
+                        query: String,
+                    }
+                    let query = match serde_json::from_str::<YouTubeQuery>(arguments) {
+                        Ok(q) => q.query,
+                        Err(e) => {
+                            log_tool_error(
+                                user.id,
+                                name,
+                                "llm_malformed",
+                                "invalid_youtube_args",
+                                &format!("Failed to parse YouTube arguments: {}", e),
+                            );
+                            tool_answers.insert(
+                                tool_call_id,
+                                "Invalid YouTube query format. Please try again.".to_string(),
+                            );
+                            continue;
+                        }
+                    };
+                    let response = crate::tool_call_utils::youtube::handle_youtube_tool(
+                        state, user.id, &query,
+                    )
+                    .await;
+                    tool_answers.insert(tool_call_id, response);
                 } else {
                     // Unknown tool - this is a system error, not a user error
                     tracing::error!("Unknown tool called: {}", name);
@@ -1918,6 +2021,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         [(axum::http::header::CONTENT_TYPE, "application/json")],
                         Json(TwilioResponse {
                             message: format!("Unknown tool: {}", name),
+                            created_task_id: None,
                         }),
                     );
                 }
@@ -1980,12 +2084,44 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             }
 
             tracing::debug!("Making follow-up request to model with tool call answers");
-            let follow_up_req =
-                chat_completion::ChatCompletionRequest::new(model.clone(), follow_up_messages)
-                    .max_tokens(250); // Allow up to ~480 chars for follow-up messages
 
-            match client.chat_completion(follow_up_req).await {
-                Ok(follow_up_result) => {
+            // Retry logic for follow-up call
+            const FOLLOWUP_MAX_RETRIES: u32 = 3;
+            let mut followup_last_error = String::new();
+            let mut followup_result = None;
+
+            for attempt in 1..=FOLLOWUP_MAX_RETRIES {
+                let follow_up_req = chat_completion::ChatCompletionRequest::new(
+                    model.clone(),
+                    follow_up_messages.clone(),
+                )
+                .max_tokens(250);
+
+                match client.chat_completion(follow_up_req).await {
+                    Ok(result) => {
+                        followup_result = Some(result);
+                        break;
+                    }
+                    Err(e) => {
+                        followup_last_error = format!("{}", e);
+                        tracing::warn!(
+                            "Follow-up completion attempt {}/{} failed: {}",
+                            attempt,
+                            FOLLOWUP_MAX_RETRIES,
+                            e
+                        );
+                        if attempt < FOLLOWUP_MAX_RETRIES {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                500 * attempt as u64,
+                            ))
+                            .await;
+                        }
+                    }
+                }
+            }
+
+            match followup_result {
+                Some(follow_up_result) => {
                     tracing::debug!("Received follow-up response from model");
                     let response = follow_up_result.choices[0]
                         .message
@@ -1996,25 +2132,65 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     // If we got an empty response, fall back to the tool answer
                     if response.trim().is_empty() {
                         tracing::warn!("Follow-up response was empty, using tool answer directly");
+                        // Check if direct_response - don't return internal hint
+                        let was_direct_response = result.choices[0]
+                            .message
+                            .tool_calls
+                            .as_ref()
+                            .map(|calls| {
+                                calls
+                                    .iter()
+                                    .any(|c| c.function.name.as_deref() == Some("direct_response"))
+                            })
+                            .unwrap_or(false);
+
+                        if was_direct_response {
+                            "I processed your request but couldn't generate a response.".to_string()
+                        } else {
+                            tool_answers
+                                .values()
+                                .next()
+                                .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
+                                .unwrap_or_else(|| {
+                                    "I processed your request but couldn't generate a response."
+                                        .to_string()
+                                })
+                        }
+                    } else {
+                        response
+                    }
+                }
+                None => {
+                    tracing::error!(
+                        "Failed to get follow-up completion after {} attempts: {}",
+                        FOLLOWUP_MAX_RETRIES,
+                        followup_last_error
+                    );
+
+                    // Check if this was a direct_response tool - don't return the internal hint
+                    let was_direct_response = result.choices[0]
+                        .message
+                        .tool_calls
+                        .as_ref()
+                        .map(|calls| {
+                            calls
+                                .iter()
+                                .any(|c| c.function.name.as_deref() == Some("direct_response"))
+                        })
+                        .unwrap_or(false);
+
+                    if was_direct_response {
+                        "I apologize, but I encountered an error. Please try again.".to_string()
+                    } else {
+                        // Return the tool answer directly, truncated to SMS limit
                         tool_answers
                             .values()
                             .next()
                             .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
                             .unwrap_or_else(|| {
-                                "I processed your request but couldn't generate a response."
-                                    .to_string()
+                                "I apologize, but I encountered an error processing your request. Please try again.".to_string()
                             })
-                    } else {
-                        response
                     }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to get follow-up completion: {}", e);
-
-                    // Return the tool answer directly, truncated to SMS limit
-                    tool_answers.values().next()
-                        .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
-                        .unwrap_or_else(|| "I apologize, but I encountered an error processing your request. Please try again.".to_string())
                 }
             }
         }
@@ -2032,7 +2208,27 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     };
 
-    // Ensure response is within SMS character limit
+    // Extract any [MEDIA_RESULTS] from tool answers and append to response
+    // This ensures media results are passed through even if AI doesn't include them
+    let mut media_results_tag = String::new();
+    for tool_answer in tool_answers.values() {
+        tracing::debug!(
+            "Checking tool answer for media (first 200 chars): {}",
+            &tool_answer.chars().take(200).collect::<String>()
+        );
+        if let Some(start) = tool_answer.find("[MEDIA_RESULTS]") {
+            if let Some(end) = tool_answer.find("[/MEDIA_RESULTS]") {
+                media_results_tag = tool_answer[start..end + 16].to_string();
+                tracing::debug!(
+                    "Found media results tag, length: {}",
+                    media_results_tag.len()
+                );
+                break;
+            }
+        }
+    }
+
+    // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
         SmsResponse::new(final_response, &client, &model)
@@ -2041,6 +2237,16 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     } else {
         // For failure messages, just truncate (they're already short)
         SmsResponse::truncated(final_response).into_inner()
+    };
+
+    // Append media results AFTER truncating (so they don't get cut off)
+    // This ensures the [MEDIA_RESULTS] JSON is always complete for web chat parsing
+    let final_response = if !media_results_tag.is_empty() {
+        tracing::debug!("Appending media results to final response (after truncation)");
+        format!("{}\n\n{}", final_response, media_results_tag)
+    } else {
+        tracing::debug!("No media results tag found in tool answers");
+        final_response
     };
 
     let final_response_with_notice = final_response.clone();
@@ -2109,6 +2315,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "Failed to process credits".to_string(),
+                        created_task_id: None,
                     }),
                 );
             }
@@ -2119,6 +2326,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(TwilioResponse {
                 message: final_response_with_notice,
+                created_task_id,
             }),
         );
     }
@@ -2193,6 +2401,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "Failed to process credits points".to_string(),
+                        created_task_id: None,
                     }),
                 );
             }
@@ -2229,6 +2438,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Message sent successfully".to_string(),
+                    created_task_id: None,
                 }),
             )
         }
@@ -2255,6 +2465,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to send message".to_string(),
+                    created_task_id: None,
                 }),
             )
         }
