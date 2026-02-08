@@ -17,7 +17,8 @@ pub struct ApiResponse {
     pub message: String,
 }
 
-#[derive(Deserialize, Clone, PartialEq)]
+#[derive(Deserialize, Clone, PartialEq, Default)]
+#[serde(default)]
 pub struct UserProfile {
     pub id: i32,
     pub email: String,

@@ -87,6 +87,8 @@ pub struct QuietModeStatus {
 #[derive(Properties, PartialEq, Clone)]
 pub struct QuietModeIndicatorProps {
     pub initial_status: QuietModeStatus,
+    #[prop_or_default]
+    pub on_change: Option<Callback<()>>,
 }
 
 // Helper to compute display text from a timestamp
@@ -188,14 +190,17 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
         })
     };
 
+    let on_change = props.on_change.clone();
     let set_quiet_mode = {
         let status = status.clone();
         let dropdown_open = dropdown_open.clone();
         let loading = loading.clone();
+        let on_change = on_change.clone();
         move |until: Option<i32>, optimistic_display: &'static str| {
             let status = status.clone();
             let dropdown_open = dropdown_open.clone();
             let loading = loading.clone();
+            let on_change = on_change.clone();
 
             // Close dropdown immediately
             dropdown_open.set(false);
@@ -223,6 +228,10 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
                             if let Ok(new_status) = resp.json::<QuietModeStatus>().await {
                                 status.set(new_status);
                             }
+                        }
+                        // Notify parent to refresh dashboard (updates timeline overlay)
+                        if let Some(cb) = &on_change {
+                            cb.emit(());
                         }
                     }
                     _ => {

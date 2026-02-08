@@ -94,7 +94,7 @@ const SETTINGS_STYLES: &str = r#"
 }
 "#;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
     People,
     Tasks,
@@ -109,11 +109,26 @@ pub struct SettingsPanelProps {
     pub user_profile: Option<UserProfile>,
     pub on_close: Callback<()>,
     pub on_profile_update: Callback<UserProfile>,
+    #[prop_or(SettingsTab::People)]
+    pub initial_tab: SettingsTab,
 }
 
 #[function_component(SettingsPanel)]
 pub fn settings_panel(props: &SettingsPanelProps) -> Html {
-    let active_tab = use_state(|| SettingsTab::People);
+    let active_tab = use_state(|| props.initial_tab);
+
+    // Update active tab when initial_tab prop changes (e.g., from URL param)
+    {
+        let active_tab = active_tab.clone();
+        let initial_tab = props.initial_tab;
+        use_effect_with_deps(
+            move |tab| {
+                active_tab.set(*tab);
+                || ()
+            },
+            initial_tab,
+        );
+    }
 
     if !props.is_open {
         return html! {};

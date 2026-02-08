@@ -105,6 +105,9 @@ pub fn SecuritySettings() -> Html {
     let delete_passkey_id = use_state(|| None::<String>);
     let webauthn_supported = use_state(|| webauthn::is_webauthn_supported());
 
+    // Logout state
+    let logout_loading = use_state(|| false);
+
     // Load TOTP status on mount
     {
         let state = state.clone();
@@ -669,6 +672,26 @@ pub fn SecuritySettings() -> Html {
         })
     };
 
+    // Logout handler
+    let on_logout_click = {
+        let logout_loading = logout_loading.clone();
+        Callback::from(move |_: MouseEvent| {
+            let logout_loading = logout_loading.clone();
+            logout_loading.set(true);
+            spawn_local(async move {
+                // Call backend logout endpoint to clear cookies
+                let _ = Api::post("/api/logout")
+                    .send()
+                    .await;
+
+                // Reload the page to reset state
+                if let Some(window) = web_sys::window() {
+                    let _ = window.location().reload();
+                }
+            });
+        })
+    };
+
     // Format timestamp
     let format_time = |ts: i32| -> String {
         let date = chrono::DateTime::from_timestamp(ts as i64, 0)
@@ -1149,6 +1172,21 @@ pub fn SecuritySettings() -> Html {
                 }
             </div>
 
+            // Session Section
+            <div class="security-settings session-section">
+                <h3 class="security-title">{"Session"}</h3>
+                <p class="security-description">
+                    {"Sign out of your account on this device."}
+                </p>
+                <button
+                    class="security-btn logout-btn"
+                    onclick={on_logout_click}
+                    disabled={*logout_loading}
+                >
+                    {if *logout_loading { "Signing out..." } else { "Sign Out" }}
+                </button>
+            </div>
+
             <style>
             {r#"
                 .security-container {
@@ -1168,7 +1206,7 @@ pub fn SecuritySettings() -> Html {
                 .security-title {
                     margin: 0 0 16px 0;
                     font-size: 18px;
-                    color: #333;
+                    color: #1a1a1a !important;
                 }
                 .security-description {
                     color: #666;
@@ -1508,6 +1546,17 @@ pub fn SecuritySettings() -> Html {
                 .setup-instruction {
                     margin-bottom: 16px;
                     color: #333;
+                }
+                /* Session/Logout section */
+                .session-section {
+                    margin-top: 0;
+                }
+                .logout-btn {
+                    background: #ef4444;
+                    color: white;
+                }
+                .logout-btn:hover:not(:disabled) {
+                    background: #dc2626;
                 }
             "#}
             </style>

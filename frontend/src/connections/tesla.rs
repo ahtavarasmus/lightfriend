@@ -4,7 +4,6 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use crate::utils::api::Api;
-use crate::components::feature_preview::FeaturePreview;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -621,12 +620,24 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             // Check subscription tier
             if props.sub_tier == Some("tier 2".to_string()) {
                 if !*tesla_connected {
-                    <FeaturePreview
-                        gif_src="/assets/previews/tesla-controls-preview.gif"
-                        caption="Control your Tesla from the dashboard - lock, climate, defrost, and more"
-                        badge_text="Preview"
-                        max_width={380}
-                    />
+                    <div class="tesla-connect-hint" style="
+                        background: rgba(30, 144, 255, 0.08);
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        border-radius: 10px;
+                        padding: 1rem;
+                        margin-bottom: 1rem;
+                        font-size: 0.9rem;
+                        color: #ccc;
+                        line-height: 1.5;
+                    ">
+                        <p style="margin: 0 0 0.5rem 0;">
+                            {"Once connected, you can control your Tesla via:"}
+                        </p>
+                        <ul style="margin: 0; padding-left: 1.25rem;">
+                            <li>{"SMS and phone calls to your Lightfriend number"}</li>
+                            <li>{"Type "}<code style="background: rgba(126, 178, 255, 0.2); padding: 0.15rem 0.4rem; border-radius: 4px; color: #7EB2FF;">{"@tesla"}</code>{" in the web chatbox for quick controls"}</li>
+                        </ul>
+                    </div>
                     <button
                         class="connect-button"
                         onclick={onclick_connect}

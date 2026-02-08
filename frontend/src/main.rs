@@ -60,6 +60,8 @@ mod dashboard {
     pub mod activity_panel;
     pub mod quiet_mode;
     pub mod media_panel;
+    pub mod tesla_quick_panel;
+    pub mod youtube_quick_panel;
 }
 mod proactive {
     pub mod common;
@@ -80,6 +82,7 @@ mod connections {
     pub mod instagram;
     pub mod tesla;
     pub mod youtube;
+    pub mod mcp;
 }
 mod controls {
     pub mod tesla_controls;
@@ -449,92 +452,61 @@ pub struct NavProps {
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { auth_state } = props;
-    let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
         use_effect_with_deps(move |_| {
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
-           
+
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
                 is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
-           
+
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                 .unwrap();
-           
+
             move || {
                 window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                     .unwrap();
             }
         }, ());
     }
-    let toggle_menu = {
-        let menu_open = menu_open.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            menu_open.set(!*menu_open);
-        })
-    };
-    let close_menu = {
-        let menu_open = menu_open.clone();
-        Callback::from(move |_: MouseEvent| {
-            menu_open.set(false);
-        })
-    };
-    let menu_class = if *menu_open {
-        "nav-right mobile-menu-open"
-    } else {
-        "nav-right"
-    };
-    let close_class = if *menu_open {
-        "burger-menu close-burger-menu"
-    } else {
-        "burger-menu"
-    };
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
                 <Link<Route> to={Route::Home} classes="nav-logo">
                     {"lightfriend"}
                 </Link<Route>>
-                <button class={close_class} onclick={toggle_menu}>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
-                <div class={menu_class}>
-                    <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Faq} classes="nav-link">
-                            {"FAQ"}
-                        </Link<Route>>
-                    </div>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Blog} classes="nav-link">
-                            {"Blog"}
-                        </Link<Route>>
-                    </div>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Pricing} classes="nav-link">
-                            {"Pricing"}
-                        </Link<Route>>
-                    </div>
+                <div class="nav-right">
                     {
-                        // Only show Login button when we've confirmed user is logged out
-                        // When Checking or LoggedIn, don't show login button
-                        if *auth_state == AuthState::LoggedOut {
-                            html! {
-                                <div onclick={close_menu.clone()}>
+                        match auth_state {
+                            AuthState::LoggedOut => html! {
+                                <>
+                                    <Link<Route> to={Route::Pricing} classes="nav-link">
+                                        {"Pricing"}
+                                    </Link<Route>>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
                                         {"Login"}
                                     </Link<Route>>
-                                </div>
-                            }
-                        } else {
-                            html! {}
+                                </>
+                            },
+                            AuthState::LoggedIn => {
+                                let onclick = Callback::from(|e: MouseEvent| {
+                                    e.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        let event = web_sys::CustomEvent::new("open-settings").unwrap();
+                                        let _ = window.dispatch_event(&event);
+                                    }
+                                });
+                                html! {
+                                    <button {onclick} class="nav-link">
+                                        {"Settings"}
+                                    </button>
+                                }
+                            },
+                            AuthState::Checking => html! {},
                         }
                     }
                 </div>

@@ -58,8 +58,9 @@ pub struct DashboardFooterProps {
     pub watched_contacts: Vec<WatchedContact>,
     pub next_digest: Option<NextDigestInfo>,
     pub quiet_mode: QuietModeStatus,
-    pub on_settings_click: Callback<()>,
     pub on_activity_click: Callback<()>,
+    #[prop_or_default]
+    pub on_quiet_mode_change: Option<Callback<()>>,
 }
 
 #[function_component(DashboardFooter)]
@@ -98,16 +99,10 @@ pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
                     <div class="footer-digest">{digest_text}</div>
                 </div>
                 <div class="footer-actions">
-                    <QuietModeIndicator initial_status={props.quiet_mode.clone()} />
-                    <button
-                        class="footer-btn"
-                        onclick={{
-                            let cb = props.on_settings_click.clone();
-                            Callback::from(move |_| cb.emit(()))
-                        }}
-                    >
-                        {"Settings"}
-                    </button>
+                    <QuietModeIndicator
+                        initial_status={props.quiet_mode.clone()}
+                        on_change={props.on_quiet_mode_change.clone()}
+                    />
                     <button
                         class="footer-btn"
                         onclick={{

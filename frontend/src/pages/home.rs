@@ -122,12 +122,16 @@ pub fn Home() -> Html {
                                         show_onboarding.set(true);
                                     }
                                 }
-                                Err(_) => {
+                                Err(e) => {
+                                    gloo_console::log!("Failed to parse profile data:", format!("{:?}", e));
+                                    auth_status.set(Some(false));
                                     error.set(Some("Failed to parse profile data".to_string()));
                                 }
                             }
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            gloo_console::log!("Failed to fetch profile:", format!("{:?}", e));
+                            auth_status.set(Some(false));
                             error.set(Some("Failed to fetch profile".to_string()));
                         }
                     }
@@ -411,9 +415,15 @@ pub fn Home() -> Html {
                                     <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
                                 </p>
                                 <div class="legal-links">
-                                    <a href="/terms">{"Terms & Conditions"}</a>
+                                    <a href="/faq">{"FAQ"}</a>
                                     {" | "}
-                                    <a href="/privacy">{"Privacy Policy"}</a>
+                                    <a href="/blog">{"Blog"}</a>
+                                    {" | "}
+                                    <a href="/pricing">{"Pricing"}</a>
+                                    {" | "}
+                                    <a href="/terms">{"Terms"}</a>
+                                    {" | "}
+                                    <a href="/privacy">{"Privacy"}</a>
                                     {" | "}
                                     <a href="/updates">{"Updates"}</a>
                                 </div>

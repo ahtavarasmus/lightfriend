@@ -14,27 +14,8 @@ use crate::connections::messenger::MessengerConnect;
 use crate::connections::instagram::InstagramConnect;
 use crate::connections::tesla::TeslaConnect;
 use crate::connections::youtube::YouTubeConnect;
+use crate::connections::mcp::McpConnect;
 use serde_json::Value;
-use serde::{Deserialize, Serialize};
-use gloo_timers::future::TimeoutFuture;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ProactiveResponse {
-    enabled: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct UpdateProactiveRequest {
-    enabled: bool,
-}
-
-#[derive(Clone, PartialEq)]
-enum ToggleSaveState {
-    Idle,
-    Saving,
-    Success,
-    Error(String),
-}
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -50,12 +31,7 @@ struct ServiceGroupState {
     service_count: usize,
     connected_count: usize,
 }
-#[derive(Clone, PartialEq)]
-enum MonitoringTab {
-    Tasks,
-    People,
-    Scheduled,
-}
+// MonitoringTab removed - Tasks, People, and Digests are now in Settings Panel
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
@@ -69,24 +45,8 @@ pub fn connect(props: &ConnectProps) -> Html {
     let uber_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
     let youtube_connected = use_state(|| false);
+    let mcp_server_count = use_state(|| 0_usize);
     let selected_app = use_state(|| None::<String>);
-    let proactive_enabled = use_state(|| true);
-    let toggle_save_state = use_state(|| ToggleSaveState::Idle);
-
-    // Load proactive state on mount
-    {
-        let proactive_enabled = proactive_enabled.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                if let Ok(resp) = Api::get("/api/profile/proactive-agent").send().await {
-                    if let Ok(proactive) = resp.json::<ProactiveResponse>().await {
-                        proactive_enabled.set(proactive.enabled);
-                    }
-                }
-            });
-            || ()
-        }, ());
-    }
 
     {
         let calendar_connected = calendar_connected.clone();
@@ -99,6 +59,7 @@ pub fn connect(props: &ConnectProps) -> Html {
         let uber_connected = uber_connected.clone();
         let tesla_connected = tesla_connected.clone();
         let youtube_connected = youtube_connected.clone();
+        let mcp_server_count = mcp_server_count.clone();
         use_effect_with_deps(
             move |_| {
                 // Auth handled by cookies - check all connection statuses
@@ -262,12 +223,28 @@ pub fn connect(props: &ConnectProps) -> Html {
                         }
                     }
                 });
+                // MCP servers count check
+                spawn_local({
+                    let mcp_server_count = mcp_server_count.clone();
+                    async move {
+                        if let Ok(response) = Api::get("/api/mcp/servers")
+                            .send()
+                            .await
+                        {
+                            if let Ok(data) = response.json::<Value>().await {
+                                if let Some(servers) = data.as_array() {
+                                    mcp_server_count.set(servers.len());
+                                }
+                            }
+                        }
+                    }
+                });
                 || ()
             },
             (),
         );
     }
-    let group_states = use_state(|| {
+    let _group_states = use_state(|| {
         let mut map = std::collections::HashMap::new();
         map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
         map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
@@ -309,61 +286,13 @@ pub fn connect(props: &ConnectProps) -> Html {
             "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "mcp" => html! { <McpConnect user_id={props.user_id} /> },
             _ => html! {},
         }
     } else {
         html! {}
     };
-    let active_monitoring_tab = use_state(|| {
-        web_sys::window()
-            .and_then(|w| w.local_storage().ok().flatten())
-            .and_then(|s| s.get_item("monitoring_tab").ok().flatten())
-            .map(|s| match s.as_str() {
-                "people" => MonitoringTab::People,
-                "scheduled" => MonitoringTab::Scheduled,
-                _ => MonitoringTab::Tasks,
-            })
-            .unwrap_or(MonitoringTab::Tasks)
-    });
-
-    // Toggle proactive handler
-    let handle_toggle = {
-        let proactive_enabled = proactive_enabled.clone();
-        let toggle_save_state = toggle_save_state.clone();
-        Callback::from(move |_| {
-            let new_value = !*proactive_enabled;
-            let proactive_enabled = proactive_enabled.clone();
-            let toggle_save_state = toggle_save_state.clone();
-            proactive_enabled.set(new_value);
-            toggle_save_state.set(ToggleSaveState::Saving);
-            spawn_local(async move {
-                let request = UpdateProactiveRequest { enabled: new_value };
-                match Api::post("/api/profile/proactive-agent")
-                    .header("Content-Type", "application/json")
-                    .body(serde_json::to_string(&request).unwrap())
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        toggle_save_state.set(ToggleSaveState::Success);
-                        let state = toggle_save_state.clone();
-                        spawn_local(async move {
-                            TimeoutFuture::new(2000).await;
-                            state.set(ToggleSaveState::Idle);
-                        });
-                    },
-                    Ok(_) => {
-                        toggle_save_state.set(ToggleSaveState::Error("Failed to save".to_string()));
-                    },
-                    Err(_) => {
-                        toggle_save_state.set(ToggleSaveState::Error("Network error".to_string()));
-                    }
-                }
-            });
-        })
-    };
-
-            html! {
+    html! {
                 <div class="connect-section">
                     // Apps
                     <div class="apps-icons-row">
@@ -423,415 +352,43 @@ pub fn connect(props: &ConnectProps) -> Html {
                         >
                             <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
                         </button>
+                        <button
+                            class={classes!("app-icon", "mcp-icon", if *mcp_server_count > 0 { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "mcp") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
+                            })}
+                            title="MCP Servers - Add custom tools"
+                        >
+                            <i class="fa-solid fa-plug"></i>
+                        </button>
                     </div>
                     <div class="app-details">
                         { details }
                     </div>
-                    // Proactive Services
-                    <div class="service-group">
-                    <h3 class="service-group-title notifications-header">
-                        <div class="header-left" onclick={let group_states = group_states.clone();
-                            Callback::from(move |_| {
-                                let mut new_states = (*group_states).clone();
-                                if let Some(state) = new_states.get_mut("proactive") {
-                                    state.expanded = !state.expanded;
-                                }
-                                group_states.set(new_states);
-                            })
-                        }>
-                            <i class="fa-solid fa-robot"></i>
-                            {"Notifications"}
-                            <span class="toggle-status-hint">{if *proactive_enabled { "Active" } else { "Paused" }}</span>
-                            {match &*toggle_save_state {
-                                ToggleSaveState::Idle => html! {},
-                                ToggleSaveState::Saving => html! {
-                                    <span class="save-indicator">
-                                        <span class="save-spinner"></span>
-                                    </span>
-                                },
-                                ToggleSaveState::Success => html! {
-                                    <span class="save-indicator save-success">{"✓"}</span>
-                                },
-                                ToggleSaveState::Error(msg) => html! {
-                                    <span class="save-indicator save-error" title={msg.clone()}>{"✗"}</span>
-                                },
-                            }}
-                            <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
-                                "fas fa-chevron-up"
-                            } else {
-                                "fas fa-chevron-down"
-                            }}></i>
-                        </div>
-                        <label class="toggle-switch header-toggle" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                            <input
-                                type="checkbox"
-                                checked={*proactive_enabled}
-                                onchange={handle_toggle}
-                            />
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </h3>
-                        <div class={classes!(
-                            "monitoring-content",
-                            if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                        <div class="monitoring-tabs">
-                            <button
-                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::Tasks).then(|| "active"))}
-                                onclick={{
-                                    let active_monitoring_tab = active_monitoring_tab.clone();
-                                    Callback::from(move |_| {
-                                        active_monitoring_tab.set(MonitoringTab::Tasks);
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("monitoring_tab", "tasks");
-                                            }
-                                        }
-                                    })
-                                }}
-                            >
-                                {"Tasks"}
-                            </button>
-                            <button
-                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::People).then(|| "active"))}
-                                onclick={{
-                                    let active_monitoring_tab = active_monitoring_tab.clone();
-                                    Callback::from(move |_| {
-                                        active_monitoring_tab.set(MonitoringTab::People);
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("monitoring_tab", "people");
-                                            }
-                                        }
-                                    })
-                                }}
-                            >
-                                {"People"}
-                            </button>
-                            <button
-                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::Scheduled).then(|| "active"))}
-                                onclick={{
-                                    let active_monitoring_tab = active_monitoring_tab.clone();
-                                    Callback::from(move |_| {
-                                        active_monitoring_tab.set(MonitoringTab::Scheduled);
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("monitoring_tab", "scheduled");
-                                            }
-                                        }
-                                    })
-                                }}
-                            >
-                                {"Digests"}
-                            </button>
-                        </div>
-                        <div class={classes!("service-list", if !*proactive_enabled { "disabled" } else { "" })}>
-                            {
-                                match *active_monitoring_tab {
-                                    MonitoringTab::Tasks => {
-                                        html! {
-                                            <div class={classes!("service-item")}>
-                                                <crate::proactive::waiting_checks::TasksSection
-                                                    tasks={vec![]}
-                                                    on_change={Callback::from(|_| {})}
-                                                    phone_number={props.phone_number.clone()}
-                                                    critical_disabled={!*proactive_enabled}
-                                                />
-                                            </div>
-                                        }
-                                    },
-                                    MonitoringTab::People => {
-                                        html! {
-                                        <>
-                                            <div class={classes!("service-item")}>
-                                                <crate::proactive::critical::CriticalSection
-                                                    proactive_disabled={!*proactive_enabled}
-                                                />
-                                            </div>
-                                            <p class="flow-description">{"Notifications are sent immediately for unread messages. If you've been recently online, there may be up to a 5 minute delay to avoid notifying while you're already chatting. Email is checked every 10 minutes."}</p>
-                                        </>
-                                    }},
-                                    MonitoringTab::Scheduled => html! {
-                                        <div class={classes!("service-item")}>
-                                            {
-                                                html! {
-                                                    <crate::proactive::digest::DigestSection
-                                                        phone_number={props.phone_number.clone()}
-                                                        disabled={!*proactive_enabled}
-                                                        />
-                                                }
-                                            }
-                                        </div>
-                                    }
-                                }
-                            }
-                        </div>
-                        </div>
-                    </div>
-                    // Tools
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("tools") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fa-solid fa-hammer"></i>
-                            {"Tools"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                {"8 tools ready!"}
-                                </span>
-                                <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
+                    // Tools - compact always-green icons
+                    <div class="tools-section">
+                        <h4 class="tools-title">{"Built-in Tools"}</h4>
+                        <div class="tools-icons-row">
+                            <div class="tool-icon connected" title="Perplexity AI - AI-powered search and answers">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
                             </div>
-                        </h3>
-<div class={classes!(
-                            "service-list",
-                            if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                            // Perplexity
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
-                                        {"Perplexity AI"}
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Ask any question and get accurate, AI-powered answers through SMS or voice calls. Perplexity helps you find information, solve problems, and learn new things."}
-                                </p>
+                            <div class="tool-icon connected" title="Weather - Weather updates and forecasts">
+                                <i class="fa-solid fa-sun"></i>
                             </div>
-                            // Weather
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"☀️ Weather"}
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Get instant weather updates and forecasts for any location through SMS or voice calls. Provides current conditions."}
-                                </p>
+                            <div class="tool-icon connected" title="Directions - Step-by-step navigation">
+                                <i class="fa-solid fa-directions"></i>
                             </div>
-                            // Directions
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <i class="fas fa-directions" style="color: #1E90FF; font-size: 24px; margin-right: 8px;"></i>
-                                        {"Get Directions"}
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Get step-by-step directions between any two addresses through SMS or voice calls. Includes estimated travel time, distance, and turn-by-turn navigation for walking, biking, driving, or public transit."}
-                                </p>
+                            <div class="tool-icon connected" title="Photo - QR codes and text translation">
+                                <i class="fa-solid fa-camera"></i>
                             </div>
-                            // QR Code Scanner
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <i class="fas fa-qrcode" style="color: #1E90FF; font-size: 24px; margin-right: 8px;"></i>
-                                        {"QR Code Scanner"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("qr-scanner-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                     
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Send a photo of any QR code through SMS and receive its contents instantly. For URLs, you can then either type them manually or have them automatically forwarded to your email if you're using The Light Phone. Note: Photo messaging (MMS) is only available in countries where Twilio supports MMS, including the US and Australia."}
-                                </p>
-                                <div id="qr-scanner-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Take a photo of any QR code"}</li>
-                                            <li>{"2. Send the photo to lightfriend via SMS"}</li>
-                                            <li>{"3. Receive the decoded content in seconds"}</li>
-                                            <li>{"4. For URLs: The Light Phone users get them automatically forwarded to email"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
+                            <div class="tool-icon connected" title="Tasks - Create reminders and scheduled tasks">
+                                <i class="fa-solid fa-tasks"></i>
                             </div>
-                            // Photo Translation
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"🔤 Photo Translation"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("photo-translation-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                     
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Send a photo of text in any language and receive its translation instantly via SMS. Perfect for menus, signs, documents, or any text you need to understand quickly. Note: Photo messaging (MMS) is only available in countries where Twilio supports MMS, including the US and Australia."}
-                                </p>
-                                <div id="photo-translation-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Send a photo containing text to lightfriend"}</li>
-                                            <li>{"2. Specify the target language (or it will default to English)"}</li>
-                                            <li>{"3. Receive the translated text via SMS within seconds"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"🔔 Notifications Status"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                     
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Easily toggle all notifications on and off without having to use this dashboard. Works with both voice calls and SMS."}
-                                </p>
-                                <div id="waiting-checks-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"Tell lightfriend to turn on or off all notifications."}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            // Waiting Checks
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"⏰ Waiting Checks"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                     
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Set up notifications for when you're waiting for something from emails or messaging apps. Get a message when it's time to check on what you're waiting for."}
-                                </p>
-                                <div id="waiting-checks-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Tell lightfriend what you're waiting for and from where (Messaging apps or email)"}</li>
-                                            <li>{"2. When lightfriend notices the event, it sends you a text and removes the waiting check"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            // SMS During Calls
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"📱 SMS During Calls"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("sms-during-calls-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                     
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Send information via SMS while you're on a voice call with lightfriend. Perfect for getting details you need to write down or remember."}
-                                </p>
-                                <div id="sms-during-calls-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. During any voice call with lightfriend"}</li>
-                                            <li>{"2. Ask for information to be sent via SMS"}</li>
-                                            <li>{"3. Continue your conversation while receiving the info"}</li>
-                                            <li>{"4. Check your messages after the call for the details"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
+                            <div class="tool-icon connected" title="SMS During Calls - Send info via SMS while on voice calls">
+                                <i class="fa-solid fa-sms"></i>
                             </div>
                         </div>
+                        <p class="tools-hint">{"All tools are always available via SMS and voice calls"}</p>
                     </div>
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
@@ -840,6 +397,61 @@ pub fn connect(props: &ConnectProps) -> Html {
                     }
 <style>
         {r#"
+/* Tools section - compact always-green icons */
+.tools-section {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: rgba(30, 30, 30, 0.5);
+    border: 1px solid rgba(52, 211, 153, 0.2);
+    border-radius: 12px;
+}
+.tools-title {
+    color: #34D399;
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin: 0 0 0.75rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.tools-icons-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+.tool-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(52, 211, 153, 0.1);
+    border: none;
+    color: #34D399;
+    font-size: 1.2rem;
+    cursor: default;
+    transition: all 0.2s ease;
+}
+.tool-icon.connected {
+    box-shadow: 0 0 15px rgba(52, 211, 153, 0.4);
+}
+.tool-icon:hover {
+    background: rgba(52, 211, 153, 0.2);
+    box-shadow: 0 0 20px rgba(52, 211, 153, 0.5);
+}
+.tool-icon img {
+    width: 20px !important;
+    height: 20px !important;
+    object-fit: contain;
+    filter: brightness(0) saturate(100%) invert(68%) sepia(52%) saturate(434%) hue-rotate(106deg) brightness(96%) contrast(92%);
+}
+.tools-hint {
+    color: #666;
+    font-size: 0.8rem;
+    margin: 0.75rem 0 0 0;
+    font-style: italic;
+}
 .group-summary {
     margin-left: auto;
     display: flex;
@@ -1049,6 +661,16 @@ pub fn connect(props: &ConnectProps) -> Html {
     background: rgba(52, 211, 153, 0.2);
     box-shadow: 0 0 10px rgba(52, 211, 153, 0.5);
 }
+.app-icon.mcp-icon {
+    color: #A78BFA;
+}
+.app-icon.mcp-icon.connected {
+    background: rgba(139, 92, 246, 0.2);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+.app-icon.mcp-icon:hover {
+    background: rgba(139, 92, 246, 0.1);
+}
 .app-details {
     width: 100%;
 }
@@ -1094,26 +716,74 @@ pub fn connect(props: &ConnectProps) -> Html {
         box-sizing: border-box;
     }
 }
+.info-button {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 50%;
+    transition: all 0.2s;
+    line-height: 1;
+}
 .info-button:hover {
     background: rgba(30, 144, 255, 0.1);
+    color: #7eb2ff;
     transform: scale(1.1);
 }
 .info-section {
     background: rgba(30, 144, 255, 0.05);
     border-radius: 8px;
     margin-top: 1rem;
+    padding: 1rem;
     border: 1px solid rgba(30, 144, 255, 0.1);
 }
-.info-section p {
-    color: #CCC;
+.info-section h4 {
+    color: #fff;
+    font-size: 1.1rem;
+    margin: 0 0 0.75rem 0;
+    font-weight: 600;
+}
+.info-section h5 {
+    color: #7eb2ff;
+    font-size: 0.95rem;
     margin: 0 0 0.5rem 0;
+    font-weight: 500;
+}
+.info-section p {
+    color: #bbb;
+    margin: 0 0 0.5rem 0;
+    line-height: 1.5;
 }
 .info-section ul {
     margin: 0;
-    color: #999;
+    padding-left: 1.25rem;
+    color: #bbb;
 }
 .info-section li {
     margin: 0.5rem 0;
+    line-height: 1.4;
+}
+.info-subsection {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.info-subsection:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+.info-subsection.security-notice {
+    background: rgba(105, 240, 174, 0.05);
+    border: 1px solid rgba(105, 240, 174, 0.1);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-top: 1rem;
+}
+.info-subsection.security-notice h5 {
+    color: #69f0ae;
 }
 .fas.fa-directions,
 .fas.fa-qrcode {
@@ -1772,6 +1442,47 @@ input:checked + .slider:before {
 .service-list.disabled {
     opacity: 0.5;
     pointer-events: none;
+}
+/* Simplified Notifications Toggle */
+.notifications-toggle-group {
+    padding: 1.5rem;
+}
+.notifications-toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+.notifications-toggle-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.notifications-toggle-info i {
+    color: #34D399;
+    font-size: 1.5rem;
+}
+.notifications-toggle-text h3 {
+    color: #34D399;
+    font-size: 1.1rem;
+    margin: 0;
+}
+.notifications-toggle-text .toggle-status-hint {
+    display: block;
+    margin-top: 0.25rem;
+}
+.notifications-toggle-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.notifications-hint {
+    color: #666;
+    font-size: 0.85rem;
+    margin-top: 1rem;
+    margin-bottom: 0;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 "#}
                     </style>
