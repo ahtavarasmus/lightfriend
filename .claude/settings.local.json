@@ -155,7 +155,12 @@
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/proactive/constant_monitoring.rs)",
       "Bash(git -C /Users/ahtavarasmus/worktrees/frontend_deadcode log --oneline -10 frontend/src/profile/billing_payments.rs)",
       "Bash(rustc:*)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(sqlite3:*)",
+      "Bash(pgrep:*)",
+      "Bash(ps:*)"
     ],
     "deny": [
       "Read(.env)",
@@ -170,6 +175,8 @@
       "Bash(sudo *)"
     ],
     "ask": [
+      "Bash(cargo test*--ignored*)",
+      "Bash(cargo test*--include-ignored*)",
       "Bash(touch */.claude/.allow-*)",
       "Bash(touch .claude/.allow-*)",
       "Edit(backend/tests/**)",
