@@ -4,7 +4,17 @@ use wasm_bindgen_futures::spawn_local;
 use serde_json::{json, Value};
 use crate::utils::api::Api;
 use crate::dashboard::media_panel::{MediaPanel, MediaItem, extract_video_id};
+use crate::dashboard::tesla_quick_panel::TeslaQuickPanel;
+use crate::dashboard::youtube_quick_panel::YouTubeQuickPanel;
 use super::timeline_view::UpcomingTask;
+
+// @mention system - available mentions
+const MENTION_OPTIONS: &[(&str, &str, &str)] = &[
+    ("tesla", "Tesla Controls", "fa-car"),
+    ("youtube", "YouTube", "fa-youtube"),
+    // Future: ("calendar", "Calendar", "fa-calendar"),
+    // Future: ("weather", "Weather", "fa-cloud"),
+];
 
 const CHAT_STYLES: &str = r#"
 .chat-section {
@@ -177,6 +187,89 @@ const CHAT_STYLES: &str = r#"
     background: rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.8);
 }
+/* Task preview panel */
+.task-preview-panel {
+    background: rgba(30, 144, 255, 0.1);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    border-radius: 12px;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+}
+.task-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.task-preview-label {
+    color: #7eb2ff;
+    font-size: 0.8rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.task-preview-close {
+    background: transparent;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.task-preview-close:hover {
+    color: #999;
+    background: rgba(255, 255, 255, 0.05);
+}
+.task-preview-content {
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+.task-preview-content:hover {
+    background: rgba(30, 144, 255, 0.1);
+}
+.task-preview-time {
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.task-preview-time i {
+    color: #7eb2ff;
+}
+.task-preview-date {
+    color: #888;
+    font-weight: 400;
+}
+.task-preview-desc {
+    color: #ccc;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+    line-height: 1.4;
+}
+.task-preview-source {
+    color: #7eb2ff;
+    font-size: 0.75rem;
+    margin-top: 0.15rem;
+    opacity: 0.8;
+}
+.task-preview-condition {
+    color: #e8a838;
+    font-size: 0.75rem;
+    margin-top: 0.15rem;
+    font-style: italic;
+}
+.task-preview-hint {
+    color: #666;
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
+}
 "#;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -188,6 +281,18 @@ pub struct ChatBoxProps {
     pub focused_task: Option<UpcomingTask>,
     #[prop_or_default]
     pub on_task_cleared: Callback<()>,
+    /// Callback when a task is created via chat - passes the task ID
+    #[prop_or_default]
+    pub on_task_created: Callback<i32>,
+    /// Task preview (shown after creation, before entering edit mode)
+    #[prop_or_default]
+    pub preview_task: Option<UpcomingTask>,
+    /// Callback when user clicks preview task to edit it
+    #[prop_or_default]
+    pub on_preview_click: Callback<UpcomingTask>,
+    /// Callback to close task preview
+    #[prop_or_default]
+    pub on_preview_close: Callback<()>,
 }
 
 #[function_component(ChatBox)]
@@ -214,6 +319,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let detected_media: UseStateHandle<Vec<MediaItem>> = use_state(|| Vec::new());
     let media_playing = use_state(|| false);
     let media_playing_index = use_state(|| 0usize);
+
+    // @mention system state
+    let active_mention = use_state(|| None::<String>);
 
     // Update call duration every second when call is active
     {
@@ -290,6 +398,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let media_playing_send = media_playing.clone();
         let focused_task = props.focused_task.clone();
         let on_task_cleared = props.on_task_cleared.clone();
+        let on_task_created = props.on_task_created.clone();
         let chat_input_ref = chat_input_ref.clone();
 
         Callback::from(move |_| {
@@ -314,6 +423,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let media_playing = media_playing_send.clone();
             let focused_task = focused_task.clone();
             let on_task_cleared = on_task_cleared.clone();
+            let on_task_created = on_task_created.clone();
             let chat_input_ref = chat_input_ref.clone();
 
             // Set user message and clear previous reply (only for regular chat, not task editing)
@@ -399,10 +509,13 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
                                             let _ = window.dispatch_event(&event);
                                         }
-                                        // Refocus the input for continued editing
-                                        if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
-                                            let _ = input.focus();
-                                        }
+                                        // Refocus the input for continued editing (with delay to ensure re-render completes)
+                                        let chat_input_ref = chat_input_ref.clone();
+                                        gloo_timers::callback::Timeout::new(100, move || {
+                                            if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                                                let _ = input.focus();
+                                            }
+                                        }).forget();
                                         // Stay in task edit mode - don't call on_task_cleared
                                     } else {
                                         // Regular chat - show in message history
@@ -426,6 +539,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                                 detected_media.set(media_items);
                                                 media_playing.set(false);
                                             }
+                                        }
+
+                                        // Check if a task was created - trigger preview
+                                        if let Some(task_id) = data["created_task_id"].as_i64() {
+                                            on_task_created.emit(task_id as i32);
                                         }
 
                                         // Dispatch event for other components
@@ -555,23 +673,38 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 <div class="chat-messages">
                     {
                         match ((*chat_user_msg).clone(), (*chat_bot_reply).clone(), *chat_loading) {
-                            (None, _, false) => html! {},
+                            // Task edit mode: only show bot reply (must come before wildcard)
+                            (None, Some(bot_reply), false) => html! {
+                                <div class="chat-msg assistant">{bot_reply}</div>
+                            },
+                            // Loading state in task edit mode (no user message shown)
+                            (None, None, true) => html! {
+                                <div class="chat-msg assistant loading">{"..."}</div>
+                            },
+                            // No messages, not loading - show nothing
+                            (None, None, false) => html! {},
+                            // Regular chat: user message with loading indicator
                             (Some(user_msg), None, true) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
                                     <div class="chat-msg assistant loading">{"..."}</div>
                                 </>
                             },
+                            // Regular chat: both messages
                             (Some(user_msg), Some(bot_reply), _) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
                                     <div class="chat-msg assistant">{bot_reply}</div>
                                 </>
                             },
+                            // Regular chat: user message, no response yet
                             (Some(user_msg), None, false) => html! {
                                 <div class="chat-msg user">{user_msg}</div>
                             },
-                            _ => html! {}
+                            // Task edit mode: loading with existing reply
+                            (None, Some(_), true) => html! {
+                                <div class="chat-msg assistant loading">{"..."}</div>
+                            },
                         }
                     }
                 </div>
@@ -671,10 +804,53 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             let chat_input = chat_input.clone();
                             let detected_media = detected_media.clone();
                             let media_playing = media_playing.clone();
+                            let active_mention = active_mention.clone();
                             Callback::from(move |e: InputEvent| {
                                 let input: HtmlInputElement = e.target_unchecked_into();
                                 let value = input.value();
                                 chat_input.set(value.clone());
+
+                                // @mention detection - check for @word pattern at end of input
+                                let mention_regex = regex::Regex::new(r"@(\w*)$").ok();
+                                if let Some(re) = mention_regex {
+                                    if let Some(cap) = re.captures(&value) {
+                                        let query = cap.get(1).map(|m| m.as_str().to_lowercase()).unwrap_or_default();
+
+                                        // Find matching mentions
+                                        let matches: Vec<_> = MENTION_OPTIONS.iter()
+                                            .filter(|(name, _, _)| name.starts_with(&query))
+                                            .collect();
+
+                                        // If exactly one match, show its panel
+                                        if matches.len() == 1 && !query.is_empty() {
+                                            let (name, _, _) = matches[0];
+                                            active_mention.set(Some(name.to_string()));
+                                        } else if query.is_empty() {
+                                            // Just typed @ - could show dropdown here in future
+                                            // For now, don't change active_mention
+                                        }
+                                    } else {
+                                        // No @mention pattern found - check if we should clear
+                                        // Only clear if user deleted the @ or mention text
+                                        let has_mention = MENTION_OPTIONS.iter()
+                                            .any(|(name, _, _)| value.to_lowercase().contains(&format!("@{}", name)));
+                                        if !has_mention && (*active_mention).is_some() {
+                                            // Check if there's still a partial @mention
+                                            let has_at = value.contains('@');
+                                            if !has_at {
+                                                active_mention.set(None);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Also check for completed @mentions in text
+                                for (name, _, _) in MENTION_OPTIONS.iter() {
+                                    if value.to_lowercase().contains(&format!("@{}", name)) {
+                                        active_mention.set(Some(name.to_string()));
+                                        break;
+                                    }
+                                }
 
                                 // Detect video URLs from all supported platforms
                                 let url_regex = regex::Regex::new(r"https?://[^\s]+").ok();
@@ -840,6 +1016,75 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 on_back={on_media_back}
                                 youtube_connected={props.youtube_connected}
                             />
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+                // @mention control panels
+                {
+                    match (*active_mention).as_deref() {
+                        Some("tesla") if props.focused_task.is_none() => {
+                            let on_close = {
+                                let active_mention = active_mention.clone();
+                                Callback::from(move |_: ()| active_mention.set(None))
+                            };
+                            html! { <TeslaQuickPanel on_close={on_close} /> }
+                        }
+                        Some("youtube") if props.focused_task.is_none() => {
+                            let on_close = {
+                                let active_mention = active_mention.clone();
+                                Callback::from(move |_: ()| active_mention.set(None))
+                            };
+                            html! { <YouTubeQuickPanel on_close={on_close} /> }
+                        }
+                        // Future: Some("calendar") => html! { <CalendarPanel on_close={...} /> }
+                        _ => html! {}
+                    }
+                }
+                // Task preview panel (shown after task creation)
+                {
+                    if let Some(task) = &props.preview_task {
+                        let task_for_click = task.clone();
+                        let on_click = props.on_preview_click.clone();
+                        let on_close = props.on_preview_close.clone();
+                        let is_recurring = task.trigger_type == "recurring_email" || task.trigger_type == "recurring_messaging";
+                        html! {
+                            <div class="task-preview-panel">
+                                <div class="task-preview-header">
+                                    <span class="task-preview-label">{if is_recurring { "Monitoring active" } else { "Task scheduled" }}</span>
+                                    <button class="task-preview-close" onclick={Callback::from(move |_: MouseEvent| on_close.emit(()))}>{"x"}</button>
+                                </div>
+                                <div class="task-preview-content" onclick={Callback::from(move |_: MouseEvent| on_click.emit(task_for_click.clone()))}>
+                                    <div class="task-preview-time">
+                                        {if is_recurring {
+                                            html! { <i class="fa-solid fa-eye"></i> }
+                                        } else {
+                                            html! { <i class="fa-regular fa-clock"></i> }
+                                        }}
+                                        {&task.time_display}
+                                        {if !task.date_display.is_empty() {
+                                            html! { <span class="task-preview-date">{format!(" - {}", &task.date_display)}</span> }
+                                        } else {
+                                            html! {}
+                                        }}
+                                    </div>
+                                    if let Some(ref src) = task.sources_display {
+                                        <div class="task-preview-source">{format!("Check: {}", src)}</div>
+                                    }
+                                    if let Some(ref cond) = task.condition {
+                                        <div class="task-preview-condition">{format!("Condition: {}", cond)}</div>
+                                    }
+                                    <div class="task-preview-desc">
+                                        {if task.condition.is_some() || task.sources_display.is_some() {
+                                            format!("Then: {}", &task.description)
+                                        } else {
+                                            task.description.clone()
+                                        }}
+                                    </div>
+                                    <div class="task-preview-hint">{"Click to edit"}</div>
+                                </div>
+                            </div>
                         }
                     } else {
                         html! {}

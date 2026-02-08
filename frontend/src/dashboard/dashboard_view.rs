@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use serde::Deserialize;
 use crate::utils::api::Api;
@@ -8,7 +9,7 @@ use super::chat_box::ChatBox;
 use super::triage_indicator::{TriageIndicator, AttentionItem as TriageAttentionItem};
 use super::timeline_view::{TimelineView, UpcomingTask, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, WatchedContact, NextDigestInfo};
-use super::settings_panel::SettingsPanel;
+use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::activity_panel::ActivityPanel;
 use super::quiet_mode::QuietModeStatus;
 
@@ -78,6 +79,18 @@ const DASHBOARD_STYLES: &str = r#"
     word-wrap: break-word;
     line-height: 1.4;
 }
+.task-detail-source {
+    font-size: 0.75rem;
+    color: #7eb2ff;
+    margin-top: 0.15rem;
+    opacity: 0.8;
+}
+.task-detail-condition {
+    font-size: 0.75rem;
+    color: #e8a838;
+    margin-top: 0.15rem;
+    font-style: italic;
+}
 .task-detail-note {
     font-size: 0.7rem;
     color: #666;
@@ -126,6 +139,12 @@ struct DashboardSummaryResponse {
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
+    /// Tasks beyond the current timeline range (for extend button preview)
+    #[serde(default)]
+    tasks_beyond: Vec<UpcomingTaskResponse>,
+    /// Total count of tasks beyond the timeline range
+    #[serde(default)]
+    tasks_beyond_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize, Default)]
@@ -155,8 +174,18 @@ struct ScheduledItemResponse {
 struct UpcomingTaskResponse {
     task_id: Option<i32>,
     timestamp: i32,
+    #[serde(default)]
+    trigger_type: String,
     time_display: String,
     description: String,
+    #[serde(default)]
+    date_display: String,
+    #[serde(default)]
+    relative_display: String,
+    #[serde(default)]
+    condition: Option<String>,
+    #[serde(default)]
+    sources_display: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -172,6 +201,8 @@ struct NextDigestResponse {
 
 #[derive(Clone, PartialEq, Deserialize)]
 struct UpcomingDigestResponse {
+    #[serde(default)]
+    task_id: Option<i32>,
     timestamp: i32,
     time_display: String,
     sources: Option<String>,
@@ -195,9 +226,94 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Panel visibility state
     let settings_open = use_state(|| false);
     let activity_open = use_state(|| false);
+    let settings_initial_tab = use_state(|| SettingsTab::People);
+
+    // Handle URL parameters for opening settings panel with specific tab
+    {
+        let settings_open = settings_open.clone();
+        let settings_initial_tab = settings_initial_tab.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(search) = window.location().search() {
+                        if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
+                            // Check for ?settings=capabilities (or other tab names)
+                            if let Some(tab) = params.get("settings") {
+                                let tab_enum = match tab.to_lowercase().as_str() {
+                                    "people" => Some(SettingsTab::People),
+                                    "tasks" => Some(SettingsTab::Tasks),
+                                    "capabilities" | "connections" => Some(SettingsTab::Capabilities),
+                                    "account" => Some(SettingsTab::Account),
+                                    "billing" => Some(SettingsTab::Billing),
+                                    _ => None,
+                                };
+                                if let Some(tab) = tab_enum {
+                                    settings_initial_tab.set(tab);
+                                    settings_open.set(true);
+                                    // Clean URL
+                                    if let Ok(history) = window.history() {
+                                        let _ = history.replace_state_with_url(
+                                            &wasm_bindgen::JsValue::NULL,
+                                            "",
+                                            Some("/"),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
+
+    // Listen for custom event from nav Settings button
+    {
+        let settings_open = settings_open.clone();
+        let settings_initial_tab = settings_initial_tab.clone();
+        use_effect_with_deps(
+            move |_| {
+                let settings_open = settings_open.clone();
+                let settings_initial_tab = settings_initial_tab.clone();
+                let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                    settings_initial_tab.set(SettingsTab::Account);
+                    settings_open.set(true);
+                }) as Box<dyn FnMut()>);
+
+                if let Some(window) = web_sys::window() {
+                    let _ = window.add_event_listener_with_callback(
+                        "open-settings",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                }
+
+                // Return cleanup function
+                let cleanup_callback = callback;
+                move || {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.remove_event_listener_with_callback(
+                            "open-settings",
+                            cleanup_callback.as_ref().unchecked_ref(),
+                        );
+                    }
+                }
+            },
+            (),
+        );
+    }
 
     // Task detail modal state
     let selected_task = use_state(|| None::<UpcomingTask>);
+
+    // Task preview state (shown below chatbox after creation, before entering edit mode)
+    let preview_task = use_state(|| None::<UpcomingTask>);
+
+    // Timeline end timestamp state (default: now + 90 days)
+    let now_ts_init = (js_sys::Date::now() / 1000.0) as i32;
+    let ninety_days_secs = 90 * 24 * 60 * 60;
+    let timeline_end_ts = use_state(move || now_ts_init + ninety_days_secs);
 
     // Fetch YouTube connection status
     {
@@ -206,23 +322,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             spawn_local(async move {
                 match Api::get("/api/auth/youtube/status").send().await {
                     Ok(response) => {
-                        let status = response.status();
-                        match response.json::<serde_json::Value>().await {
-                            Ok(data) => {
-                                web_sys::console::log_1(&format!("YouTube status response: {:?}", data).into());
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                    web_sys::console::log_1(&format!("YouTube connected: {}", connected).into());
-                                    youtube_connected.set(connected);
-                                }
-                            }
-                            Err(e) => {
-                                web_sys::console::error_1(&format!("Failed to parse YouTube status: {:?}", e).into());
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                youtube_connected.set(connected);
                             }
                         }
                     }
-                    Err(e) => {
-                        web_sys::console::error_1(&format!("Failed to fetch YouTube status: {:?}", e).into());
-                    }
+                    Err(_) => {}
                 }
             });
             || ()
@@ -233,12 +339,15 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let fetch_summary = {
         let summary = summary.clone();
         let summary_loading = summary_loading.clone();
+        let timeline_end_ts = timeline_end_ts.clone();
         Callback::from(move |_: ()| {
             let summary = summary.clone();
             let summary_loading = summary_loading.clone();
+            let until = *timeline_end_ts;
 
             spawn_local(async move {
-                match Api::get("/api/dashboard/summary").send().await {
+                let url = format!("/api/dashboard/summary?until={}", until);
+                match Api::get(&url).send().await {
                     Ok(response) => {
                         if response.ok() {
                             if let Ok(data) = response.json::<DashboardSummaryResponse>().await {
@@ -246,9 +355,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             }
                         }
                     }
-                    Err(_) => {
-                        // Silently handle error - show empty state
-                    }
+                    Err(_) => {}
                 }
                 summary_loading.set(false);
             });
@@ -327,8 +434,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 .map(|t| UpcomingTask {
                     task_id: t.task_id,
                     timestamp: t.timestamp,
+                    trigger_type: t.trigger_type.clone(),
                     time_display: t.time_display.clone(),
                     description: t.description.clone(),
+                    date_display: t.date_display.clone(),
+                    relative_display: t.relative_display.clone(),
+                    condition: t.condition.clone(),
+                    sources_display: t.sources_display.clone(),
                 })
                 .collect()
         })
@@ -340,6 +452,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             s.upcoming_digests
                 .iter()
                 .map(|d| UpcomingDigest {
+                    task_id: d.task_id,
                     timestamp: d.timestamp,
                     time_display: d.time_display.clone(),
                     sources: d.sources.clone(),
@@ -347,6 +460,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 .collect()
         })
         .unwrap_or_default();
+
 
     // Update selected_task with fresh data when summary changes
     {
@@ -403,11 +517,18 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let sunrise_hour = (*summary).as_ref().and_then(|s| s.sunrise_hour);
     let sunset_hour = (*summary).as_ref().and_then(|s| s.sunset_hour);
 
+    // Extract quiet_until for timeline visualization (only if is_quiet is true)
+    let quiet_until = if quiet_mode.is_quiet {
+        quiet_mode.until
+    } else {
+        None
+    };
+
     // Callbacks for footer buttons
-    let on_settings_click = {
-        let settings_open = settings_open.clone();
-        Callback::from(move |_| {
-            settings_open.set(true);
+    let on_quiet_mode_change = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |_: ()| {
+            fetch_summary.emit(());
         })
     };
 
@@ -436,6 +557,26 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let on_task_click = {
         let selected_task = selected_task.clone();
         Callback::from(move |task: UpcomingTask| {
+            selected_task.set(Some(task));
+        })
+    };
+
+    // Digest click callback - convert to UpcomingTask for editing
+    let on_digest_click = {
+        let selected_task = selected_task.clone();
+        Callback::from(move |digest: UpcomingDigest| {
+            // Convert digest to UpcomingTask for the edit UI
+            let task = UpcomingTask {
+                task_id: digest.task_id,
+                timestamp: digest.timestamp,
+                trigger_type: "once".to_string(),
+                time_display: digest.time_display.clone(),
+                description: format!("Digest: {}", digest.sources.as_deref().unwrap_or("all sources")),
+                date_display: String::new(),
+                relative_display: String::new(),
+                condition: None,
+                sources_display: None,
+            };
             selected_task.set(Some(task));
         })
     };
@@ -483,6 +624,61 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Callback for usage changes (refresh summary after chat)
     let on_usage_change = fetch_summary.clone();
 
+
+    // Callback for when a task is created via chat - show preview below chatbox
+    let on_task_created = {
+        let preview_task = preview_task.clone();
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |task_id: i32| {
+            // Refresh the dashboard to get the new task
+            fetch_summary.emit(());
+
+            // Schedule a check after a short delay to find and show preview
+            let preview_task = preview_task.clone();
+            gloo_timers::callback::Timeout::new(500, move || {
+                let preview_task = preview_task.clone();
+                spawn_local(async move {
+                    if let Ok(response) = Api::get(&format!("/api/tasks/{}", task_id)).send().await {
+                        if response.ok() {
+                            if let Ok(task_data) = response.json::<serde_json::Value>().await {
+                                let task = UpcomingTask {
+                                    task_id: task_data["id"].as_i64().map(|i| i as i32),
+                                    timestamp: task_data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
+                                    trigger_type: task_data["trigger_type"].as_str().unwrap_or("once").to_string(),
+                                    time_display: task_data["time_display"].as_str().unwrap_or("").to_string(),
+                                    description: task_data["description"].as_str().unwrap_or("").to_string(),
+                                    date_display: task_data["date_display"].as_str().unwrap_or("").to_string(),
+                                    relative_display: task_data["relative_display"].as_str().unwrap_or("").to_string(),
+                                    condition: task_data["condition"].as_str().map(|s| s.to_string()),
+                                    sources_display: task_data["sources_display"].as_str().map(|s| s.to_string()),
+                                };
+                                preview_task.set(Some(task));
+                            }
+                        }
+                    }
+                });
+            }).forget();
+        })
+    };
+
+    // Callback for when user clicks on task preview to edit it
+    let on_preview_click = {
+        let selected_task = selected_task.clone();
+        let preview_task = preview_task.clone();
+        Callback::from(move |task: UpcomingTask| {
+            selected_task.set(Some(task));
+            preview_task.set(None);
+        })
+    };
+
+    // Callback to close task preview
+    let on_preview_close = {
+        let preview_task = preview_task.clone();
+        Callback::from(move |_: ()| {
+            preview_task.set(None);
+        })
+    };
+
     html! {
         <>
             <style>{DASHBOARD_STYLES}</style>
@@ -500,6 +696,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         youtube_connected={*youtube_connected}
                         focused_task={(*selected_task).clone()}
                         on_task_cleared={on_task_cleared}
+                        on_task_created={on_task_created}
+                        preview_task={(*preview_task).clone()}
+                        on_preview_click={on_preview_click}
+                        on_preview_close={on_preview_close}
                     />
 
                     // Task detail bar (shown when task selected) - below ChatBox
@@ -507,7 +707,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <div class="task-detail-bar">
                             <div class="task-detail-info">
                                 <div class="task-detail-time">{&task.time_display}</div>
-                                <div class="task-detail-desc">{&task.description}</div>
+                                if let Some(ref src) = task.sources_display {
+                                    <div class="task-detail-source">{format!("Check: {}", src)}</div>
+                                }
+                                if let Some(ref cond) = task.condition {
+                                    <div class="task-detail-condition">{format!("Condition: {}", cond)}</div>
+                                }
+                                <div class="task-detail-desc">
+                                    {if task.condition.is_some() || task.sources_display.is_some() {
+                                        format!("Then: {}", &task.description)
+                                    } else {
+                                        task.description.clone()
+                                    }}
+                                </div>
                                 <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
                             </div>
                             <button class="task-btn-delete" onclick={on_delete_task}>{"Delete"}</button>
@@ -530,8 +742,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     upcoming_digests={upcoming_digests}
                     now_timestamp={now_timestamp}
                     on_task_click={on_task_click}
+                    on_digest_click={on_digest_click}
                     sunrise_hour={sunrise_hour}
                     sunset_hour={sunset_hour}
+                    quiet_until={quiet_until}
                 />
 
                 // Horizontal separator
@@ -542,8 +756,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     watched_contacts={watched_contacts}
                     next_digest={next_digest}
                     quiet_mode={quiet_mode}
-                    on_settings_click={on_settings_click}
                     on_activity_click={on_activity_click}
+                    on_quiet_mode_change={Some(on_quiet_mode_change)}
                 />
             </div>
 
@@ -553,6 +767,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 user_profile={Some(props.user_profile.clone())}
                 on_close={on_settings_close}
                 on_profile_update={props.on_profile_update.clone()}
+                initial_tab={*settings_initial_tab}
             />
 
             // Activity panel (slide-in)
