@@ -230,6 +230,7 @@ pub async fn handle_send_chat_message(
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             Json(TwilioResponse {
                 message: error_msg.to_string(),
+                created_task_id: None,
             }),
         ));
     }
@@ -248,7 +249,10 @@ pub async fn handle_send_chat_message(
             return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse { message: error_msg }),
+                Json(TwilioResponse {
+                    message: error_msg,
+                    created_task_id: None,
+                }),
             ));
         }
     };
@@ -294,7 +298,10 @@ pub async fn handle_send_chat_message(
             return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse { message: error_msg }),
+                Json(TwilioResponse {
+                    message: error_msg,
+                    created_task_id: None,
+                }),
             ));
         }
     };
@@ -334,6 +341,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
+                    created_task_id: None,
                 }),
             ));
         }
@@ -394,6 +402,7 @@ pub async fn handle_send_chat_message(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(TwilioResponse {
             message: "Message queued".to_string(),
+            created_task_id: None,
         }),
     ))
 }

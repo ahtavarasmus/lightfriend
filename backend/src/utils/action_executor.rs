@@ -14,9 +14,44 @@
 use crate::tool_call_utils::utils::create_openai_client_for_user;
 use crate::AppState;
 use crate::ModelPurpose;
+use crate::UserCoreOps;
 use openai_api_rs::v1::chat_completion;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// A structured representation of a task action.
+/// Stored as JSON in the DB `action` column.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StructuredAction {
+    pub tool: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+}
+
+impl StructuredAction {
+    /// Convert to old-style action string for display formatting compatibility.
+    /// e.g. StructuredAction { tool: "send_reminder", params: {"message": "Call mom"} }
+    ///   -> "send_reminder(Call mom)"
+    pub fn to_action_string(&self) -> String {
+        match &self.params {
+            Some(params) if params.is_object() => {
+                // Extract the "primary" param value for display
+                let obj = params.as_object().unwrap();
+                let display_val = match self.tool.as_str() {
+                    "send_reminder" => obj.get("message").and_then(|v| v.as_str()),
+                    "control_tesla" => obj.get("command").and_then(|v| v.as_str()),
+                    "get_weather" => obj.get("location").and_then(|v| v.as_str()),
+                    _ => obj.values().next().and_then(|v| v.as_str()),
+                };
+                match display_val {
+                    Some(val) => format!("{}({})", self.tool, val),
+                    None => self.tool.clone(),
+                }
+            }
+            _ => self.tool.clone(),
+        }
+    }
+}
 
 /// Result of executing a task's action
 pub enum ActionResult {
@@ -171,6 +206,27 @@ pub async fn fetch_sources(
                     context_parts.push(format!("CALENDAR:\n{}", calendar_result));
                 }
             }
+            "weather" => {
+                // Fetch weather using user's default location from settings
+                let user_info = state.user_core.get_user_info(user_id).ok();
+                let location = user_info
+                    .and_then(|u| u.location)
+                    .unwrap_or_else(|| "current location".to_string());
+
+                match crate::utils::tool_exec::get_weather(
+                    state, &location, "metric", "current", user_id,
+                )
+                .await
+                {
+                    Ok(weather_data) => {
+                        context_parts.push(format!("WEATHER:\n{}", weather_data));
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to fetch weather: {:?}", e);
+                        context_parts.push("WEATHER: (fetch failed)".to_string());
+                    }
+                }
+            }
             _ => {
                 tracing::warn!("Unknown source type: {}", source);
             }
@@ -184,42 +240,83 @@ pub async fn fetch_sources(
     }
 }
 
-/// Parse action string into tool name and optional parameter
-/// Examples:
-/// - "generate_digest" -> ("generate_digest", None)
-/// - "control_tesla(climate_on)" -> ("control_tesla", Some("climate_on"))
-fn parse_action(action: &str) -> (String, Option<String>) {
+/// Parse an action string into a StructuredAction.
+/// Handles both new JSON format and old `tool(param)` format for backward compatibility.
+///
+/// New format: `{"tool":"send_reminder","params":{"message":"Call mom"}}`
+/// Old format: `send_reminder(Call mom)` or `generate_digest`
+fn parse_action_structured(action: &str) -> StructuredAction {
     let action = action.trim();
     if action.is_empty() {
-        return (String::new(), None);
+        return StructuredAction {
+            tool: String::new(),
+            params: None,
+        };
     }
 
+    // Try JSON parse first (new format)
+    if let Ok(structured) = serde_json::from_str::<StructuredAction>(action) {
+        return structured;
+    }
+
+    // Fall back to old tool(param) format
     if let Some(idx) = action.find('(') {
         if action.ends_with(')') {
             let tool = action[..idx].to_string();
             let param = action[idx + 1..action.len() - 1].to_string();
-            return (tool, Some(param));
+            // Map old param to the correct JSON shape per tool
+            let params = match tool.as_str() {
+                "send_reminder" => serde_json::json!({ "message": param }),
+                "control_tesla" => serde_json::json!({ "command": param }),
+                "get_weather" => serde_json::json!({ "location": param }),
+                "send_chat_message" => {
+                    let parts: Vec<&str> = param.splitn(3, ',').map(|s| s.trim()).collect();
+                    if parts.len() >= 3 {
+                        serde_json::json!({
+                            "platform": parts[0],
+                            "contact": parts[1],
+                            "message": parts[2]
+                        })
+                    } else {
+                        serde_json::json!({ "raw": param })
+                    }
+                }
+                _ => serde_json::json!({ "raw": param }),
+            };
+            return StructuredAction {
+                tool,
+                params: Some(params),
+            };
         }
     }
-    (action.to_string(), None)
+
+    // Simple tool name with no params
+    StructuredAction {
+        tool: action.to_string(),
+        params: None,
+    }
 }
 
-/// Execute a single tool call directly (without AI)
+/// Execute a single tool call directly (without AI) from a StructuredAction
 async fn execute_direct_tool(
     state: &Arc<AppState>,
     user_id: i32,
-    tool_name: &str,
-    param: Option<&str>,
+    action: &StructuredAction,
     source_data: &str,
 ) -> Result<String, String> {
-    match tool_name {
+    let params = action.params.as_ref();
+
+    match action.tool.as_str() {
         "generate_digest" => {
             crate::tool_call_utils::management::handle_generate_digest(state, user_id, source_data)
                 .await
                 .map_err(|e| e.to_string())
         }
         "control_tesla" => {
-            let command = param.unwrap_or("status");
+            let command = params
+                .and_then(|p| p.get("command"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
             let args = serde_json::json!({ "command": command }).to_string();
             Ok(crate::tool_call_utils::tesla::handle_tesla_command(
                 state, user_id, &args, true, // silent mode
@@ -227,7 +324,10 @@ async fn execute_direct_tool(
             .await)
         }
         "get_weather" => {
-            let location = param.unwrap_or("current location");
+            let location = params
+                .and_then(|p| p.get("location"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("current location");
             crate::utils::tool_exec::get_weather(state, location, "metric", "current", user_id)
                 .await
                 .map_err(|e| e.to_string())
@@ -236,6 +336,13 @@ async fn execute_direct_tool(
             crate::tool_call_utils::calendar::handle_fetch_calendar_events(state, user_id, "{}")
                 .await,
         ),
+        "send_reminder" => {
+            let message = params
+                .and_then(|p| p.get("message"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Reminder");
+            Ok(message.to_string())
+        }
         "" => {
             // Empty action - just return source data summary
             if source_data.is_empty() {
@@ -244,7 +351,7 @@ async fn execute_direct_tool(
                 Ok(source_data.to_string())
             }
         }
-        _ => Err(format!("Unknown action tool: {}", tool_name)),
+        _ => Err(format!("Unknown action tool: {}", action.tool)),
     }
 }
 
@@ -501,37 +608,35 @@ pub async fn execute_action_spec(
     }
 
     // Step 3: Parse and execute action (continue even on failure)
-    let (tool_name, param) = parse_action(action_spec);
+    let structured = parse_action_structured(action_spec);
     let mut action_failed = false;
-    let action_result =
-        match execute_direct_tool(state, user_id, &tool_name, param.as_deref(), &source_data).await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!("Action execution failed for user {}: {}", user_id, e);
-                action_failed = true;
+    let action_result = match execute_direct_tool(state, user_id, &structured, &source_data).await {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!("Action execution failed for user {}: {}", user_id, e);
+            action_failed = true;
 
-                // Create admin alert (no sensitive content)
-                if let Err(alert_err) = state.admin_alert_repository.create_alert(
-                    "task_action_failed",
-                    "warning",
-                    &format!(
-                        "Action '{}' failed for user {}: {}",
-                        action_spec, user_id, e
-                    ),
-                    "action_executor",
-                    "execute_action_spec",
-                ) {
-                    tracing::error!("Failed to create admin alert: {}", alert_err);
-                }
-
-                // Continue with error message - we'll still try to notify user
-                format!("Task action failed: {}", e)
+            // Create admin alert (no sensitive content)
+            if let Err(alert_err) = state.admin_alert_repository.create_alert(
+                "task_action_failed",
+                "warning",
+                &format!(
+                    "Action '{}' failed for user {}: {}",
+                    action_spec, user_id, e
+                ),
+                "action_executor",
+                "execute_action_spec",
+            ) {
+                tracing::error!("Failed to create admin alert: {}", alert_err);
             }
-        };
+
+            // Continue with error message - we'll still try to notify user
+            format!("Task action failed: {}", e)
+        }
+    };
 
     // Step 4: Generate notification message (with fallbacks)
-    let notification_message = if tool_name == "generate_digest" && !action_failed {
+    let notification_message = if structured.tool == "generate_digest" && !action_failed {
         // Digest already formatted, use directly
         action_result.clone()
     } else {
@@ -587,5 +692,79 @@ pub async fn execute_action_spec(
         ActionResult::Success {
             message: notification_message,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_structured_json_format() {
+        let action = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
+        let result = parse_action_structured(action);
+        assert_eq!(result.tool, "send_reminder");
+        let msg = result.params.unwrap();
+        assert_eq!(msg["message"], "Call mom");
+    }
+
+    #[test]
+    fn test_parse_structured_old_format() {
+        let result = parse_action_structured("send_reminder(Call mom)");
+        assert_eq!(result.tool, "send_reminder");
+        let params = result.params.unwrap();
+        assert_eq!(params["message"], "Call mom");
+    }
+
+    #[test]
+    fn test_parse_structured_old_tesla() {
+        let result = parse_action_structured("control_tesla(climate_on)");
+        assert_eq!(result.tool, "control_tesla");
+        let params = result.params.unwrap();
+        assert_eq!(params["command"], "climate_on");
+    }
+
+    #[test]
+    fn test_parse_structured_simple_tool() {
+        let result = parse_action_structured("generate_digest");
+        assert_eq!(result.tool, "generate_digest");
+        assert!(result.params.is_none());
+    }
+
+    #[test]
+    fn test_parse_structured_empty() {
+        let result = parse_action_structured("");
+        assert_eq!(result.tool, "");
+        assert!(result.params.is_none());
+    }
+
+    #[test]
+    fn test_structured_to_action_string() {
+        let action = StructuredAction {
+            tool: "send_reminder".to_string(),
+            params: Some(serde_json::json!({"message": "Call mom"})),
+        };
+        assert_eq!(action.to_action_string(), "send_reminder(Call mom)");
+    }
+
+    #[test]
+    fn test_structured_to_action_string_no_params() {
+        let action = StructuredAction {
+            tool: "generate_digest".to_string(),
+            params: None,
+        };
+        assert_eq!(action.to_action_string(), "generate_digest");
+    }
+
+    #[test]
+    fn test_roundtrip_json_serialize() {
+        let action = StructuredAction {
+            tool: "control_tesla".to_string(),
+            params: Some(serde_json::json!({"command": "climate_on"})),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        let parsed = parse_action_structured(&json);
+        assert_eq!(parsed.tool, "control_tesla");
+        assert_eq!(parsed.params.unwrap()["command"], "climate_on");
     }
 }

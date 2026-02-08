@@ -10,8 +10,8 @@ use std::sync::Arc;
 /// Keep this list updated when adding new tools.
 pub struct RuntimeTool {
     pub name: &'static str,
-    pub syntax: &'static str,
     pub description: &'static str,
+    pub params_schema: &'static str,
 }
 
 /// Returns the list of available runtime tools for task execution.
@@ -20,43 +20,56 @@ pub fn get_available_runtime_tools() -> Vec<RuntimeTool> {
     vec![
         RuntimeTool {
             name: "send_reminder",
-            syntax: "send_reminder(message)",
             description: "Send a notification/reminder to the user. Use for reminder-only tasks.",
+            params_schema: r#"{"message": "The reminder text"}"#,
         },
         RuntimeTool {
             name: "control_tesla",
-            syntax: "control_tesla(command)",
             description: "Control Tesla vehicle. Commands: climate_on, climate_off, lock, unlock",
+            params_schema: r#"{"command": "climate_on|climate_off|lock|unlock|status"}"#,
         },
         RuntimeTool {
             name: "send_chat_message",
-            syntax: "send_chat_message(platform, contact, message)",
             description: "Send message via WhatsApp, Telegram, or Signal",
+            params_schema: r#"{"platform": "whatsapp|telegram|signal", "contact": "name", "message": "text"}"#,
         },
         RuntimeTool {
             name: "send_email",
-            syntax: "send_email(to, subject, body)",
             description: "Send an email",
+            params_schema: r#"{"to": "email@example.com", "subject": "Subject", "body": "Email body"}"#,
         },
         RuntimeTool {
             name: "fetch_calendar_events",
-            syntax: "fetch_calendar_events()",
             description: "Check/fetch calendar events",
+            params_schema: r#"{}"#,
         },
         RuntimeTool {
             name: "get_weather",
-            syntax: "get_weather(location)",
             description: "Get weather information for a location",
+            params_schema: r#"{"location": "City name or 'current location'"}"#,
         },
     ]
+}
+
+/// Returns the tool names from the runtime tools registry.
+pub fn get_runtime_tool_names() -> Vec<String> {
+    get_available_runtime_tools()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect()
 }
 
 /// Returns a formatted string listing all available runtime tools for AI prompts.
 pub fn get_runtime_tools_prompt() -> String {
     let tools = get_available_runtime_tools();
-    let mut result = String::from("AVAILABLE TOOLS (use these exact names in instructions):\n");
+    let mut result = String::from(
+        "AVAILABLE TOOLS (use exact tool name for action_tool, JSON object for action_params):\n",
+    );
     for tool in tools {
-        result.push_str(&format!("- {} - {}\n", tool.syntax, tool.description));
+        result.push_str(&format!(
+            "- {} - {} | params: {}\n",
+            tool.name, tool.description, tool.params_schema
+        ));
     }
     result
 }

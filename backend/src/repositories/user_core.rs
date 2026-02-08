@@ -73,6 +73,7 @@ pub trait UserCoreOps: Send + Sync {
     fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError>;
     fn update_info(&self, user_id: i32, info: &str) -> Result<(), DieselError>;
     fn update_location(&self, user_id: i32, location: &str) -> Result<(), DieselError>;
+    fn update_user_coordinates(&self, user_id: i32, lat: f32, lon: f32) -> Result<(), DieselError>;
     fn update_nearby_places(&self, user_id: i32, places: &str) -> Result<(), DieselError>;
     fn update_timezone(&self, user_id: i32, tz: &str) -> Result<(), DieselError>;
     fn update_timezone_auto(&self, user_id: i32, auto: bool) -> Result<(), DieselError>;
@@ -120,6 +121,10 @@ pub trait UserCoreOps: Send + Sync {
     // Proactive agent
     fn update_proactive_agent_on(&self, user_id: i32, enabled: bool) -> Result<(), DieselError>;
     fn get_proactive_agent_on(&self, user_id: i32) -> Result<bool, DieselError>;
+
+    // Quiet mode
+    fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError>;
+    fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError>;
     fn update_critical_enabled(
         &self,
         user_id: i32,
@@ -646,6 +651,15 @@ impl UserCoreOps for UserCore {
         Ok(())
     }
 
+    fn update_user_coordinates(&self, user_id: i32, lat: f32, lon: f32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        self.ensure_user_info_exists(user_id)?;
+        diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
+            .set((user_info::latitude.eq(lat), user_info::longitude.eq(lon)))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     fn update_nearby_places(&self, user_id: i32, nearby_places: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         self.ensure_user_info_exists(user_id)?;
@@ -1002,6 +1016,99 @@ impl UserCoreOps for UserCore {
             .first::<bool>(&mut conn)?;
 
         Ok(proactive_agent_on)
+    }
+
+    fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
+        use crate::schema::tasks;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Cancel any active quiet_mode tasks for this user
+        diesel::update(
+            tasks::table
+                .filter(tasks::user_id.eq(user_id))
+                .filter(tasks::status.eq("active"))
+                .filter(tasks::action.like("%quiet_mode%")),
+        )
+        .set((
+            tasks::status.eq("completed"),
+            tasks::completed_at.eq(Some(now)),
+        ))
+        .execute(&mut conn)?;
+
+        // If enabling quiet mode, insert a new task
+        if let Some(end_ts) = until {
+            let end_time = if end_ts == 0 { None } else { Some(end_ts) };
+            let new_task = crate::models::user_models::NewTask {
+                user_id,
+                trigger: format!("once_{}", now),
+                condition: None,
+                action: r#"{"tool":"quiet_mode"}"#.to_string(),
+                notification_type: None,
+                status: "active".to_string(),
+                created_at: now,
+                is_permanent: None,
+                recurrence_rule: None,
+                recurrence_time: None,
+                sources: None,
+                end_time,
+            };
+            diesel::insert_into(tasks::table)
+                .values(&new_task)
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
+        use crate::schema::tasks;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Find active quiet_mode tasks for this user
+        let active_tasks = tasks::table
+            .filter(tasks::user_id.eq(user_id))
+            .filter(tasks::status.eq("active"))
+            .filter(tasks::action.like("%quiet_mode%"))
+            .load::<crate::models::user_models::Task>(&mut conn)?;
+
+        for task in &active_tasks {
+            // Verify this is actually a quiet_mode task (not just containing the string)
+            if !crate::handlers::dashboard_handlers::is_quiet_mode_task(&task.action) {
+                continue;
+            }
+
+            match task.end_time {
+                None => {
+                    // Indefinite quiet mode
+                    return Ok(Some(0));
+                }
+                Some(end_ts) if end_ts > now => {
+                    // Still active timed quiet mode
+                    return Ok(Some(end_ts));
+                }
+                Some(_) => {
+                    // Expired - auto-complete this task
+                    diesel::update(tasks::table.filter(tasks::id.eq(task.id)))
+                        .set((
+                            tasks::status.eq("completed"),
+                            tasks::completed_at.eq(Some(now)),
+                        ))
+                        .execute(&mut conn)?;
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     fn update_critical_enabled(

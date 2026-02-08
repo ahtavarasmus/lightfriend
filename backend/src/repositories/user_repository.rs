@@ -482,7 +482,7 @@ impl UserRepository {
     // Task methods
     const MAX_ACTIVE_TASKS_PER_USER: i64 = 50;
 
-    pub fn create_task(&self, new_task: &NewTask) -> Result<(), DieselError> {
+    pub fn create_task(&self, new_task: &NewTask) -> Result<i32, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Check task limit before creating
@@ -505,7 +505,15 @@ impl UserRepository {
         diesel::insert_into(tasks::table)
             .values(new_task)
             .execute(&mut conn)?;
-        Ok(())
+
+        // Get the ID of the just-created task (most recent for this user)
+        let task_id: Option<i32> = tasks::table
+            .filter(tasks::user_id.eq(new_task.user_id))
+            .order(tasks::id.desc())
+            .select(tasks::id)
+            .first(&mut conn)?;
+
+        Ok(task_id.unwrap_or(0))
     }
 
     pub fn get_user_tasks(&self, user_id: i32) -> Result<Vec<Task>, DieselError> {
@@ -620,6 +628,83 @@ impl UserRepository {
             ))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    /// Update task condition/description (updates both action and condition fields)
+    pub fn update_task_condition(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_condition: &str,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Update both action and condition fields - action is displayed in dashboard,
+        // condition is used for recurring task triggers
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set((
+            tasks::action.eq(new_condition),
+            tasks::condition.eq(Some(new_condition)),
+        ))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the action field of a task
+    pub fn update_task_action(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_action: &str,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::action.eq(new_action))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the condition field of a task
+    pub fn update_task_condition_only(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_condition: Option<&str>,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::condition.eq(new_condition))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the sources field of a task
+    pub fn update_task_sources(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_sources: Option<&str>,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::sources.eq(new_sources))
+        .execute(&mut conn)?;
+        Ok(count > 0)
     }
 
     /// Complete a task - if permanent with recurrence, reschedules; otherwise marks completed
