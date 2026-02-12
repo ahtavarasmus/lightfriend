@@ -333,50 +333,73 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
                         margin-bottom: 1rem;
                         font-size: 0.9rem;
                     }
-                    .info-button {
-                        background: none;
-                        border: none;
-                        color: #F59E0B;
-                        font-size: 1.2rem;
-                        cursor: pointer;
-                        padding: 0.5rem;
-                        border-radius: 50%;
-                        width: 32px;
-                        height: 32px;
+                    .chat-banner {
                         display: flex;
                         align-items: center;
-                        justify-content: center;
-                        transition: all 0.3s ease;
+                        gap: 0.75rem;
+                        padding: 0.75rem 1rem;
+                        background: rgba(245, 158, 11, 0.08);
+                        border: 1px solid rgba(245, 158, 11, 0.15);
+                        border-radius: 10px;
+                        color: #ccc;
+                        font-size: 0.9rem;
                     }
-                    .info-button:hover {
+                    .chat-banner .banner-icon {
+                        color: #F59E0B;
+                        font-size: 1rem;
+                        flex-shrink: 0;
+                    }
+                    .examples-toggle {
+                        background: none;
+                        border: 1px solid rgba(245, 158, 11, 0.25);
+                        color: #F59E0B;
+                        padding: 0.35rem 0.75rem;
+                        border-radius: 6px;
+                        font-size: 0.8rem;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        white-space: nowrap;
+                        flex-shrink: 0;
+                    }
+                    .examples-toggle:hover {
                         background: rgba(245, 158, 11, 0.1);
-                        transform: scale(1.1);
                     }
-                    .info-section {
+                    .examples-section {
                         background: rgba(0, 0, 0, 0.2);
                         border: 1px solid rgba(245, 158, 11, 0.1);
                         border-radius: 12px;
-                        padding: 1.5rem;
-                        margin-top: 1rem;
+                        padding: 1.25rem;
+                        margin-top: 0.75rem;
                     }
-                    .info-section h4 {
+                    .examples-section h4 {
                         color: #F59E0B;
-                        margin: 0 0 1rem 0;
-                        font-size: 1rem;
-                    }
-                    .info-subsection {
-                        color: #999;
+                        margin: 0 0 0.5rem 0;
                         font-size: 0.9rem;
                     }
-                    .info-subsection ul {
+                    .examples-section h4:not(:first-child) {
+                        margin-top: 1rem;
+                    }
+                    .examples-section ul {
                         margin: 0;
-                        padding-left: 1.5rem;
+                        padding-left: 1.25rem;
+                        color: #999;
+                        font-size: 0.85rem;
                     }
-                    .info-subsection li {
-                        margin-bottom: 0.5rem;
+                    .examples-section li {
+                        margin-bottom: 0.35rem;
                     }
-                    .info-subsection li:last-child {
+                    .examples-section li:last-child {
                         margin-bottom: 0;
+                    }
+                    .examples-limitations {
+                        margin-top: 1rem;
+                        padding-top: 0.75rem;
+                        border-top: 1px solid rgba(255, 255, 255, 0.08);
+                        color: #666;
+                        font-size: 0.8rem;
+                    }
+                    .examples-limitations p {
+                        margin: 0 0 0.25rem 0;
                     }
                     .save-indicator {
                         min-width: 24px;
@@ -550,40 +573,76 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
                     } else {
                         html! {}
                     }}
+                </div>
+                <div class="flow-description">
+                    {"Your active tasks - manage them here, create new ones through the chat."}
+                </div>
+                <div class="chat-banner">
+                    <i class="fas fa-comment-dots banner-icon"></i>
+                    <span>{"Create tasks through the chat - just describe what you need."}</span>
                     <button
-                        class="info-button"
+                        class="examples-toggle"
                         onclick={Callback::from({
                             let show_info = show_info.clone();
                             move |_| show_info.set(!*show_info)
                         })}
                     >
-                        {"ⓘ"}
+                        {if *show_info { "Hide examples" } else { "Show examples" }}
                     </button>
                 </div>
-                <div class="flow-description">
-                    {"Scheduled reminders and message monitoring - all set up via SMS or voice calls."}
-                </div>
-                <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
-                    <h4>{"What You Can Do"}</h4>
-                    <div class="info-subsection">
-                        <ul>
-                            <li><strong>{"Scheduled reminders: "}</strong>{"\"Remind me at 3pm to call mom\""}</li>
-                            <li><strong>{"Timed actions: "}</strong>{"\"Turn on Tesla climate in 30 minutes\""}</li>
-                            <li><strong>{"Message monitoring: "}</strong>{"\"Let me know when mom texts\""}</li>
-                            <li><strong>{"Email watching: "}</strong>{"\"Notify me when I get an email about my job application\""}</li>
-                            <li><strong>{"Conditional tasks: "}</strong>{"\"If mom hasn't replied by 8pm, remind me to follow up\""}</li>
-                        </ul>
-                    </div>
-                    <h4>{"How It Works"}</h4>
-                    <div class="info-subsection">
-                        <ul>
-                            <li>{"Just text or call Lightfriend and ask - tasks are created automatically"}</li>
-                            <li>{"Scheduled tasks run at the specified time"}</li>
-                            <li>{"Monitoring tasks check each incoming message/email until a match is found"}</li>
-                            <li>{"Notifications sent via SMS or Call depending on your preference"}</li>
-                        </ul>
-                    </div>
-                </div>
+                {if *show_info {
+                    html! {
+                        <div class="examples-section">
+                            <h4>{"Reminders & Scheduling"}</h4>
+                            <ul>
+                                <li>{"\"Remind me at 3pm to call mom\""}</li>
+                                <li>{"\"Remind me every Monday at 9am to submit the weekly report\""}</li>
+                                <li>{"\"Tell me to take my medicine every day at 8am and 8pm\""}</li>
+                                <li>{"\"Remind me in 30 minutes to check the oven\""}</li>
+                            </ul>
+                            <h4>{"Morning & Evening Digests"}</h4>
+                            <ul>
+                                <li>{"\"Send me a daily digest at 8am with my emails and WhatsApp messages\""}</li>
+                                <li>{"\"Give me a morning briefing at 7am with weather, calendar, and emails\""}</li>
+                                <li>{"\"Send me an evening summary at 9pm of all messages I got today\""}</li>
+                            </ul>
+                            <h4>{"Message Monitoring"}</h4>
+                            <ul>
+                                <li>{"\"Let me know when mom texts me on WhatsApp\""}</li>
+                                <li>{"\"Notify me if I get a message from my boss on Telegram\""}</li>
+                                <li>{"\"Alert me when someone mentions 'project deadline' in any chat\""}</li>
+                            </ul>
+                            <h4>{"Email Watching"}</h4>
+                            <ul>
+                                <li>{"\"Tell me when I get an email about my job application\""}</li>
+                                <li>{"\"Notify me if I receive an email from HR\""}</li>
+                                <li>{"\"Watch for emails with 'invoice' in the subject\""}</li>
+                            </ul>
+                            <h4>{"Conditional Tasks"}</h4>
+                            <ul>
+                                <li>{"\"If it's above 25 degrees at 8am, remind me to water the plants\""}</li>
+                                <li>{"\"Check the weather at 7am - if it's going to rain, remind me to bring an umbrella\""}</li>
+                            </ul>
+                            <h4>{"Smart Home / Tesla"}</h4>
+                            <ul>
+                                <li>{"\"Turn on Tesla climate at 7:30am every weekday\""}</li>
+                                <li>{"\"Start warming up my car in 20 minutes\""}</li>
+                            </ul>
+                            <h4>{"Calendar"}</h4>
+                            <ul>
+                                <li>{"\"What's on my calendar today?\""}</li>
+                                <li>{"\"Send me my calendar events every morning at 7am\""}</li>
+                            </ul>
+                            <div class="examples-limitations">
+                                <p>{"Can't send messages on your behalf"}</p>
+                                <p>{"Can't make purchases or payments"}</p>
+                                <p>{"Can't access apps not connected in Capabilities"}</p>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }}
             </div>
             {
                 if let Some(error) = (*error_message).as_ref() {
@@ -599,7 +658,7 @@ pub fn tasks_section(props: &TasksSectionProps) -> Html {
             {if (*tasks_local).is_empty() {
                 html! {
                     <div class="empty-state">
-                        {"No active tasks. Ask Lightfriend via SMS or call: \"Remind me at 5pm to pick up groceries\""}
+                        {"No active tasks yet. Use the chat above to create your first task."}
                     </div>
                 }
             } else {

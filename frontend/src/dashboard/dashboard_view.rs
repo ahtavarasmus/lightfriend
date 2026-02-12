@@ -8,7 +8,7 @@ use crate::profile::billing_models::UserProfile;
 use super::chat_box::ChatBox;
 use super::triage_indicator::{TriageIndicator, AttentionItem as TriageAttentionItem};
 use super::timeline_view::{TimelineView, UpcomingTask, UpcomingDigest};
-use super::dashboard_footer::{DashboardFooter, WatchedContact, NextDigestInfo};
+use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::activity_panel::ActivityPanel;
 use super::quiet_mode::QuietModeStatus;
@@ -123,6 +123,115 @@ const DASHBOARD_STYLES: &str = r#"
     color: #fff;
     background: rgba(255, 255, 255, 0.1);
 }
+.section-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.section-label span {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.info-icon-btn {
+    background: transparent;
+    border: none;
+    color: #555;
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+    transition: color 0.2s;
+}
+.info-icon-btn:hover {
+    color: #7EB2FF;
+}
+.info-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+.info-modal-box {
+    background: #1e1e2f;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 440px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    color: #ddd;
+}
+.info-modal-box h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.1rem;
+    color: #fff;
+}
+.info-modal-box h4 {
+    margin: 1rem 0 0.35rem 0;
+    font-size: 0.9rem;
+    color: #7EB2FF;
+}
+.info-modal-box ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+.info-modal-box li {
+    font-size: 0.8rem;
+    color: #aaa;
+    margin-bottom: 0.25rem;
+    line-height: 1.4;
+}
+.info-modal-hint {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 0.75rem;
+}
+.info-modal-limits {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+.info-modal-limits p {
+    font-size: 0.75rem;
+    color: #666;
+    margin: 0.2rem 0;
+}
+.info-modal-section {
+    margin-bottom: 0.75rem;
+}
+.info-modal-section p {
+    font-size: 0.8rem;
+    color: #aaa;
+    margin: 0.25rem 0;
+    line-height: 1.4;
+}
+.info-modal-section strong {
+    color: #ccc;
+}
+.info-modal-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 1rem 0;
+}
+.info-modal-close {
+    display: block;
+    margin: 1.25rem auto 0;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #999;
+    padding: 0.4rem 1.25rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.info-modal-close:hover {
+    color: #ccc;
+}
 "#;
 
 /// API response types matching backend
@@ -229,7 +338,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Panel visibility state
     let settings_open = use_state(|| false);
     let activity_open = use_state(|| false);
-    let settings_initial_tab = use_state(|| SettingsTab::People);
+    let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
 
     // Handle URL parameters for opening settings panel with specific tab
     {
@@ -243,8 +352,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             // Check for ?settings=capabilities (or other tab names)
                             if let Some(tab) = params.get("settings") {
                                 let tab_enum = match tab.to_lowercase().as_str() {
-                                    "people" => Some(SettingsTab::People),
-                                    "tasks" => Some(SettingsTab::Tasks),
                                     "capabilities" | "connections" => Some(SettingsTab::Capabilities),
                                     "account" => Some(SettingsTab::Account),
                                     "billing" => Some(SettingsTab::Billing),
@@ -306,6 +413,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             (),
         );
     }
+
+    // Info modal state
+    let show_tasks_info = use_state(|| false);
 
     // Task detail modal state
     let selected_task = use_state(|| None::<UpcomingTask>);
@@ -507,19 +617,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
     // Get current timestamp for timeline
     let now_timestamp = (js_sys::Date::now() / 1000.0) as i32;
-
-    let watched_contacts: Vec<WatchedContact> = (*summary)
-        .as_ref()
-        .map(|s| {
-            s.watched_contacts
-                .iter()
-                .map(|c| WatchedContact {
-                    nickname: c.nickname.clone(),
-                    notification_mode: c.notification_mode.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
 
     let next_digest = (*summary).as_ref().and_then(|s| {
         s.next_digest.as_ref().map(|d| NextDigestInfo {
@@ -771,6 +868,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     html! {}
                 }}
 
+                // Tasks section label with info icon
+                <div class="section-label">
+                    <span>{"Tasks"}</span>
+                    <button class="info-icon-btn" onclick={{
+                        let show_tasks_info = show_tasks_info.clone();
+                        Callback::from(move |_: MouseEvent| show_tasks_info.set(true))
+                    }}>
+                        <i class="fa-solid fa-circle-info"></i>
+                    </button>
+                </div>
+
                 // Timeline view showing upcoming tasks and digests
                 <TimelineView
                     upcoming_tasks={upcoming_tasks}
@@ -783,12 +891,92 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     quiet_until={quiet_until}
                 />
 
+                // Tasks info modal
+                if *show_tasks_info {
+                    <div class="info-modal-overlay" onclick={{
+                        let show_tasks_info = show_tasks_info.clone();
+                        Callback::from(move |_: MouseEvent| show_tasks_info.set(false))
+                    }}>
+                        <div class="info-modal-box" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                            <h3>{"Tasks"}</h3>
+                            <p class="info-modal-hint">{"Create tasks by describing them in the chat. Each task you see on the timeline was created by you."}</p>
+
+                            <h4>{"How Tasks Work"}</h4>
+                            <div class="info-modal-section">
+                                <p>{"When you create a task, the following is saved: the schedule (when to trigger), an optional condition (checked at trigger time), an action (what to do), which sources to check (email, WhatsApp, etc.), and how to notify you."}</p>
+                                <p><strong>{"Fixed at creation: "}</strong>{"The schedule, recurrence rule, action to run, and which sources to check. These don't change between runs."}</p>
+                                <p><strong>{"Dynamic at trigger time: "}</strong>{"Source data is fetched fresh, conditions are evaluated against live data, and the notification message is generated from current results."}</p>
+                            </div>
+
+                            <h4>{"Trigger Types"}</h4>
+                            <div class="info-modal-section">
+                                <p><strong>{"Deterministic: "}</strong>{"Reminders and digests always fire at their scheduled time. If you set a reminder for 3pm, it will notify you at 3pm - no AI decision involved."}</p>
+                                <p><strong>{"Probabilistic: "}</strong>{"Conditional tasks (e.g. \"if it's going to rain\") depend on AI evaluation of live data. The trigger time is fixed, but whether the action runs depends on whether the condition matches."}</p>
+                                <p><strong>{"Event-driven: "}</strong>{"Message monitoring and email watching fire whenever a new message or email arrives, then evaluate any conditions against that content."}</p>
+                            </div>
+
+                            <h4>{"Safety by Design"}</h4>
+                            <div class="info-modal-section">
+                                <p>{"Lightfriend can only run a fixed set of actions: send you a notification, generate a digest, send a message to a specific contact, check weather, fetch calendar events, or control Tesla. No other actions exist - this is hardcoded, not AI-decided."}</p>
+                                <p>{"Tasks can only be created by you. Lightfriend cannot create, modify, or chain tasks on its own. Every task on your timeline is one you explicitly asked for."}</p>
+                                <p>{"Conditions are evaluated (matched true/false against data), never executed. Even if source data contained malicious instructions, the system only asks \"does this match the condition?\" - it cannot run new actions based on message content."}</p>
+                                <p>{"This means the risk of any task is knowable at creation time: you can see exactly what it will check, what action it will take, and when."}</p>
+                            </div>
+
+                            <div class="info-modal-divider"></div>
+
+                            <h4>{"Examples"}</h4>
+                            <p class="info-modal-hint">{"Describe any of these in the chat to create a task"}</p>
+                            <h4>{"Reminders & Scheduling"}</h4>
+                            <ul>
+                                <li>{"\"Remind me at 3pm to call mom\""}</li>
+                                <li>{"\"Remind me every Monday at 9am to submit the weekly report\""}</li>
+                                <li>{"\"Tell me to take my medicine every day at 8am and 8pm\""}</li>
+                            </ul>
+                            <h4>{"Digests"}</h4>
+                            <ul>
+                                <li>{"\"Send me a daily digest at 8am with my emails and WhatsApp messages\""}</li>
+                                <li>{"\"Give me a morning briefing at 7am with weather, calendar, and emails\""}</li>
+                            </ul>
+                            <h4>{"Message & Email Monitoring"}</h4>
+                            <ul>
+                                <li>{"\"Let me know when mom texts me on WhatsApp\""}</li>
+                                <li>{"\"Notify me if I get a message from my boss on Telegram\""}</li>
+                                <li>{"\"Tell me when I get an email about my job application\""}</li>
+                            </ul>
+                            <h4>{"Conditional Tasks"}</h4>
+                            <ul>
+                                <li>{"\"If it's above 25 degrees at 8am, remind me to water the plants\""}</li>
+                                <li>{"\"Check the weather at 7am - if it's going to rain, remind me to bring an umbrella\""}</li>
+                            </ul>
+                            <h4>{"Smart Home / Tesla"}</h4>
+                            <ul>
+                                <li>{"\"Turn on Tesla climate at 7:30am every weekday\""}</li>
+                                <li>{"\"Start warming up my car in 20 minutes\""}</li>
+                            </ul>
+                            <h4>{"Calendar"}</h4>
+                            <ul>
+                                <li>{"\"Send me my calendar events every morning at 7am\""}</li>
+                            </ul>
+
+                            <div class="info-modal-limits">
+                                <p>{"Can't make purchases or payments"}</p>
+                                <p>{"Can't access apps not connected in Capabilities"}</p>
+                                <p>{"Can't take actions you didn't explicitly create a task for"}</p>
+                            </div>
+                            <button class="info-modal-close" onclick={{
+                                let show_tasks_info = show_tasks_info.clone();
+                                Callback::from(move |_: MouseEvent| show_tasks_info.set(false))
+                            }}>{"Close"}</button>
+                        </div>
+                    </div>
+                }
+
                 // Horizontal separator
                 <div class="peace-separator"></div>
 
                 // Footer with watching info and buttons
                 <DashboardFooter
-                    watched_contacts={watched_contacts}
                     next_digest={next_digest}
                     quiet_mode={quiet_mode}
                     on_activity_click={on_activity_click}

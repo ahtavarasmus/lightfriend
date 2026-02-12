@@ -1,5 +1,6 @@
 use yew::prelude::*;
 use crate::dashboard::quiet_mode::{QuietModeIndicator, QuietModeStatus};
+use crate::dashboard::contact_avatar_row::ContactAvatarRow;
 
 const FOOTER_STYLES: &str = r#"
 .peace-footer {
@@ -11,9 +12,6 @@ const FOOTER_STYLES: &str = r#"
 .footer-info {
     color: #666;
     font-size: 0.85rem;
-}
-.footer-watching {
-    margin-bottom: 0.25rem;
 }
 .footer-digest {
     color: #888;
@@ -43,19 +41,12 @@ const FOOTER_STYLES: &str = r#"
 "#;
 
 #[derive(Clone, PartialEq)]
-pub struct WatchedContact {
-    pub nickname: String,
-    pub notification_mode: String,
-}
-
-#[derive(Clone, PartialEq)]
 pub struct NextDigestInfo {
     pub time_display: String,
 }
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct DashboardFooterProps {
-    pub watched_contacts: Vec<WatchedContact>,
     pub next_digest: Option<NextDigestInfo>,
     pub quiet_mode: QuietModeStatus,
     pub on_activity_click: Callback<()>,
@@ -65,26 +56,6 @@ pub struct DashboardFooterProps {
 
 #[function_component(DashboardFooter)]
 pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
-    // Format watched contacts as a comma-separated list
-    let watched_names: Vec<String> = props
-        .watched_contacts
-        .iter()
-        .take(5)
-        .map(|c| c.nickname.clone())
-        .collect();
-
-    let watching_text = if watched_names.is_empty() {
-        "No contacts being watched".to_string()
-    } else if watched_names.len() < props.watched_contacts.len() {
-        format!(
-            "Watching: {} + {} more",
-            watched_names.join(", "),
-            props.watched_contacts.len() - watched_names.len()
-        )
-    } else {
-        format!("Watching: {}", watched_names.join(", "))
-    };
-
     let digest_text = match &props.next_digest {
         Some(info) => format!("Next digest: {}", info.time_display),
         None => "No digest scheduled".to_string(),
@@ -94,8 +65,8 @@ pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
         <>
             <style>{FOOTER_STYLES}</style>
             <div class="peace-footer">
+                <ContactAvatarRow />
                 <div class="footer-info">
-                    <div class="footer-watching">{watching_text}</div>
                     <div class="footer-digest">{digest_text}</div>
                 </div>
                 <div class="footer-actions">

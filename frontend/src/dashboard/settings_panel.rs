@@ -4,8 +4,6 @@ use crate::auth::connect::Connect;
 use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
-use crate::proactive::contact_profiles::ContactProfilesSection;
-use crate::proactive::waiting_checks::TasksSection;
 
 const SETTINGS_STYLES: &str = r#"
 .settings-panel-overlay {
@@ -96,8 +94,6 @@ const SETTINGS_STYLES: &str = r#"
 
 #[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
-    People,
-    Tasks,
     Capabilities,
     Account,
     Billing,
@@ -109,7 +105,7 @@ pub struct SettingsPanelProps {
     pub user_profile: Option<UserProfile>,
     pub on_close: Callback<()>,
     pub on_profile_update: Callback<UserProfile>,
-    #[prop_or(SettingsTab::People)]
+    #[prop_or(SettingsTab::Capabilities)]
     pub initial_tab: SettingsTab,
 }
 
@@ -135,31 +131,6 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
     }
 
     let tab_content = match *active_tab {
-        SettingsTab::People => html! {
-            <div class="settings-content">
-                <h3>{"People"}</h3>
-                <p class="settings-hint">{"Configure notification settings for contacts you want to monitor"}</p>
-                <ContactProfilesSection />
-            </div>
-        },
-        SettingsTab::Tasks => {
-            if let Some(profile) = props.user_profile.as_ref() {
-                html! {
-                    <div class="settings-content">
-                        <h3>{"Tasks"}</h3>
-                        <p class="settings-hint">{"Scheduled reminders, message monitoring, and recurring digests"}</p>
-                        <TasksSection
-                            tasks={vec![]}
-                            on_change={Callback::from(|_| {})}
-                            phone_number={profile.phone_number.clone()}
-                            critical_disabled={false}
-                        />
-                    </div>
-                }
-            } else {
-                html! { <div class="settings-content">{"Loading..."}</div> }
-            }
-        }
         SettingsTab::Capabilities => {
             if let Some(profile) = props.user_profile.as_ref() {
                 html! {
@@ -237,24 +208,6 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     </button>
                 </div>
                 <div class="settings-tabs">
-                    <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::People).then(|| "active"))}
-                        onclick={{
-                            let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::People))
-                        }}
-                    >
-                        {"People"}
-                    </button>
-                    <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::Tasks).then(|| "active"))}
-                        onclick={{
-                            let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::Tasks))
-                        }}
-                    >
-                        {"Tasks"}
-                    </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Capabilities).then(|| "active"))}
                         onclick={{

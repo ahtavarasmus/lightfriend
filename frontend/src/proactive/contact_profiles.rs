@@ -572,6 +572,12 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                     default_mode.set(data.default_mode);
                                 }
                             }
+                            // Notify avatar row to refresh
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(event) = web_sys::CustomEvent::new("lightfriend-contact-profiles-updated") {
+                                    let _ = window.dispatch_event(&event);
+                                }
+                            }
                             profile_save_state.set(FieldSaveState::Idle);
                             show_modal.set(false);
                         } else {
@@ -611,6 +617,12 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                                 default_mode.set(data.default_mode);
                             }
                         }
+                        // Notify avatar row to refresh
+                        if let Some(window) = web_sys::window() {
+                            if let Ok(event) = web_sys::CustomEvent::new("lightfriend-contact-profiles-updated") {
+                                let _ = window.dispatch_event(&event);
+                            }
+                        }
                     } else {
                         error_message.set(Some("Failed to delete profile".to_string()));
                     }
@@ -639,6 +651,11 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             default_mode.set(new_mode);
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(event) = web_sys::CustomEvent::new("lightfriend-contact-profiles-updated") {
+                                    let _ = window.dispatch_event(&event);
+                                }
+                            }
                             default_save_state.set(FieldSaveState::Success);
                             let state = default_save_state.clone();
                             spawn_local(async move {
@@ -674,6 +691,11 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             default_noti_type.set(new_type);
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(event) = web_sys::CustomEvent::new("lightfriend-contact-profiles-updated") {
+                                    let _ = window.dispatch_event(&event);
+                                }
+                            }
                             default_save_state.set(FieldSaveState::Success);
                             let state = default_save_state.clone();
                             spawn_local(async move {
@@ -707,6 +729,11 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             default_notify_on_call.set(new_value);
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(event) = web_sys::CustomEvent::new("lightfriend-contact-profiles-updated") {
+                                    let _ = window.dispatch_event(&event);
+                                }
+                            }
                             default_save_state.set(FieldSaveState::Success);
                             let state = default_save_state.clone();
                             spawn_local(async move {

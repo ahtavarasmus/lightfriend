@@ -120,44 +120,47 @@ const TIMELINE_STYLES: &str = r#"
 
 .timeline-tasks {
     position: absolute;
-    top: 50px;
+    top: 28px;
     left: 0;
     right: 0;
-    bottom: 16px;
+    bottom: 4px;
 }
 
 .timeline-task {
     position: absolute;
     background: rgba(30, 30, 46, 0.9);
     border: 1px solid rgba(126, 178, 255, 0.3);
-    border-radius: 8px;
-    padding: 6px 10px;
+    border-radius: 6px;
+    padding: 2px 6px;
     max-width: 120px;
-    min-width: 80px;
+    min-width: 50px;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     z-index: 5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
 }
 
 .timeline-task:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(126, 178, 255, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(126, 178, 255, 0.2);
     border-color: rgba(126, 178, 255, 0.5);
 }
 
 .timeline-task-time {
-    font-size: 0.8rem;
+    font-size: 0.65rem;
     font-weight: 600;
     color: #7EB2FF;
-    margin-bottom: 2px;
+    display: inline;
+    margin-right: 3px;
 }
 
 .timeline-task-desc {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     color: #999;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: inline;
 }
 
 .timeline-empty {
@@ -182,34 +185,37 @@ const TIMELINE_STYLES: &str = r#"
     position: absolute;
     background: rgba(110, 200, 140, 0.15);
     border: 1px solid rgba(110, 200, 140, 0.4);
-    border-radius: 8px;
-    padding: 6px 10px;
+    border-radius: 6px;
+    padding: 2px 6px;
     max-width: 120px;
-    min-width: 80px;
+    min-width: 50px;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     z-index: 5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
 }
 
 .timeline-digest:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(110, 200, 140, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(110, 200, 140, 0.2);
     border-color: rgba(110, 200, 140, 0.6);
 }
 
 .timeline-digest-time {
-    font-size: 0.8rem;
+    font-size: 0.65rem;
     font-weight: 600;
     color: #6ec88c;
-    margin-bottom: 2px;
+    display: inline;
+    margin-right: 3px;
 }
 
 .timeline-digest-desc {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     color: #999;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: inline;
 }
 
 .timeline-wrapper {
@@ -968,7 +974,7 @@ pub fn timeline_view(props: &TimelineViewProps) -> Html {
     // Assign rows based on collision detection
     const ITEM_WIDTH: f64 = 100.0;
     let mut item_rows: std::collections::HashMap<(bool, usize), i32> = std::collections::HashMap::new();
-    let mut row_end_positions: Vec<f64> = vec![-1000.0; 3];
+    let mut row_end_positions: Vec<f64> = vec![-1000.0; 6];
 
     for item in &all_items {
         let mut assigned_row = 0;
@@ -1001,7 +1007,7 @@ pub fn timeline_view(props: &TimelineViewProps) -> Html {
         };
 
         let row = item_rows_clone.get(&(false, idx)).copied().unwrap_or(0);
-        let top = row * 35;
+        let top = row * 18;
 
         let onclick = {
             let task = task.clone();
@@ -1020,8 +1026,8 @@ pub fn timeline_view(props: &TimelineViewProps) -> Html {
                 style={format!("left: {}px; top: {}px;", left, top)}
                 onclick={onclick}
             >
-                <div class="timeline-task-time">{&task.time_display}</div>
-                <div class="timeline-task-desc" title={task.description.clone()}>{&task.description}</div>
+                <span class="timeline-task-time">{&task.time_display}</span>
+                <span class="timeline-task-desc" title={task.description.clone()}>{&task.description}</span>
             </div>
         }
     }).collect();
@@ -1035,7 +1041,7 @@ pub fn timeline_view(props: &TimelineViewProps) -> Html {
         };
 
         let row = item_rows.get(&(true, idx)).copied().unwrap_or(0);
-        let top = row * 35;
+        let top = row * 18;
 
         let sources_display = digest.sources.as_ref()
             .map(|s| s.replace(",", ", "))
@@ -1058,8 +1064,8 @@ pub fn timeline_view(props: &TimelineViewProps) -> Html {
                 style={format!("left: {}px; top: {}px;", left, top)}
                 onclick={onclick}
             >
-                <div class="timeline-digest-time">{&digest.time_display}</div>
-                <div class="timeline-digest-desc" title={sources_display.clone()}>{"Digest"}</div>
+                <span class="timeline-digest-time">{&digest.time_display}</span>
+                <span class="timeline-digest-desc" title={sources_display.clone()}>{"Digest"}</span>
             </div>
         }
     }).collect();

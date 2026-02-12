@@ -316,6 +316,7 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
                 <div class="mcp-title">
                     <i class="fa-solid fa-plug"></i>
                     <span>{"MCP Servers"}</span>
+                    <span style="font-size: 0.6rem; color: #e8a838; background: rgba(232, 168, 56, 0.15); padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 500; letter-spacing: 0.3px;">{"BETA"}</span>
                 </div>
                 <button class="add-server-btn" onclick={on_open_add_modal}>
                     <i class="fa-solid fa-plus"></i>

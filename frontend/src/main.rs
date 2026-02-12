@@ -62,6 +62,7 @@ mod dashboard {
     pub mod media_panel;
     pub mod tesla_quick_panel;
     pub mod youtube_quick_panel;
+    pub mod contact_avatar_row;
 }
 mod proactive {
     pub mod common;

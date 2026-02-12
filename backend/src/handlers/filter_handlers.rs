@@ -851,7 +851,20 @@ SOURCE TYPES:
 - "weather" - fetch weather data (for temperature/rain conditions)
 - "email" - fetch recent emails
 - "calendar" - fetch calendar events
+- "whatsapp" - fetch WhatsApp messages
+- "telegram" - fetch Telegram messages
+- "signal" - fetch Signal messages
 - Multiple sources: "weather,email"
+
+SOURCE EDITING RULES:
+- To REMOVE a source: return new_sources with the FULL remaining list (excluding the removed source)
+  Example: Current sources = "email,whatsapp,telegram,signal,calendar"
+  User: "remove calendar" -> new_sources = "email,whatsapp,telegram,signal"
+- To ADD a source: return new_sources with the full list INCLUDING the new source
+  Example: Current sources = "email,weather"
+  User: "add calendar" -> new_sources = "email,weather,calendar"
+- To REPLACE all sources: return the new complete list
+- NEVER return null for new_sources when the user asks to add or remove a source
 
 ACTION FORMAT (CRITICAL):
 - new_action MUST be a JSON object with "tool" and optional "params" keys
@@ -870,6 +883,8 @@ CORRECT EXAMPLES:
 - User: "change the condition to if it's snowing" -> new_condition = "if it's snowing", new_sources = "weather", new_action = null
 - User: "make it a reminder about the package" -> new_action = {{"tool":"send_reminder","params":{{"message":"Package reminder"}}}}, new_condition = null
 - User: "add weather check" -> new_sources = "weather", everything else null
+- User: "remove calendar from the sources" (current sources: "email,whatsapp,calendar") -> new_sources = "email,whatsapp", everything else null
+- User: "don't check email" (current sources: "email,weather") -> new_sources = "weather", everything else null
 
 WRONG:
 - new_action = "send_reminder(Call you)" - WRONG! Must be JSON object, never a string

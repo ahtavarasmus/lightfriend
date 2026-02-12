@@ -160,7 +160,13 @@
       "Bash(pkill:*)",
       "Bash(sqlite3:*)",
       "Bash(pgrep:*)",
-      "Bash(ps:*)"
+      "Bash(ps:*)",
+      "Bash(while ! lsof -i :3000 -P)",
+      "Bash(do sleep 2)",
+      "Bash(done)",
+      "Bash(col:*)",
+      "Bash(# Check if afinfo is available to get clip duration which afinfo && afinfo /Users/ahtavarasmus/.claude/hooks/audio/marvin_01.mp3)",
+      "Bash(bash -c 'echo \"\"Child PPID is: $PPID''''')"
     ],
     "deny": [
       "Read(.env)",

@@ -775,10 +775,19 @@ pub async fn process_sms(
         minutes.abs()
     );
 
+    // Load contact profiles for the system prompt
+    let contacts_info = match state.user_repository.get_contact_profiles(user.id) {
+        Ok(profiles) if !profiles.is_empty() => {
+            let nicknames: Vec<&str> = profiles.iter().map(|p| p.nickname.as_str()).collect();
+            format!("\n\nYour contacts: {}. When the user refers to a contact by name, use the matching nickname in tool calls.", nicknames.join(", "))
+        }
+        _ => String::new(),
+    };
+
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 480 characters) while being accurate and helpful. Characters are expensive - be succinct! When listing items (emails, events, tasks), just use numbers and content directly without repeating labels like 'Subject:', 'Event:', etc. Example: 'Emails: 1. Meeting reminder (10am) 2. Invoice from John (9am)' NOT 'Emails: 1. Subject: Meeting reminder (10am) 2. Subject: Invoice from John (9am)'. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 480 characters) while being accurate and helpful. Characters are expensive - be succinct! When listing items (emails, events, tasks), just use numbers and content directly without repeating labels like 'Subject:', 'Event:', etc. Example: 'Emails: 1. Meeting reminder (10am) 2. Invoice from John (9am)' NOT 'Emails: 1. Subject: Meeting reminder (10am) 2. Subject: Invoice from John (9am)'. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.{contacts_info}
 
 ### Tool Usage Guidelines:
 - Provide all relevant details in the response immediately.

@@ -762,7 +762,11 @@ fn format_structured_action(action: &crate::utils::action_executor::StructuredAc
             "send_chat_message" => {
                 // Build "platform,contact,message" for format_tool_display
                 let platform = obj.get("platform").and_then(|v| v.as_str()).unwrap_or("");
-                let contact = obj.get("contact").and_then(|v| v.as_str()).unwrap_or("");
+                let contact = obj
+                    .get("contact")
+                    .or_else(|| obj.get("chat_name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let message = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
                 return Some(format!("{},{},{}", platform, contact, message));
             }

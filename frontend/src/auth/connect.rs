@@ -287,6 +287,12 @@ pub fn connect(props: &ConnectProps) -> Html {
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "mcp" => html! { <McpConnect user_id={props.user_id} /> },
+            "perplexity" => html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> },
+            "weather" => html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> },
+            "directions" => html! { <div class="builtin-detail"><p>{"Step-by-step navigation and travel time estimates between locations."}</p></div> },
+            "photo" => html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> },
+            "tasks" => html! { <div class="builtin-detail"><p>{"Create reminders and scheduled tasks via natural language."}</p></div> },
+            "sms_calls" => html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> },
             _ => html! {},
         }
     } else {
@@ -357,7 +363,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                             onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
                                 selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
                             })}
-                            title="MCP Servers - Add custom tools"
+                            title="MCP Servers - Add custom tools (beta)"
                         >
                             <i class="fa-solid fa-plug"></i>
                         </button>
@@ -365,30 +371,63 @@ pub fn connect(props: &ConnectProps) -> Html {
                     <div class="app-details">
                         { details }
                     </div>
-                    // Tools - compact always-green icons
-                    <div class="tools-section">
-                        <h4 class="tools-title">{"Built-in Tools"}</h4>
-                        <div class="tools-icons-row">
-                            <div class="tool-icon connected" title="Perplexity AI - AI-powered search and answers">
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
-                            </div>
-                            <div class="tool-icon connected" title="Weather - Weather updates and forecasts">
-                                <i class="fa-solid fa-sun"></i>
-                            </div>
-                            <div class="tool-icon connected" title="Directions - Step-by-step navigation">
-                                <i class="fa-solid fa-directions"></i>
-                            </div>
-                            <div class="tool-icon connected" title="Photo - QR codes and text translation">
-                                <i class="fa-solid fa-camera"></i>
-                            </div>
-                            <div class="tool-icon connected" title="Tasks - Create reminders and scheduled tasks">
-                                <i class="fa-solid fa-tasks"></i>
-                            </div>
-                            <div class="tool-icon connected" title="SMS During Calls - Send info via SMS while on voice calls">
-                                <i class="fa-solid fa-sms"></i>
-                            </div>
-                        </div>
-                        <p class="tools-hint">{"All tools are always available via SMS and voice calls"}</p>
+                    // Built-in tools row - same style as capabilities above
+                    <div class="builtin-tools-label">{"Built-in"}</div>
+                    <div class="apps-icons-row builtin-row">
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "perplexity") { "selected" } else { "" })}
+                            title="Perplexity AI - AI-powered search and answers"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("perplexity".to_string()) { None } else { Some("perplexity".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "weather") { "selected" } else { "" })}
+                            title="Weather - Weather updates and forecasts"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("weather".to_string()) { None } else { Some("weather".to_string()) });
+                            })}
+                        >
+                            <i class="fa-solid fa-sun"></i>
+                        </button>
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "directions") { "selected" } else { "" })}
+                            title="Directions - Step-by-step navigation"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("directions".to_string()) { None } else { Some("directions".to_string()) });
+                            })}
+                        >
+                            <i class="fa-solid fa-directions"></i>
+                        </button>
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "photo") { "selected" } else { "" })}
+                            title="Photo - QR codes and text translation"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("photo".to_string()) { None } else { Some("photo".to_string()) });
+                            })}
+                        >
+                            <i class="fa-solid fa-camera"></i>
+                        </button>
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "tasks") { "selected" } else { "" })}
+                            title="Tasks - Create reminders and scheduled tasks"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("tasks".to_string()) { None } else { Some("tasks".to_string()) });
+                            })}
+                        >
+                            <i class="fa-solid fa-tasks"></i>
+                        </button>
+                        <button
+                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "sms_calls") { "selected" } else { "" })}
+                            title="SMS During Calls - Send info via SMS while on voice calls"
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("sms_calls".to_string()) { None } else { Some("sms_calls".to_string()) });
+                            })}
+                        >
+                            <i class="fa-solid fa-sms"></i>
+                        </button>
                     </div>
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
@@ -397,60 +436,39 @@ pub fn connect(props: &ConnectProps) -> Html {
                     }
 <style>
         {r#"
-/* Tools section - compact always-green icons */
-.tools-section {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    background: rgba(30, 30, 30, 0.5);
-    border: 1px solid rgba(52, 211, 153, 0.2);
-    border-radius: 12px;
-}
-.tools-title {
-    color: #34D399;
-    font-size: 0.9rem;
-    font-weight: 500;
-    margin: 0 0 0.75rem 0;
+/* Built-in tools - same row style as capabilities */
+.builtin-tools-label {
+    color: #666;
+    font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    padding: 0 1.5rem;
+    margin: 0;
 }
-.tools-icons-row {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+.apps-icons-row.builtin-row {
+    padding-top: 0.5rem;
+    margin-top: 0;
 }
-.tool-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(52, 211, 153, 0.1);
-    border: none;
+.app-icon.builtin-tool {
     color: #34D399;
-    font-size: 1.2rem;
-    cursor: default;
-    transition: all 0.2s ease;
+    font-size: 1.5rem;
+    cursor: pointer;
 }
-.tool-icon.connected {
-    box-shadow: 0 0 15px rgba(52, 211, 153, 0.4);
+.app-icon.builtin-tool.selected {
+    background: rgba(52, 211, 153, 0.25);
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.5);
 }
-.tool-icon:hover {
-    background: rgba(52, 211, 153, 0.2);
-    box-shadow: 0 0 20px rgba(52, 211, 153, 0.5);
-}
-.tool-icon img {
-    width: 20px !important;
-    height: 20px !important;
-    object-fit: contain;
+.app-icon.builtin-tool img {
     filter: brightness(0) saturate(100%) invert(68%) sepia(52%) saturate(434%) hue-rotate(106deg) brightness(96%) contrast(92%);
 }
-.tools-hint {
-    color: #666;
-    font-size: 0.8rem;
-    margin: 0.75rem 0 0 0;
-    font-style: italic;
+.builtin-detail {
+    padding: 0.75rem 1rem;
+    color: #aaa;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+.builtin-detail p {
+    margin: 0;
 }
 .group-summary {
     margin-left: auto;
