@@ -320,6 +320,7 @@ impl RoomInterface for RoomWrapper {
                     message_type: msgtype.to_string(),
                     room_name: room_name.clone(),
                     media_url: None,
+                    room_id: Some(self.room.room_id().to_string()),
                 });
             }
         }

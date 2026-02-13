@@ -51,6 +51,12 @@ pub struct ContactProfile {
     pub notify_on_call: bool,
     #[serde(default)]
     pub exceptions: Vec<ProfileException>,
+    #[serde(default)]
+    pub whatsapp_room_id: Option<String>,
+    #[serde(default)]
+    pub telegram_room_id: Option<String>,
+    #[serde(default)]
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -75,6 +81,12 @@ fn default_notify_call() -> bool {
 pub struct Room {
     pub display_name: String,
     pub last_activity_formatted: String,
+    #[serde(default)]
+    pub room_id: String,
+    #[serde(default)]
+    pub is_group: bool,
+    #[serde(default)]
+    pub attached_to: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -102,6 +114,12 @@ pub struct CreateProfileRequest {
     pub notify_on_call: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exceptions: Option<Vec<ExceptionRequest>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub whatsapp_room_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram_room_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -546,6 +564,9 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                 notification_type: (*form_type).clone(),
                 notify_on_call: *form_notify_call,
                 exceptions: if exceptions.is_empty() { None } else { Some(exceptions) },
+                whatsapp_room_id: editing_profile_val.as_ref().and_then(|p| p.whatsapp_room_id.clone()),
+                telegram_room_id: editing_profile_val.as_ref().and_then(|p| p.telegram_room_id.clone()),
+                signal_room_id: editing_profile_val.as_ref().and_then(|p| p.signal_room_id.clone()),
             };
 
             profile_save_state.set(FieldSaveState::Saving);

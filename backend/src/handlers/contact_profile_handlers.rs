@@ -36,6 +36,9 @@ pub struct CreateContactProfileRequest {
     pub notification_type: String, // "sms", "call", "call_sms"
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +52,9 @@ pub struct UpdateContactProfileRequest {
     pub notification_type: String,
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +67,7 @@ pub struct UpdateDefaultModeRequest {
 #[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: String,
+    pub exclude_profile_id: Option<i32>,
 }
 
 // Response DTOs
@@ -95,6 +102,9 @@ pub struct ContactProfileResponse {
     pub notification_type: String,
     pub notify_on_call: bool,
     pub exceptions: Vec<ExceptionResponse>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
 }
 
 impl ContactProfileResponse {
@@ -116,6 +126,9 @@ impl ContactProfileResponse {
                 .into_iter()
                 .map(ExceptionResponse::from)
                 .collect(),
+            whatsapp_room_id: p.whatsapp_room_id,
+            telegram_room_id: p.telegram_room_id,
+            signal_room_id: p.signal_room_id,
         }
     }
 }
@@ -225,9 +238,33 @@ pub async fn create_contact_profile(
         ));
     }
 
+    // Trim nickname whitespace
+    let nickname = request.nickname.trim().to_string();
+
+    // Check for duplicate nickname (case-insensitive)
+    if let Ok(existing) = state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
+        tracing::info!(
+            "Checking duplicate nickname '{}' against {} existing profiles",
+            nickname,
+            existing.len()
+        );
+        if existing
+            .iter()
+            .any(|p| p.nickname.trim().eq_ignore_ascii_case(&nickname))
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "A contact profile with this nickname already exists" })),
+            ));
+        }
+    }
+
     let new_profile = NewContactProfile {
         user_id: auth_user.user_id,
-        nickname: request.nickname,
+        nickname,
         whatsapp_chat: request.whatsapp_chat,
         telegram_chat: request.telegram_chat,
         signal_chat: request.signal_chat,
@@ -236,6 +273,9 @@ pub async fn create_contact_profile(
         notification_type: request.notification_type,
         notify_on_call: if request.notify_on_call { 1 } else { 0 },
         created_at: Utc::now().timestamp() as i32,
+        whatsapp_room_id: request.whatsapp_room_id,
+        telegram_room_id: request.telegram_room_id,
+        signal_room_id: request.signal_room_id,
     };
 
     match state.user_repository.create_contact_profile(&new_profile) {
@@ -250,7 +290,7 @@ pub async fn create_contact_profile(
                     {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"]
+                    if !["all", "critical", "digest", "ignore", "mention"]
                         .contains(&exc.notification_mode.as_str())
                     {
                         continue;
@@ -325,6 +365,22 @@ pub async fn update_contact_profile(
         ));
     }
 
+    // Check for duplicate nickname (case-insensitive), excluding the profile being updated
+    if let Ok(existing) = state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
+        if existing
+            .iter()
+            .any(|p| p.nickname.eq_ignore_ascii_case(&request.nickname) && p.id != Some(profile_id))
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "A contact profile with this nickname already exists" })),
+            ));
+        }
+    }
+
     match state
         .user_repository
         .update_contact_profile(UpdateContactProfileParams {
@@ -338,6 +394,9 @@ pub async fn update_contact_profile(
             notification_mode: request.notification_mode.clone(),
             notification_type: request.notification_type.clone(),
             notify_on_call: if request.notify_on_call { 1 } else { 0 },
+            whatsapp_room_id: request.whatsapp_room_id,
+            telegram_room_id: request.telegram_room_id,
+            signal_room_id: request.signal_room_id,
         }) {
         Ok(()) => {
             // Handle exceptions if provided
@@ -356,7 +415,7 @@ pub async fn update_contact_profile(
                     {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"]
+                    if !["all", "critical", "digest", "ignore", "mention"]
                         .contains(&exc.notification_mode.as_str())
                     {
                         continue;
@@ -496,12 +555,40 @@ pub async fn search_chats(
         .await
     {
         Ok(rooms) => {
+            // Look up which rooms are already assigned to contacts
+            let room_ids: Vec<String> = rooms
+                .iter()
+                .filter(|r| !r.room_id.is_empty())
+                .map(|r| r.room_id.clone())
+                .collect();
+
+            let assigned_rooms = if !room_ids.is_empty() {
+                state
+                    .user_repository
+                    .find_profiles_by_room_ids(
+                        auth_user.user_id,
+                        &room_ids,
+                        query.exclude_profile_id,
+                    )
+                    .unwrap_or_default()
+            } else {
+                std::collections::HashMap::new()
+            };
+
             let results: Vec<serde_json::Value> = rooms
                 .iter()
                 .map(|room| {
+                    let attached_to = if !room.room_id.is_empty() {
+                        assigned_rooms.get(&room.room_id).cloned()
+                    } else {
+                        None
+                    };
                     json!({
                         "display_name": room.display_name,
-                        "last_activity_formatted": room.last_activity_formatted
+                        "last_activity_formatted": room.last_activity_formatted,
+                        "room_id": room.room_id,
+                        "is_group": room.is_group,
+                        "attached_to": attached_to
                     })
                 })
                 .collect();

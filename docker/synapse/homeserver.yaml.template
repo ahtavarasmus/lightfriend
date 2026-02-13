@@ -1,5 +1,5 @@
 # Synapse homeserver configuration for Docker deployment
-server_name: "matrix.local"
+server_name: "localhost"
 pid_file: /data/homeserver.pid
 web_client_location: https://app.element.io/
 
@@ -43,7 +43,7 @@ app_service_config_files:
   - /bridges/signal/signal-registration.yaml
   - /bridges/messenger/messenger-registration.yaml
   - /bridges/instagram/instagram-registration.yaml
-  - /bridges/telegram/telegram-registration.yaml
+  # - /bridges/telegram/telegram-registration.yaml  # Disabled: logging config issue
   - /bridges/doublepuppet.yaml
 
 # Shared secret for double puppeting (instead of module)

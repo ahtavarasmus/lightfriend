@@ -248,6 +248,7 @@ pub struct MessageInfo {
     pub content: String,
     pub timestamp_rfc: String,
     pub platform: String, // e.g., "email", "whatsapp", "telegram", "signal" etc.
+    pub room_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,6 +281,9 @@ fn build_contact_maps_and_filter_messages(
 ) -> DigestContactMaps {
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     let mut ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
+    // Room ID-based maps for stable matching
+    let mut room_id_ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut room_id_priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     let profiles = state
         .user_repository
         .get_contact_profiles(user_id)
@@ -302,8 +306,26 @@ fn build_contact_maps_and_filter_messages(
                 .unwrap_or_else(|| profile.notification_mode.clone())
         };
 
+        // Helper to insert into room_id maps
+        let mut insert_room_id = |platform: &str, room_id: &Option<String>, mode: &str| {
+            if let Some(ref rid) = room_id {
+                if mode == "ignore" {
+                    room_id_ignore_map
+                        .entry(platform.to_string())
+                        .or_default()
+                        .insert(rid.clone());
+                } else {
+                    room_id_priority_map
+                        .entry(platform.to_string())
+                        .or_default()
+                        .insert(rid.clone());
+                }
+            }
+        };
+
         if let Some(ref wa) = profile.whatsapp_chat {
             let mode = get_effective_mode("whatsapp");
+            insert_room_id("whatsapp", &profile.whatsapp_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("whatsapp".to_string())
@@ -318,6 +340,7 @@ fn build_contact_maps_and_filter_messages(
         }
         if let Some(ref tg) = profile.telegram_chat {
             let mode = get_effective_mode("telegram");
+            insert_room_id("telegram", &profile.telegram_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("telegram".to_string())
@@ -332,6 +355,7 @@ fn build_contact_maps_and_filter_messages(
         }
         if let Some(ref sig) = profile.signal_chat {
             let mode = get_effective_mode("signal");
+            insert_room_id("signal", &profile.signal_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("signal".to_string())
@@ -367,8 +391,26 @@ fn build_contact_maps_and_filter_messages(
     }
 
     // Filter out messages from ignored contacts
+    // Check room_id first (stable), then fall back to display name matching
     let original_count = messages.len();
     messages.retain(|msg| {
+        // Check room_id-based ignore first
+        if let Some(ref rid) = msg.room_id {
+            if room_id_ignore_map
+                .get(&msg.platform)
+                .is_some_and(|set| set.contains(rid))
+            {
+                return false;
+            }
+            // If room_id matches a priority profile, keep it
+            if room_id_priority_map
+                .get(&msg.platform)
+                .is_some_and(|set| set.contains(rid))
+            {
+                return true;
+            }
+        }
+        // Fall back to display name matching for legacy profiles
         let sender_lower = msg.sender.to_lowercase();
         !ignore_map.get(&msg.platform).is_some_and(|set| {
             set.iter()
@@ -386,9 +428,29 @@ fn build_contact_maps_and_filter_messages(
 }
 
 /// Resolves a sender name to a contact profile nickname if one exists.
-/// Returns the profile nickname if the chat_name matches a contact profile,
-/// otherwise returns the original chat_name.
-fn resolve_sender_name(profiles: &[ContactProfile], platform: &str, chat_name: &str) -> String {
+/// Tries room_id match first (exact, stable), then falls back to display name substring match.
+fn resolve_sender_name(
+    profiles: &[ContactProfile],
+    platform: &str,
+    chat_name: &str,
+    room_id: Option<&str>,
+) -> String {
+    // Try room_id match first (stable identifier)
+    if let Some(rid) = room_id {
+        if let Some(p) = profiles.iter().find(|p| {
+            let profile_room_id = match platform {
+                "whatsapp" => p.whatsapp_room_id.as_deref(),
+                "telegram" => p.telegram_room_id.as_deref(),
+                "signal" => p.signal_room_id.as_deref(),
+                _ => None,
+            };
+            profile_room_id == Some(rid)
+        }) {
+            return p.nickname.clone();
+        }
+    }
+
+    // Fall back to display name substring match (legacy profiles without room_id)
     let chat_lower = chat_name.to_lowercase();
     profiles
         .iter()
@@ -829,6 +891,7 @@ pub async fn check_morning_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -883,10 +946,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -963,10 +1028,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "telegram",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "telegram".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1043,10 +1110,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1339,6 +1408,7 @@ pub async fn check_day_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -1393,10 +1463,12 @@ pub async fn check_day_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1476,10 +1548,12 @@ pub async fn check_day_digest(
                                     &contact_profiles,
                                     "telegram",
                                     &msg.room_name,
+                                    msg.room_id.as_deref(),
                                 ),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
+                                room_id: msg.room_id.clone(),
                             })
                             .collect();
 
@@ -1521,10 +1595,12 @@ pub async fn check_day_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1841,6 +1917,7 @@ pub async fn check_evening_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -1895,10 +1972,12 @@ pub async fn check_evening_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1978,10 +2057,12 @@ pub async fn check_evening_digest(
                                     &contact_profiles,
                                     "telegram",
                                     &msg.room_name,
+                                    msg.room_id.as_deref(),
                                 ),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
+                                room_id: msg.room_id.clone(),
                             })
                             .collect();
 
@@ -2024,10 +2105,12 @@ pub async fn check_evening_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 

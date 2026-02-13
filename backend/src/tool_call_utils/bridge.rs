@@ -262,24 +262,36 @@ pub async fn handle_send_chat_message(
         .user_repository
         .get_contact_profiles(user_id)
         .unwrap_or_default();
-    let profile_chat = profiles.iter().find_map(|p| {
+
+    // Find matching profile by nickname
+    let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let chat_name_lower = args.chat_name.to_lowercase();
-        if nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower) {
-            match args.platform.as_str() {
-                "whatsapp" => p.whatsapp_chat.clone(),
-                "telegram" => p.telegram_chat.clone(),
-                "signal" => p.signal_chat.clone(),
-                _ => None,
-            }
-        } else {
-            None
-        }
+        nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
     });
 
-    // Use profile's chat name if found, otherwise fall back to user's input
-    let search_term = profile_chat.unwrap_or_else(|| args.chat_name.clone());
-    let best_match = crate::utils::bridge::search_best_match(&rooms, &search_term);
+    // If profile has a room_id, find the room directly; otherwise search by display name
+    let profile_room_id = matching_profile.and_then(|p| match args.platform.as_str() {
+        "whatsapp" => p.whatsapp_room_id.clone(),
+        "telegram" => p.telegram_room_id.clone(),
+        "signal" => p.signal_room_id.clone(),
+        _ => None,
+    });
+
+    let best_match = if let Some(ref rid) = profile_room_id {
+        // Direct room_id lookup - exact match
+        rooms.iter().find(|r| r.room_id == *rid).cloned()
+    } else {
+        // Fall back to display name search
+        let profile_chat = matching_profile.and_then(|p| match args.platform.as_str() {
+            "whatsapp" => p.whatsapp_chat.clone(),
+            "telegram" => p.telegram_chat.clone(),
+            "signal" => p.signal_chat.clone(),
+            _ => None,
+        });
+        let search_term = profile_chat.unwrap_or_else(|| args.chat_name.clone());
+        crate::utils::bridge::search_best_match(&rooms, &search_term)
+    };
     let best_match = match best_match {
         Some(room) => room,
         None => {

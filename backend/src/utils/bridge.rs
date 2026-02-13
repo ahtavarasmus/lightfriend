@@ -26,6 +26,8 @@ pub struct BridgeRoom {
     pub display_name: String,
     pub last_activity: i64,
     pub last_activity_formatted: String,
+    #[serde(default)]
+    pub is_group: bool,
 }
 
 use chrono::DateTime;
@@ -41,6 +43,7 @@ pub struct BridgeMessage {
     pub message_type: String,
     pub room_name: String,
     pub media_url: Option<String>,
+    pub room_id: Option<String>,
 }
 
 fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
@@ -145,6 +148,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
             if !has_service_member {
                 return None;
             }
+            let is_group = members.len() > 3;
             // Get last activity from most recent message, regardless of sender
             let mut options = matrix_sdk::room::MessagesOptions::backward();
             options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
@@ -162,6 +166,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
                 display_name,
                 last_activity,
                 last_activity_formatted: format_timestamp(last_activity, None),
+                is_group,
             })
         });
     }
@@ -216,12 +221,14 @@ pub async fn get_service_rooms_trait(
                 continue;
             }
 
+            let is_group = members.len() > 3;
             let last_activity = room.get_last_activity().await;
             rooms.push(BridgeRoom {
                 room_id: room_info.room_id,
                 display_name: room_info.display_name,
                 last_activity,
                 last_activity_formatted: format_timestamp(last_activity, None),
+                is_group,
             });
         }
     }
@@ -287,6 +294,7 @@ pub async fn send_bridge_message_trait(
     }
 
     let room_name = room.display_name().await?;
+    let room_id_str = room.room_id().to_string();
     let current_timestamp = chrono::Utc::now().timestamp();
     Ok(BridgeMessage {
         sender: "You".to_string(),
@@ -297,6 +305,7 @@ pub async fn send_bridge_message_trait(
         message_type: if is_image { "image" } else { "text" }.to_string(),
         room_name,
         media_url: None,
+        room_id: Some(room_id_str),
     })
 }
 
@@ -563,6 +572,7 @@ pub async fn get_triggering_message_in_room(
                         message_type: msgtype.to_string(),
                         room_name: cleaned_room_name,
                         media_url: None,
+                        room_id: Some(room_id.to_string()),
                     }));
                 }
             }
@@ -699,6 +709,7 @@ pub async fn get_latest_sent_message_in_room(
                     message_type: msgtype.to_string(),
                     room_name: cleaned_room_name,
                     media_url: None,
+                    room_id: Some(room_id.to_string()),
                 }));
             }
         }
@@ -855,6 +866,7 @@ pub async fn fetch_bridge_messages(
         let sender_prefix = sender_prefix.clone();
         let user_timezone = user_timezone.clone();
         let room_name = remove_bridge_suffix(&bridge_room.display_name);
+        let bridge_room_id = bridge_room.room_id.clone();
         let debug_user = user_id == 1;
         if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
             tracing::info!("Skipping message from a muted room");
@@ -920,6 +932,7 @@ pub async fn fetch_bridge_messages(
                                 message_type: msgtype.to_string(),
                                 room_name: room_name.clone(),
                                 media_url: None,
+                                room_id: Some(bridge_room_id.clone()),
                             });
                             if messages.len() == 5 {
                                 break;
@@ -1049,6 +1062,7 @@ pub async fn send_bridge_message(
         message_type: "text".to_string(),
         room_name: room.display_name().await?.to_string(),
         media_url: None,
+        room_id: Some(room.room_id().to_string()),
     })
 }
 
@@ -1063,6 +1077,7 @@ async fn fetch_messages_from_room(
     timezone: Option<String>,
 ) -> Result<(Vec<BridgeMessage>, String)> {
     let room_name = room.display_name().await?.to_string();
+    let room_id_str = room.room_id().to_string();
     let sender_prefix = get_sender_prefix(service);
     let mut options = MessagesOptions::backward();
     options.limit = matrix_sdk::ruma::UInt::new(limit.unwrap_or(20)).unwrap();
@@ -1076,6 +1091,7 @@ async fn fetch_messages_from_room(
         let timezone = timezone.clone();
         let room_name = room_name_clone.clone();
         let sender_prefix = sender_prefix.clone();
+        let room_id_str = room_id_str.clone();
         futures.push(async move {
             if let Ok(AnySyncTimelineEvent::MessageLike(
                 matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg),
@@ -1141,6 +1157,7 @@ async fn fetch_messages_from_room(
                     message_type: msgtype.to_string(),
                     room_name: room_name.clone(),
                     media_url: None,
+                    room_id: Some(room_id_str.clone()),
                 })
             } else {
                 None
@@ -1712,6 +1729,7 @@ pub async fn handle_bridge_message(
 
     // Extract chat_name early for contact profile matching
     let chat_name = remove_bridge_suffix(room_name.as_str());
+    let current_room_id = room.room_id().to_string();
 
     // Load contact profiles for matching
     let contact_profiles = state
@@ -1719,37 +1737,87 @@ pub async fn handle_bridge_message(
         .get_contact_profiles(user_id)
         .unwrap_or_default();
 
-    // Find matching contact profile for this chat/sender
-    let matching_profile = contact_profiles.iter().find(|p| {
-        let chat_lower = chat_name.to_lowercase();
-        match service.as_str() {
-            "whatsapp" => p
-                .whatsapp_chat
-                .as_ref()
-                .map(|c| {
-                    let c_lower = remove_bridge_suffix(c).to_lowercase();
-                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                })
-                .unwrap_or(false),
-            "telegram" => p
-                .telegram_chat
-                .as_ref()
-                .map(|c| {
-                    let c_lower = remove_bridge_suffix(c).to_lowercase();
-                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                })
-                .unwrap_or(false),
-            "signal" => p
-                .signal_chat
-                .as_ref()
-                .map(|c| {
-                    let c_lower = remove_bridge_suffix(c).to_lowercase();
-                    chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                })
-                .unwrap_or(false),
-            _ => false,
-        }
-    });
+    // Find matching contact profile - try room_id first (stable), then display name
+    let matching_profile = contact_profiles
+        .iter()
+        .find(|p| {
+            // Try room_id match first
+            let profile_room_id = match service.as_str() {
+                "whatsapp" => p.whatsapp_room_id.as_deref(),
+                "telegram" => p.telegram_room_id.as_deref(),
+                "signal" => p.signal_room_id.as_deref(),
+                _ => None,
+            };
+            profile_room_id == Some(current_room_id.as_str())
+        })
+        .or_else(|| {
+            // Fall back to display name matching for legacy/proactive profiles
+            let name_match = contact_profiles.iter().find(|p| {
+                let chat_lower = chat_name.to_lowercase();
+                match service.as_str() {
+                    "whatsapp" => p
+                        .whatsapp_chat
+                        .as_ref()
+                        .map(|c| {
+                            let c_lower = remove_bridge_suffix(c).to_lowercase();
+                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                        })
+                        .unwrap_or(false),
+                    "telegram" => p
+                        .telegram_chat
+                        .as_ref()
+                        .map(|c| {
+                            let c_lower = remove_bridge_suffix(c).to_lowercase();
+                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                        })
+                        .unwrap_or(false),
+                    "signal" => p
+                        .signal_chat
+                        .as_ref()
+                        .map(|c| {
+                            let c_lower = remove_bridge_suffix(c).to_lowercase();
+                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+                        })
+                        .unwrap_or(false),
+                    _ => false,
+                }
+            });
+
+            // Auto-save room_id on name-based match so future messages use room_id directly
+            if let Some(profile) = name_match {
+                let profile_room_id = match service.as_str() {
+                    "whatsapp" => profile.whatsapp_room_id.as_deref(),
+                    "telegram" => profile.telegram_room_id.as_deref(),
+                    "signal" => profile.signal_room_id.as_deref(),
+                    _ => None,
+                };
+                if profile_room_id.is_none() || profile_room_id == Some("") {
+                    if let Some(pid) = profile.id {
+                        if let Err(e) = state.user_repository.update_profile_room_id(
+                            pid,
+                            &service,
+                            &current_room_id,
+                        ) {
+                            tracing::warn!(
+                                "Failed to auto-save room_id for profile {}: {}",
+                                pid,
+                                e
+                            );
+                        } else {
+                            tracing::info!(
+                                "Auto-saved {} room_id {} for profile {} ({})",
+                                service,
+                                current_room_id,
+                                pid,
+                                profile.nickname
+                            );
+                        }
+                    }
+                }
+            }
+
+            name_match
+        });
 
     // Check if this is a group room (more than 3 members)
     let members = match room.members(RoomMemberships::JOIN).await {
@@ -1764,11 +1832,22 @@ pub async fn handle_bridge_message(
         println!("members: {}", member_count);
     }
 
-    // Group chat handling: check if profile has "all" mode to bypass @mention requirement
+    // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
-        let is_priority_group = matching_profile
-            .map(|p| p.notification_mode == "all")
-            .unwrap_or(false);
+        // Check platform-specific exception mode first, then fall back to profile mode
+        let effective_mode = matching_profile
+            .and_then(|p| {
+                let profile_id = p.id.unwrap_or(0);
+                state
+                    .user_repository
+                    .get_profile_exception_for_platform(profile_id, &service)
+                    .ok()
+                    .flatten()
+                    .map(|exc| exc.notification_mode)
+                    .or_else(|| Some(p.notification_mode.clone()))
+            })
+            .unwrap_or_default();
+        let is_priority_group = effective_mode == "all";
 
         if !is_priority_group {
             let is_mentioned = event
@@ -2107,6 +2186,52 @@ pub async fn handle_bridge_message(
                 }
             }
         }
+        "mention" => {
+            // @mention only mode: already handled by the group member check above
+            // If we reach here, user was @mentioned in a group or this is a DM
+            // For groups: user was mentioned, so notify like "all" mode
+            if member_count > 3 {
+                let suffix = match notification_type_str.as_str() {
+                    "call" => "_call",
+                    "call_sms" => "_call_sms",
+                    _ => "_sms",
+                };
+                let notification_type = format!("{}_mention{}", service, suffix);
+
+                match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await
+                {
+                    Ok(()) => {
+                        let state_clone = state.clone();
+                        let content_clone = content.clone();
+                        let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
+                        let message = trim_for_sms(&service, sender_display, &content_clone);
+                        let first_message = format!(
+                            "Hello, you were mentioned in a {} group {}.",
+                            service_cap, sender_display
+                        );
+
+                        tokio::spawn(async move {
+                            crate::proactive::utils::send_notification(
+                                &state_clone,
+                                user_id,
+                                &message,
+                                notification_type,
+                                Some(first_message),
+                            )
+                            .await;
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "User {} does not have enough credits for mention notification: {}",
+                            user_id,
+                            e
+                        );
+                    }
+                }
+            }
+            // For DMs (member_count <= 3), mention mode doesn't apply, skip
+        }
         "digest" | "ignore" => {
             // For digest mode: message will be picked up by digest job, no immediate notification
             // For ignore mode: skip entirely (applies to both default settings and profile exceptions)
@@ -2141,6 +2266,11 @@ pub async fn search_bridge_rooms(
         ));
     }
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    // Sync to pick up rooms created/joined by the bridge via double puppet
+    client
+        .sync_once(matrix_sdk::config::SyncSettings::new())
+        .await
+        .ok();
     let all_rooms = get_service_rooms(&client, service).await?;
     let search_term_lower = search_term.trim().to_lowercase();
     // Single-pass matching with prioritized results
@@ -2178,7 +2308,118 @@ pub async fn search_bridge_rooms(
         capitalize(service)
     );
 
-    Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
+    let mut results: Vec<BridgeRoom> = matching_rooms.into_iter().map(|(_, room)| room).collect();
+
+    // Search Synapse Admin API for bridge ghost users (contacts without rooms).
+    // The user directory API excludes appservice users by design, so we use the
+    // admin API which searches the users table directly.
+    if search_term.trim().len() >= 2 {
+        let homeserver_url = std::env::var("MATRIX_HOMESERVER").unwrap_or_default();
+        let access_token = client
+            .matrix_auth()
+            .session()
+            .map(|s| s.tokens.access_token.clone())
+            .unwrap_or_default();
+
+        if !homeserver_url.is_empty() && !access_token.is_empty() {
+            let admin_url = format!(
+                "{}/_synapse/admin/v2/users?from=0&limit=50&name={}",
+                homeserver_url.trim_end_matches('/'),
+                urlencoding::encode(search_term.trim())
+            );
+            let http_client = reqwest::Client::new();
+            match http_client
+                .get(&admin_url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(body) = resp.json::<serde_json::Value>().await {
+                        let sender_prefix = get_sender_prefix(service);
+                        let bot_names: [String; 2] =
+                            [format!("{}bot", service), format!("{}-bridge", service)];
+
+                        let mut existing_names: std::collections::HashSet<String> = results
+                            .iter()
+                            .map(|r| remove_bridge_suffix(&r.display_name).to_lowercase())
+                            .collect();
+
+                        if let Some(users) = body["users"].as_array() {
+                            tracing::info!(
+                                "Admin API returned {} users for '{}'",
+                                users.len(),
+                                search_term
+                            );
+                            for user in users {
+                                let name = user["name"].as_str().unwrap_or_default();
+                                // Extract localpart from @localpart:server
+                                let localpart = name
+                                    .trim_start_matches('@')
+                                    .split(':')
+                                    .next()
+                                    .unwrap_or_default();
+
+                                if !localpart.starts_with(&sender_prefix) {
+                                    continue;
+                                }
+                                if bot_names.iter().any(|b| localpart == b.as_str()) {
+                                    continue;
+                                }
+
+                                let raw_display = user["displayname"].as_str().unwrap_or_default();
+                                let display_name = if !raw_display.is_empty() {
+                                    remove_bridge_suffix(raw_display)
+                                } else {
+                                    let number = localpart.trim_start_matches(&sender_prefix);
+                                    if number.chars().all(|c| c.is_ascii_digit())
+                                        && number.len() > 5
+                                    {
+                                        format!("+{}", number)
+                                    } else {
+                                        continue;
+                                    }
+                                };
+
+                                if existing_names.contains(&display_name.to_lowercase()) {
+                                    continue;
+                                }
+
+                                let name_lower = display_name.to_lowercase();
+                                let is_match = name_lower == search_term_lower
+                                    || name_lower.contains(&search_term_lower)
+                                    || strsim::jaro_winkler(&name_lower, &search_term_lower) >= 0.7;
+
+                                if is_match {
+                                    existing_names.insert(display_name.to_lowercase());
+                                    results.push(BridgeRoom {
+                                        room_id: String::new(),
+                                        display_name,
+                                        last_activity: 0,
+                                        last_activity_formatted: "Contact".to_string(),
+                                        is_group: false,
+                                    });
+                                }
+                            }
+                        }
+                        tracing::info!(
+                            "Total results after admin search: {} for {}",
+                            results.len(),
+                            capitalize(service)
+                        );
+                    }
+                }
+                Ok(resp) => {
+                    tracing::warn!("Admin API returned status {}", resp.status());
+                }
+                Err(e) => {
+                    tracing::warn!("Admin API search failed: {:?}", e);
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 pub fn capitalize(s: &str) -> String {

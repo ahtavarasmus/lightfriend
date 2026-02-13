@@ -166,7 +166,14 @@
       "Bash(done)",
       "Bash(col:*)",
       "Bash(# Check if afinfo is available to get clip duration which afinfo && afinfo /Users/ahtavarasmus/.claude/hooks/audio/marvin_01.mp3)",
-      "Bash(bash -c 'echo \"\"Child PPID is: $PPID''''')"
+      "Bash(bash -c 'echo \"\"Child PPID is: $PPID''''')",
+      "Bash(docker stats:*)",
+      "Bash(docker pull:*)",
+      "Bash(ln:*)",
+      "Bash(DOCKER_HOST=unix:///Users/ahtavarasmus/.docker/run/docker.sock docker ps:*)",
+      "Bash(DOCKER_HOST=unix:///var/run/docker.sock docker ps:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec:*)"
     ],
     "deny": [
       "Read(.env)",

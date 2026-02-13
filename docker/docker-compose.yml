@@ -132,7 +132,7 @@ services:
 
   # Lightfriend Core (Rust backend + frontend)
   core:
-    image: eddiepease1/lightfriend-core:latest
+    image: ahtavarasmus/lightfriend-core:latest
     container_name: lightfriend-core
     environment:
       DATABASE_URL: /app/data/database.db

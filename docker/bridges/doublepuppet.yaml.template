@@ -7,5 +7,5 @@ sender_localpart: doublepuppetbot
 rate_limited: false
 namespaces:
   users:
-  - regex: '@.*:matrix\.local'
+  - regex: '@.*:localhost'
     exclusive: false

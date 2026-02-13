@@ -458,6 +458,9 @@ pub struct ContactProfile {
     pub notification_type: String, // "sms", "call"
     pub notify_on_call: i32,       // 1 = true, 0 = false
     pub created_at: i32,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -473,6 +476,9 @@ pub struct NewContactProfile {
     pub notification_type: String,
     pub notify_on_call: i32,
     pub created_at: i32,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Debug, Clone)]

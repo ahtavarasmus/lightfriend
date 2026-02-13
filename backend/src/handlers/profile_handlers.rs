@@ -2123,6 +2123,7 @@ pub async fn get_instant_digest(
                         .date_formatted
                         .unwrap_or_else(|| "No timestamp".to_string()),
                     platform: "email".to_string(),
+                    room_id: None,
                 })
                 .collect();
             messages.extend(email_msgs);
@@ -2151,6 +2152,7 @@ pub async fn get_instant_digest(
                         content: msg.content,
                         timestamp_rfc: msg.formatted_timestamp,
                         platform: bridge_type.to_string(),
+                        room_id: msg.room_id.clone(),
                     })
                     .collect();
                 messages.extend(infos);

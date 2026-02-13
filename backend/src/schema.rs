@@ -68,6 +68,9 @@ diesel::table! {
         notification_type -> Text,
         notify_on_call -> Integer,
         created_at -> Integer,
+        whatsapp_room_id -> Nullable<Text>,
+        telegram_room_id -> Nullable<Text>,
+        signal_room_id -> Nullable<Text>,
     }
 }
 
