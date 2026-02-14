@@ -538,6 +538,7 @@ fn format_disconnection_notice(
 
 /// Checks whether a single message is critical.
 /// Returns `(is_critical, what_to_inform, first_message)`.
+#[allow(clippy::too_many_arguments)]
 pub async fn check_message_importance(
     state: &Arc<AppState>,
     user_id: i32,
@@ -545,6 +546,8 @@ pub async fn check_message_importance(
     service: &str,
     chat_name: &str,
     raw_content: &str,
+    contact_notes: Option<&str>,
+    conversation_context: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Special case for WhatsApp incoming calls
     if raw_content.contains("Incoming call") || raw_content.contains("Missed call") {
@@ -574,10 +577,23 @@ pub async fn check_message_importance(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Analyze this message and decide if it is critical:\n\n{}",
-                message
-            )),
+            content: chat_completion::Content::Text({
+                let mut prompt =
+                    String::from("Analyze this message and decide if it is critical:\n\n");
+                if let Some(notes) = contact_notes {
+                    if !notes.is_empty() {
+                        prompt.push_str(&format!("Contact notes from the user: \"{}\"\n\n", notes));
+                    }
+                }
+                if !conversation_context.is_empty() {
+                    prompt.push_str(&format!(
+                        "Recent conversation:\n{}\n\n",
+                        conversation_context
+                    ));
+                }
+                prompt.push_str(&format!("New message: {}", message));
+                prompt
+            }),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -696,6 +712,7 @@ pub async fn generate_suggested_reply(
     recent_user_messages: &[String],
     conversation_history: &[(String, String, i64)],
     user_context: Option<&str>,
+    contact_notes: Option<&str>,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     let (client, provider) = create_openai_client_for_user(state, user_id)?;
 
@@ -737,11 +754,18 @@ pub async fn generate_suggested_reply(
         None => String::new(),
     };
 
+    let notes_section = match contact_notes {
+        Some(notes) if !notes.is_empty() => {
+            format!("\n\nUser's notes about this contact: \"{}\"", notes)
+        }
+        _ => String::new(),
+    };
+
     let system_prompt = format!(
         r#"You are drafting a reply on behalf of a user to a message they received on {service}.
 The reply will be sent from the user's account, so it must sound like them - not like an AI.
 
-{style_examples}{conversation_section}{context_section}
+{style_examples}{conversation_section}{context_section}{notes_section}
 
 Rules:
 1. First decide: does this message NEED a reply? Messages like "love you", "ok", "thumbs up", memes, or broadcast messages do NOT need replies. Questions, requests, invitations, and time-sensitive asks DO.
@@ -753,6 +777,7 @@ Rules:
         style_examples = style_examples,
         conversation_section = conversation_section,
         context_section = context_section,
+        notes_section = notes_section,
     );
 
     let user_prompt = format!(

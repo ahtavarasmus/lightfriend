@@ -797,6 +797,19 @@ pub async fn process_sms(
 - CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
 - When users request conditional tasks that check data sources at a specific time (e.g. 'at 8am check my email and if...', 'at 7am check the weather and if...'), use trigger_type='once' with the specified trigger_time AND set the sources field. The system will automatically fetch the data at the scheduled time. For example, 'at 8am tomorrow check my email and if there is anything from my boss, remind me to reply' should use trigger_type='once', trigger_time='2026-02-08T08:00', sources='email', condition='email from boss'. Only use trigger_type='recurring_email' when the user wants to be notified on EVERY matching incoming email with no specific time.
 
+### Task vs Calendar Event:
+- 'add task', 'remind me', 'set a reminder', 'schedule a task' -> use create_task (Lightfriend's built-in task system)
+- 'add to my calendar', 'create a calendar event', 'put this on my calendar' -> use create_calendar_event (Google Calendar)
+- When in doubt, use create_task. Only use create_calendar_event when the user explicitly mentions their calendar or Google Calendar.
+
+### Event Reminder Timing:
+- When the user mentions an event at a specific time, set trigger_time BEFORE the event so the reminder is useful:
+  - 'meeting at 2pm' -> trigger_time 1:55 PM (5 min before - same-location event)
+  - 'dinner at restaurant at 7pm' -> trigger_time 6:00 PM (60 min before - travel needed)
+  - 'doctor appointment at 3pm' -> trigger_time 2:15 PM (45 min before - appointment)
+- If the user gives an explicit reminder time, use it exactly: 'remind me at 1pm about my 2pm meeting' -> trigger_time 1:00 PM
+- Always include the actual event time in the reminder message so the user knows when it starts.
+
 ### Date and Time Handling:
 - Always work with times in the user's timezone: {} with offset {}.
 - When user mentions times without dates, assume they mean the nearest future occurrence.

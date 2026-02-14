@@ -948,6 +948,48 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn get_phone_contact_notification_mode(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, DieselError> {
+            Ok("critical".to_string())
+        }
+
+        fn set_phone_contact_notification_mode(
+            &self,
+            _user_id: i32,
+            _mode: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_contact_notification_type(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, DieselError> {
+            Ok("sms".to_string())
+        }
+
+        fn set_phone_contact_notification_type(
+            &self,
+            _user_id: i32,
+            _ntype: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_contact_notify_on_call(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
+        fn set_phone_contact_notify_on_call(
+            &self,
+            _user_id: i32,
+            _notify: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn get_call_notify(&self, _user_id: i32) -> Result<bool, DieselError> {
             Ok(true)
         }

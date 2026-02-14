@@ -3,6 +3,7 @@ use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use serde::Deserialize;
 use crate::utils::api::Api;
+use super::timeline_view::{UpcomingTask, UpcomingDigest};
 
 const ACTIVITY_STYLES: &str = r#"
 .activity-panel-overlay {
@@ -29,8 +30,7 @@ const ACTIVITY_STYLES: &str = r#"
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1.25rem 1.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1.25rem 1.5rem 0;
     position: sticky;
     top: 0;
     background: #1a1a1a;
@@ -53,6 +53,33 @@ const ACTIVITY_STYLES: &str = r#"
 }
 .activity-header .close-btn:hover {
     color: #fff;
+}
+.activity-tabs {
+    display: flex;
+    gap: 0;
+    padding: 0.75rem 1.5rem 0;
+    position: sticky;
+    top: 52px;
+    background: #1a1a1a;
+    z-index: 10;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.activity-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.activity-tab:hover {
+    color: #aaa;
+}
+.activity-tab.active {
+    color: #fff;
+    border-bottom-color: #7EB2FF;
 }
 .activity-body {
     padding: 1.5rem;
@@ -110,7 +137,97 @@ const ACTIVITY_STYLES: &str = r#"
     white-space: nowrap;
     margin-left: 1rem;
 }
+
+/* Upcoming tab styles */
+.upcoming-day-header {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.upcoming-day-header:first-child {
+    margin-top: 0;
+}
+.upcoming-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    border-left: 3px solid #3d4f6f;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-bottom: 0.5rem;
+    gap: 0.75rem;
+}
+.upcoming-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+.upcoming-item.digest-item {
+    border-left-color: #4CAF50;
+}
+.upcoming-item-body {
+    flex: 1;
+    min-width: 0;
+}
+.upcoming-item-time {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #7EB2FF;
+}
+.upcoming-item-time .relative {
+    font-weight: 400;
+    color: #666;
+    margin-left: 0.4rem;
+    font-size: 0.75rem;
+}
+.upcoming-item.digest-item .upcoming-item-time {
+    color: #6ec88c;
+}
+.upcoming-item-desc {
+    font-size: 0.85rem;
+    color: #ccc;
+    margin-top: 0.15rem;
+    line-height: 1.3;
+}
+.upcoming-item-meta {
+    font-size: 0.7rem;
+    color: #888;
+    margin-top: 0.15rem;
+}
+.upcoming-item-condition {
+    font-size: 0.7rem;
+    color: #e8a838;
+    margin-top: 0.1rem;
+    font-style: italic;
+}
+.upcoming-item-delete {
+    background: transparent;
+    border: none;
+    color: #555;
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.25rem 0.4rem;
+    border-radius: 4px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    align-self: center;
+}
+.upcoming-item-delete:hover {
+    color: #ff6b6b;
+    background: rgba(255, 68, 68, 0.1);
+}
 "#;
+
+#[derive(Clone, PartialEq)]
+enum ActivityTab {
+    Recent,
+    Upcoming,
+}
 
 #[derive(Clone, PartialEq, Deserialize)]
 pub struct ActivityEntry {
@@ -125,6 +242,18 @@ pub struct ActivityEntry {
 pub struct ActivityPanelProps {
     pub is_open: bool,
     pub on_close: Callback<()>,
+    #[prop_or_default]
+    pub upcoming_tasks: Vec<UpcomingTask>,
+    #[prop_or_default]
+    pub upcoming_digests: Vec<UpcomingDigest>,
+    #[prop_or_default]
+    pub on_task_click: Option<Callback<UpcomingTask>>,
+    #[prop_or_default]
+    pub on_task_delete: Option<Callback<i32>>,
+    #[prop_or_default]
+    pub sunrise_hour: Option<f32>,
+    #[prop_or_default]
+    pub sunset_hour: Option<f32>,
 }
 
 #[function_component(ActivityPanel)]
@@ -132,6 +261,7 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
     let activities = use_state(|| Vec::<ActivityEntry>::new());
     let loading = use_state(|| true);
     let error = use_state(|| None::<String>);
+    let active_tab = use_state(|| ActivityTab::Recent);
 
     // Fetch activities when panel opens
     {
@@ -150,7 +280,6 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
                     error.set(None);
 
                     spawn_local(async move {
-                        // Fetch from usage_logs endpoint
                         match Api::get("/api/profile/recent-activity").send().await {
                             Ok(response) => {
                                 if response.ok() {
@@ -159,7 +288,6 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
                                             activities.set(data);
                                         }
                                         Err(_) => {
-                                            // Endpoint might not exist yet - show empty state
                                             activities.set(vec![]);
                                         }
                                     }
@@ -184,40 +312,52 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
         return html! {};
     }
 
-    let content = if *loading {
-        html! { <div class="activity-loading">{"Loading..."}</div> }
-    } else if let Some(err) = (*error).as_ref() {
-        html! { <div class="activity-error">{err}</div> }
-    } else if activities.is_empty() {
-        html! {
-            <div class="activity-empty">
-                <p>{"No recent activity"}</p>
-                <p class="activity-hint">{"Actions like sending digests, notifications, and reminders will appear here."}</p>
-            </div>
+    // Recent tab content
+    let recent_content = if *active_tab == ActivityTab::Recent {
+        if *loading {
+            html! { <div class="activity-loading">{"Loading..."}</div> }
+        } else if let Some(err) = (*error).as_ref() {
+            html! { <div class="activity-error">{err}</div> }
+        } else if activities.is_empty() {
+            html! {
+                <div class="activity-empty">
+                    <p>{"No recent activity"}</p>
+                    <p class="activity-hint">{"Actions like sending digests, notifications, and reminders will appear here."}</p>
+                </div>
+            }
+        } else {
+            html! {
+                <div class="activity-list">
+                    {
+                        activities.iter().map(|activity| {
+                            let description = format_activity(activity);
+                            let time_ago = format_time_ago(activity.created_at);
+                            let success_class = match activity.success {
+                                Some(true) => "success",
+                                Some(false) => "failed",
+                                None => "",
+                            };
+
+                            html! {
+                                <div class={classes!("activity-item", success_class)}>
+                                    <div class="activity-desc">{description}</div>
+                                    <div class="activity-time">{time_ago}</div>
+                                </div>
+                            }
+                        }).collect::<Html>()
+                    }
+                </div>
+            }
         }
     } else {
-        html! {
-            <div class="activity-list">
-                {
-                    activities.iter().map(|activity| {
-                        let description = format_activity(&activity);
-                        let time_ago = format_time_ago(activity.created_at);
-                        let success_class = match activity.success {
-                            Some(true) => "success",
-                            Some(false) => "failed",
-                            None => "",
-                        };
+        html! {}
+    };
 
-                        html! {
-                            <div class={classes!("activity-item", success_class)}>
-                                <div class="activity-desc">{description}</div>
-                                <div class="activity-time">{time_ago}</div>
-                            </div>
-                        }
-                    }).collect::<Html>()
-                }
-            </div>
-        }
+    // Upcoming tab content
+    let upcoming_content = if *active_tab == ActivityTab::Upcoming {
+        render_upcoming(props)
+    } else {
+        html! {}
     };
 
     let overlay_click = {
@@ -231,13 +371,27 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
         e.stop_propagation();
     });
 
+    let on_recent_tab = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            active_tab.set(ActivityTab::Recent);
+        })
+    };
+
+    let on_upcoming_tab = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            active_tab.set(ActivityTab::Upcoming);
+        })
+    };
+
     html! {
         <>
             <style>{ACTIVITY_STYLES}</style>
             <div class="activity-panel-overlay" onclick={overlay_click}>
                 <div class="activity-panel" onclick={stop_propagation}>
                     <div class="activity-header">
-                        <h2>{"Recent Activity"}</h2>
+                        <h2>{"Activity"}</h2>
                         <button
                             class="close-btn"
                             onclick={{
@@ -248,13 +402,290 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
                             {"x"}
                         </button>
                     </div>
+                    <div class="activity-tabs">
+                        <button
+                            class={classes!("activity-tab", (*active_tab == ActivityTab::Recent).then_some("active"))}
+                            onclick={on_recent_tab}
+                        >
+                            {"Recent"}
+                        </button>
+                        <button
+                            class={classes!("activity-tab", (*active_tab == ActivityTab::Upcoming).then_some("active"))}
+                            onclick={on_upcoming_tab}
+                        >
+                            {"Upcoming"}
+                        </button>
+                    </div>
                     <div class="activity-body">
-                        {content}
+                        {recent_content}
+                        {upcoming_content}
                     </div>
                 </div>
             </div>
         </>
     }
+}
+
+/// Merged item for sorting tasks and digests together
+#[derive(Clone)]
+enum UpcomingItem {
+    Task(UpcomingTask),
+    Digest(UpcomingDigest),
+}
+
+impl UpcomingItem {
+    fn timestamp(&self) -> i32 {
+        match self {
+            UpcomingItem::Task(t) => t.timestamp,
+            UpcomingItem::Digest(d) => d.timestamp,
+        }
+    }
+}
+
+fn render_upcoming(props: &ActivityPanelProps) -> Html {
+    let sunrise = props.sunrise_hour.unwrap_or(7.0);
+    let sunset = props.sunset_hour.unwrap_or(19.0);
+
+    // Merge tasks + digests into a single sorted list
+    let mut items: Vec<UpcomingItem> = Vec::new();
+    for t in &props.upcoming_tasks {
+        items.push(UpcomingItem::Task(t.clone()));
+    }
+    for d in &props.upcoming_digests {
+        items.push(UpcomingItem::Digest(d.clone()));
+    }
+    items.sort_by_key(|item| item.timestamp());
+
+    if items.is_empty() {
+        return html! {
+            <div class="activity-empty">
+                <p>{"No upcoming tasks"}</p>
+                <p class="activity-hint">{"Create tasks by describing them in the chat."}</p>
+            </div>
+        };
+    }
+
+    // Group by day
+    let now_ts = (js_sys::Date::now() / 1000.0) as i64;
+    let now_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(js_sys::Date::now()));
+    let today_start = {
+        let d = now_date.clone();
+        d.set_hours(0);
+        d.set_minutes(0);
+        d.set_seconds(0);
+        d.set_milliseconds(0);
+        (d.get_time() / 1000.0) as i64
+    };
+
+    struct DayGroup {
+        label: String,
+        items: Vec<UpcomingItem>,
+    }
+
+    let mut groups: Vec<DayGroup> = Vec::new();
+    let mut current_day_start: Option<i64> = None;
+
+    for item in &items {
+        let item_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(item.timestamp() as f64 * 1000.0));
+        let item_day_start = {
+            let d = item_date.clone();
+            d.set_hours(0);
+            d.set_minutes(0);
+            d.set_seconds(0);
+            d.set_milliseconds(0);
+            (d.get_time() / 1000.0) as i64
+        };
+
+        let needs_new_group = match current_day_start {
+            Some(current) => item_day_start != current,
+            None => true,
+        };
+
+        if needs_new_group {
+            let days_from_today = (item_day_start - today_start) / 86400;
+            let label = if days_from_today == 0 {
+                "Today".to_string()
+            } else if days_from_today == 1 {
+                "Tomorrow".to_string()
+            } else {
+                let day_of_week = item_date.get_day();
+                let day_str = match day_of_week {
+                    0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
+                    4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "",
+                };
+                let month = item_date.get_month();
+                let month_str = match month {
+                    0 => "Jan", 1 => "Feb", 2 => "Mar", 3 => "Apr",
+                    4 => "May", 5 => "Jun", 6 => "Jul", 7 => "Aug",
+                    8 => "Sep", 9 => "Oct", 10 => "Nov", 11 => "Dec",
+                    _ => "",
+                };
+                format!("{} {} {}", day_str, month_str, item_date.get_date())
+            };
+            groups.push(DayGroup { label, items: vec![item.clone()] });
+            current_day_start = Some(item_day_start);
+        } else {
+            if let Some(group) = groups.last_mut() {
+                group.items.push(item.clone());
+            }
+        }
+    }
+
+    let on_task_click = props.on_task_click.clone();
+    let on_task_delete = props.on_task_delete.clone();
+
+    html! {
+        <div class="activity-list">
+            { for groups.into_iter().map(|group| {
+                let on_task_click = on_task_click.clone();
+                let on_task_delete = on_task_delete.clone();
+                html! {
+                    <>
+                        <div class="upcoming-day-header">{group.label}</div>
+                        { for group.items.into_iter().map(|item| {
+                            render_upcoming_item(&item, sunrise, sunset, now_ts, &on_task_click, &on_task_delete)
+                        })}
+                    </>
+                }
+            })}
+        </div>
+    }
+}
+
+fn render_upcoming_item(
+    item: &UpcomingItem,
+    sunrise: f32,
+    sunset: f32,
+    now_ts: i64,
+    on_task_click: &Option<Callback<UpcomingTask>>,
+    on_task_delete: &Option<Callback<i32>>,
+) -> Html {
+    let (is_digest, time_display, description, condition, sources, task_id, timestamp) = match item {
+        UpcomingItem::Task(t) => (
+            false,
+            t.time_display.clone(),
+            t.description.clone(),
+            t.condition.clone(),
+            t.sources_display.clone(),
+            t.task_id,
+            t.timestamp,
+        ),
+        UpcomingItem::Digest(d) => (
+            true,
+            d.time_display.clone(),
+            format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
+            None,
+            None,
+            d.task_id,
+            d.timestamp,
+        ),
+    };
+
+    // Relative time
+    let diff_secs = timestamp as i64 - now_ts;
+    let relative = if diff_secs < 0 {
+        "overdue".to_string()
+    } else if diff_secs < 3600 {
+        format!("in {}m", diff_secs / 60)
+    } else if diff_secs < 86400 {
+        format!("in {}h", diff_secs / 3600)
+    } else {
+        let days = diff_secs / 86400;
+        if days == 1 { "in 1 day".to_string() } else { format!("in {} days", days) }
+    };
+
+    // Border-left color based on time of day
+    let border_color = get_time_color(timestamp, sunrise, sunset);
+
+    let item_class = if is_digest {
+        classes!("upcoming-item", "digest-item")
+    } else {
+        classes!("upcoming-item")
+    };
+
+    // Click handler - emit the task (convert digest to UpcomingTask if needed)
+    let onclick = {
+        let on_task_click = on_task_click.clone();
+        let item = item.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(cb) = &on_task_click {
+                match &item {
+                    UpcomingItem::Task(t) => cb.emit(t.clone()),
+                    UpcomingItem::Digest(d) => {
+                        let task = UpcomingTask {
+                            task_id: d.task_id,
+                            timestamp: d.timestamp,
+                            trigger_type: "once".to_string(),
+                            time_display: d.time_display.clone(),
+                            description: format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
+                            date_display: String::new(),
+                            relative_display: String::new(),
+                            condition: None,
+                            sources_display: None,
+                        };
+                        cb.emit(task);
+                    }
+                }
+            }
+        })
+    };
+
+    // Delete handler
+    let on_delete = {
+        let on_task_delete = on_task_delete.clone();
+        let task_id = task_id;
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            if let (Some(cb), Some(id)) = (&on_task_delete, task_id) {
+                cb.emit(id);
+            }
+        })
+    };
+
+    html! {
+        <div
+            class={item_class}
+            style={format!("border-left-color: {};", border_color)}
+            onclick={onclick}
+        >
+            <div class="upcoming-item-body">
+                <div class="upcoming-item-time">
+                    {&time_display}
+                    <span class="relative">{&relative}</span>
+                </div>
+                <div class="upcoming-item-desc">{&description}</div>
+                if let Some(ref src) = sources {
+                    <div class="upcoming-item-meta">{format!("Check: {}", src)}</div>
+                }
+                if let Some(ref cond) = condition {
+                    <div class="upcoming-item-condition">{format!("If: {}", cond)}</div>
+                }
+            </div>
+            if task_id.is_some() {
+                <button class="upcoming-item-delete" onclick={on_delete} title="Delete task">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            }
+        </div>
+    }
+}
+
+/// Get a color tinted by time of day, reusing the sunrise/sunset gradient logic
+fn get_time_color(timestamp: i32, sunrise: f32, sunset: f32) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
+    let hour = date.get_hours() as f32 + (date.get_minutes() as f32 / 60.0);
+
+    if hour < (sunrise - 2.0).max(0.0) { "#1a1a2e".to_string() }
+    else if hour < (sunrise - 1.5).max(0.0) { "#2d1f3d".to_string() }
+    else if hour < (sunrise - 1.0).max(0.0) { "#4a3050".to_string() }
+    else if hour < (sunrise - 0.5).max(0.0) { "#6b4a5e".to_string() }
+    else if hour < sunrise + 1.0 { "#87616b".to_string() }
+    else if hour < sunset - 1.0 { "#3d4f6f".to_string() }
+    else if hour < sunset - 0.5 { "#5a5070".to_string() }
+    else if hour < sunset { "#6b4a5e".to_string() }
+    else if hour < sunset + 1.0 { "#4a3050".to_string() }
+    else if hour < sunset + 2.0 { "#2d1f3d".to_string() }
+    else { "#1a1a2e".to_string() }
 }
 
 fn format_activity(activity: &ActivityEntry) -> String {

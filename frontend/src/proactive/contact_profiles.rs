@@ -57,6 +57,8 @@ pub struct ContactProfile {
     pub telegram_room_id: Option<String>,
     #[serde(default)]
     pub signal_room_id: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -67,6 +69,12 @@ pub struct ContactProfilesResponse {
     pub default_noti_type: String,
     #[serde(default = "default_notify_call")]
     pub default_notify_on_call: bool,
+    #[serde(default = "default_phone_contact_mode")]
+    pub phone_contact_mode: String,
+    #[serde(default = "default_phone_contact_noti_type")]
+    pub phone_contact_noti_type: String,
+    #[serde(default = "default_phone_contact_notify_call")]
+    pub phone_contact_notify_on_call: bool,
 }
 
 fn default_noti_type() -> String {
@@ -74,6 +82,18 @@ fn default_noti_type() -> String {
 }
 
 fn default_notify_call() -> bool {
+    true
+}
+
+fn default_phone_contact_mode() -> String {
+    "critical".to_string()
+}
+
+fn default_phone_contact_noti_type() -> String {
+    "sms".to_string()
+}
+
+fn default_phone_contact_notify_call() -> bool {
     true
 }
 
@@ -87,6 +107,8 @@ pub struct Room {
     pub is_group: bool,
     #[serde(default)]
     pub attached_to: Option<String>,
+    #[serde(default)]
+    pub is_phone_contact: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -120,10 +142,19 @@ pub struct CreateProfileRequest {
     pub telegram_room_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signal_room_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateDefaultModeRequest {
+    pub mode: Option<String>,
+    pub noti_type: Option<String>,
+    pub notify_on_call: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdatePhoneContactModeRequest {
     pub mode: Option<String>,
     pub noti_type: Option<String>,
     pub notify_on_call: Option<bool>,
@@ -567,6 +598,7 @@ pub fn contact_profiles_section(props: &ContactProfilesProps) -> Html {
                 whatsapp_room_id: editing_profile_val.as_ref().and_then(|p| p.whatsapp_room_id.clone()),
                 telegram_room_id: editing_profile_val.as_ref().and_then(|p| p.telegram_room_id.clone()),
                 signal_room_id: editing_profile_val.as_ref().and_then(|p| p.signal_room_id.clone()),
+                notes: editing_profile_val.as_ref().and_then(|p| p.notes.clone()),
             };
 
             profile_save_state.set(FieldSaveState::Saving);

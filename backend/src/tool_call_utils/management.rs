@@ -90,7 +90,16 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 "When to execute the task. Required for trigger_type='once'. \
                 Format: ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. \
                 Convert relative times like 'in 3 hours', 'tomorrow at 9am', 'this afternoon at 2pm' \
-                to this format based on current time.".to_string()
+                to this format based on current time.\n\
+                SMART TIMING: When the user describes an upcoming event, set trigger_time BEFORE the event \
+                so the reminder arrives with enough preparation time:\n\
+                - Virtual/same-location (meeting, call, class, standup): 5 minutes before\n\
+                - Appointments (doctor, dentist, interview, haircut): 45 minutes before\n\
+                - Travel needed (restaurant, friend's place, airport, gym): 60 minutes before\n\
+                - OVERRIDE: If the user specifies an explicit reminder time (e.g. 'remind me at 1pm about \
+                my 2pm meeting'), use their exact time, not the smart offset.\n\
+                - Include the actual event time in the reminder message so the user knows when it starts \
+                (e.g. 'Meeting at 2:00 PM - starting in 5 min').".to_string()
             ),
             ..Default::default()
         }),

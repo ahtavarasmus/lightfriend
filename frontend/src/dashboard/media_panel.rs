@@ -1182,7 +1182,7 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
         "Search Results"
     };
 
-    let show_back_button = props.playing && props.media_items.len() > 1 && props.on_back.is_some();
+    let show_back_button = props.playing && props.on_back.is_some();
 
     let youtube_connected = props.youtube_connected;
 

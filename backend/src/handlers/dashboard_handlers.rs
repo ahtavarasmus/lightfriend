@@ -43,10 +43,18 @@ pub struct QuietModeInfo {
 #[derive(Serialize)]
 pub struct AttentionItem {
     pub id: i32,
-    pub item_type: String, // "email_critical", "bridge_disconnected", "task_due"
+    pub item_type: String, // "message_reply", "bridge_disconnected", "action_approval"
     pub summary: String,
     pub timestamp: i32,
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_json: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -130,24 +138,36 @@ pub async fn get_dashboard_summary(
     let (sunrise_hour, sunset_hour) =
         calculate_sun_times_from_coords(latitude, longitude, now, &tz);
 
-    // Collect attention items from various sources
+    // Collect attention items from triage_items
     let mut attention_items: Vec<AttentionItem> = Vec::new();
 
-    // Bridge disconnection events (unhandled)
-    if let Ok(events) = state
-        .user_repository
-        .get_pending_disconnection_events(user_id)
-    {
-        for event in events {
+    if let Ok(triage_items) = state.user_repository.get_pending_triage_items(user_id) {
+        for item in triage_items {
+            let source = item
+                .context_json
+                .as_ref()
+                .and_then(|ctx| {
+                    serde_json::from_str::<serde_json::Value>(ctx)
+                        .ok()
+                        .and_then(|v| v["bridge_type"].as_str().map(|s| s.to_string()))
+                })
+                .or(item.source_type.clone());
+
+            let context_parsed = item
+                .context_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok());
+
             attention_items.push(AttentionItem {
-                id: event.id.unwrap_or(0),
-                item_type: "bridge_disconnected".to_string(),
-                summary: format!(
-                    "{} disconnected",
-                    capitalize_bridge_type(&event.bridge_type)
-                ),
-                timestamp: event.detected_at,
-                source: Some(event.bridge_type.clone()),
+                id: item.id.unwrap_or(0),
+                item_type: item.item_type.clone(),
+                summary: item.summary.clone(),
+                timestamp: item.created_at,
+                source,
+                suggested_action: item.suggested_action.clone(),
+                reasoning: item.reasoning.clone(),
+                context_json: context_parsed,
+                source_id: item.source_id.clone(),
             });
         }
     }
@@ -832,14 +852,6 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
-fn capitalize_bridge_type(bridge_type: &str) -> String {
-    let mut chars = bridge_type.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
 fn get_quiet_mode_info(
     state: &Arc<AppState>,
     user_id: i32,
@@ -940,37 +952,292 @@ fn calculate_sun_times_from_coords(
 
 /// DELETE /api/admin/dashboard/triage/{item_type}/{id}
 /// Dismisses a single triage/attention item by type and ID.
+/// Legacy endpoint - now delegates to triage_items table.
 pub async fn dismiss_triage_item(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Path((item_type, id)): Path<(String, i32)>,
+    Path((_item_type, id)): Path<(String, i32)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
 
-    let deleted = match item_type.as_str() {
-        "bridge_disconnected" => state
-            .user_repository
-            .delete_disconnection_event_by_id(id, user_id)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("Failed to delete event: {}", e)})),
-                )
-            })?,
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Unknown item type: {}", item_type)})),
-            ));
-        }
-    };
+    // Dismiss from triage_items table
+    let updated = state
+        .user_repository
+        .update_triage_item_status(id, user_id, "dismissed")
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to dismiss: {}", e)})),
+            )
+        })?;
 
-    if deleted {
+    if updated {
         Ok(Json(serde_json::json!({"success": true})))
     } else {
         Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Item not found"})),
+        ))
+    }
+}
+
+// Triage API types
+
+#[derive(Serialize)]
+pub struct TriageItemResponse {
+    pub id: i32,
+    pub item_type: String,
+    pub status: String,
+    pub summary: String,
+    pub suggested_action: Option<String>,
+    pub reasoning: Option<String>,
+    pub context_json: Option<serde_json::Value>,
+    pub priority: i32,
+    pub source_type: Option<String>,
+    pub source_id: Option<String>,
+    pub created_at: i32,
+    pub snooze_until: Option<i32>,
+    pub expires_at: Option<i32>,
+}
+
+#[derive(Serialize)]
+pub struct TriageListResponse {
+    pub items: Vec<TriageItemResponse>,
+    pub count: i32,
+}
+
+#[derive(Deserialize)]
+pub struct ExecuteRequest {
+    pub action: Option<String>, // edited reply text, if user modified it
+}
+
+#[derive(Deserialize)]
+pub struct SnoozeRequest {
+    pub minutes: Option<i32>, // default 60
+}
+
+fn triage_item_to_response(item: crate::models::user_models::TriageItem) -> TriageItemResponse {
+    let context_parsed = item
+        .context_json
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+
+    TriageItemResponse {
+        id: item.id.unwrap_or(0),
+        item_type: item.item_type,
+        status: item.status,
+        summary: item.summary,
+        suggested_action: item.suggested_action,
+        reasoning: item.reasoning,
+        context_json: context_parsed,
+        priority: item.priority,
+        source_type: item.source_type,
+        source_id: item.source_id,
+        created_at: item.created_at,
+        snooze_until: item.snooze_until,
+        expires_at: item.expires_at,
+    }
+}
+
+/// GET /api/triage
+/// Returns all pending triage items for the authenticated user.
+pub async fn get_triage_items(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<TriageListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+
+    let items = state
+        .user_repository
+        .get_pending_triage_items(user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to get triage items: {}", e)})),
+            )
+        })?;
+
+    let count = items.len() as i32;
+    let responses: Vec<TriageItemResponse> =
+        items.into_iter().map(triage_item_to_response).collect();
+
+    Ok(Json(TriageListResponse {
+        items: responses,
+        count,
+    }))
+}
+
+/// POST /api/triage/{id}/execute
+/// Executes the suggested action for a triage item (e.g., sends a reply via bridge).
+pub async fn execute_triage_item(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+    body: Option<Json<ExecuteRequest>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+
+    let item = state
+        .user_repository
+        .get_triage_item_by_id(id, user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("DB error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Triage item not found"})),
+            )
+        })?;
+
+    // Determine the action text: use edited version if provided, otherwise the suggested action
+    let action_text = body
+        .as_ref()
+        .and_then(|b| b.action.clone())
+        .or(item.suggested_action.clone());
+
+    match item.item_type.as_str() {
+        "message_reply" => {
+            let reply_text = action_text.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "No reply text available"})),
+                )
+            })?;
+
+            // Parse context_json for service and chat_name
+            let context: serde_json::Value = item
+                .context_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .ok_or_else(|| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": "Invalid context data"})),
+                    )
+                })?;
+
+            let service = context["service"].as_str().ok_or_else(|| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Missing service in context"})),
+                )
+            })?;
+
+            let chat_name = context["chat_name"].as_str().ok_or_else(|| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Missing chat_name in context"})),
+                )
+            })?;
+
+            // Send the reply via bridge
+            crate::utils::bridge::send_bridge_message(
+                service,
+                &state,
+                user_id,
+                chat_name,
+                &reply_text,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Failed to send message: {}", e)})),
+                )
+            })?;
+        }
+        "bridge_disconnected" => {
+            // No action to execute for bridge disconnections - just mark completed
+        }
+        _ => {
+            // For unknown types, just mark completed
+        }
+    }
+
+    // Mark item as completed
+    state
+        .user_repository
+        .update_triage_item_status(id, user_id, "completed")
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to update status: {}", e)})),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({"success": true})))
+}
+
+/// POST /api/triage/{id}/snooze
+/// Snoozes a triage item for a specified duration (default: 60 minutes).
+pub async fn snooze_triage_item(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+    body: Option<Json<SnoozeRequest>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let minutes = body.as_ref().and_then(|b| b.minutes).unwrap_or(60);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let snooze_until = now + (minutes * 60);
+
+    let updated = state
+        .user_repository
+        .snooze_triage_item(id, user_id, snooze_until)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to snooze: {}", e)})),
+            )
+        })?;
+
+    if updated {
+        Ok(Json(
+            serde_json::json!({"success": true, "snooze_until": snooze_until}),
+        ))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Triage item not found"})),
+        ))
+    }
+}
+
+/// DELETE /api/triage/{id}
+/// Permanently dismisses a triage item.
+pub async fn dismiss_triage_item_by_id(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+
+    let updated = state
+        .user_repository
+        .update_triage_item_status(id, user_id, "dismissed")
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to dismiss: {}", e)})),
+            )
+        })?;
+
+    if updated {
+        Ok(Json(serde_json::json!({"success": true})))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Triage item not found"})),
         ))
     }
 }

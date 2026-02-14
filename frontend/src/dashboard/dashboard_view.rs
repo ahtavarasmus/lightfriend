@@ -6,11 +6,15 @@ use crate::utils::api::Api;
 use crate::profile::billing_models::UserProfile;
 
 use super::chat_box::ChatBox;
-use super::triage_indicator::{TriageIndicator, AttentionItem as TriageAttentionItem};
-use super::timeline_view::{TimelineView, UpcomingTask, UpcomingDigest};
+use super::triage_indicator::{
+    AttentionItem as TriageAttentionItem, ConversationMessage,
+    QuickReplyButton, QuickReplyFlow,
+};
+use super::timeline_view::{UpcomingTask, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::activity_panel::ActivityPanel;
+use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
 
 const DASHBOARD_STYLES: &str = r#"
@@ -232,6 +236,13 @@ const DASHBOARD_STYLES: &str = r#"
 .info-modal-close:hover {
     color: #ccc;
 }
+.lf-number-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-align: center;
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.02em;
+}
 "#;
 
 /// API response types matching backend
@@ -270,6 +281,14 @@ struct AttentionItemResponse {
     summary: String,
     timestamp: i32,
     source: Option<String>,
+    #[serde(default)]
+    suggested_action: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    context_json: Option<serde_json::Value>,
+    #[serde(default)]
+    source_id: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -414,19 +433,14 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Info modal state
-    let show_tasks_info = use_state(|| false);
-
     // Task detail modal state
     let selected_task = use_state(|| None::<UpcomingTask>);
 
     // Task preview state (shown below chatbox after creation, before entering edit mode)
     let preview_task = use_state(|| None::<UpcomingTask>);
 
-    // Timeline end timestamp state (default: now + 90 days)
-    let now_ts_init = (js_sys::Date::now() / 1000.0) as i32;
-    let ninety_days_secs = 90 * 24 * 60 * 60;
-    let timeline_end_ts = use_state(move || now_ts_init + ninety_days_secs);
+    // Quick reply card flow state
+    let quick_reply_open = use_state(|| false);
 
     // Fetch YouTube connection status
     {
@@ -472,11 +486,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let fetch_summary = {
         let summary = summary.clone();
         let summary_loading = summary_loading.clone();
-        let timeline_end_ts = timeline_end_ts.clone();
         Callback::from(move |_: ()| {
             let summary = summary.clone();
             let summary_loading = summary_loading.clone();
-            let until = *timeline_end_ts;
+            let until = (js_sys::Date::now() / 1000.0) as i32 + 90 * 24 * 60 * 60;
 
             spawn_local(async move {
                 let url = format!("/api/dashboard/summary?until={}", until);
@@ -547,12 +560,36 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             s.attention_count,
             s.attention_items
                 .iter()
-                .map(|item| TriageAttentionItem {
-                    id: item.id,
-                    item_type: item.item_type.clone(),
-                    summary: item.summary.clone(),
-                    timestamp: item.timestamp,
-                    source: item.source.clone(),
+                .map(|item| {
+                    let ctx = item.context_json.as_ref();
+                    let conversation_snippet = ctx
+                        .and_then(|v| v["conversation_snippet"].as_array())
+                        .map(|arr| arr.iter().filter_map(|entry| {
+                            Some(ConversationMessage {
+                                sender: entry["sender"].as_str()?.to_string(),
+                                text: entry["text"].as_str()?.to_string(),
+                                ts: entry["ts"].as_i64().unwrap_or(0),
+                            })
+                        }).collect())
+                        .unwrap_or_default();
+                    TriageAttentionItem {
+                        id: item.id,
+                        item_type: item.item_type.clone(),
+                        summary: item.summary.clone(),
+                        timestamp: item.timestamp,
+                        source: item.source.clone(),
+                        suggested_action: item.suggested_action.clone(),
+                        reasoning: item.reasoning.clone(),
+                        original_message: ctx
+                            .and_then(|v| v["original_message"].as_str().map(|s| s.to_string())),
+                        source_id: item.source_id.clone(),
+                        conversation_snippet,
+                        service: ctx.and_then(|v| v["service"].as_str().map(|s| s.to_string()))
+                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").next().map(|n| n.to_lowercase()))),
+                        sender_name: ctx.and_then(|v| v["sender_name"].as_str().map(|s| s.to_string()))
+                            .or_else(|| ctx.and_then(|v| v["chat_name"].as_str().map(|s| s.to_string())))
+                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").nth(1).map(|n| n.to_string()))),
+                    }
                 })
                 .collect(),
         ),
@@ -595,28 +632,38 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .unwrap_or_default();
 
 
-    // Update selected_task with fresh data when summary changes
+    // Update selected_task with fresh data when summary changes (check both tasks and digests)
     {
         let selected_task = selected_task.clone();
         let upcoming_tasks = upcoming_tasks.clone();
+        let upcoming_digests_for_effect = upcoming_digests.clone();
         use_effect_with_deps(
-            move |tasks: &Vec<UpcomingTask>| {
+            move |(tasks, digests): &(Vec<UpcomingTask>, Vec<UpcomingDigest>)| {
                 if let Some(current) = (*selected_task).as_ref() {
                     if let Some(task_id) = current.task_id {
-                        // Find the updated task in the new data
                         if let Some(updated) = tasks.iter().find(|t| t.task_id == Some(task_id)) {
                             selected_task.set(Some(updated.clone()));
+                        } else if let Some(updated_digest) = digests.iter().find(|d| d.task_id == Some(task_id)) {
+                            let task = UpcomingTask {
+                                task_id: updated_digest.task_id,
+                                timestamp: updated_digest.timestamp,
+                                trigger_type: "once".to_string(),
+                                time_display: updated_digest.time_display.clone(),
+                                description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
+                                date_display: String::new(),
+                                relative_display: String::new(),
+                                condition: None,
+                                sources_display: None,
+                            };
+                            selected_task.set(Some(task));
                         }
                     }
                 }
                 || ()
             },
-            upcoming_tasks,
+            (upcoming_tasks, upcoming_digests_for_effect),
         );
     }
-
-    // Get current timestamp for timeline
-    let now_timestamp = (js_sys::Date::now() / 1000.0) as i32;
 
     let next_digest = (*summary).as_ref().and_then(|s| {
         s.next_digest.as_ref().map(|d| NextDigestInfo {
@@ -636,13 +683,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Extract sunrise/sunset hours for timeline
     let sunrise_hour = (*summary).as_ref().and_then(|s| s.sunrise_hour);
     let sunset_hour = (*summary).as_ref().and_then(|s| s.sunset_hour);
-
-    // Extract quiet_until for timeline visualization (only if is_quiet is true)
-    let quiet_until = if quiet_mode.is_quiet {
-        quiet_mode.until
-    } else {
-        None
-    };
 
     // Callbacks for footer buttons
     let on_quiet_mode_change = {
@@ -673,31 +713,28 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Task click callback for timeline
-    let on_task_click = {
+    // Task click callback from activity panel - close panel and enter edit mode
+    let on_activity_task_click = {
         let selected_task = selected_task.clone();
+        let activity_open = activity_open.clone();
         Callback::from(move |task: UpcomingTask| {
+            activity_open.set(false);
             selected_task.set(Some(task));
         })
     };
 
-    // Digest click callback - convert to UpcomingTask for editing
-    let on_digest_click = {
-        let selected_task = selected_task.clone();
-        Callback::from(move |digest: UpcomingDigest| {
-            // Convert digest to UpcomingTask for the edit UI
-            let task = UpcomingTask {
-                task_id: digest.task_id,
-                timestamp: digest.timestamp,
-                trigger_type: "once".to_string(),
-                time_display: digest.time_display.clone(),
-                description: format!("Digest: {}", digest.sources.as_deref().unwrap_or("all sources")),
-                date_display: String::new(),
-                relative_display: String::new(),
-                condition: None,
-                sources_display: None,
-            };
-            selected_task.set(Some(task));
+    // Task delete callback from activity panel
+    let on_activity_task_delete = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |task_id: i32| {
+            let fetch_summary = fetch_summary.clone();
+            spawn_local(async move {
+                if let Ok(resp) = Api::delete(&format!("/api/tasks/{}", task_id)).send().await {
+                    if resp.ok() {
+                        fetch_summary.emit(());
+                    }
+                }
+            });
         })
     };
 
@@ -747,16 +784,60 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         Callback::from(move |item: TriageAttentionItem| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                let url = format!(
-                    "/api/admin/dashboard/triage/{}/{}",
-                    item.item_type, item.id
-                );
+                let url = format!("/api/triage/{}", item.id);
                 if let Ok(resp) = Api::delete(&url).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
                     }
                 }
             });
+        })
+    };
+
+    // Snooze triage item callback
+    let on_triage_snooze = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |item: TriageAttentionItem| {
+            let fetch_summary = fetch_summary.clone();
+            spawn_local(async move {
+                let url = format!("/api/triage/{}/snooze", item.id);
+                if let Ok(req) = Api::post(&url).json(&serde_json::json!({"minutes": 60})) {
+                    if let Ok(resp) = req.send().await {
+                        if resp.ok() {
+                            fetch_summary.emit(());
+                        }
+                    }
+                }
+            });
+        })
+    };
+
+    // Quick reply flow callbacks
+    let on_open_quick_reply = {
+        let quick_reply_open = quick_reply_open.clone();
+        Callback::from(move |_: ()| {
+            quick_reply_open.set(true);
+        })
+    };
+
+    let on_close_quick_reply = {
+        let quick_reply_open = quick_reply_open.clone();
+        Callback::from(move |_: ()| {
+            quick_reply_open.set(false);
+        })
+    };
+
+    let on_item_sent = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |_item: TriageAttentionItem| {
+            fetch_summary.emit(());
+        })
+    };
+
+    let on_item_dismissed = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |_item: TriageAttentionItem| {
+            fetch_summary.emit(());
         })
     };
 
@@ -829,6 +910,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
                 // Chat box and task bar in a container above the overlay
                 <div class={if selected_task.is_some() { "task-edit-container" } else { "" }}>
+                    // Show the user's Lightfriend SMS number above chat
+                    if let Some(ref num) = props.user_profile.preferred_number {
+                        <div class="lf-number-label">
+                            {"SMS: "}{num}
+                        </div>
+                    }
                     // Chat box - always at the top, pass focused_task for edit mode
                     <ChatBox
                         on_usage_change={on_usage_change}
@@ -875,127 +962,95 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
             // Main dashboard content - blurred when task focused
             <div class={if selected_task.is_some() { "peace-main task-focused" } else { "peace-main" }}>
-                // Triage indicator (admin-only for now)
+                // System-level notices (bridge disconnected etc. - items with no source_id)
+                // Admin-only for now
                 { if props.user_profile.id == 1 {
-                    html! {
-                        <TriageIndicator
-                            attention_count={attention_count}
-                            attention_items={attention_items}
-                            on_dismiss={on_triage_dismiss.clone()}
-                        />
+                    let system_items: Vec<_> = attention_items.iter()
+                        .filter(|item| item.source_id.is_none())
+                        .collect();
+                    if system_items.is_empty() {
+                        html! {}
+                    } else {
+                        html! {
+                            <div>
+                                { for system_items.iter().map(|item| {
+                                    let dismiss_item = (*item).clone();
+                                    let on_dismiss = on_triage_dismiss.clone();
+                                    html! {
+                                        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.2);border-radius:8px;margin-bottom:0.5rem;">
+                                            <span style="color:#f59e0b;font-size:0.8rem;font-weight:600;">{"!"}</span>
+                                            <span style="flex:1;color:#ccc;font-size:0.85rem;">{&item.summary}</span>
+                                            <button
+                                                style="background:none;border:none;color:#666;font-size:0.9rem;cursor:pointer;padding:0.2rem 0.4rem;"
+                                                onclick={Callback::from(move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    on_dismiss.emit(dismiss_item.clone());
+                                                })}
+                                                title="Dismiss"
+                                            >{"x"}</button>
+                                        </div>
+                                    }
+                                })}
+                            </div>
+                        }
                     }
                 } else {
                     html! {}
                 }}
 
-                // Tasks section label with info icon
+                // People section with contact avatars
                 <div class="section-label">
-                    <span>{"Tasks"}</span>
-                    <button class="info-icon-btn" onclick={{
-                        let show_tasks_info = show_tasks_info.clone();
-                        Callback::from(move |_: MouseEvent| show_tasks_info.set(true))
-                    }}>
-                        <i class="fa-solid fa-circle-info"></i>
-                    </button>
+                    <span>{"People"}</span>
                 </div>
+                // Filter: message_reply items go to quick reply flow, rest stay as banners
+                { {
+                    let message_reply_items: Vec<TriageAttentionItem> = if props.user_profile.id == 1 {
+                        attention_items.iter()
+                            .filter(|item| item.item_type == "message_reply")
+                            .cloned()
+                            .collect()
+                    } else {
+                        vec![]
+                    };
+                    let reply_count = message_reply_items.len();
+                    html! {
+                        <>
+                            <QuickReplyButton
+                                message_reply_count={reply_count}
+                                on_open={on_open_quick_reply.clone()}
+                            />
+                            if *quick_reply_open {
+                                <QuickReplyFlow
+                                    items={message_reply_items}
+                                    on_close={on_close_quick_reply.clone()}
+                                    on_item_sent={on_item_sent.clone()}
+                                    on_item_dismissed={on_item_dismissed.clone()}
+                                />
+                            }
+                        </>
+                    }
+                }}
+                { if props.user_profile.id == 1 {
+                    html! {
+                        <ContactAvatarRow
+                            attention_items={attention_items.clone()}
+                            on_triage_dismiss={on_triage_dismiss.clone()}
+                            on_triage_snooze={on_triage_snooze.clone()}
+                        />
+                    }
+                } else {
+                    html! {
+                        <ContactAvatarRow
+                            attention_items={vec![]}
+                            on_triage_dismiss={on_triage_dismiss.clone()}
+                            on_triage_snooze={on_triage_snooze.clone()}
+                        />
+                    }
+                }}
 
-                // Timeline view showing upcoming tasks and digests
-                <TimelineView
-                    upcoming_tasks={upcoming_tasks}
-                    upcoming_digests={upcoming_digests}
-                    now_timestamp={now_timestamp}
-                    on_task_click={on_task_click}
-                    on_digest_click={on_digest_click}
-                    sunrise_hour={sunrise_hour}
-                    sunset_hour={sunset_hour}
-                    quiet_until={quiet_until}
-                />
-
-                // Tasks info modal
-                if *show_tasks_info {
-                    <div class="info-modal-overlay" onclick={{
-                        let show_tasks_info = show_tasks_info.clone();
-                        Callback::from(move |_: MouseEvent| show_tasks_info.set(false))
-                    }}>
-                        <div class="info-modal-box" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                            <h3>{"Tasks"}</h3>
-                            <p class="info-modal-hint">{"Create tasks by describing them in the chat. Each task you see on the timeline was created by you."}</p>
-
-                            <h4>{"How Tasks Work"}</h4>
-                            <div class="info-modal-section">
-                                <p>{"When you create a task, the following is saved: the schedule (when to trigger), an optional condition (checked at trigger time), an action (what to do), which sources to check (email, WhatsApp, etc.), and how to notify you."}</p>
-                                <p><strong>{"Fixed at creation: "}</strong>{"The schedule, recurrence rule, action to run, and which sources to check. These don't change between runs."}</p>
-                                <p><strong>{"Dynamic at trigger time: "}</strong>{"Source data is fetched fresh, conditions are evaluated against live data, and the notification message is generated from current results."}</p>
-                            </div>
-
-                            <h4>{"Trigger Types"}</h4>
-                            <div class="info-modal-section">
-                                <p><strong>{"Deterministic: "}</strong>{"Reminders and digests always fire at their scheduled time. If you set a reminder for 3pm, it will notify you at 3pm - no AI decision involved."}</p>
-                                <p><strong>{"Probabilistic: "}</strong>{"Conditional tasks (e.g. \"if it's going to rain\") depend on AI evaluation of live data. The trigger time is fixed, but whether the action runs depends on whether the condition matches."}</p>
-                                <p><strong>{"Event-driven: "}</strong>{"Message monitoring and email watching fire whenever a new message or email arrives, then evaluate any conditions against that content."}</p>
-                            </div>
-
-                            <h4>{"Safety by Design"}</h4>
-                            <div class="info-modal-section">
-                                <p>{"Lightfriend can only run a fixed set of actions: send you a notification, generate a digest, send a message to a specific contact, check weather, fetch calendar events, or control Tesla. No other actions exist - this is hardcoded, not AI-decided."}</p>
-                                <p>{"Tasks can only be created by you. Lightfriend cannot create, modify, or chain tasks on its own. Every task on your timeline is one you explicitly asked for."}</p>
-                                <p>{"Conditions are evaluated (matched true/false against data), never executed. Even if source data contained malicious instructions, the system only asks \"does this match the condition?\" - it cannot run new actions based on message content."}</p>
-                                <p>{"This means the risk of any task is knowable at creation time: you can see exactly what it will check, what action it will take, and when."}</p>
-                            </div>
-
-                            <div class="info-modal-divider"></div>
-
-                            <h4>{"Examples"}</h4>
-                            <p class="info-modal-hint">{"Describe any of these in the chat to create a task"}</p>
-                            <h4>{"Reminders & Scheduling"}</h4>
-                            <ul>
-                                <li>{"\"Remind me at 3pm to call mom\""}</li>
-                                <li>{"\"Remind me every Monday at 9am to submit the weekly report\""}</li>
-                                <li>{"\"Tell me to take my medicine every day at 8am and 8pm\""}</li>
-                            </ul>
-                            <h4>{"Digests"}</h4>
-                            <ul>
-                                <li>{"\"Send me a daily digest at 8am with my emails and WhatsApp messages\""}</li>
-                                <li>{"\"Give me a morning briefing at 7am with weather, calendar, and emails\""}</li>
-                            </ul>
-                            <h4>{"Message & Email Monitoring"}</h4>
-                            <ul>
-                                <li>{"\"Let me know when mom texts me on WhatsApp\""}</li>
-                                <li>{"\"Notify me if I get a message from my boss on Telegram\""}</li>
-                                <li>{"\"Tell me when I get an email about my job application\""}</li>
-                            </ul>
-                            <h4>{"Conditional Tasks"}</h4>
-                            <ul>
-                                <li>{"\"If it's above 25 degrees at 8am, remind me to water the plants\""}</li>
-                                <li>{"\"Check the weather at 7am - if it's going to rain, remind me to bring an umbrella\""}</li>
-                            </ul>
-                            <h4>{"Smart Home / Tesla"}</h4>
-                            <ul>
-                                <li>{"\"Turn on Tesla climate at 7:30am every weekday\""}</li>
-                                <li>{"\"Start warming up my car in 20 minutes\""}</li>
-                            </ul>
-                            <h4>{"Calendar"}</h4>
-                            <ul>
-                                <li>{"\"Send me my calendar events every morning at 7am\""}</li>
-                            </ul>
-
-                            <div class="info-modal-limits">
-                                <p>{"Can't make purchases or payments"}</p>
-                                <p>{"Can't access apps not connected in Capabilities"}</p>
-                                <p>{"Can't take actions you didn't explicitly create a task for"}</p>
-                            </div>
-                            <button class="info-modal-close" onclick={{
-                                let show_tasks_info = show_tasks_info.clone();
-                                Callback::from(move |_: MouseEvent| show_tasks_info.set(false))
-                            }}>{"Close"}</button>
-                        </div>
-                    </div>
-                }
-
-                // Horizontal separator
                 <div class="peace-separator"></div>
 
-                // Footer with watching info and buttons
+                // Footer with digest info and buttons
                 <DashboardFooter
                     next_digest={next_digest}
                     quiet_mode={quiet_mode}
@@ -1017,6 +1072,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             <ActivityPanel
                 is_open={*activity_open}
                 on_close={on_activity_close}
+                upcoming_tasks={upcoming_tasks}
+                upcoming_digests={upcoming_digests}
+                on_task_click={on_activity_task_click}
+                on_task_delete={on_activity_task_delete}
+                sunrise_hour={sunrise_hour}
+                sunset_hour={sunset_hour}
             />
 
             </div>

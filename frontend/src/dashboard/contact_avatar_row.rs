@@ -6,8 +6,9 @@ use crate::utils::api::Api;
 use crate::proactive::contact_profiles::{
     ContactProfile, ContactProfilesResponse, ProfileException,
     CreateProfileRequest, ExceptionRequest, UpdateDefaultModeRequest,
-    Room, SearchResponse,
+    UpdatePhoneContactModeRequest, Room, SearchResponse,
 };
+use super::triage_indicator::AttentionItem as TriageAttentionItem;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -26,7 +27,7 @@ const AVATAR_ROW_STYLES: &str = r#"
     display: flex;
     gap: 1rem;
     justify-content: center;
-    padding: 0.5rem 0.25rem;
+    padding: 1rem 0.25rem 0.5rem;
     min-width: min-content;
 }
 
@@ -293,6 +294,21 @@ const AVATAR_ROW_STYLES: &str = r#"
     vertical-align: middle;
     line-height: 1.2;
 }
+.contact-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #2d5a3d;
+    color: #7fdf9a;
+    margin-left: 4px;
+    vertical-align: middle;
+    line-height: 1.2;
+}
+.contact-tag.push-name {
+    background: #5a4a2d;
+    color: #dfbf7f;
+}
 
 .avatar-modal-row input.warn-border {
     border-color: #e55 !important;
@@ -437,6 +453,29 @@ const AVATAR_ROW_STYLES: &str = r#"
     background: rgba(126,178,255,0.08);
     color: #a0c8ff;
 }
+
+/* Notes textarea in contact settings */
+.avatar-modal-notes {
+    width: 100%;
+    padding: 0.5rem;
+    background: #12121f;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    color: #ddd;
+    font-size: 0.85rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 50px;
+    outline: none;
+}
+.avatar-modal-notes:focus {
+    border-color: rgba(255,255,255,0.3);
+}
+.avatar-modal-notes-hint {
+    font-size: 0.7rem;
+    color: #666;
+    margin-top: 0.2rem;
+}
 "#;
 
 // ---------------------------------------------------------------------------
@@ -547,6 +586,7 @@ enum ModalType {
     ContactSettings(i32),
     PlatformException(i32, String),
     DefaultSettings,
+    PhoneContactSettings,
     AddContact,
     PeopleInfo,
     PlatformInfo(i32, String),
@@ -557,8 +597,34 @@ enum ModalType {
 // Component
 // ---------------------------------------------------------------------------
 
+#[derive(Properties, PartialEq, Clone)]
+pub struct ContactAvatarRowProps {
+    #[prop_or_default]
+    pub attention_items: Vec<TriageAttentionItem>,
+    pub on_triage_dismiss: Callback<TriageAttentionItem>,
+    pub on_triage_snooze: Callback<TriageAttentionItem>,
+}
+
+/// Returns triage items that match a given contact profile by comparing source_id
+/// against the profile's room_ids (whatsapp_room_id, telegram_room_id, signal_room_id).
+fn items_for_contact<'a>(
+    items: &'a [TriageAttentionItem],
+    profile: &ContactProfile,
+) -> Vec<&'a TriageAttentionItem> {
+    items.iter().filter(|item| {
+        if let Some(ref sid) = item.source_id {
+            let sid = sid.as_str();
+            profile.whatsapp_room_id.as_deref() == Some(sid)
+                || profile.telegram_room_id.as_deref() == Some(sid)
+                || profile.signal_room_id.as_deref() == Some(sid)
+        } else {
+            false
+        }
+    }).collect()
+}
+
 #[function_component(ContactAvatarRow)]
-pub fn contact_avatar_row() -> Html {
+pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let profiles = use_state(|| Vec::<ContactProfile>::new());
     let default_mode = use_state(|| "critical".to_string());
     let default_noti_type = use_state(|| "sms".to_string());
@@ -573,6 +639,8 @@ pub fn contact_avatar_row() -> Html {
     let form_mode = use_state(|| "critical".to_string());
     let form_type = use_state(|| "sms".to_string());
     let form_notify_call = use_state(|| true);
+
+    let form_notes = use_state(|| String::new());
 
     // Contact settings form state (bridge fields)
     let form_whatsapp = use_state(|| String::new());
@@ -596,6 +664,14 @@ pub fn contact_avatar_row() -> Html {
     let def_form_mode = use_state(|| "critical".to_string());
     let def_form_type = use_state(|| "sms".to_string());
     let def_form_notify_call = use_state(|| true);
+
+    // Phone contact settings state
+    let phone_contact_mode = use_state(|| "critical".to_string());
+    let phone_contact_noti_type = use_state(|| "sms".to_string());
+    let phone_contact_notify_on_call = use_state(|| true);
+    let pc_form_mode = use_state(|| "critical".to_string());
+    let pc_form_type = use_state(|| "sms".to_string());
+    let pc_form_notify_call = use_state(|| true);
 
     // Add contact form state
     let add_nickname = use_state(|| String::new());
@@ -634,12 +710,18 @@ pub fn contact_avatar_row() -> Html {
         let default_mode = default_mode.clone();
         let default_noti_type = default_noti_type.clone();
         let default_notify_on_call = default_notify_on_call.clone();
+        let phone_contact_mode = phone_contact_mode.clone();
+        let phone_contact_noti_type = phone_contact_noti_type.clone();
+        let phone_contact_notify_on_call = phone_contact_notify_on_call.clone();
         let loading = loading.clone();
         Callback::from(move |_: ()| {
             let profiles = profiles.clone();
             let default_mode = default_mode.clone();
             let default_noti_type = default_noti_type.clone();
             let default_notify_on_call = default_notify_on_call.clone();
+            let phone_contact_mode = phone_contact_mode.clone();
+            let phone_contact_noti_type = phone_contact_noti_type.clone();
+            let phone_contact_notify_on_call = phone_contact_notify_on_call.clone();
             let loading = loading.clone();
             spawn_local(async move {
                 if let Ok(response) = Api::get("/api/contact-profiles").send().await {
@@ -648,6 +730,9 @@ pub fn contact_avatar_row() -> Html {
                         default_mode.set(data.default_mode);
                         default_noti_type.set(data.default_noti_type);
                         default_notify_on_call.set(data.default_notify_on_call);
+                        phone_contact_mode.set(data.phone_contact_mode);
+                        phone_contact_noti_type.set(data.phone_contact_noti_type);
+                        phone_contact_notify_on_call.set(data.phone_contact_notify_on_call);
                     }
                 }
                 loading.set(false);
@@ -800,7 +885,8 @@ pub fn contact_avatar_row() -> Html {
     // -----------------------------------------------------------------------
     // Avatar click: open contact settings modal
     // -----------------------------------------------------------------------
-    let on_avatar_click = {
+    // Helper to open contact settings modal (shared between avatar click and triage gear)
+    let open_contact_settings = {
         let modal = modal.clone();
         let profiles = profiles.clone();
         let form_nickname = form_nickname.clone();
@@ -826,6 +912,7 @@ pub fn contact_avatar_row() -> Html {
         let show_signal_suggestions = show_signal_suggestions.clone();
         let search_error_whatsapp = search_error_whatsapp.clone();
         let search_error_telegram = search_error_telegram.clone();
+        let form_notes = form_notes.clone();
         let search_error_signal = search_error_signal.clone();
         Callback::from(move |profile_id: i32| {
             if let Some(p) = profiles.iter().find(|p| p.id == profile_id) {
@@ -837,10 +924,10 @@ pub fn contact_avatar_row() -> Html {
                 form_telegram.set(p.telegram_chat.clone().unwrap_or_default());
                 form_signal.set(p.signal_chat.clone().unwrap_or_default());
                 form_email.set(p.email_addresses.clone().unwrap_or_default());
+                form_notes.set(p.notes.clone().unwrap_or_default());
                 form_whatsapp_room_id.set(p.whatsapp_room_id.clone());
                 form_telegram_room_id.set(p.telegram_room_id.clone());
                 form_signal_room_id.set(p.signal_room_id.clone());
-                // Existing profile values were previously validated
                 form_whatsapp_selected.set(p.whatsapp_chat.is_some());
                 form_telegram_selected.set(p.telegram_chat.is_some());
                 form_signal_selected.set(p.signal_chat.is_some());
@@ -856,6 +943,13 @@ pub fn contact_avatar_row() -> Html {
                 error_msg.set(None);
                 modal.set(Some(ModalType::ContactSettings(profile_id)));
             }
+        })
+    };
+
+    let on_avatar_click = {
+        let open_settings = open_contact_settings.clone();
+        Callback::from(move |profile_id: i32| {
+            open_settings.emit(profile_id);
         })
     };
 
@@ -957,6 +1051,27 @@ pub fn contact_avatar_row() -> Html {
     };
 
     // -----------------------------------------------------------------------
+    // Phone contact settings click
+    // -----------------------------------------------------------------------
+    let on_phone_contact_click = {
+        let modal = modal.clone();
+        let phone_contact_mode = phone_contact_mode.clone();
+        let phone_contact_noti_type = phone_contact_noti_type.clone();
+        let phone_contact_notify_on_call = phone_contact_notify_on_call.clone();
+        let pc_form_mode = pc_form_mode.clone();
+        let pc_form_type = pc_form_type.clone();
+        let pc_form_notify_call = pc_form_notify_call.clone();
+        let error_msg = error_msg.clone();
+        Callback::from(move |_: MouseEvent| {
+            pc_form_mode.set((*phone_contact_mode).clone());
+            pc_form_type.set((*phone_contact_noti_type).clone());
+            pc_form_notify_call.set(*phone_contact_notify_on_call);
+            error_msg.set(None);
+            modal.set(Some(ModalType::PhoneContactSettings));
+        })
+    };
+
+    // -----------------------------------------------------------------------
     // Add contact click: open AddContact modal
     // -----------------------------------------------------------------------
     let on_add_click = {
@@ -1044,6 +1159,7 @@ pub fn contact_avatar_row() -> Html {
         let form_whatsapp_selected = form_whatsapp_selected.clone();
         let form_telegram_selected = form_telegram_selected.clone();
         let form_signal_selected = form_signal_selected.clone();
+        let form_notes = form_notes.clone();
         let error_msg = error_msg.clone();
         let saving = saving.clone();
         let fetch_profiles = fetch_profiles.clone();
@@ -1080,6 +1196,7 @@ pub fn contact_avatar_row() -> Html {
             }).collect();
 
             let em = (*form_email).clone();
+            let notes_val = (*form_notes).trim().to_string();
             let request = CreateProfileRequest {
                 nickname,
                 whatsapp_chat: if wa.is_empty() { None } else { Some(wa) },
@@ -1093,6 +1210,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id: (*form_whatsapp_room_id).clone(),
                 telegram_room_id: (*form_telegram_room_id).clone(),
                 signal_room_id: (*form_signal_room_id).clone(),
+                notes: if notes_val.is_empty() { None } else { Some(notes_val) },
             };
 
             let modal = modal.clone();
@@ -1249,6 +1367,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id: wa_rid,
                 telegram_room_id: tg_rid,
                 signal_room_id: sg_rid,
+                notes: profile.notes.clone(),
             };
 
             let modal = modal.clone();
@@ -1361,6 +1480,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id: wa_rid,
                 telegram_room_id: tg_rid,
                 signal_room_id: sg_rid,
+                notes: profile.notes.clone(),
             };
 
             let modal = modal.clone();
@@ -1424,6 +1544,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id: profile.whatsapp_room_id.clone(),
                 telegram_room_id: profile.telegram_room_id.clone(),
                 signal_room_id: profile.signal_room_id.clone(),
+                notes: profile.notes.clone(),
             };
 
             let modal = modal.clone();
@@ -1505,6 +1626,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id,
                 telegram_room_id,
                 signal_room_id,
+                notes: profile.notes.clone(),
             };
 
             let modal = modal.clone();
@@ -1584,6 +1706,57 @@ pub fn contact_avatar_row() -> Html {
     };
 
     // -----------------------------------------------------------------------
+    // Save phone contact defaults
+    // -----------------------------------------------------------------------
+    let save_phone_contact_defaults = {
+        let modal = modal.clone();
+        let phone_contact_mode = phone_contact_mode.clone();
+        let phone_contact_noti_type = phone_contact_noti_type.clone();
+        let phone_contact_notify_on_call = phone_contact_notify_on_call.clone();
+        let pc_form_mode = pc_form_mode.clone();
+        let pc_form_type = pc_form_type.clone();
+        let pc_form_notify_call = pc_form_notify_call.clone();
+        let error_msg = error_msg.clone();
+        let saving = saving.clone();
+        Callback::from(move |_: ()| {
+            let modal = modal.clone();
+            let phone_contact_mode = phone_contact_mode.clone();
+            let phone_contact_noti_type = phone_contact_noti_type.clone();
+            let phone_contact_notify_on_call = phone_contact_notify_on_call.clone();
+            let new_mode = (*pc_form_mode).clone();
+            let new_type = (*pc_form_type).clone();
+            let new_call = *pc_form_notify_call;
+            let error_msg = error_msg.clone();
+            let saving = saving.clone();
+
+            saving.set(true);
+            spawn_local(async move {
+                let request = UpdatePhoneContactModeRequest {
+                    mode: Some(new_mode.clone()),
+                    noti_type: Some(new_type.clone()),
+                    notify_on_call: Some(new_call),
+                };
+                if let Ok(req) = Api::put("/api/contact-profiles/phone-contact-mode").json(&request) {
+                    if let Ok(response) = req.send().await {
+                        if response.ok() {
+                            phone_contact_mode.set(new_mode);
+                            phone_contact_noti_type.set(new_type);
+                            phone_contact_notify_on_call.set(new_call);
+                            dispatch_sync_event();
+                            modal.set(None);
+                        } else {
+                            error_msg.set(Some("Failed to save".to_string()));
+                        }
+                    } else {
+                        error_msg.set(Some("Network error".to_string()));
+                    }
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    // -----------------------------------------------------------------------
     // Save new contact
     // -----------------------------------------------------------------------
     let save_new_contact = {
@@ -1644,6 +1817,7 @@ pub fn contact_avatar_row() -> Html {
                 whatsapp_room_id: (*add_whatsapp_room_id).clone(),
                 telegram_room_id: (*add_telegram_room_id).clone(),
                 signal_room_id: (*add_signal_room_id).clone(),
+                notes: None,
             };
 
             let modal = modal.clone();
@@ -1779,16 +1953,30 @@ pub fn contact_avatar_row() -> Html {
         }
     };
 
-    let render_default_avatar = {
+    let render_phone_contact_avatar = {
+        let on_click = on_phone_contact_click.clone();
+        html! {
+            <div class="avatar-item" onclick={on_click}>
+                <div class="avatar-circle-wrap">
+                    <div class="avatar-circle default-avatar">
+                        <i class="fa-solid fa-address-book"></i>
+                    </div>
+                </div>
+                <span class="avatar-label">{"Contacts"}</span>
+            </div>
+        }
+    };
+
+    let render_unknown_avatar = {
         let on_click = on_default_click.clone();
         html! {
             <div class="avatar-item" onclick={on_click}>
                 <div class="avatar-circle-wrap">
                     <div class="avatar-circle default-avatar">
-                        <i class="fa-solid fa-users"></i>
+                        <i class="fa-solid fa-user-question"></i>
                     </div>
                 </div>
-                <span class="avatar-label">{"Default"}</span>
+                <span class="avatar-label">{"Unknown"}</span>
             </div>
         }
     };
@@ -1946,6 +2134,12 @@ pub fn contact_avatar_row() -> Html {
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
                                             }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
+                                            }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
                                     }
@@ -2005,6 +2199,12 @@ pub fn contact_avatar_row() -> Html {
                                             <span>{&room.display_name}</span>
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
                                             }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
@@ -2066,6 +2266,12 @@ pub fn contact_avatar_row() -> Html {
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
                                             }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
+                                            }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
                                     }
@@ -2075,6 +2281,15 @@ pub fn contact_avatar_row() -> Html {
                     }
                 } else {
                     html! {}
+                };
+
+                // Notes
+                let on_notes_input = {
+                    let form_notes = form_notes.clone();
+                    Callback::from(move |e: InputEvent| {
+                        let target: HtmlInputElement = e.target_unchecked_into();
+                        form_notes.set(target.value());
+                    })
                 };
 
                 // Mode
@@ -2176,6 +2391,14 @@ pub fn contact_avatar_row() -> Html {
                                 <label>{"Email"}</label>
                                 <input type="text" value={(*form_email).clone()} oninput={on_form_email_input}
                                     placeholder="email@example.com" />
+                            </div>
+                            <div class="avatar-modal-row">
+                                <label>{"Notes"}</label>
+                                <textarea class="avatar-modal-notes" rows="2"
+                                    value={(*form_notes).clone()}
+                                    oninput={on_notes_input}
+                                    placeholder="e.g. My mom. Reply in Finnish." />
+                                <div class="avatar-modal-notes-hint">{"Helps AI draft better replies"}</div>
                             </div>
                             <div class="avatar-modal-row">
                                 <label>{"Notification mode"}</label>
@@ -2309,6 +2532,12 @@ pub fn contact_avatar_row() -> Html {
                                                     if is_group {
                                                         <span class="group-tag">{"Group"}</span>
                                                     }
+                                                    if room.is_phone_contact == Some(true) {
+                                                        <span class="contact-tag">{"Saved contact"}</span>
+                                                    }
+                                                    if room.is_phone_contact == Some(false) {
+                                                        <span class="contact-tag push-name">{"Push name"}</span>
+                                                    }
                                                     <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                                 </div>
                                             }
@@ -2365,6 +2594,12 @@ pub fn contact_avatar_row() -> Html {
                                                     if is_group {
                                                         <span class="group-tag">{"Group"}</span>
                                                     }
+                                                    if room.is_phone_contact == Some(true) {
+                                                        <span class="contact-tag">{"Saved contact"}</span>
+                                                    }
+                                                    if room.is_phone_contact == Some(false) {
+                                                        <span class="contact-tag push-name">{"Push name"}</span>
+                                                    }
                                                     <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                                 </div>
                                             }
@@ -2420,6 +2655,12 @@ pub fn contact_avatar_row() -> Html {
                                                     <span>{&room.display_name}</span>
                                                     if is_group {
                                                         <span class="group-tag">{"Group"}</span>
+                                                    }
+                                                    if room.is_phone_contact == Some(true) {
+                                                        <span class="contact-tag">{"Saved contact"}</span>
+                                                    }
+                                                    if room.is_phone_contact == Some(false) {
+                                                        <span class="contact-tag push-name">{"Push name"}</span>
                                                     }
                                                     <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                                 </div>
@@ -2601,6 +2842,88 @@ pub fn contact_avatar_row() -> Html {
                 }
             }
 
+            ModalType::PhoneContactSettings => {
+                let err = (*error_msg).clone();
+                let is_saving = *saving;
+
+                let on_mode = {
+                    let pc_form_mode = pc_form_mode.clone();
+                    Callback::from(move |e: Event| {
+                        let target: HtmlSelectElement = e.target_unchecked_into();
+                        pc_form_mode.set(target.value());
+                    })
+                };
+
+                let on_type = {
+                    let pc_form_type = pc_form_type.clone();
+                    Callback::from(move |e: Event| {
+                        let target: HtmlSelectElement = e.target_unchecked_into();
+                        pc_form_type.set(target.value());
+                    })
+                };
+
+                let on_call = {
+                    let pc_form_notify_call = pc_form_notify_call.clone();
+                    let current = *pc_form_notify_call;
+                    Callback::from(move |_: Event| {
+                        pc_form_notify_call.set(!current);
+                    })
+                };
+
+                let on_save = {
+                    let save = save_phone_contact_defaults.clone();
+                    Callback::from(move |_: MouseEvent| { save.emit(()); })
+                };
+
+                let current_pc_mode = (*pc_form_mode).clone();
+                let show_type = current_pc_mode != "digest";
+
+                html! {
+                    <div class="avatar-modal-overlay" onclick={on_overlay_click}>
+                        <div class="avatar-modal-box" onclick={stop_prop}>
+                            <h3>{"Phone Contacts"}</h3>
+                            <p style="font-size:0.8rem;color:#888;margin:0 0 1rem 0;">
+                                {"Applied to people saved in your phone contacts who don't have a profile above."}
+                            </p>
+                            if let Some(e) = err {
+                                <div class="avatar-modal-error">{e}</div>
+                            }
+                            <div class="avatar-modal-row">
+                                <label>{"Notification mode"}</label>
+                                <select onchange={on_mode}>
+                                    <option value="all" selected={current_pc_mode == "all"}>{"All"}</option>
+                                    <option value="critical" selected={current_pc_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_pc_mode == "digest"}>{"Digest"}</option>
+                                </select>
+                            </div>
+                            if show_type {
+                                <div class="avatar-modal-row">
+                                    <label>{"Notification type"}</label>
+                                    <select onchange={on_type}>
+                                        <option value="sms" selected={*pc_form_type == "sms"}>{"SMS"}</option>
+                                        <option value="call" selected={*pc_form_type == "call"}>{"Call"}</option>
+                                        <option value="call_sms" selected={*pc_form_type == "call_sms"}>{"Call + SMS"}</option>
+                                    </select>
+                                </div>
+                                <div class="avatar-modal-check">
+                                    <input type="checkbox" id="av-pc-call" checked={*pc_form_notify_call} onchange={on_call} />
+                                    <label for="av-pc-call">{"Notify on incoming call"}</label>
+                                </div>
+                            }
+                            <div class="avatar-modal-actions">
+                                <button class="avatar-modal-btn-cancel" onclick={{
+                                    let close = close.clone();
+                                    Callback::from(move |_: MouseEvent| close.emit(()))
+                                }}>{"Cancel"}</button>
+                                <button class="avatar-modal-btn-save" onclick={on_save} disabled={is_saving}>
+                                    {if is_saving { "Saving..." } else { "Save" }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+
             ModalType::DefaultSettings => {
                 let err = (*error_msg).clone();
                 let is_saving = *saving;
@@ -2640,9 +2963,9 @@ pub fn contact_avatar_row() -> Html {
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
                         <div class="avatar-modal-box" onclick={stop_prop}>
-                            <h3>{"Default Settings"}</h3>
+                            <h3>{"Unknown People"}</h3>
                             <p style="font-size:0.8rem;color:#888;margin:0 0 1rem 0;">
-                                {"Applied to messages from contacts not listed above."}
+                                {"Applied to messages from unknown numbers not in your phone contacts."}
                             </p>
                             if let Some(e) = err {
                                 <div class="avatar-modal-error">{e}</div>
@@ -2700,8 +3023,14 @@ pub fn contact_avatar_row() -> Html {
                                 <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications from this contact."}</p>
                             </div>
                             <div class="people-info-section">
+                                <h4>{"3 Tiers"}</h4>
+                                <p class="people-info-mode"><strong>{"Profiles: "}</strong>{"People you've created profiles for above get per-profile notification settings."}</p>
+                                <p class="people-info-mode"><strong>{"Contacts: "}</strong>{"People saved in your phone contacts (but without a profile) use \"Contacts\" settings."}</p>
+                                <p class="people-info-mode"><strong>{"Unknown: "}</strong>{"Everyone else (unknown numbers not in your phone) uses \"Unknown\" settings."}</p>
+                            </div>
+                            <div class="people-info-section">
                                 <h4>{"How to Use"}</h4>
-                                <p>{"Click an avatar to edit their settings. Click \"+\" to add a new contact. Click platform bubbles to set per-platform overrides. Click \"Default\" to change settings for everyone else."}</p>
+                                <p>{"Click an avatar to edit settings. Click \"+\" to add a new contact profile. Click \"Contacts\" or \"Unknown\" to change settings for those groups."}</p>
                             </div>
                             <div class="people-info-tip">
                                 <strong>{"Tip: "}</strong>{"Use nicknames when chatting with Lightfriend! For example, \"has Mom messaged me?\" or \"send my Boss a WhatsApp message\" will automatically find the right chat."}
@@ -2972,6 +3301,12 @@ pub fn contact_avatar_row() -> Html {
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
                                             }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
+                                            }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
                                     }
@@ -3032,6 +3367,12 @@ pub fn contact_avatar_row() -> Html {
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
                                             }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
+                                            }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
                                     }
@@ -3091,6 +3432,12 @@ pub fn contact_avatar_row() -> Html {
                                             <span>{&room.display_name}</span>
                                             if is_group {
                                                 <span class="group-tag">{"Group"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(true) {
+                                                <span class="contact-tag">{"Saved contact"}</span>
+                                            }
+                                            if room.is_phone_contact == Some(false) {
+                                                <span class="contact-tag push-name">{"Push name"}</span>
                                             }
                                             <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
                                         </div>
@@ -3182,6 +3529,7 @@ pub fn contact_avatar_row() -> Html {
                     </div>
                 }
             }
+
         }
     };
 
@@ -3221,7 +3569,8 @@ pub fn contact_avatar_row() -> Html {
                         </button>
                     </div>
                     {profile_avatars}
-                    {render_default_avatar}
+                    {render_phone_contact_avatar}
+                    {render_unknown_avatar}
                     {render_add_avatar}
                 </div>
             </div>

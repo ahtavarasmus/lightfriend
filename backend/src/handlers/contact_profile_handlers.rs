@@ -39,6 +39,7 @@ pub struct CreateContactProfileRequest {
     pub whatsapp_room_id: Option<String>,
     pub telegram_room_id: Option<String>,
     pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -55,10 +56,18 @@ pub struct UpdateContactProfileRequest {
     pub whatsapp_room_id: Option<String>,
     pub telegram_room_id: Option<String>,
     pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateDefaultModeRequest {
+    pub mode: Option<String>,      // "critical", "digest", "ignore"
+    pub noti_type: Option<String>, // "sms", "call", "call_sms"
+    pub notify_on_call: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdatePhoneContactModeRequest {
     pub mode: Option<String>,      // "critical", "digest", "ignore"
     pub noti_type: Option<String>, // "sms", "call", "call_sms"
     pub notify_on_call: Option<bool>,
@@ -105,6 +114,7 @@ pub struct ContactProfileResponse {
     pub whatsapp_room_id: Option<String>,
     pub telegram_room_id: Option<String>,
     pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 impl ContactProfileResponse {
@@ -129,6 +139,7 @@ impl ContactProfileResponse {
             whatsapp_room_id: p.whatsapp_room_id,
             telegram_room_id: p.telegram_room_id,
             signal_room_id: p.signal_room_id,
+            notes: p.notes,
         }
     }
 }
@@ -173,11 +184,29 @@ pub async fn get_contact_profiles(
                 .get_default_notify_on_call(auth_user.user_id)
                 .unwrap_or(true);
 
+            let phone_contact_mode = state
+                .user_core
+                .get_phone_contact_notification_mode(auth_user.user_id)
+                .unwrap_or_else(|_| "critical".to_string());
+
+            let phone_contact_noti_type = state
+                .user_core
+                .get_phone_contact_notification_type(auth_user.user_id)
+                .unwrap_or_else(|_| "sms".to_string());
+
+            let phone_contact_notify_on_call = state
+                .user_core
+                .get_phone_contact_notify_on_call(auth_user.user_id)
+                .unwrap_or(true);
+
             Ok(Json(json!({
                 "profiles": responses,
                 "default_mode": default_mode,
                 "default_noti_type": default_noti_type,
-                "default_notify_on_call": default_notify_on_call
+                "default_notify_on_call": default_notify_on_call,
+                "phone_contact_mode": phone_contact_mode,
+                "phone_contact_noti_type": phone_contact_noti_type,
+                "phone_contact_notify_on_call": phone_contact_notify_on_call
             })))
         }
         Err(e) => {
@@ -276,6 +305,7 @@ pub async fn create_contact_profile(
         whatsapp_room_id: request.whatsapp_room_id,
         telegram_room_id: request.telegram_room_id,
         signal_room_id: request.signal_room_id,
+        notes: request.notes,
     };
 
     match state.user_repository.create_contact_profile(&new_profile) {
@@ -397,6 +427,7 @@ pub async fn update_contact_profile(
             whatsapp_room_id: request.whatsapp_room_id,
             telegram_room_id: request.telegram_room_id,
             signal_room_id: request.signal_room_id,
+            notes: request.notes,
         }) {
         Ok(()) => {
             // Handle exceptions if provided
@@ -532,6 +563,66 @@ pub async fn update_default_mode(
     Ok(Json(json!({ "success": true })))
 }
 
+/// PUT /api/contact-profiles/phone-contact-mode
+pub async fn update_phone_contact_mode(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<UpdatePhoneContactModeRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(ref mode) = request.mode {
+        if !["critical", "digest", "ignore"].contains(&mode.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" })),
+            ));
+        }
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notification_mode(auth_user.user_id, mode)
+        {
+            tracing::error!("Failed to update phone contact notification mode: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update phone contact mode" })),
+            ));
+        }
+    }
+
+    if let Some(ref noti_type) = request.noti_type {
+        if !["sms", "call", "call_sms"].contains(&noti_type.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" })),
+            ));
+        }
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notification_type(auth_user.user_id, noti_type)
+        {
+            tracing::error!("Failed to update phone contact notification type: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update notification type" })),
+            ));
+        }
+    }
+
+    if let Some(notify_on_call) = request.notify_on_call {
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notify_on_call(auth_user.user_id, notify_on_call)
+        {
+            tracing::error!("Failed to update phone contact notify on call: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update call setting" })),
+            ));
+        }
+    }
+
+    Ok(Json(json!({ "success": true })))
+}
+
 /// GET /api/contact-profiles/search/:service?q=query
 /// Searches for chats on the specified service (reuses existing bridge room search)
 pub async fn search_chats(
@@ -588,7 +679,8 @@ pub async fn search_chats(
                         "last_activity_formatted": room.last_activity_formatted,
                         "room_id": room.room_id,
                         "is_group": room.is_group,
-                        "attached_to": attached_to
+                        "attached_to": attached_to,
+                        "is_phone_contact": crate::utils::bridge::is_phone_contact_from_room_name(&room.display_name)
                     })
                 })
                 .collect();

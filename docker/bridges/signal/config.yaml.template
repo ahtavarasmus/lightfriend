@@ -2,7 +2,7 @@
 # Full config reference: https://github.com/mautrix/signal/blob/master/example-config.yaml
 
 network:
-    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber}} (Signal)"
+    displayname_template: "{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber}} (Signal~){{end}}"
 
 homeserver:
     address: http://synapse:8008

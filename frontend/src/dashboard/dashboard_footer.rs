@@ -1,6 +1,5 @@
 use yew::prelude::*;
 use crate::dashboard::quiet_mode::{QuietModeIndicator, QuietModeStatus};
-use crate::dashboard::contact_avatar_row::ContactAvatarRow;
 
 const FOOTER_STYLES: &str = r#"
 .peace-footer {
@@ -65,7 +64,6 @@ pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
         <>
             <style>{FOOTER_STYLES}</style>
             <div class="peace-footer">
-                <ContactAvatarRow />
                 <div class="footer-info">
                     <div class="footer-digest">{digest_text}</div>
                 </div>

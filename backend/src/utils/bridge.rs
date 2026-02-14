@@ -2030,6 +2030,9 @@ pub async fn handle_bridge_message(
         }
     };
 
+    // Extract contact notes before the match consumes matching_profile
+    let contact_notes = matching_profile.as_ref().and_then(|p| p.notes.clone());
+
     // Determine notification mode and type based on contact profile or default
     // Check for platform-specific exceptions if a profile matches
     let (notification_mode, notification_type_str, notify_on_call, profile_nickname) =
@@ -2212,6 +2215,8 @@ pub async fn handle_bridge_message(
                     service_cap.as_str(),
                     sender_display.as_str(),
                     content.as_str(),
+                    contact_notes.as_deref(),
+                    "",
                 )
                 .await
             {
@@ -2338,6 +2343,7 @@ pub async fn handle_bridge_message(
     let sender_display = profile_nickname
         .clone()
         .unwrap_or_else(|| chat_name.to_string());
+    let contact_notes_clone = contact_notes.clone();
     tokio::spawn(async move {
         // Fetch recent user messages from the room for style context
         let recent_user_msgs =
@@ -2351,7 +2357,7 @@ pub async fn handle_bridge_message(
 
         // Fetch recent conversation history (both sides) for context
         let conversation_history =
-            match get_conversation_history_from_room(&state_clone, user_id, &room_id_clone, 10)
+            match get_conversation_history_from_room(&state_clone, user_id, &room_id_clone, 20)
                 .await
             {
                 Ok(msgs) => msgs,
@@ -2374,6 +2380,7 @@ pub async fn handle_bridge_message(
             &recent_user_msgs,
             &conversation_history,
             user_context.as_deref(),
+            contact_notes_clone.as_deref(),
         )
         .await
         {
@@ -2391,12 +2398,30 @@ pub async fn handle_bridge_message(
                     .unwrap()
                     .as_secs() as i32;
 
+                // Build conversation snippet for frontend display (last 10 messages)
+                let conversation_snippet: Vec<serde_json::Value> = conversation_history
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .map(|(sender, text, ts)| {
+                        serde_json::json!({
+                            "sender": sender,
+                            "text": text,
+                            "ts": ts
+                        })
+                    })
+                    .collect();
+
                 let context = serde_json::json!({
                     "service": service_clone,
                     "room_id": room_id_clone,
                     "chat_name": chat_name_clone,
                     "original_message": content_clone,
                     "sender_name": sender_display,
+                    "conversation_snippet": conversation_snippet,
                 });
 
                 let summary = format!(

@@ -55,6 +55,7 @@ pub struct UpdateContactProfileParams {
     pub whatsapp_room_id: Option<String>,
     pub telegram_room_id: Option<String>,
     pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 pub struct UserRepository {
@@ -969,6 +970,7 @@ impl UserRepository {
                 contact_profiles::whatsapp_room_id.eq(params.whatsapp_room_id),
                 contact_profiles::telegram_room_id.eq(params.telegram_room_id),
                 contact_profiles::signal_room_id.eq(params.signal_room_id),
+                contact_profiles::notes.eq(params.notes),
             ))
             .execute(&mut conn)?;
         Ok(())
@@ -2318,5 +2320,200 @@ impl UserRepository {
 
         println!("Successfully created google calendar connection");
         Ok(())
+    }
+
+    // Triage item methods
+
+    pub fn create_triage_item(
+        &self,
+        new_item: crate::models::user_models::NewTriageItem,
+    ) -> Result<(), DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(triage_items::table)
+            .values(&new_item)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_pending_triage_items(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::status.eq("pending"))
+            .order(triage_items::priority.desc())
+            .then_order_by(triage_items::created_at.desc())
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn get_triage_item_by_id(
+        &self,
+        item_id: i32,
+        user_id: i32,
+    ) -> Result<Option<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let item = triage_items::table
+            .filter(triage_items::id.eq(item_id))
+            .filter(triage_items::user_id.eq(user_id))
+            .first::<crate::models::user_models::TriageItem>(&mut conn)
+            .optional()?;
+
+        Ok(item)
+    }
+
+    pub fn update_triage_item_status(
+        &self,
+        item_id: i32,
+        user_id: i32,
+        new_status: &str,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::id.eq(item_id))
+                .filter(triage_items::user_id.eq(user_id)),
+        )
+        .set(triage_items::status.eq(new_status))
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn snooze_triage_item(
+        &self,
+        item_id: i32,
+        user_id: i32,
+        snooze_until: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::id.eq(item_id))
+                .filter(triage_items::user_id.eq(user_id)),
+        )
+        .set((
+            triage_items::status.eq("snoozed"),
+            triage_items::snooze_until.eq(snooze_until),
+        ))
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn get_snoozed_items_due(
+        &self,
+        now: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::status.eq("snoozed"))
+            .filter(triage_items::snooze_until.le(now))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn get_expired_items(
+        &self,
+        now: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::status.eq_any(vec!["pending", "snoozed"]))
+            .filter(triage_items::expires_at.is_not_null())
+            .filter(triage_items::expires_at.le(now))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn resurface_snoozed_items(&self, now: i32) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::status.eq("snoozed"))
+                .filter(triage_items::snooze_until.le(now)),
+        )
+        .set((
+            triage_items::status.eq("pending"),
+            triage_items::snooze_until.eq(None::<i32>),
+        ))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn expire_old_items(&self, now: i32) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::status.eq_any(vec!["pending", "snoozed"]))
+                .filter(triage_items::expires_at.is_not_null())
+                .filter(triage_items::expires_at.le(now)),
+        )
+        .set(triage_items::status.eq("expired"))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn dismiss_triage_items_for_room(
+        &self,
+        user_id: i32,
+        room_id: &str,
+    ) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::user_id.eq(user_id))
+                .filter(triage_items::source_id.eq(room_id))
+                .filter(triage_items::status.eq_any(vec!["pending", "snoozed"])),
+        )
+        .set(triage_items::status.eq("completed"))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn get_pending_triage_items_for_digest(
+        &self,
+        user_id: i32,
+        item_type: &str,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::item_type.eq(item_type))
+            .filter(triage_items::status.eq("pending"))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
     }
 }

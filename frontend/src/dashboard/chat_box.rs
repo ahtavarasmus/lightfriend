@@ -347,6 +347,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let detected_media: UseStateHandle<Vec<MediaItem>> = use_state(|| Vec::new());
     let media_playing = use_state(|| false);
     let media_playing_index = use_state(|| 0usize);
+    let media_from_yt_panel = use_mut_ref(|| false);
 
     // @mention system state
     let active_mention = use_state(|| None::<String>);
@@ -1066,9 +1067,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         let on_media_close = {
                             let detected_media = detected_media.clone();
                             let media_playing = media_playing.clone();
+                            let media_from_yt_panel = media_from_yt_panel.clone();
                             Callback::from(move |_: ()| {
                                 detected_media.set(Vec::new());
                                 media_playing.set(false);
+                                *media_from_yt_panel.borrow_mut() = false;
                             })
                         };
                         let on_media_select = {
@@ -1079,11 +1082,26 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 media_playing.set(true);
                             })
                         };
-                        let on_media_back = {
+                        let from_yt_render = *media_from_yt_panel.borrow();
+                        let on_media_back = if from_yt_render || (*detected_media).len() > 1 {
                             let media_playing = media_playing.clone();
-                            Callback::from(move |_: ()| {
-                                media_playing.set(false);
-                            })
+                            let detected_media = detected_media.clone();
+                            let active_mention = active_mention.clone();
+                            let media_from_yt_panel = media_from_yt_panel.clone();
+                            Some(Callback::from(move |_: ()| {
+                                let from_yt = *media_from_yt_panel.borrow();
+                                if from_yt {
+                                    // Go back to YouTube subscription feed
+                                    *media_from_yt_panel.borrow_mut() = false;
+                                    detected_media.set(Vec::new());
+                                    media_playing.set(false);
+                                    active_mention.set(Some("youtube".to_string()));
+                                } else {
+                                    media_playing.set(false);
+                                }
+                            }))
+                        } else {
+                            None
                         };
                         html! {
                             <MediaPanel
@@ -1115,7 +1133,21 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 let active_mention = active_mention.clone();
                                 Callback::from(move |_: ()| active_mention.set(None))
                             };
-                            html! { <YouTubeQuickPanel on_close={on_close} /> }
+                            let on_video_select = {
+                                let detected_media = detected_media.clone();
+                                let media_playing = media_playing.clone();
+                                let media_playing_index = media_playing_index.clone();
+                                let active_mention = active_mention.clone();
+                                let media_from_yt_panel = media_from_yt_panel.clone();
+                                Callback::from(move |item: MediaItem| {
+                                    *media_from_yt_panel.borrow_mut() = true;
+                                    detected_media.set(vec![item]);
+                                    media_playing_index.set(0);
+                                    media_playing.set(true);
+                                    active_mention.set(None);
+                                })
+                            };
+                            html! { <YouTubeQuickPanel on_close={on_close} on_video_select={on_video_select} /> }
                         }
                         // Future: Some("calendar") => html! { <CalendarPanel on_close={...} /> }
                         _ => html! {}

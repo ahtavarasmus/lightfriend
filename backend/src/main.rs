@@ -1235,6 +1235,20 @@ async fn main() {
             "/api/dashboard/summary",
             get(dashboard_handlers::get_dashboard_summary),
         )
+        // Triage routes
+        .route("/api/triage", get(dashboard_handlers::get_triage_items))
+        .route(
+            "/api/triage/{id}/execute",
+            post(dashboard_handlers::execute_triage_item),
+        )
+        .route(
+            "/api/triage/{id}/snooze",
+            post(dashboard_handlers::snooze_triage_item),
+        )
+        .route(
+            "/api/triage/{id}",
+            delete(dashboard_handlers::dismiss_triage_item_by_id),
+        )
         // Contact Profiles routes
         .route(
             "/api/contact-profiles",
@@ -1247,6 +1261,10 @@ async fn main() {
         .route(
             "/api/contact-profiles/default-mode",
             put(contact_profile_handlers::update_default_mode),
+        )
+        .route(
+            "/api/contact-profiles/phone-contact-mode",
+            put(contact_profile_handlers::update_phone_contact_mode),
         )
         .route(
             "/api/contact-profiles/search/{service}",

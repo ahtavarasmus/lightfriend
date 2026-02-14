@@ -116,11 +116,47 @@ pub async fn check_all_bridges_health(
                     user_id
                 );
 
-                // Record disconnection event for digest notification
+                // Record disconnection as a triage item
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i32;
+
+                let bridge_name = match bridge.bridge_type.as_str() {
+                    "whatsapp" => "WhatsApp",
+                    "telegram" => "Telegram",
+                    "signal" => "Signal",
+                    other => other,
+                };
+
+                let context = serde_json::json!({
+                    "bridge_type": bridge.bridge_type,
+                });
+
+                let new_item = crate::models::user_models::NewTriageItem {
+                    user_id,
+                    item_type: "bridge_disconnected".to_string(),
+                    status: "pending".to_string(),
+                    summary: format!("{} disconnected", bridge_name),
+                    suggested_action: None,
+                    reasoning: None,
+                    context_json: Some(context.to_string()),
+                    priority: 1, // elevated - user should reconnect
+                    source_type: Some("system".to_string()),
+                    source_id: None,
+                    created_at: current_time,
+                    snooze_until: None,
+                    expires_at: None,
+                };
+
+                if let Err(e) = state.user_repository.create_triage_item(new_item) {
+                    error!(
+                        "Failed to create triage item for bridge disconnection for user {}: {}",
+                        user_id, e
+                    );
+                }
+
+                // Also record in legacy table for backward compatibility during migration
                 if let Err(e) = state.user_repository.record_bridge_disconnection(
                     user_id,
                     &bridge.bridge_type,
@@ -671,7 +707,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     }
 
                                     // Check message importance based on criticality
-                                    match crate::proactive::utils::check_message_importance(&state, user.id, &emails_content, "", "", "").await {
+                                    match crate::proactive::utils::check_message_importance(&state, user.id, &emails_content, "", "", "", None, "").await {
                                         Ok((is_critical, message, first_message)) => {
                                             if is_critical {
                                                 let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());
@@ -987,6 +1023,44 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(bridge_health_job)
         .await
         .expect("Failed to add bridge health check job to scheduler");
+
+    // Triage item maintenance - runs every minute to resurface snoozed items and expire old ones
+    let state_clone = Arc::clone(&state);
+    let triage_maintenance_job = Job::new_async("0 */1 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            // Resurface snoozed items whose snooze_until has passed
+            match state.user_repository.resurface_snoozed_items(now) {
+                Ok(count) => {
+                    if count > 0 {
+                        debug!("Resurfaced {} snoozed triage items", count);
+                    }
+                }
+                Err(e) => error!("Failed to resurface snoozed triage items: {}", e),
+            }
+
+            // Expire items past their expires_at timestamp
+            match state.user_repository.expire_old_items(now) {
+                Ok(count) => {
+                    if count > 0 {
+                        debug!("Expired {} triage items", count);
+                    }
+                }
+                Err(e) => error!("Failed to expire triage items: {}", e),
+            }
+        })
+    })
+    .expect("Failed to create triage maintenance job");
+
+    sched
+        .add(triage_maintenance_job)
+        .await
+        .expect("Failed to add triage maintenance job to scheduler");
 
     // Time-triggered tasks - runs every minute to execute due "once_*" tasks
     let state_clone = Arc::clone(&state);

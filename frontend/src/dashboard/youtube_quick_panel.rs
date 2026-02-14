@@ -2,6 +2,7 @@ use yew::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use serde::Deserialize;
 use crate::utils::api::Api;
+use crate::dashboard::media_panel::MediaItem;
 use web_sys::HtmlInputElement;
 use gloo_timers::callback::Timeout;
 use std::rc::Rc;
@@ -207,6 +208,7 @@ pub struct YouTubeVideosResponse {
 #[derive(Properties, Clone, PartialEq)]
 pub struct YouTubeQuickPanelProps {
     pub on_close: Callback<()>,
+    pub on_video_select: Callback<MediaItem>,
 }
 
 #[function_component(YouTubeQuickPanel)]
@@ -494,7 +496,6 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                                             <div class="youtube-video-grid">
                                                 {
                                                     display_videos.iter().map(|video| {
-                                                        let video_url = format!("https://www.youtube.com/watch?v={}", video.id);
                                                         let thumbnail_url = video.thumbnail.clone()
                                                             .unwrap_or_else(|| format!("https://img.youtube.com/vi/{}/mqdefault.jpg", video.id));
                                                         let meta = match (&video.channel, &video.duration) {
@@ -518,12 +519,25 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                                                                 </div>
                                                             }
                                                         } else {
+                                                            let on_click = {
+                                                                let on_video_select = props.on_video_select.clone();
+                                                                let media_item = MediaItem {
+                                                                    platform: "youtube".to_string(),
+                                                                    video_id: video.id.clone(),
+                                                                    title: video.title.clone(),
+                                                                    thumbnail: thumbnail_url.clone(),
+                                                                    duration: video.duration.clone(),
+                                                                    channel: video.channel.clone(),
+                                                                    original_url: None,
+                                                                };
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    on_video_select.emit(media_item.clone());
+                                                                })
+                                                            };
                                                             html! {
-                                                                <a
+                                                                <div
                                                                     class="youtube-video-card"
-                                                                    href={video_url}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
+                                                                    onclick={on_click}
                                                                 >
                                                                     <img
                                                                         class="youtube-thumbnail"
@@ -535,7 +549,7 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                                                                         <div class="youtube-video-title">{&video.title}</div>
                                                                         <div class="youtube-video-meta">{meta}</div>
                                                                     </div>
-                                                                </a>
+                                                                </div>
                                                             }
                                                         }
                                                     }).collect::<Html>()

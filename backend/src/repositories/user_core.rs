@@ -103,6 +103,27 @@ pub trait UserCoreOps: Send + Sync {
     fn set_default_notification_type(&self, user_id: i32, ntype: &str) -> Result<(), DieselError>;
     fn get_default_notify_on_call(&self, user_id: i32) -> Result<bool, DieselError>;
     fn set_default_notify_on_call(&self, user_id: i32, notify: bool) -> Result<(), DieselError>;
+
+    // Phone contact notification settings (Tier 2)
+    fn get_phone_contact_notification_mode(&self, user_id: i32) -> Result<String, DieselError>;
+    fn set_phone_contact_notification_mode(
+        &self,
+        user_id: i32,
+        mode: &str,
+    ) -> Result<(), DieselError>;
+    fn get_phone_contact_notification_type(&self, user_id: i32) -> Result<String, DieselError>;
+    fn set_phone_contact_notification_type(
+        &self,
+        user_id: i32,
+        ntype: &str,
+    ) -> Result<(), DieselError>;
+    fn get_phone_contact_notify_on_call(&self, user_id: i32) -> Result<bool, DieselError>;
+    fn set_phone_contact_notify_on_call(
+        &self,
+        user_id: i32,
+        notify: bool,
+    ) -> Result<(), DieselError>;
+
     fn get_call_notify(&self, user_id: i32) -> Result<bool, DieselError>;
     fn update_call_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError>;
 
@@ -515,6 +536,64 @@ impl UserCoreOps for UserCore {
         diesel::update(user_settings::table)
             .filter(user_settings::user_id.eq(user_id))
             .set(user_settings::default_notify_on_call.eq(if notify { 1 } else { 0 }))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    fn get_phone_contact_notification_mode(&self, user_id: i32) -> Result<String, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings
+            .phone_contact_notification_mode
+            .unwrap_or_else(|| "critical".to_string()))
+    }
+
+    fn set_phone_contact_notification_mode(
+        &self,
+        user_id: i32,
+        mode: &str,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::phone_contact_notification_mode.eq(mode))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    fn get_phone_contact_notification_type(&self, user_id: i32) -> Result<String, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings
+            .phone_contact_notification_type
+            .unwrap_or_else(|| "sms".to_string()))
+    }
+
+    fn set_phone_contact_notification_type(
+        &self,
+        user_id: i32,
+        ntype: &str,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::phone_contact_notification_type.eq(ntype))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    fn get_phone_contact_notify_on_call(&self, user_id: i32) -> Result<bool, DieselError> {
+        let settings = self.get_user_settings(user_id)?;
+        Ok(settings.phone_contact_notify_on_call != 0)
+    }
+
+    fn set_phone_contact_notify_on_call(
+        &self,
+        user_id: i32,
+        notify: bool,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(user_settings::table)
+            .filter(user_settings::user_id.eq(user_id))
+            .set(user_settings::phone_contact_notify_on_call.eq(if notify { 1 } else { 0 }))
             .execute(&mut conn)?;
         Ok(())
     }
