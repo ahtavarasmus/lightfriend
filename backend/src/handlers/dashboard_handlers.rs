@@ -492,20 +492,20 @@ fn find_next_digest(
 ) -> Option<NextDigestInfo> {
     let tasks = state.user_repository.get_user_tasks(user_id).ok()?;
 
-    // Find digest tasks (action contains "generate_digest" and is_permanent = 1)
-    let digest_task = tasks
+    // Find the earliest future digest task
+    let earliest_ts = tasks
         .iter()
-        .find(|t| is_digest_task(&t.action) && t.is_permanent.unwrap_or(0) == 1)?;
+        .filter(|t| is_digest_task(&t.action) && t.is_permanent.unwrap_or(0) == 1)
+        .filter_map(|t| {
+            t.trigger
+                .strip_prefix("once_")
+                .and_then(|s| s.parse::<i32>().ok())
+        })
+        .filter(|&ts| ts > now_ts)
+        .min()?;
 
-    // Parse the trigger to get next occurrence
-    if let Some(ts_str) = digest_task.trigger.strip_prefix("once_") {
-        if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-            let time_display = format_relative_time(trigger_ts, now_ts, tz);
-            return Some(NextDigestInfo { time_display });
-        }
-    }
-
-    None
+    let time_display = format_relative_time(earliest_ts, now_ts, tz);
+    Some(NextDigestInfo { time_display })
 }
 
 pub fn format_time_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {

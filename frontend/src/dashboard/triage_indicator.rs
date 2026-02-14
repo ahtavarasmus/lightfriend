@@ -317,7 +317,6 @@ pub struct QuickReplyFlowProps {
 
 #[function_component(QuickReplyFlow)]
 pub fn quick_reply_flow(props: &QuickReplyFlowProps) -> Html {
-    let current_index = use_state(|| 0usize);
     let edit_text = use_state(String::new);
     let sending = use_state(|| false);
     let all_done = use_state(|| false);

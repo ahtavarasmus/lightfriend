@@ -1793,7 +1793,12 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             let platform_key = pi.key.to_string();
             let icon_class = pi.icon.to_string();
             let eff_mode = effective_mode_for_platform(profile, pi.key);
-            let badge = mode_badge_info(eff_mode);
+            // Only show badge if this platform has an override that differs from the contact default
+            let badge = if has_override && eff_mode != profile.notification_mode.as_str() {
+                mode_badge_info(eff_mode)
+            } else {
+                None
+            };
             let on_click = {
                 let cb = on_bubble_click.clone();
                 let pk = platform_key.clone();

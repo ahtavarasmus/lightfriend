@@ -555,7 +555,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     }
 
     // Convert API response to component props
-    let (attention_count, attention_items) = match (*summary).as_ref() {
+    let (_attention_count, attention_items) = match (*summary).as_ref() {
         Some(s) => (
             s.attention_count,
             s.attention_items

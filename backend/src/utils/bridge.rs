@@ -109,14 +109,14 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
         || sender_localpart.starts_with("whatsapp_")
         || sender_localpart.starts_with("whatsapp")
     {
-        println!("Detected WhatsApp");
+        tracing::debug!("Detected WhatsApp");
         return Some("whatsapp".to_string());
     }
     if room_name.contains("(tg)")
         || sender_localpart.starts_with("telegram_")
         || sender_localpart.starts_with("telegram")
     {
-        println!("Detected Telegram");
+        tracing::debug!("Detected Telegram");
         return Some("telegram".to_string());
     }
     if room_name.contains("(signal)")
@@ -124,10 +124,10 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
         || sender_localpart.starts_with("signal_")
         || sender_localpart.starts_with("signal")
     {
-        println!("Detected Signal");
+        tracing::debug!("Detected Signal");
         return Some("signal".to_string());
     }
-    println!("No service detected");
+    tracing::debug!("No service detected");
     None
 }
 
@@ -1638,9 +1638,7 @@ pub async fn handle_bridge_message(
 
     tracing::info!("No user reply detected; proceeding with message processing");
     let sender_prefix = get_sender_prefix(&service);
-    if user_id == 1 {
-        println!("sender_prefix: {}", sender_prefix);
-    }
+    tracing::debug!("sender_prefix: {}", sender_prefix);
     if !sender_localpart.starts_with(&sender_prefix) {
         tracing::info!("Skipping non-{} sender", service);
         return;
@@ -1677,10 +1675,7 @@ pub async fn handle_bridge_message(
         MessageType::Emote(t) => t.body,
         _ => return,
     };
-    if user_id == 1 {
-        // if admin for debugging
-        println!("message: {}", content);
-    }
+    tracing::debug!("message: {}", content);
 
     // Check recurring_messaging tasks for this user
     let message_context = format!(
@@ -1888,9 +1883,7 @@ pub async fn handle_bridge_message(
         }
     };
     let member_count = members.len() as u64;
-    if user_id == 1 {
-        println!("members: {}", member_count);
-    }
+    tracing::debug!("members: {}", member_count);
 
     // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
@@ -2105,11 +2098,9 @@ pub async fn handle_bridge_message(
             }
         };
 
-    if user_id == 1 {
-        println!("notification_mode: {}", notification_mode);
-        println!("notification_type: {}", notification_type_str);
-        println!("profile_nickname: {:?}", profile_nickname);
-    }
+    tracing::debug!("notification_mode: {}", notification_mode);
+    tracing::debug!("notification_type: {}", notification_type_str);
+    tracing::debug!("profile_nickname: {:?}", profile_nickname);
 
     // Handle incoming/missed calls using per-profile notify_on_call setting
     if content.contains("Incoming call") || content.contains("Missed call") {
@@ -2199,11 +2190,9 @@ pub async fn handle_bridge_message(
                 return;
             }
 
-            if user_id == 1 {
-                println!("service: {}", service);
-                println!("chat_name: {}", chat_name);
-                println!("content: {}", content);
-            }
+            tracing::debug!("service: {}", service);
+            tracing::debug!("chat_name: {}", chat_name);
+            tracing::debug!("content: {}", content);
 
             // Use profile nickname for critical message detection if available
             let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
@@ -2220,9 +2209,7 @@ pub async fn handle_bridge_message(
                 )
                 .await
             {
-                if user_id == 1 {
-                    println!("is_critical: {}", is_critical);
-                }
+                tracing::debug!("is_critical: {}", is_critical);
 
                 if is_critical {
                     // Check if we recently sent a critical notification to avoid duplicates
