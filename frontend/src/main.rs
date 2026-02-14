@@ -4,6 +4,13 @@ use log::{info, Level};
 use web_sys::MouseEvent;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum AuthState {
+    Checking,  // Initial - don't show Login or Logout
+    LoggedIn,
+    LoggedOut,
+}
 mod config;
 mod utils {
     pub mod api;
@@ -28,7 +35,6 @@ mod pages {
     pub mod landing;
     pub mod money;
     pub mod termsprivacy;
-    pub mod proactive;
     pub mod faq;
     pub mod supported_countries;
     pub mod setup_costs;
@@ -40,13 +46,22 @@ mod pages {
 }
 mod components {
     pub mod notification;
-    pub mod feature_preview;
+}
+mod dashboard {
+    pub mod dashboard_view;
+    pub mod chat_box;
+    pub mod triage_indicator;
+    pub mod timeline_view;
+    pub mod dashboard_footer;
+    pub mod settings_panel;
+    pub mod activity_panel;
+    pub mod quiet_mode;
+    pub mod media_panel;
+    pub mod tesla_quick_panel;
+    pub mod youtube_quick_panel;
+    pub mod contact_avatar_row;
 }
 mod proactive {
-    pub mod common;
-    pub mod waiting_checks;
-    pub mod digest;
-    pub mod critical;
     pub mod contact_profiles;
 }
 mod connections {
@@ -61,12 +76,7 @@ mod connections {
     pub mod instagram;
     pub mod tesla;
     pub mod youtube;
-}
-mod controls {
-    pub mod tesla_controls;
-}
-mod media {
-    pub mod youtube_hub;
+    pub mod mcp;
 }
 mod auth {
     pub mod connect;
@@ -425,116 +435,66 @@ pub fn pricing_wrapper() -> Html {
 
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
-    pub logged_in: bool,
-    pub on_logout: Callback<()>,
+    pub auth_state: AuthState,
 }
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
-    let NavProps { logged_in, on_logout } = props;
-    let menu_open = use_state(|| false);
+    let NavProps { auth_state } = props;
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
         use_effect_with_deps(move |_| {
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
-           
+
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
                 is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
-           
+
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                 .unwrap();
-           
+
             move || {
                 window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                     .unwrap();
             }
         }, ());
     }
-   
-    let handle_logout = {
-        let on_logout = on_logout.clone();
-        Callback::from(move |_| {
-            on_logout.emit(());
-        })
-    };
-    let toggle_menu = {
-        let menu_open = menu_open.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            menu_open.set(!*menu_open);
-        })
-    };
-    let close_menu = {
-        let menu_open = menu_open.clone();
-        Callback::from(move |_: MouseEvent| {
-            menu_open.set(false);
-        })
-    };
-    let menu_class = if *menu_open {
-        "nav-right mobile-menu-open"
-    } else {
-        "nav-right"
-    };
-    let close_class = if *menu_open {
-        "burger-menu close-burger-menu"
-    } else {
-        "burger-menu"
-    };
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
                 <Link<Route> to={Route::Home} classes="nav-logo">
                     {"lightfriend"}
                 </Link<Route>>
-                <button class={close_class} onclick={toggle_menu}>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
-                <div class={menu_class}>
-                    <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Faq} classes="nav-link">
-                            {"FAQ"}
-                        </Link<Route>>
-                    </div>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Blog} classes="nav-link">
-                            {"Blog"}
-                        </Link<Route>>
-                    </div>
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Pricing} classes="nav-link">
-                            {"Pricing"}
-                        </Link<Route>>
-                    </div>
+                <div class="nav-right">
                     {
-                        if *logged_in {
-                            html! {
+                        match auth_state {
+                            AuthState::LoggedOut => html! {
                                 <>
-                                    <button onclick={
-                                        let close = close_menu.clone();
-                                        let logout = handle_logout.clone();
-                                        Callback::from(move |e: MouseEvent| {
-                                            close.emit(e);
-                                            logout.emit(());
-                                        })
-                                    } class="nav-logout-button">
-                                        {"Logout"}
-                                    </button>
-                                </>
-                            }
-                        } else {
-                            html! {
-                                <div onclick={close_menu.clone()}>
+                                    <Link<Route> to={Route::Pricing} classes="nav-link">
+                                        {"Pricing"}
+                                    </Link<Route>>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
                                         {"Login"}
                                     </Link<Route>>
-                                </div>
-                            }
+                                </>
+                            },
+                            AuthState::LoggedIn => {
+                                let onclick = Callback::from(|e: MouseEvent| {
+                                    e.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        let event = web_sys::CustomEvent::new("open-settings").unwrap();
+                                        let _ = window.dispatch_event(&event);
+                                    }
+                                });
+                                html! {
+                                    <button {onclick} class="nav-link">
+                                        {"Settings"}
+                                    </button>
+                                }
+                            },
+                            AuthState::Checking => html! {},
                         }
                     }
                 </div>
@@ -544,29 +504,29 @@ pub fn nav(props: &NavProps) -> Html {
 }
 #[function_component]
 fn App() -> Html {
-    let logged_in = use_state(|| false); // Default to false, will be checked via API
+    let auth_state = use_state(|| AuthState::Checking); // Start in checking state
     let auth_check_started = use_state(|| false); // Track if auth check has started
 
     // Check authentication status with automatic token refresh
     {
-        let logged_in = logged_in.clone();
+        let auth_state = auth_state.clone();
         let auth_check_started = auth_check_started.clone();
         use_effect_with_deps(move |_| {
             // Only run if we haven't started the check yet
             if !*auth_check_started {
                 auth_check_started.set(true);
 
-                let logged_in = logged_in.clone();
+                let auth_state = auth_state.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     if let Ok(response) = Api::get("/api/auth/status").send().await
                     {
                         if response.ok() {
-                            logged_in.set(true);
+                            auth_state.set(AuthState::LoggedIn);
                         } else {
-                            logged_in.set(false);
+                            auth_state.set(AuthState::LoggedOut);
                         }
                     } else {
-                        logged_in.set(false);
+                        auth_state.set(AuthState::LoggedOut);
                     }
                 });
             }
@@ -574,30 +534,10 @@ fn App() -> Html {
         }, ());
     }
 
-    let handle_logout = {
-        let logged_in = logged_in.clone();
-        Callback::from(move |_| {
-            let logged_in = logged_in.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                // Call backend logout endpoint to clear cookies
-                let _ = utils::api::Api::post("/api/logout")
-                    .send()
-                    .await;
-
-                logged_in.set(false);
-
-                // Reload the page to reset state
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().reload();
-                }
-            });
-        })
-    };
-
     html! {
         <>
             <BrowserRouter>
-                <Nav logged_in={*logged_in} on_logout={handle_logout} />
+                <Nav auth_state={*auth_state} />
                 <Switch<Route> render={switch} />
             </BrowserRouter>
         </>

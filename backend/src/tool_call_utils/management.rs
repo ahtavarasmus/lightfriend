@@ -90,7 +90,16 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 "When to execute the task. Required for trigger_type='once'. \
                 Format: ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. \
                 Convert relative times like 'in 3 hours', 'tomorrow at 9am', 'this afternoon at 2pm' \
-                to this format based on current time.".to_string()
+                to this format based on current time.\n\
+                SMART TIMING: When the user describes an upcoming event, set trigger_time BEFORE the event \
+                so the reminder arrives with enough preparation time:\n\
+                - Virtual/same-location (meeting, call, class, standup): 5 minutes before\n\
+                - Appointments (doctor, dentist, interview, haircut): 45 minutes before\n\
+                - Travel needed (restaurant, friend's place, airport, gym): 60 minutes before\n\
+                - OVERRIDE: If the user specifies an explicit reminder time (e.g. 'remind me at 1pm about \
+                my 2pm meeting'), use their exact time, not the smart offset.\n\
+                - Include the actual event time in the reminder message so the user knows when it starts \
+                (e.g. 'Meeting at 2:00 PM - starting in 5 min').".to_string()
             ),
             ..Default::default()
         }),
@@ -117,26 +126,68 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
         }),
     );
 
-    // action_spec: detailed step-by-step instructions for runtime AI
+    // action_tool: enum of available runtime tools
+    let tool_names = crate::tool_call_utils::utils::get_runtime_tool_names();
+    let tools_prompt = crate::tool_call_utils::utils::get_runtime_tools_prompt();
+
     task_properties.insert(
-        "action_spec".to_string(),
+        "action_tool".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(format!(
+                "The tool to execute when this task fires. Pick from the enum list.\n\n\
+                CRITICAL - REMINDER vs ACTION:\n\
+                - User says 'remind me to X' -> action_tool: \"send_reminder\" (just NOTIFY, don't do X)\n\
+                - User says 'do X' / 'turn on X' -> action_tool: \"control_tesla\" (actually EXECUTE X)\n\n\
+                {}\n\
+                CORRECT:\n\
+                - 'remind me to call mom' -> action_tool: \"send_reminder\"\n\
+                - 'turn on tesla climate' -> action_tool: \"control_tesla\"\n\
+                - 'call me at midnight' -> action_tool: \"send_reminder\"\n\n\
+                WRONG:\n\
+                - Calling send_reminder as a standalone tool - it is only valid here inside create_task\n\
+                - 'remind me to X' -> action_tool: \"control_tesla\" - user wants reminder, not action",
+                tools_prompt
+            )),
+            enum_values: Some(tool_names),
+            ..Default::default()
+        }),
+    );
+
+    // action_params: JSON object with tool-specific parameters
+    task_properties.insert(
+        "action_params".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Detailed step-by-step instructions for what to do when triggered. \
-                Another AI will execute these instructions using tools, so be specific and unambiguous.\n\n\
-                Available runtime tools:\n\
-                - send_reminder(message): Send notification to user\n\
-                - control_tesla(command): Control Tesla (climate_on, climate_off, lock, unlock)\n\
-                - get_weather(location): Get weather info\n\
-                - send_chat_message(platform, contact, message): Send message via WhatsApp/Telegram/Signal\n\
-                - send_email(to, subject, body): Send email\n\
-                - fetch_calendar_events(): Check calendar\n\n\
-                Examples:\n\
-                - 'Use send_reminder to notify user about picking up the package'\n\
-                - 'Use control_tesla to turn on climate control'\n\
-                - 'Step 1: Use get_weather to check temperature. Step 2: If below 10C, use control_tesla to turn on climate. Otherwise use send_reminder to inform user weather is warm.'\n\
-                - 'Use send_chat_message to send \"just checking in\" to mom on WhatsApp'".to_string()
+                "A JSON object string with parameters for the chosen action_tool.\n\
+                Each tool has its own params shape:\n\
+                - send_reminder: {\"message\": \"Call mom\"}\n\
+                - control_tesla: {\"command\": \"climate_on\"}\n\
+                - send_chat_message: {\"platform\": \"whatsapp\", \"contact\": \"Mom\", \"message\": \"Hi\"}\n\
+                  (platform is optional - defaults to user's first connected platform;\n\
+                   contact is REQUIRED - the person or group to message.\n\
+                   If the user doesn't specify who to message, ask them.)\n\
+                - send_email: {\"to\": \"a@b.com\", \"subject\": \"Hi\", \"body\": \"...\"}\n\
+                - fetch_calendar_events: {}\n\
+                - get_weather: {\"location\": \"New York\"}\n\n\
+                LANGUAGE: Always use third person ('the user'), NEVER 'you'.".to_string()
+            ),
+            ..Default::default()
+        }),
+    );
+
+    // sources: data sources to fetch before evaluating condition
+    task_properties.insert(
+        "sources".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Comma-separated data sources to fetch before evaluating the condition.\n\
+                Use 'weather' for weather/temperature conditions (uses user's default location).\n\
+                Use 'email' for email-based conditions. Use 'calendar' for calendar-based conditions.\n\
+                Only set this when the task has a condition that needs external data to evaluate.\n\
+                Leave empty for unconditional tasks like simple reminders.".to_string()
             ),
             ..Default::default()
         }),
@@ -162,14 +213,22 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("create_task"),
             description: Some(String::from(
-                "Creates a scheduled task or sets up monitoring for future events.\n\n\
-                USE CASES:\n\
-                1. Time-based reminders: 'remind me at 1pm about the package'\n\
-                2. Scheduled actions: 'turn on tesla climate in 3 hours'\n\
-                3. Message monitoring: 'notify me when mom messages'\n\
-                4. Email monitoring: 'let me know when I get an email about my job application'\n\
-                5. Conditional actions: 'if mom hasn't replied by 8pm, send her a follow up'\n\n\
-                For monitoring tasks, the condition describes what to look for.\n\
+                "Creates a scheduled task or sets up monitoring for future events. \
+                You MUST use this tool for all reminders and scheduled actions. \
+                Do NOT attempt to call send_reminder directly - it is not a tool, it is only valid as action_tool inside create_task.\n\n\
+                NOTIFICATION METHOD (how to notify user):\n\
+                - 'call me at X' = action_tool=\"send_reminder\", action_params={\"message\":\"Scheduled check-in\"}, notification_type='call'\n\
+                - 'text me at X' = action_tool=\"send_reminder\", notification_type='sms'\n\
+                - Default is SMS if not specified\n\n\
+                REMINDER vs ACTION (what to do):\n\
+                - 'remind me to X' = action_tool=\"send_reminder\", action_params={\"message\":\"X\"}\n\
+                - 'do X' / 'turn on X' = action_tool=\"control_tesla\", action_params={\"command\":\"climate_on\"}\n\n\
+                LANGUAGE: Always use 'the user' (third person), NEVER 'you' or 'me'.\n\n\
+                EXAMPLES:\n\
+                - 'call me at midnight' -> action_tool=\"send_reminder\", action_params={\"message\":\"Scheduled check-in\"}, notification_type='call'\n\
+                - 'remind me at 10pm to turn on tesla' -> action_tool=\"send_reminder\", action_params={\"message\":\"Turn on Tesla climate\"}\n\
+                - 'turn on tesla at 10pm' -> action_tool=\"control_tesla\", action_params={\"command\":\"climate_on\"}\n\
+                - 'remind me to call mom' -> action_tool=\"send_reminder\", action_params={\"message\":\"Call mom\"}\n\n\
                 For scheduled tasks, use trigger_type='once' with trigger_time.",
             )),
             parameters: types::FunctionParameters {
@@ -177,7 +236,7 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 properties: Some(task_properties),
                 required: Some(vec![
                     String::from("trigger_type"),
-                    String::from("action_spec"),
+                    String::from("action_tool"),
                 ]),
             },
         },
@@ -195,16 +254,207 @@ pub struct CreateTaskArgs {
     pub trigger_type: String, // "once" | "recurring_email" | "recurring_messaging"
     pub trigger_time: Option<String>, // "2025-12-30T13:00" (required for "once")
     pub condition: Option<String>,
-    pub action_spec: String, // Detailed step-by-step instructions for runtime AI
+    pub action_tool: String, // Tool name from runtime tools registry
+    pub action_params: Option<serde_json::Value>, // JSON object with tool-specific params
     pub notification_type: Option<String>,
+    pub sources: Option<String>, // comma-separated source types: "weather", "email", "calendar", etc.
+}
+
+/// Result from handle_create_task containing the confirmation message and task ID
+pub struct CreateTaskResult {
+    pub message: String,
+    pub task_id: i32,
 }
 
 pub async fn handle_create_task(
     state: &Arc<AppState>,
     user_id: i32,
     args: &str,
-) -> Result<String, Box<dyn Error>> {
+) -> Result<CreateTaskResult, Box<dyn Error>> {
     let args: CreateTaskArgs = serde_json::from_str(args)?;
+
+    // Validate action_tool against known tools
+    let known_tools = crate::tool_call_utils::utils::get_runtime_tool_names();
+    if !known_tools.contains(&args.action_tool) {
+        return Err(format!(
+            "Unknown action_tool '{}'. Valid tools: {}",
+            args.action_tool,
+            known_tools.join(", ")
+        )
+        .into());
+    }
+
+    // Normalize action_params to a JSON object
+    // AI might send a string instead of an object - wrap it based on tool name
+    let mut params: Option<serde_json::Value> = if let Some(ref val) = args.action_params {
+        if val.is_object() {
+            Some(val.clone())
+        } else if let Some(s) = val.as_str() {
+            // AI sent a string - it might be serialized JSON or a plain string
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                if parsed.is_object() {
+                    // String was serialized JSON object like "{\"message\":\"Call mom\"}"
+                    Some(parsed)
+                } else if let Some(inner) = parsed.as_str() {
+                    // String was double-quoted like "\"Call mom\""
+                    let key = match args.action_tool.as_str() {
+                        "send_reminder" => "message",
+                        "control_tesla" => "command",
+                        "get_weather" => "location",
+                        _ => "raw",
+                    };
+                    Some(serde_json::json!({ key: inner }))
+                } else {
+                    Some(serde_json::json!({ "raw": s }))
+                }
+            } else {
+                // Plain string like "Call mom" - wrap in expected param key
+                let key = match args.action_tool.as_str() {
+                    "send_reminder" => "message",
+                    "control_tesla" => "command",
+                    "get_weather" => "location",
+                    _ => "raw",
+                };
+                Some(serde_json::json!({ key: s }))
+            }
+        } else {
+            Some(val.clone())
+        }
+    } else {
+        None
+    };
+
+    // Resolve invalid platform for send_chat_message to the user's first connected bridge
+    if args.action_tool == "send_chat_message" {
+        if let Some(ref mut p) = params {
+            let valid_platforms = ["telegram", "whatsapp", "signal"];
+            let needs_default = match p.get("platform") {
+                Some(serde_json::Value::String(s)) => {
+                    !valid_platforms.contains(&s.to_lowercase().as_str())
+                }
+                None => true,
+                _ => true,
+            };
+            if needs_default {
+                if let Ok(Some(bridge)) = state.user_repository.get_first_connected_bridge(user_id)
+                {
+                    if let Some(obj) = p.as_object_mut() {
+                        obj.insert(
+                            "platform".to_string(),
+                            serde_json::Value::String(bridge.bridge_type),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve contact name for send_chat_message via contact profiles + Matrix bridge
+    if args.action_tool == "send_chat_message" {
+        if let Some(ref mut p) = params {
+            // Normalize: LLM sometimes uses "chat_name" instead of "contact"
+            if p.get("contact").is_none() {
+                if let Some(chat_name_val) =
+                    p.as_object_mut().and_then(|obj| obj.remove("chat_name"))
+                {
+                    if let Some(obj) = p.as_object_mut() {
+                        obj.insert("contact".to_string(), chat_name_val);
+                    }
+                }
+            }
+
+            if let Some(contact_val) = p
+                .get("contact")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+            {
+                if !contact_val.is_empty() {
+                    let platform = p
+                        .get("platform")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("whatsapp")
+                        .to_string();
+
+                    // Try resolving via contact profile nickname
+                    let profiles = state
+                        .user_repository
+                        .get_contact_profiles(user_id)
+                        .unwrap_or_default();
+                    let profile_chat = profiles.iter().find_map(|prof| {
+                        let nickname_lower = prof.nickname.to_lowercase();
+                        let contact_lower = contact_val.to_lowercase();
+                        if nickname_lower.contains(&contact_lower)
+                            || contact_lower.contains(&nickname_lower)
+                        {
+                            match platform.as_str() {
+                                "whatsapp" => prof.whatsapp_chat.clone(),
+                                "telegram" => prof.telegram_chat.clone(),
+                                "signal" => prof.signal_chat.clone(),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    });
+
+                    let search_term = profile_chat.unwrap_or_else(|| contact_val.clone());
+
+                    // Try to resolve via Matrix bridge rooms
+                    match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+                        Ok(client) => {
+                            match crate::utils::bridge::get_service_rooms(&client, &platform).await
+                            {
+                                Ok(rooms) => {
+                                    if let Some(best_match) =
+                                        crate::utils::bridge::search_best_match(
+                                            &rooms,
+                                            &search_term,
+                                        )
+                                    {
+                                        let resolved_name =
+                                            crate::utils::bridge::remove_bridge_suffix(
+                                                &best_match.display_name,
+                                            );
+                                        if let Some(obj) = p.as_object_mut() {
+                                            obj.insert(
+                                                "contact".to_string(),
+                                                serde_json::Value::String(resolved_name),
+                                            );
+                                        }
+                                    } else {
+                                        return Err(format!(
+                                            "Could not find contact '{}' on {}. Please check the name and try again.",
+                                            contact_val,
+                                            platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..]
+                                        ).into());
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(format!(
+                                        "Failed to verify contact on {}: {}. Please make sure your {} bridge is connected.",
+                                        platform, e, platform
+                                    ).into());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!(
+                                "Could not connect to messaging bridge: {}. Please make sure your {} bridge is connected.",
+                                e, platform
+                            ).into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build StructuredAction and serialize to JSON for the action column
+    let structured = crate::utils::action_executor::StructuredAction {
+        tool: args.action_tool.clone(),
+        params,
+    };
+    let action_json = serde_json::to_string(&structured)?;
 
     // Build trigger field
     let trigger = match args.trigger_type.as_str() {
@@ -249,33 +499,32 @@ pub async fn handle_create_task(
         user_id,
         trigger: trigger.clone(),
         condition: args.condition.clone(),
-        action: args.action_spec.clone(),
+        action: action_json,
         notification_type: args.notification_type.or(Some(default_noti_type)),
         status: "active".to_string(),
         created_at: now,
         is_permanent: None,
         recurrence_rule: None,
         recurrence_time: None,
-        sources: None,
+        sources: args.sources.clone(),
+        end_time: None,
     };
 
-    state
+    let task_id = state
         .user_repository
         .create_task(&new_task)
         .map_err(|e| format!("Failed to create task: {:?}", e))?;
 
-    // Build confirmation message (use a short summary, not full action_spec)
-    let action_summary = if args.action_spec.len() > 50 {
-        format!("{}...", &args.action_spec[..50])
-    } else {
-        args.action_spec.clone()
-    };
+    // Build human-friendly confirmation using format_action_description
+    let action_display = crate::handlers::dashboard_handlers::format_action_description(
+        &structured.to_action_string(),
+    );
 
     let confirmation = match args.trigger_type.as_str() {
         "once" => {
             format!(
                 "Got it! I'll handle '{}' at the scheduled time.",
-                action_summary
+                action_display
             )
         }
         "recurring_email" => {
@@ -287,7 +536,7 @@ pub async fn handle_create_task(
             } else {
                 format!(
                     "Got it! I'll monitor your emails and execute: {}",
-                    action_summary
+                    action_display
                 )
             }
         }
@@ -300,21 +549,128 @@ pub async fn handle_create_task(
             } else {
                 format!(
                     "Got it! I'll monitor your messages and execute: {}",
-                    action_summary
+                    action_display
                 )
             }
         }
-        _ => format!("Task created: {}", action_summary),
+        _ => format!("Task created: {}", action_display),
     };
 
-    Ok(confirmation)
+    Ok(CreateTaskResult {
+        message: confirmation,
+        task_id,
+    })
+}
+
+/// Wrapper around handle_create_task that retries once via LLM if the first attempt fails.
+/// On first failure, sends the error back to the LLM asking it to fix the arguments,
+/// then executes the corrected create_task call.
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_create_task_with_retry(
+    state: &Arc<AppState>,
+    user_id: i32,
+    arguments: &str,
+    client: &openai_api_rs::v1::api::OpenAIClient,
+    model: &str,
+    tools: &[openai_api_rs::v1::chat_completion::Tool],
+    completion_messages: &[openai_api_rs::v1::chat_completion::ChatCompletionMessage],
+    failed_tool_call: &openai_api_rs::v1::chat_completion::ToolCall,
+    assistant_content: Option<&str>,
+) -> Result<CreateTaskResult, Box<dyn Error>> {
+    use openai_api_rs::v1::chat_completion;
+
+    // Attempt 1: try with original arguments
+    // Convert error to String immediately so Box<dyn Error> (non-Send) doesn't live across .await
+    let first_err_msg = match handle_create_task(state, user_id, arguments).await {
+        Ok(result) => return Ok(result),
+        Err(e) => e.to_string(),
+    };
+
+    tracing::warn!("create_task attempt 1/2 failed: {}", first_err_msg);
+
+    // Build retry messages: conversation + failed assistant call + error feedback
+    let mut retry_msgs = completion_messages.to_vec();
+    retry_msgs.push(chat_completion::ChatCompletionMessage {
+        role: chat_completion::MessageRole::assistant,
+        content: chat_completion::Content::Text(assistant_content.unwrap_or_default().to_string()),
+        name: None,
+        tool_calls: Some(vec![failed_tool_call.clone()]),
+        tool_call_id: None,
+    });
+    retry_msgs.push(chat_completion::ChatCompletionMessage {
+        role: chat_completion::MessageRole::tool,
+        content: chat_completion::Content::Text(format!(
+            "Error: {}. Please fix the arguments and call create_task again.",
+            first_err_msg
+        )),
+        name: None,
+        tool_calls: None,
+        tool_call_id: Some(failed_tool_call.id.clone()),
+    });
+
+    // Ask LLM to retry with fixed arguments
+    let retry_req = chat_completion::ChatCompletionRequest::new(model.to_string(), retry_msgs)
+        .tools(tools.to_vec())
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .max_tokens(500);
+
+    let retry_result = client
+        .chat_completion(retry_req)
+        .await
+        .map_err(|e| format!("create_task retry API call failed: {}", e))?;
+
+    // Find create_task in the retry response
+    let retry_task_call = retry_result
+        .choices
+        .first()
+        .and_then(|c| c.message.tool_calls.as_ref())
+        .and_then(|calls| {
+            calls
+                .iter()
+                .find(|c| c.function.name.as_deref() == Some("create_task"))
+        });
+
+    match retry_task_call {
+        Some(retry_call) => {
+            let retry_args = retry_call.function.arguments.as_deref().unwrap_or("{}");
+            match handle_create_task(state, user_id, retry_args).await {
+                Ok(result) => {
+                    tracing::info!("create_task succeeded on retry (attempt 2/2)");
+                    Ok(result)
+                }
+                Err(second_err) => {
+                    tracing::error!("create_task attempt 2/2 also failed: {}", second_err);
+                    Err(second_err)
+                }
+            }
+        }
+        None => {
+            // LLM didn't call create_task on retry
+            tracing::error!("LLM did not retry create_task after error feedback");
+            Err(first_err_msg.into())
+        }
+    }
 }
 
 /// Parse ISO datetime string (in user's timezone) to UTC unix timestamp
 fn parse_datetime_to_timestamp(time_str: &str, tz: &Tz) -> Result<i32, Box<dyn Error>> {
-    use chrono::{NaiveDateTime, TimeZone};
+    use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 
-    // Try parsing as ISO datetime (YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS)
+    // Try parsing as full ISO datetime with timezone offset first (e.g. "2026-02-08T07:00:00+02:00")
+    // AI often includes timezone offsets - use the offset directly for accurate conversion
+    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(time_str) {
+        return Ok(dt.timestamp() as i32);
+    }
+    // Also try common offset format without seconds (e.g. "2026-02-08T07:00+02:00")
+    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(&format!(
+        "{}:00{}",
+        &time_str[..16],
+        &time_str[16..]
+    )) {
+        return Ok(dt.timestamp() as i32);
+    }
+
+    // Fall back to naive datetime parsing (no timezone offset in string)
     let naive = if time_str.len() == 16 {
         // YYYY-MM-DDTHH:MM format
         NaiveDateTime::parse_from_str(&format!("{}:00", time_str), "%Y-%m-%dT%H:%M:%S")?

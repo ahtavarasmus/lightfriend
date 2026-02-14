@@ -26,7 +26,6 @@ pub struct BridgeConfig {
 // SHARED CONSTANTS - same for all bridges
 const POLL_INTERVAL_MS: i32 = 5000;        // 5 seconds
 const POLL_DURATION_MS: i32 = 300000;      // 5 minutes
-const SYNC_INDICATOR_DURATION_MS: f64 = 300000.0;  // 5 minutes
 
 // Bridge configs
 pub const WHATSAPP_CONFIG: BridgeConfig = BridgeConfig {
@@ -579,19 +578,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 <div class="connection-status">
                     if status.connected {
                         <>
-                            {
-                                // Show sync indicator for 5 minutes after connection
-                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= SYNC_INDICATOR_DURATION_MS {
-                                    html! {
-                                        <div class="sync-indicator">
-                                            <div class="sync-spinner"></div>
-                                            <p>{"Building the bridge... This may take up to 5 minutes. Only future messages will be visible. To send messages, contacts may need to message you first."}</p>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
                             <div class="button-group">
                                 <p class="service-description">
                                     {format!("Send and receive {} messages through SMS or voice calls.", bridge_name)}

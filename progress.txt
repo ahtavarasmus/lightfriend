@@ -1,0 +1,94 @@
+STRUCTURED TASK ACTIONS REFACTOR - Progress Report
+===================================================
+Date: 2026-02-07
+
+STATUS: COMPLETE - All changes implemented, tested, and verified end-to-end.
+
+SUMMARY
+-------
+Replaced free-form action_spec strings (e.g. "send_reminder(Call mom)") with
+structured JSON (e.g. {"tool":"send_reminder","params":{"message":"Call mom"}}).
+No DB migration needed - old and new formats coexist.
+
+FILES MODIFIED (5)
+------------------
+
+1. backend/src/tool_call_utils/utils.rs
+   - Added params_schema field to RuntimeTool (replaces syntax)
+   - Added get_runtime_tool_names() for dynamic enum constraint
+   - Updated get_runtime_tools_prompt() to show JSON param format
+
+2. backend/src/tool_call_utils/management.rs
+   - Replaced action_spec parameter with action_tool + action_params
+   - Updated CreateTaskArgs: action_tool (String) + action_params (Option<Value>)
+   - handle_create_task() validates tool name, normalizes params, builds StructuredAction
+   - Normalization handles 3 AI output formats:
+     a) JSON object {"message":"X"} - used directly
+     b) Serialized JSON string "{\"message\":\"X\"}" - parsed and unwrapped
+     c) Plain string "X" - wrapped into {"message":"X"} based on tool name
+
+3. backend/src/utils/action_executor.rs
+   - Added StructuredAction struct (Serialize/Deserialize)
+   - Added parse_action_structured() with backward compat (JSON first, old format fallback)
+   - Updated execute_direct_tool() to accept &StructuredAction
+   - Updated execute_action_spec() to use structured parsing
+   - Added 8 unit tests
+
+4. backend/src/handlers/dashboard_handlers.rs
+   - Added is_digest_task() helper (handles both old and new format)
+   - Replaced all 6 instances of task.action == "generate_digest" with is_digest_task()
+   - Updated format_action_description() to try JSON parse first
+   - Added format_structured_action() and format_tool_display() helpers
+   - Added 8 unit tests
+
+5. backend/src/handlers/filter_handlers.rs
+   - Changed AiTaskEditResult.new_condition to new_action (serde_json::Value)
+   - Updated AI prompt to return structured JSON in new_action field
+   - Response handling serializes Value to JSON string for DB storage
+
+BUGS FOUND AND FIXED (3)
+-------------------------
+
+Bug 1: action_params type mismatch
+  - AI sends action_params as JSON object, but CreateTaskArgs had Option<String>
+  - Error: "invalid type: map, expected a string"
+  - Fix: Changed to Option<serde_json::Value>
+
+Bug 2: AI sends plain string instead of JSON object
+  - AI sent action_params as "Call lena" instead of {"message":"Call lena"}
+  - Error: "action_params must be a JSON object"
+  - Fix: Added normalization logic that wraps strings based on tool name
+
+Bug 3: AI sends serialized JSON string
+  - AI sent action_params as "{\"message\":\"Take out the trash\"}" (string containing JSON)
+  - Result: Double-wrapped {"message":"{\"message\":\"Take out the trash\"}"}
+  - Display showed raw JSON instead of clean text
+  - Fix: Try parsing string as JSON first; if it's an object, use it directly
+
+TESTS
+-----
+- 81 lib tests pass (65 original + 16 new unit tests)
+- Integration tests have pre-existing migration failures (unrelated)
+
+E2E VERIFICATION
+----------------
+All tested via browser (localhost:8080):
+
+1. Task creation: "remind me at 10pm to water the plants"
+   - AI response: "Reminder set for 10:00 PM tonight to water the plants!"
+   - DB: {"tool":"send_reminder","params":{"message":"Water the plants"}}
+   - Display: "Reminder: Water the plants" (clean, no raw JSON)
+   - Timeline: Shows correctly
+
+2. Task edit: "change time to 9pm"
+   - Time updated from 10pm to 9pm
+   - Action preserved as structured JSON
+   - Display updated correctly
+
+3. Task execution: 2pm reminder fired successfully
+   - parse_action_structured() parsed JSON correctly
+   - Notification sent (dev mode - not actually dispatched)
+
+4. Backward compat: Old tasks like "send_reminder(Flight reminder)" still display correctly
+
+5. Old-format digest task (task 10: "generate_digest") still recognized by is_digest_task()

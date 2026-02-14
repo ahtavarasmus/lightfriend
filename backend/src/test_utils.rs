@@ -626,6 +626,7 @@ pub mod mock_user_core {
         pub user_info: Mutex<HashMap<i32, UserInfo>>,
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
+        pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
 
         // Error injection
         pub find_by_id_error: Mutex<Option<DieselError>>,
@@ -649,6 +650,7 @@ pub mod mock_user_core {
                 user_info: Mutex::new(HashMap::new()),
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
+                quiet_mode: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
             }
@@ -821,6 +823,15 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn update_user_coordinates(
+            &self,
+            _user_id: i32,
+            _lat: f32,
+            _lon: f32,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn update_nearby_places(&self, _user_id: i32, _places: &str) -> Result<(), DieselError> {
             Ok(())
         }
@@ -930,6 +941,48 @@ pub mod mock_user_core {
         }
 
         fn set_default_notify_on_call(
+            &self,
+            _user_id: i32,
+            _notify: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_contact_notification_mode(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, DieselError> {
+            Ok("critical".to_string())
+        }
+
+        fn set_phone_contact_notification_mode(
+            &self,
+            _user_id: i32,
+            _mode: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_contact_notification_type(
+            &self,
+            _user_id: i32,
+        ) -> Result<String, DieselError> {
+            Ok("sms".to_string())
+        }
+
+        fn set_phone_contact_notification_type(
+            &self,
+            _user_id: i32,
+            _ntype: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_phone_contact_notify_on_call(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
+        fn set_phone_contact_notify_on_call(
             &self,
             _user_id: i32,
             _notify: bool,
@@ -1175,6 +1228,21 @@ pub mod mock_user_core {
         fn set_magic_token(&self, _user_id: i32, _token: &str) -> Result<(), DieselError> {
             Ok(())
         }
+
+        fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
+            self.quiet_mode.lock().unwrap().insert(user_id, until);
+            Ok(())
+        }
+
+        fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
+            Ok(self
+                .quiet_mode
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .copied()
+                .flatten())
+        }
     }
 }
 
@@ -1194,6 +1262,7 @@ pub struct TestTaskParams {
     pub recurrence_time: Option<String>,
     pub sources: Option<String>,
     pub condition: Option<String>,
+    pub end_time: Option<i32>,
 }
 
 impl TestTaskParams {
@@ -1209,6 +1278,7 @@ impl TestTaskParams {
             recurrence_time: None,
             sources: None,
             condition: None,
+            end_time: None,
         }
     }
 
@@ -1228,6 +1298,7 @@ impl TestTaskParams {
             recurrence_time: Some(time.to_string()),
             sources: None,
             condition: None,
+            end_time: None,
         }
     }
 
@@ -1247,6 +1318,27 @@ impl TestTaskParams {
             recurrence_time: Some(time.to_string()),
             sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
             condition: None,
+            end_time: None,
+        }
+    }
+
+    /// Create a quiet mode task
+    pub fn quiet_mode_task(user_id: i32, end_time: Option<i32>) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        Self {
+            user_id,
+            trigger: format!("once_{}", now),
+            action: r#"{"tool":"quiet_mode"}"#.to_string(),
+            notification_type: None,
+            is_permanent: None,
+            recurrence_rule: None,
+            recurrence_time: None,
+            sources: None,
+            condition: None,
+            end_time,
         }
     }
 
@@ -1299,6 +1391,7 @@ pub fn create_test_task(
         recurrence_rule: params.recurrence_rule.clone(),
         recurrence_time: params.recurrence_time.clone(),
         sources: params.sources.clone(),
+        end_time: params.end_time,
     };
 
     state

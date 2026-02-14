@@ -17,6 +17,7 @@ use crate::schema::subaccounts;
 use crate::schema::tasks;
 use crate::schema::totp_backup_codes;
 use crate::schema::totp_secrets;
+use crate::schema::triage_items;
 use crate::schema::uber;
 use crate::schema::usage_logs;
 use crate::schema::user_info;
@@ -65,6 +66,8 @@ pub struct User {
     pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
     pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
+    pub last_backup_at: Option<i32>, // Unix timestamp of last backup
+    pub backup_session_active: bool, // whether a backup session is currently active
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
@@ -81,6 +84,8 @@ pub struct UserInfo {
     pub recent_contacts: Option<String>,
     pub blocker_password_vault: Option<String>,
     pub lockbox_password_vault: Option<String>,
+    pub latitude: Option<f32>,
+    pub longitude: Option<f32>,
 }
 
 #[derive(Insertable)]
@@ -396,6 +401,7 @@ pub struct Task {
     pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
     pub recurrence_time: Option<String>, // "09:00" (HH:MM in user timezone)
     pub sources: Option<String>,   // "email,whatsapp,telegram,signal,calendar"
+    pub end_time: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -412,6 +418,7 @@ pub struct NewTask {
     pub recurrence_rule: Option<String>,
     pub recurrence_time: Option<String>,
     pub sources: Option<String>,
+    pub end_time: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
@@ -452,6 +459,10 @@ pub struct ContactProfile {
     pub notification_type: String, // "sms", "call"
     pub notify_on_call: i32,       // 1 = true, 0 = false
     pub created_at: i32,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -467,6 +478,10 @@ pub struct NewContactProfile {
     pub notification_type: String,
     pub notify_on_call: i32,
     pub created_at: i32,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Debug, Clone)]
@@ -547,6 +562,10 @@ pub struct UserSettings {
     pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
     pub default_notify_on_call: i32,               // 1 = notify on incoming calls, 0 = don't notify
     pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - which LLM provider to use for SMS/chat
+    pub quiet_mode_until: Option<i32>, // NULL = active, 0 = indefinite quiet, >0 = quiet until that unix timestamp
+    pub phone_contact_notification_mode: Option<String>, // "critical", "digest", or "ignore" - for phone contacts without a profile
+    pub phone_contact_notification_type: Option<String>, // "sms" or "call" - notification type for phone contacts
+    pub phone_contact_notify_on_call: i32, // 1 = notify on incoming calls from phone contacts, 0 = don't
 }
 
 #[derive(Insertable)]
@@ -892,4 +911,43 @@ pub struct NewSiteMetric {
     pub metric_key: String,
     pub metric_value: String,
     pub updated_at: i32,
+}
+
+// Triage items - AI decision queue for user actions
+#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = triage_items)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct TriageItem {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub item_type: String, // "message_reply", "bridge_disconnected", "action_approval"
+    pub status: String,    // "pending", "snoozed", "completed", "dismissed", "expired"
+    pub summary: String,
+    pub suggested_action: Option<String>,
+    pub reasoning: Option<String>,
+    pub context_json: Option<String>,
+    pub priority: i32,               // 0=normal, 1=elevated, 2=urgent
+    pub source_type: Option<String>, // "bridge_message", "email", "system"
+    pub source_id: Option<String>,   // room_id, email_uid, etc.
+    pub created_at: i32,
+    pub snooze_until: Option<i32>,
+    pub expires_at: Option<i32>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = triage_items)]
+pub struct NewTriageItem {
+    pub user_id: i32,
+    pub item_type: String,
+    pub status: String,
+    pub summary: String,
+    pub suggested_action: Option<String>,
+    pub reasoning: Option<String>,
+    pub context_json: Option<String>,
+    pub priority: i32,
+    pub source_type: Option<String>,
+    pub source_id: Option<String>,
+    pub created_at: i32,
+    pub snooze_until: Option<i32>,
+    pub expires_at: Option<i32>,
 }

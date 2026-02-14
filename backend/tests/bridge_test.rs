@@ -332,24 +332,28 @@ mod bridge_helper_tests {
                 display_name: "John Smith (WA)".to_string(),
                 last_activity: 1000,
                 last_activity_formatted: "2024-01-01 10:00:00".to_string(),
+                is_group: false,
             },
             BridgeRoom {
                 room_id: "!room2:server".to_string(),
                 display_name: "Jane Doe (WA)".to_string(),
                 last_activity: 2000,
                 last_activity_formatted: "2024-01-01 11:00:00".to_string(),
+                is_group: false,
             },
             BridgeRoom {
                 room_id: "!room3:server".to_string(),
                 display_name: "Family Group (WA)".to_string(),
                 last_activity: 3000,
                 last_activity_formatted: "2024-01-01 12:00:00".to_string(),
+                is_group: true,
             },
             BridgeRoom {
                 room_id: "!room4:server".to_string(),
                 display_name: "Work Chat (TG)".to_string(),
                 last_activity: 4000,
                 last_activity_formatted: "2024-01-01 13:00:00".to_string(),
+                is_group: false,
             },
         ]
     }
@@ -447,6 +451,7 @@ mod bridge_helper_tests {
                 display_name: format!("Test Room {} (WA)", i),
                 last_activity: i as i64,
                 last_activity_formatted: "".to_string(),
+                is_group: false,
             })
             .collect();
 
@@ -485,6 +490,7 @@ mod workflow_tests {
             message_type: "text".to_string(),
             room_name: "".to_string(),
             media_url: None,
+            room_id: None,
         }
     }
 

@@ -90,7 +90,7 @@ impl AiConfig {
     ///
     /// OpenRouter: GPT-4o for everything (supports vision + tools)
     /// Tinfoil:
-    ///   - Default: qwen3-coder-480b (tools, no vision)
+    ///   - Default: kimi-k2-5 (tools + vision multimodal)
     ///   - VisionOnly: qwen3-vl-30b (vision, no tools)
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
@@ -99,7 +99,7 @@ impl AiConfig {
             (AiProvider::OpenRouter, ModelPurpose::VisionOnly) => "openai/gpt-4o-2024-11-20",
 
             // Tinfoil models
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "qwen3-coder-480b",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
             (AiProvider::Tinfoil, ModelPurpose::VisionOnly) => "qwen3-vl-30b",
         }
     }

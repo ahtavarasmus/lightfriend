@@ -107,7 +107,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_calendar_event"),
-            description: Some(String::from("Creates a new Google Calendar event. Invoke this tool immediately without extra confirmation if the user has explicitly provided the required parameters (summary, start_time, and duration_minutes). If any required parameters are missing or unclear, ask the user for clarification in a follow-up response, then call the tool once the information is obtained. Only include optional parameters like description or add_notification if the user specifies them.")),
+            description: Some(String::from("Creates a new Google Calendar event. ONLY use this when the user explicitly asks to add something to their Google Calendar (e.g. 'add to my calendar', 'create a calendar event'). Do NOT use this for generic 'add task' or 'remind me' requests - use create_task instead. Invoke this tool immediately without extra confirmation if the user has explicitly provided the required parameters (summary, start_time, and duration_minutes). If any required parameters are missing or unclear, ask the user for clarification in a follow-up response, then call the tool once the information is obtained. Only include optional parameters like description or add_notification if the user specifies them.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(calendar_event_properties),
@@ -328,6 +328,7 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: success_msg,
+                    created_task_id: None,
                 }),
             ))
         }
@@ -350,7 +351,10 @@ pub async fn handle_create_calendar_event(
             Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse { message: error_msg }),
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: error_msg,
+                    created_task_id: None,
+                }),
             ))
         }
     }

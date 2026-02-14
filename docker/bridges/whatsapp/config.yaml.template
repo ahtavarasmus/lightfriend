@@ -3,7 +3,7 @@
 
 network:
     os_name: lightfriend
-    displayname_template: "{{or .FullName .PushName .BusinessName .Phone}} (WA)"
+    displayname_template: "{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"
     call_start_notices: true
     mute_status_broadcast: false
     initial_auto_reconnect: true
@@ -45,7 +45,7 @@ backfill:
 
 bridge:
     username_template: whatsapp_{{.}}
-    displayname_template: "{{if .BusinessName}}{{.BusinessName}}{{else if .PushName}}{{.PushName}}{{else}}{{.JID}}{{end}} (WA)"
+    displayname_template: "{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"
     permissions:
         "*": user
         "@admin:localhost": admin

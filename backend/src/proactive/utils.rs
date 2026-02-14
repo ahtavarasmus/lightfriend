@@ -248,6 +248,7 @@ pub struct MessageInfo {
     pub content: String,
     pub timestamp_rfc: String,
     pub platform: String, // e.g., "email", "whatsapp", "telegram", "signal" etc.
+    pub room_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,6 +281,9 @@ fn build_contact_maps_and_filter_messages(
 ) -> DigestContactMaps {
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     let mut ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
+    // Room ID-based maps for stable matching
+    let mut room_id_ignore_map: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut room_id_priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     let profiles = state
         .user_repository
         .get_contact_profiles(user_id)
@@ -302,8 +306,26 @@ fn build_contact_maps_and_filter_messages(
                 .unwrap_or_else(|| profile.notification_mode.clone())
         };
 
+        // Helper to insert into room_id maps
+        let mut insert_room_id = |platform: &str, room_id: &Option<String>, mode: &str| {
+            if let Some(ref rid) = room_id {
+                if mode == "ignore" {
+                    room_id_ignore_map
+                        .entry(platform.to_string())
+                        .or_default()
+                        .insert(rid.clone());
+                } else {
+                    room_id_priority_map
+                        .entry(platform.to_string())
+                        .or_default()
+                        .insert(rid.clone());
+                }
+            }
+        };
+
         if let Some(ref wa) = profile.whatsapp_chat {
             let mode = get_effective_mode("whatsapp");
+            insert_room_id("whatsapp", &profile.whatsapp_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("whatsapp".to_string())
@@ -318,6 +340,7 @@ fn build_contact_maps_and_filter_messages(
         }
         if let Some(ref tg) = profile.telegram_chat {
             let mode = get_effective_mode("telegram");
+            insert_room_id("telegram", &profile.telegram_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("telegram".to_string())
@@ -332,6 +355,7 @@ fn build_contact_maps_and_filter_messages(
         }
         if let Some(ref sig) = profile.signal_chat {
             let mode = get_effective_mode("signal");
+            insert_room_id("signal", &profile.signal_room_id, &mode);
             if mode == "ignore" {
                 ignore_map
                     .entry("signal".to_string())
@@ -367,8 +391,26 @@ fn build_contact_maps_and_filter_messages(
     }
 
     // Filter out messages from ignored contacts
+    // Check room_id first (stable), then fall back to display name matching
     let original_count = messages.len();
     messages.retain(|msg| {
+        // Check room_id-based ignore first
+        if let Some(ref rid) = msg.room_id {
+            if room_id_ignore_map
+                .get(&msg.platform)
+                .is_some_and(|set| set.contains(rid))
+            {
+                return false;
+            }
+            // If room_id matches a priority profile, keep it
+            if room_id_priority_map
+                .get(&msg.platform)
+                .is_some_and(|set| set.contains(rid))
+            {
+                return true;
+            }
+        }
+        // Fall back to display name matching for legacy profiles
         let sender_lower = msg.sender.to_lowercase();
         !ignore_map.get(&msg.platform).is_some_and(|set| {
             set.iter()
@@ -386,9 +428,29 @@ fn build_contact_maps_and_filter_messages(
 }
 
 /// Resolves a sender name to a contact profile nickname if one exists.
-/// Returns the profile nickname if the chat_name matches a contact profile,
-/// otherwise returns the original chat_name.
-fn resolve_sender_name(profiles: &[ContactProfile], platform: &str, chat_name: &str) -> String {
+/// Tries room_id match first (exact, stable), then falls back to display name substring match.
+fn resolve_sender_name(
+    profiles: &[ContactProfile],
+    platform: &str,
+    chat_name: &str,
+    room_id: Option<&str>,
+) -> String {
+    // Try room_id match first (stable identifier)
+    if let Some(rid) = room_id {
+        if let Some(p) = profiles.iter().find(|p| {
+            let profile_room_id = match platform {
+                "whatsapp" => p.whatsapp_room_id.as_deref(),
+                "telegram" => p.telegram_room_id.as_deref(),
+                "signal" => p.signal_room_id.as_deref(),
+                _ => None,
+            };
+            profile_room_id == Some(rid)
+        }) {
+            return p.nickname.clone();
+        }
+    }
+
+    // Fall back to display name substring match (legacy profiles without room_id)
     let chat_lower = chat_name.to_lowercase();
     profiles
         .iter()
@@ -410,21 +472,22 @@ fn resolve_sender_name(profiles: &[ContactProfile], platform: &str, chat_name: &
         .unwrap_or_else(|| chat_name.to_string())
 }
 
-/// Formats disconnection events into a notice string for digest inclusion
-/// Returns formatted notice and deletes the events from the database
+/// Formats disconnection events into a notice string for digest inclusion.
+/// Reads from triage_items table (bridge_disconnected items).
+/// Does NOT delete the triage items - they persist in the dashboard for user action.
 fn format_disconnection_notice(
     state: &Arc<AppState>,
     user_id: i32,
     timezone: &str,
 ) -> Option<String> {
-    let events = match state
+    let items = match state
         .user_repository
-        .get_pending_disconnection_events(user_id)
+        .get_pending_triage_items_for_digest(user_id, "bridge_disconnected")
     {
-        Ok(events) => events,
+        Ok(items) => items,
         Err(e) => {
             tracing::error!(
-                "Failed to get disconnection events for user {}: {}",
+                "Failed to get bridge disconnection triage items for user {}: {}",
                 user_id,
                 e
             );
@@ -432,7 +495,7 @@ fn format_disconnection_notice(
         }
     };
 
-    if events.is_empty() {
+    if items.is_empty() {
         return None;
     }
 
@@ -445,12 +508,12 @@ fn format_disconnection_notice(
         }
     };
 
-    // Format each disconnection event
-    let notices: Vec<String> = events
+    // Format each disconnection triage item
+    let notices: Vec<String> = items
         .iter()
-        .map(|event| {
+        .map(|item| {
             // Convert timestamp to user's timezone
-            let datetime = chrono::DateTime::from_timestamp(event.detected_at as i64, 0)
+            let datetime = chrono::DateTime::from_timestamp(item.created_at as i64, 0)
                 .unwrap_or_else(Utc::now)
                 .with_timezone(&tz);
 
@@ -466,32 +529,16 @@ fn format_disconnection_notice(
                 (hour - 12, "pm")
             };
 
-            // Capitalize bridge type
-            let bridge_name = match event.bridge_type.as_str() {
-                "whatsapp" => "WhatsApp",
-                "telegram" => "Telegram",
-                "signal" => "Signal",
-                other => other,
-            };
-
-            format!("NOTICE: {} disconnected at {}{}", bridge_name, hour12, ampm)
+            format!("NOTICE: {} at {}{}", item.summary, hour12, ampm)
         })
         .collect();
-
-    // Delete the events after formatting
-    if let Err(e) = state.user_repository.delete_disconnection_events(user_id) {
-        tracing::error!(
-            "Failed to delete disconnection events for user {}: {}",
-            user_id,
-            e
-        );
-    }
 
     Some(notices.join(". "))
 }
 
 /// Checks whether a single message is critical.
 /// Returns `(is_critical, what_to_inform, first_message)`.
+#[allow(clippy::too_many_arguments)]
 pub async fn check_message_importance(
     state: &Arc<AppState>,
     user_id: i32,
@@ -499,6 +546,8 @@ pub async fn check_message_importance(
     service: &str,
     chat_name: &str,
     raw_content: &str,
+    contact_notes: Option<&str>,
+    conversation_context: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Special case for WhatsApp incoming calls
     if raw_content.contains("Incoming call") || raw_content.contains("Missed call") {
@@ -528,10 +577,23 @@ pub async fn check_message_importance(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Analyze this message and decide if it is critical:\n\n{}",
-                message
-            )),
+            content: chat_completion::Content::Text({
+                let mut prompt =
+                    String::from("Analyze this message and decide if it is critical:\n\n");
+                if let Some(notes) = contact_notes {
+                    if !notes.is_empty() {
+                        prompt.push_str(&format!("Contact notes from the user: \"{}\"\n\n", notes));
+                    }
+                }
+                if !conversation_context.is_empty() {
+                    prompt.push_str(&format!(
+                        "Recent conversation:\n{}\n\n",
+                        conversation_context
+                    ));
+                }
+                prompt.push_str(&format!("New message: {}", message));
+                prompt
+            }),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -630,6 +692,214 @@ pub async fn check_message_importance(
         }
         Err(e) => {
             tracing::error!("Failed to get message analysis: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Generates a suggested reply for a bridge message.
+/// Returns (needs_reply, suggested_reply, reasoning) where:
+/// - needs_reply: whether this message warrants a response
+/// - suggested_reply: the AI-drafted reply text matching the user's style
+/// - reasoning: why the AI suggested this reply (shown as helper text)
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_suggested_reply(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    chat_name: &str,
+    message_content: &str,
+    recent_user_messages: &[String],
+    conversation_history: &[(String, String, i64)],
+    user_context: Option<&str>,
+    contact_notes: Option<&str>,
+) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
+    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+
+    // Build context about the user's messaging style from their recent messages
+    let style_examples = if recent_user_messages.is_empty() {
+        "No previous messages available - use a casual, friendly tone.".to_string()
+    } else {
+        let examples: Vec<String> = recent_user_messages
+            .iter()
+            .take(5)
+            .map(|m| format!("- {}", m))
+            .collect();
+        format!(
+            "Examples of how this user writes messages:\n{}",
+            examples.join("\n")
+        )
+    };
+
+    let conversation_section = if conversation_history.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = conversation_history
+            .iter()
+            .map(|(sender, msg, ts)| {
+                let dt = chrono::DateTime::from_timestamp(*ts, 0)
+                    .map(|d| d.format("%b %d %H:%M").to_string())
+                    .unwrap_or_default();
+                format!("[{}] {}: {}", dt, sender, msg)
+            })
+            .collect();
+        format!("\n\nRecent conversation history:\n{}", lines.join("\n"))
+    };
+
+    let context_section = match user_context {
+        Some(ctx) => format!(
+            "\n\nRelevant context about the user's schedule/tasks:\n{}",
+            ctx
+        ),
+        None => String::new(),
+    };
+
+    let notes_section = match contact_notes {
+        Some(notes) if !notes.is_empty() => {
+            format!("\n\nUser's notes about this contact: \"{}\"", notes)
+        }
+        _ => String::new(),
+    };
+
+    let system_prompt = format!(
+        r#"You are drafting a reply on behalf of a user to a message they received on {service}.
+The reply will be sent from the user's account, so it must sound like them - not like an AI.
+
+{style_examples}{conversation_section}{context_section}{notes_section}
+
+Rules:
+1. First decide: does this message NEED a reply? Messages like "love you", "ok", "thumbs up", memes, or broadcast messages do NOT need replies. Questions, requests, invitations, and time-sensitive asks DO.
+2. If a reply is needed, draft one that matches the user's writing style (abbreviations, emoji usage, tone, language).
+3. Keep it short and natural - how a real person would reply on {service}.
+4. If the user has schedule conflicts or relevant context, incorporate that naturally.
+5. Provide brief reasoning for your suggestion."#,
+        service = service,
+        style_examples = style_examples,
+        conversation_section = conversation_section,
+        context_section = context_section,
+        notes_section = notes_section,
+    );
+
+    let user_prompt = format!(
+        "Message from {} on {}:\n\"{}\"\n\nShould the user reply? If so, draft a reply.",
+        chat_name, service, message_content
+    );
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(user_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "needs_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether this message needs a reply from the user".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "suggested_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "The drafted reply matching the user's writing style. Empty if no reply needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "reasoning".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Brief explanation of why this reply was suggested or why no reply is needed"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "draft_reply".to_string(),
+            description: Some("Analyzes if a message needs a reply and drafts one".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    "needs_reply".to_string(),
+                    "suggested_reply".to_string(),
+                    "reasoning".to_string(),
+                ]),
+            },
+        },
+    }];
+
+    let model = state
+        .ai_config
+        .model(provider, ModelPurpose::Default)
+        .to_string();
+    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.7)
+        .max_tokens(300);
+
+    #[derive(Deserialize, Debug)]
+    struct ReplyResponse {
+        needs_reply: bool,
+        suggested_reply: Option<String>,
+        reasoning: Option<String>,
+    }
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                if let Some(first_call) = tool_calls.first() {
+                    if let Some(args) = &first_call.function.arguments {
+                        match serde_json::from_str::<ReplyResponse>(args) {
+                            Ok(response) => {
+                                tracing::debug!(target: "triage_reply", ?response, "Reply analysis result");
+                                let reply = if response.needs_reply {
+                                    response.suggested_reply.filter(|s| !s.is_empty())
+                                } else {
+                                    None
+                                };
+                                Ok((response.needs_reply, reply, response.reasoning))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse reply analysis response: {}", e);
+                                Ok((false, None, None))
+                            }
+                        }
+                    } else {
+                        Ok((false, None, None))
+                    }
+                } else {
+                    Ok((false, None, None))
+                }
+            } else {
+                Ok((false, None, None))
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to get reply analysis: {}", e);
             Err(e.into())
         }
     }
@@ -829,6 +1099,7 @@ pub async fn check_morning_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -883,10 +1154,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -963,10 +1236,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "telegram",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "telegram".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1043,10 +1318,12 @@ pub async fn check_morning_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1339,6 +1616,7 @@ pub async fn check_day_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -1393,10 +1671,12 @@ pub async fn check_day_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1476,10 +1756,12 @@ pub async fn check_day_digest(
                                     &contact_profiles,
                                     "telegram",
                                     &msg.room_name,
+                                    msg.room_id.as_deref(),
                                 ),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
+                                room_id: msg.room_id.clone(),
                             })
                             .collect();
 
@@ -1521,10 +1803,12 @@ pub async fn check_day_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1841,6 +2125,7 @@ pub async fn check_evening_digest(
                                         .date_formatted
                                         .unwrap_or_else(|| "No Timestamp".to_string()),
                                     platform: "email".to_string(),
+                                    room_id: None,
                                 })
                                 .collect::<Vec<MessageInfo>>()
                         }
@@ -1895,10 +2180,12 @@ pub async fn check_evening_digest(
                                         &contact_profiles,
                                         "whatsapp",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "whatsapp".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -1978,10 +2265,12 @@ pub async fn check_evening_digest(
                                     &contact_profiles,
                                     "telegram",
                                     &msg.room_name,
+                                    msg.room_id.as_deref(),
                                 ),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "telegram".to_string(),
+                                room_id: msg.room_id.clone(),
                             })
                             .collect();
 
@@ -2024,10 +2313,12 @@ pub async fn check_evening_digest(
                                         &contact_profiles,
                                         "signal",
                                         &msg.room_name,
+                                        msg.room_id.as_deref(),
                                     ),
                                     content: msg.content,
                                     timestamp_rfc: msg.formatted_timestamp,
                                     platform: "signal".to_string(),
+                                    room_id: msg.room_id.clone(),
                                 })
                                 .collect();
 
@@ -2352,6 +2643,28 @@ pub async fn send_notification(
             return;
         }
     };
+
+    // Check quiet mode - skip notification if user is in quiet mode
+    match state.user_core.get_quiet_mode(user_id) {
+        Ok(Some(0)) => {
+            tracing::debug!(
+                "Skipping notification for user {} - indefinite quiet mode",
+                user_id
+            );
+            return;
+        }
+        Ok(Some(ts)) if ts > current_time => {
+            tracing::debug!(
+                "Skipping notification for user {} - quiet mode until {}",
+                user_id,
+                ts
+            );
+            return;
+        }
+        _ => {
+            // No quiet mode or expired - proceed with notification
+        }
+    }
 
     let user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,

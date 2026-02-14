@@ -52,6 +52,10 @@ pub struct UpdateContactProfileParams {
     pub notification_mode: String,
     pub notification_type: String,
     pub notify_on_call: i32,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 pub struct UserRepository {
@@ -482,7 +486,7 @@ impl UserRepository {
     // Task methods
     const MAX_ACTIVE_TASKS_PER_USER: i64 = 50;
 
-    pub fn create_task(&self, new_task: &NewTask) -> Result<(), DieselError> {
+    pub fn create_task(&self, new_task: &NewTask) -> Result<i32, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Check task limit before creating
@@ -505,7 +509,15 @@ impl UserRepository {
         diesel::insert_into(tasks::table)
             .values(new_task)
             .execute(&mut conn)?;
-        Ok(())
+
+        // Get the ID of the just-created task (most recent for this user)
+        let task_id: Option<i32> = tasks::table
+            .filter(tasks::user_id.eq(new_task.user_id))
+            .order(tasks::id.desc())
+            .select(tasks::id)
+            .first(&mut conn)?;
+
+        Ok(task_id.unwrap_or(0))
     }
 
     pub fn get_user_tasks(&self, user_id: i32) -> Result<Vec<Task>, DieselError> {
@@ -620,6 +632,83 @@ impl UserRepository {
             ))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    /// Update task condition/description (updates both action and condition fields)
+    pub fn update_task_condition(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_condition: &str,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Update both action and condition fields - action is displayed in dashboard,
+        // condition is used for recurring task triggers
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set((
+            tasks::action.eq(new_condition),
+            tasks::condition.eq(Some(new_condition)),
+        ))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the action field of a task
+    pub fn update_task_action(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_action: &str,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::action.eq(new_action))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the condition field of a task
+    pub fn update_task_condition_only(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_condition: Option<&str>,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::condition.eq(new_condition))
+        .execute(&mut conn)?;
+        Ok(count > 0)
+    }
+
+    /// Update only the sources field of a task
+    pub fn update_task_sources(
+        &self,
+        user_id: i32,
+        task_id: i32,
+        new_sources: Option<&str>,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::user_id.eq(user_id)),
+        )
+        .set(tasks::sources.eq(new_sources))
+        .execute(&mut conn)?;
+        Ok(count > 0)
     }
 
     /// Complete a task - if permanent with recurrence, reschedules; otherwise marks completed
@@ -878,9 +967,76 @@ impl UserRepository {
                 contact_profiles::notification_mode.eq(params.notification_mode),
                 contact_profiles::notification_type.eq(params.notification_type),
                 contact_profiles::notify_on_call.eq(params.notify_on_call),
+                contact_profiles::whatsapp_room_id.eq(params.whatsapp_room_id),
+                contact_profiles::telegram_room_id.eq(params.telegram_room_id),
+                contact_profiles::signal_room_id.eq(params.signal_room_id),
+                contact_profiles::notes.eq(params.notes),
             ))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    /// Update only the room_id for a specific service on a contact profile.
+    /// Used to auto-capture room_id on first name-based match from the bridge.
+    pub fn update_profile_room_id(
+        &self,
+        profile_id: i32,
+        service: &str,
+        room_id: &str,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        match service {
+            "whatsapp" => {
+                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
+                    .set(contact_profiles::whatsapp_room_id.eq(Some(room_id)))
+                    .execute(&mut conn)?;
+            }
+            "telegram" => {
+                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
+                    .set(contact_profiles::telegram_room_id.eq(Some(room_id)))
+                    .execute(&mut conn)?;
+            }
+            "signal" => {
+                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
+                    .set(contact_profiles::signal_room_id.eq(Some(room_id)))
+                    .execute(&mut conn)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Find contact profiles that use any of the given room IDs.
+    /// Returns a map of room_id -> nickname for rooms that are already assigned.
+    pub fn find_profiles_by_room_ids(
+        &self,
+        user_id: i32,
+        room_ids: &[String],
+        exclude_profile_id: Option<i32>,
+    ) -> Result<std::collections::HashMap<String, String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let mut query = contact_profiles::table
+            .filter(contact_profiles::user_id.eq(user_id))
+            .into_boxed();
+
+        if let Some(excl_id) = exclude_profile_id {
+            query = query.filter(contact_profiles::id.ne(excl_id));
+        }
+
+        let profiles: Vec<ContactProfile> = query.load(&mut conn)?;
+
+        let mut result = std::collections::HashMap::new();
+        for profile in profiles {
+            for rid in room_ids {
+                if profile.whatsapp_room_id.as_deref() == Some(rid.as_str())
+                    || profile.telegram_room_id.as_deref() == Some(rid.as_str())
+                    || profile.signal_room_id.as_deref() == Some(rid.as_str())
+                {
+                    result.insert(rid.clone(), profile.nickname.clone());
+                }
+            }
+        }
+        Ok(result)
     }
 
     pub fn delete_contact_profile(&self, user_id: i32, profile_id: i32) -> Result<(), DieselError> {
@@ -1780,6 +1936,20 @@ impl UserRepository {
         Ok(bridge)
     }
 
+    pub fn get_first_connected_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::status.eq("connected"))
+            .order(bridges::id.asc())
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+
     pub fn has_active_bridges(&self, user_id: i32) -> Result<bool, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1884,6 +2054,42 @@ impl UserRepository {
         .execute(&mut conn)?;
 
         Ok(())
+    }
+
+    pub fn delete_disconnection_event_by_id(
+        &self,
+        event_id: i32,
+        user_id: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::bridge_disconnection_events;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::delete(
+            bridge_disconnection_events::table
+                .filter(bridge_disconnection_events::id.eq(event_id))
+                .filter(bridge_disconnection_events::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn delete_email_judgment_by_id(
+        &self,
+        judgment_id: i32,
+        user_id: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::delete(
+            email_judgments::table
+                .filter(email_judgments::id.eq(judgment_id))
+                .filter(email_judgments::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
     }
 
     // Mark an email as processed
@@ -2114,5 +2320,200 @@ impl UserRepository {
 
         println!("Successfully created google calendar connection");
         Ok(())
+    }
+
+    // Triage item methods
+
+    pub fn create_triage_item(
+        &self,
+        new_item: crate::models::user_models::NewTriageItem,
+    ) -> Result<(), DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(triage_items::table)
+            .values(&new_item)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_pending_triage_items(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::status.eq("pending"))
+            .order(triage_items::priority.desc())
+            .then_order_by(triage_items::created_at.desc())
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn get_triage_item_by_id(
+        &self,
+        item_id: i32,
+        user_id: i32,
+    ) -> Result<Option<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let item = triage_items::table
+            .filter(triage_items::id.eq(item_id))
+            .filter(triage_items::user_id.eq(user_id))
+            .first::<crate::models::user_models::TriageItem>(&mut conn)
+            .optional()?;
+
+        Ok(item)
+    }
+
+    pub fn update_triage_item_status(
+        &self,
+        item_id: i32,
+        user_id: i32,
+        new_status: &str,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::id.eq(item_id))
+                .filter(triage_items::user_id.eq(user_id)),
+        )
+        .set(triage_items::status.eq(new_status))
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn snooze_triage_item(
+        &self,
+        item_id: i32,
+        user_id: i32,
+        snooze_until: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::id.eq(item_id))
+                .filter(triage_items::user_id.eq(user_id)),
+        )
+        .set((
+            triage_items::status.eq("snoozed"),
+            triage_items::snooze_until.eq(snooze_until),
+        ))
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn get_snoozed_items_due(
+        &self,
+        now: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::status.eq("snoozed"))
+            .filter(triage_items::snooze_until.le(now))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn get_expired_items(
+        &self,
+        now: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::status.eq_any(vec!["pending", "snoozed"]))
+            .filter(triage_items::expires_at.is_not_null())
+            .filter(triage_items::expires_at.le(now))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
+
+    pub fn resurface_snoozed_items(&self, now: i32) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::status.eq("snoozed"))
+                .filter(triage_items::snooze_until.le(now)),
+        )
+        .set((
+            triage_items::status.eq("pending"),
+            triage_items::snooze_until.eq(None::<i32>),
+        ))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn expire_old_items(&self, now: i32) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::status.eq_any(vec!["pending", "snoozed"]))
+                .filter(triage_items::expires_at.is_not_null())
+                .filter(triage_items::expires_at.le(now)),
+        )
+        .set(triage_items::status.eq("expired"))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn dismiss_triage_items_for_room(
+        &self,
+        user_id: i32,
+        room_id: &str,
+    ) -> Result<usize, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::update(
+            triage_items::table
+                .filter(triage_items::user_id.eq(user_id))
+                .filter(triage_items::source_id.eq(room_id))
+                .filter(triage_items::status.eq_any(vec!["pending", "snoozed"])),
+        )
+        .set(triage_items::status.eq("completed"))
+        .execute(&mut conn)?;
+
+        Ok(count)
+    }
+
+    pub fn get_pending_triage_items_for_digest(
+        &self,
+        user_id: i32,
+        item_type: &str,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::item_type.eq(item_type))
+            .filter(triage_items::status.eq("pending"))
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
     }
 }

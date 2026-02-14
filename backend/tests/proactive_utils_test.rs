@@ -167,6 +167,7 @@ fn test_digest_data_serializes_correctly() {
             content: "Hello there".to_string(),
             timestamp_rfc: "2024-01-15T10:30:00Z".to_string(),
             platform: "whatsapp".to_string(),
+            room_id: None,
         }],
         calendar_events: vec![CalendarEvent {
             title: "Meeting".to_string(),
@@ -193,6 +194,7 @@ fn test_message_info_creation() {
         content: "Important meeting tomorrow".to_string(),
         timestamp_rfc: "2024-01-15T09:00:00Z".to_string(),
         platform: "telegram".to_string(),
+        room_id: None,
     };
 
     assert_eq!(info.sender, "Alice");

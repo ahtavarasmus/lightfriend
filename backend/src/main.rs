@@ -28,16 +28,17 @@ use backend::{
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    filter_handlers, google_calendar, google_calendar_auth, imap_auth, imap_handlers,
-    instagram_auth, instagram_handlers, messenger_auth, messenger_handlers, profile_handlers,
-    refund_handlers, self_host_handlers, signal_auth, signal_handlers, stripe_handlers,
-    telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    dashboard_handlers, filter_handlers, google_calendar, google_calendar_auth, imap_auth,
+    imap_handlers, instagram_auth, instagram_handlers, messenger_auth, messenger_handlers,
+    profile_handlers, refund_handlers, self_host_handlers, signal_auth, signal_handlers,
+    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth,
+    whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
     "OK"
 }
+
 pub fn validate_env() {
     // Core variables (always required regardless of environment)
     let core_vars = [
@@ -639,6 +640,10 @@ async fn main() {
             "/api/admin/alerts/enable/{alert_type}",
             post(admin_handlers::enable_alert_type),
         )
+        .route(
+            "/api/admin/dashboard/triage/{item_type}/{id}",
+            delete(handlers::dashboard_handlers::dismiss_triage_item),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
@@ -771,6 +776,14 @@ async fn main() {
         .route(
             "/api/profile/proactive-agent",
             get(profile_handlers::get_proactive_agent_on),
+        )
+        .route(
+            "/api/profile/quiet-mode",
+            get(profile_handlers::get_quiet_mode),
+        )
+        .route(
+            "/api/profile/quiet-mode",
+            post(profile_handlers::set_quiet_mode),
         )
         .route(
             "/api/profile/get_nearby_places",
@@ -1178,6 +1191,14 @@ async fn main() {
             patch(filter_handlers::set_task_permanence),
         )
         .route(
+            "/api/tasks/{task_id}/edit-ai",
+            post(filter_handlers::edit_task_with_ai),
+        )
+        .route(
+            "/api/tasks/{task_id}",
+            get(filter_handlers::get_task).delete(filter_handlers::cancel_task),
+        )
+        .route(
             "/api/filters/monitored-contacts",
             get(filter_handlers::get_priority_senders),
         )
@@ -1209,6 +1230,25 @@ async fn main() {
             "/api/filters/keyword/{service_type}/{keyword}",
             delete(filter_handlers::delete_keyword),
         )
+        // Dashboard routes
+        .route(
+            "/api/dashboard/summary",
+            get(dashboard_handlers::get_dashboard_summary),
+        )
+        // Triage routes
+        .route("/api/triage", get(dashboard_handlers::get_triage_items))
+        .route(
+            "/api/triage/{id}/execute",
+            post(dashboard_handlers::execute_triage_item),
+        )
+        .route(
+            "/api/triage/{id}/snooze",
+            post(dashboard_handlers::snooze_triage_item),
+        )
+        .route(
+            "/api/triage/{id}",
+            delete(dashboard_handlers::dismiss_triage_item_by_id),
+        )
         // Contact Profiles routes
         .route(
             "/api/contact-profiles",
@@ -1221,6 +1261,10 @@ async fn main() {
         .route(
             "/api/contact-profiles/default-mode",
             put(contact_profile_handlers::update_default_mode),
+        )
+        .route(
+            "/api/contact-profiles/phone-contact-mode",
+            put(contact_profile_handlers::update_phone_contact_mode),
         )
         .route(
             "/api/contact-profiles/search/{service}",
@@ -1249,6 +1293,32 @@ async fn main() {
         .route(
             "/api/call/web-check-credits",
             get(elevenlabs::check_web_call_credits),
+        )
+        // MCP Server routes (custom tool integrations)
+        .route(
+            "/api/mcp/servers",
+            get(handlers::mcp_handlers::list_mcp_servers)
+                .post(handlers::mcp_handlers::create_mcp_server),
+        )
+        .route(
+            "/api/mcp/servers/{id}",
+            delete(handlers::mcp_handlers::delete_mcp_server),
+        )
+        .route(
+            "/api/mcp/servers/{id}/tools",
+            get(handlers::mcp_handlers::list_server_tools),
+        )
+        .route(
+            "/api/mcp/servers/{id}/test",
+            post(handlers::mcp_handlers::test_server_connection),
+        )
+        .route(
+            "/api/mcp/servers/{id}/toggle",
+            patch(handlers::mcp_handlers::toggle_mcp_server),
+        )
+        .route(
+            "/api/mcp/test",
+            post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     let app = Router::new()

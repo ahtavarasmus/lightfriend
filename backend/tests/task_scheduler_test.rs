@@ -84,6 +84,7 @@ fn test_migrate_creates_all_three_tasks() {
         recurrence_rule: Some("daily".to_string()),
         recurrence_time: Some("08:00".to_string()),
         sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+        end_time: None,
     };
     state
         .user_repository
@@ -103,6 +104,7 @@ fn test_migrate_creates_all_three_tasks() {
         recurrence_rule: Some("daily".to_string()),
         recurrence_time: Some("12:00".to_string()),
         sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+        end_time: None,
     };
     state
         .user_repository
@@ -122,6 +124,7 @@ fn test_migrate_creates_all_three_tasks() {
         recurrence_rule: Some("daily".to_string()),
         recurrence_time: Some("18:00".to_string()),
         sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
+        end_time: None,
     };
     state
         .user_repository

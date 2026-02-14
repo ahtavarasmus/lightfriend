@@ -1278,15 +1278,35 @@ pub async fn get_video_comments(
                         ))
                     }
                 }
-            } else if status == 403 && error_text.contains("commentsDisabled") {
-                // Comments are disabled on this video
+            } else if status == 403 {
+                // 403 can mean comments disabled, video unavailable, or other restrictions
+                tracing::warn!(
+                    "YouTube comments 403 for video {}: {}",
+                    video_id,
+                    error_text
+                );
+                // Return empty comments instead of error for any 403
+                // This is usually because comments are disabled or restricted
+                Ok(Json(CommentsResponse {
+                    comments: vec![],
+                    next_page_token: None,
+                    total_results: 0,
+                }))
+            } else if status == 404 {
+                // Video not found
+                tracing::warn!("YouTube comments 404 for video {}", video_id);
                 Ok(Json(CommentsResponse {
                     comments: vec![],
                     next_page_token: None,
                     total_results: 0,
                 }))
             } else {
-                tracing::error!("YouTube comments API error {}: {}", status, error_text);
+                tracing::error!(
+                    "YouTube comments API error {} for video {}: {}",
+                    status,
+                    video_id,
+                    error_text
+                );
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "Failed to fetch comments"})),

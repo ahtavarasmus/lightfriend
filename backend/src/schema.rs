@@ -68,6 +68,10 @@ diesel::table! {
         notification_type -> Text,
         notify_on_call -> Integer,
         created_at -> Integer,
+        whatsapp_room_id -> Nullable<Text>,
+        telegram_room_id -> Nullable<Text>,
+        signal_room_id -> Nullable<Text>,
+        notes -> Nullable<Text>,
     }
 }
 
@@ -181,6 +185,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    mcp_servers (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        name -> Text,
+        url_encrypted -> Text,
+        auth_token_encrypted -> Nullable<Text>,
+        is_enabled -> Integer,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     message_history (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -285,6 +301,7 @@ diesel::table! {
         recurrence_rule -> Nullable<Text>,
         recurrence_time -> Nullable<Text>,
         sources -> Nullable<Text>,
+        end_time -> Nullable<Integer>,
     }
 }
 
@@ -323,6 +340,25 @@ diesel::table! {
         encrypted_secret -> Text,
         enabled -> Integer,
         created_at -> Integer,
+    }
+}
+
+diesel::table! {
+    triage_items (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        item_type -> Text,
+        status -> Text,
+        summary -> Text,
+        suggested_action -> Nullable<Text>,
+        reasoning -> Nullable<Text>,
+        context_json -> Nullable<Text>,
+        priority -> Integer,
+        source_type -> Nullable<Text>,
+        source_id -> Nullable<Text>,
+        created_at -> Integer,
+        snooze_until -> Nullable<Integer>,
+        expires_at -> Nullable<Integer>,
     }
 }
 
@@ -370,6 +406,8 @@ diesel::table! {
         recent_contacts -> Nullable<Text>,
         blocker_password_vault -> Nullable<Text>,
         lockbox_password_vault -> Nullable<Text>,
+        latitude -> Nullable<Float>,
+        longitude -> Nullable<Float>,
     }
 }
 
@@ -411,6 +449,10 @@ diesel::table! {
         default_notification_type -> Nullable<Text>,
         default_notify_on_call -> Integer,
         llm_provider -> Nullable<Text>,
+        quiet_mode_until -> Nullable<Integer>,
+        phone_contact_notification_mode -> Nullable<Text>,
+        phone_contact_notification_type -> Nullable<Text>,
+        phone_contact_notify_on_call -> Integer,
     }
 }
 
@@ -448,6 +490,8 @@ diesel::table! {
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
         migrated_to_new_server -> Bool,
+        last_backup_at -> Nullable<Integer>,
+        backup_session_active -> Bool,
     }
 }
 
@@ -510,6 +554,7 @@ diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
+diesel::joinable!(mcp_servers -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
@@ -518,6 +563,7 @@ diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
+diesel::joinable!(triage_items -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(webauthn_challenges -> users (user_id));
@@ -539,6 +585,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     google_calendar,
     imap_connection,
     keywords,
+    mcp_servers,
     message_history,
     message_status_log,
     priority_senders,
@@ -550,6 +597,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     tesla,
     totp_backup_codes,
     totp_secrets,
+    triage_items,
     uber,
     usage_logs,
     user_info,

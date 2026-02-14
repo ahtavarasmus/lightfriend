@@ -9,6 +9,7 @@ pub mod handlers {
     pub mod bluesky;
     pub mod bridge_auth_common;
     pub mod contact_profile_handlers;
+    pub mod dashboard_handlers;
     pub mod filter_handlers;
     pub mod google_calendar;
     pub mod google_calendar_auth;
@@ -18,6 +19,7 @@ pub mod handlers {
     pub mod instagram_auth;
     pub mod instagram_handlers;
     pub mod instagram_reels;
+    pub mod mcp_handlers;
     pub mod messenger_auth;
     pub mod messenger_handlers;
     pub mod pricing_handlers;
@@ -70,8 +72,10 @@ pub mod tool_call_utils {
     pub mod email;
     pub mod internet;
     pub mod management;
+    pub mod mcp;
     pub mod tesla;
     pub mod utils;
+    pub mod youtube;
 }
 pub mod api {
     pub mod elevenlabs;
@@ -88,11 +92,12 @@ pub mod api {
 }
 pub mod error;
 pub mod models {
+    pub mod mcp_models;
     pub mod user_models;
 }
 pub mod repositories {
     pub mod admin_alert_repository;
-    pub mod connection_auth;
+    pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
@@ -108,6 +113,7 @@ pub mod repositories {
 }
 pub mod services {
     pub mod country_service;
+    pub mod mcp_client;
     pub mod metrics_service;
     pub mod signup_service;
     pub mod twilio_message_service;

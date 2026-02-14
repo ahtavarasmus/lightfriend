@@ -36,6 +36,10 @@ pub struct CreateContactProfileRequest {
     pub notification_type: String, // "sms", "call", "call_sms"
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +53,10 @@ pub struct UpdateContactProfileRequest {
     pub notification_type: String,
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,8 +67,16 @@ pub struct UpdateDefaultModeRequest {
 }
 
 #[derive(Deserialize)]
+pub struct UpdatePhoneContactModeRequest {
+    pub mode: Option<String>,      // "critical", "digest", "ignore"
+    pub noti_type: Option<String>, // "sms", "call", "call_sms"
+    pub notify_on_call: Option<bool>,
+}
+
+#[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: String,
+    pub exclude_profile_id: Option<i32>,
 }
 
 // Response DTOs
@@ -95,6 +111,10 @@ pub struct ContactProfileResponse {
     pub notification_type: String,
     pub notify_on_call: bool,
     pub exceptions: Vec<ExceptionResponse>,
+    pub whatsapp_room_id: Option<String>,
+    pub telegram_room_id: Option<String>,
+    pub signal_room_id: Option<String>,
+    pub notes: Option<String>,
 }
 
 impl ContactProfileResponse {
@@ -116,6 +136,10 @@ impl ContactProfileResponse {
                 .into_iter()
                 .map(ExceptionResponse::from)
                 .collect(),
+            whatsapp_room_id: p.whatsapp_room_id,
+            telegram_room_id: p.telegram_room_id,
+            signal_room_id: p.signal_room_id,
+            notes: p.notes,
         }
     }
 }
@@ -160,11 +184,29 @@ pub async fn get_contact_profiles(
                 .get_default_notify_on_call(auth_user.user_id)
                 .unwrap_or(true);
 
+            let phone_contact_mode = state
+                .user_core
+                .get_phone_contact_notification_mode(auth_user.user_id)
+                .unwrap_or_else(|_| "critical".to_string());
+
+            let phone_contact_noti_type = state
+                .user_core
+                .get_phone_contact_notification_type(auth_user.user_id)
+                .unwrap_or_else(|_| "sms".to_string());
+
+            let phone_contact_notify_on_call = state
+                .user_core
+                .get_phone_contact_notify_on_call(auth_user.user_id)
+                .unwrap_or(true);
+
             Ok(Json(json!({
                 "profiles": responses,
                 "default_mode": default_mode,
                 "default_noti_type": default_noti_type,
-                "default_notify_on_call": default_notify_on_call
+                "default_notify_on_call": default_notify_on_call,
+                "phone_contact_mode": phone_contact_mode,
+                "phone_contact_noti_type": phone_contact_noti_type,
+                "phone_contact_notify_on_call": phone_contact_notify_on_call
             })))
         }
         Err(e) => {
@@ -225,9 +267,33 @@ pub async fn create_contact_profile(
         ));
     }
 
+    // Trim nickname whitespace
+    let nickname = request.nickname.trim().to_string();
+
+    // Check for duplicate nickname (case-insensitive)
+    if let Ok(existing) = state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
+        tracing::info!(
+            "Checking duplicate nickname '{}' against {} existing profiles",
+            nickname,
+            existing.len()
+        );
+        if existing
+            .iter()
+            .any(|p| p.nickname.trim().eq_ignore_ascii_case(&nickname))
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "A contact profile with this nickname already exists" })),
+            ));
+        }
+    }
+
     let new_profile = NewContactProfile {
         user_id: auth_user.user_id,
-        nickname: request.nickname,
+        nickname,
         whatsapp_chat: request.whatsapp_chat,
         telegram_chat: request.telegram_chat,
         signal_chat: request.signal_chat,
@@ -236,6 +302,10 @@ pub async fn create_contact_profile(
         notification_type: request.notification_type,
         notify_on_call: if request.notify_on_call { 1 } else { 0 },
         created_at: Utc::now().timestamp() as i32,
+        whatsapp_room_id: request.whatsapp_room_id,
+        telegram_room_id: request.telegram_room_id,
+        signal_room_id: request.signal_room_id,
+        notes: request.notes,
     };
 
     match state.user_repository.create_contact_profile(&new_profile) {
@@ -250,7 +320,7 @@ pub async fn create_contact_profile(
                     {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"]
+                    if !["all", "critical", "digest", "ignore", "mention"]
                         .contains(&exc.notification_mode.as_str())
                     {
                         continue;
@@ -325,6 +395,22 @@ pub async fn update_contact_profile(
         ));
     }
 
+    // Check for duplicate nickname (case-insensitive), excluding the profile being updated
+    if let Ok(existing) = state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
+        if existing
+            .iter()
+            .any(|p| p.nickname.eq_ignore_ascii_case(&request.nickname) && p.id != Some(profile_id))
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "A contact profile with this nickname already exists" })),
+            ));
+        }
+    }
+
     match state
         .user_repository
         .update_contact_profile(UpdateContactProfileParams {
@@ -338,6 +424,10 @@ pub async fn update_contact_profile(
             notification_mode: request.notification_mode.clone(),
             notification_type: request.notification_type.clone(),
             notify_on_call: if request.notify_on_call { 1 } else { 0 },
+            whatsapp_room_id: request.whatsapp_room_id,
+            telegram_room_id: request.telegram_room_id,
+            signal_room_id: request.signal_room_id,
+            notes: request.notes,
         }) {
         Ok(()) => {
             // Handle exceptions if provided
@@ -356,7 +446,7 @@ pub async fn update_contact_profile(
                     {
                         continue;
                     }
-                    if !["all", "critical", "digest", "ignore"]
+                    if !["all", "critical", "digest", "ignore", "mention"]
                         .contains(&exc.notification_mode.as_str())
                     {
                         continue;
@@ -473,6 +563,66 @@ pub async fn update_default_mode(
     Ok(Json(json!({ "success": true })))
 }
 
+/// PUT /api/contact-profiles/phone-contact-mode
+pub async fn update_phone_contact_mode(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<UpdatePhoneContactModeRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(ref mode) = request.mode {
+        if !["critical", "digest", "ignore"].contains(&mode.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" })),
+            ));
+        }
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notification_mode(auth_user.user_id, mode)
+        {
+            tracing::error!("Failed to update phone contact notification mode: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update phone contact mode" })),
+            ));
+        }
+    }
+
+    if let Some(ref noti_type) = request.noti_type {
+        if !["sms", "call", "call_sms"].contains(&noti_type.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" })),
+            ));
+        }
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notification_type(auth_user.user_id, noti_type)
+        {
+            tracing::error!("Failed to update phone contact notification type: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update notification type" })),
+            ));
+        }
+    }
+
+    if let Some(notify_on_call) = request.notify_on_call {
+        if let Err(e) = state
+            .user_core
+            .set_phone_contact_notify_on_call(auth_user.user_id, notify_on_call)
+        {
+            tracing::error!("Failed to update phone contact notify on call: {:?}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update call setting" })),
+            ));
+        }
+    }
+
+    Ok(Json(json!({ "success": true })))
+}
+
 /// GET /api/contact-profiles/search/:service?q=query
 /// Searches for chats on the specified service (reuses existing bridge room search)
 pub async fn search_chats(
@@ -496,12 +646,41 @@ pub async fn search_chats(
         .await
     {
         Ok(rooms) => {
+            // Look up which rooms are already assigned to contacts
+            let room_ids: Vec<String> = rooms
+                .iter()
+                .filter(|r| !r.room_id.is_empty())
+                .map(|r| r.room_id.clone())
+                .collect();
+
+            let assigned_rooms = if !room_ids.is_empty() {
+                state
+                    .user_repository
+                    .find_profiles_by_room_ids(
+                        auth_user.user_id,
+                        &room_ids,
+                        query.exclude_profile_id,
+                    )
+                    .unwrap_or_default()
+            } else {
+                std::collections::HashMap::new()
+            };
+
             let results: Vec<serde_json::Value> = rooms
                 .iter()
                 .map(|room| {
+                    let attached_to = if !room.room_id.is_empty() {
+                        assigned_rooms.get(&room.room_id).cloned()
+                    } else {
+                        None
+                    };
                     json!({
                         "display_name": room.display_name,
-                        "last_activity_formatted": room.last_activity_formatted
+                        "last_activity_formatted": room.last_activity_formatted,
+                        "room_id": room.room_id,
+                        "is_group": room.is_group,
+                        "attached_to": attached_to,
+                        "is_phone_contact": crate::utils::bridge::is_phone_contact_from_room_name(&room.display_name)
                     })
                 })
                 .collect();

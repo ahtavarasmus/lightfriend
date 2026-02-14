@@ -74,6 +74,10 @@ pub fn is_legacy_euro_plan_price(price_id: &str) -> bool {
 
 /// Check if a Stripe price ID is the BYOT plan
 pub fn is_byot_plan_price(price_id: &str) -> bool {
+    // Legacy BYOT price ID for user on older subscription
+    if price_id == "price_1RWavGKxKvG0CX8G9MFEIy93" {
+        return true;
+    }
     std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
         .map(|p| p == price_id)
         .unwrap_or(false)

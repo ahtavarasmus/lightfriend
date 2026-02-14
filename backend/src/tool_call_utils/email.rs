@@ -191,6 +191,7 @@ pub async fn handle_send_email(
                             "Contact '{}' doesn't have an email address in their profile.",
                             args.to
                         ),
+                        created_task_id: None,
                     }),
                 ));
             }
@@ -201,6 +202,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
+                    created_task_id: None,
                 })
             ));
         }
@@ -232,6 +234,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
+                    created_task_id: None,
                 }),
             ));
         }
@@ -302,6 +305,7 @@ pub async fn handle_send_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email queued".to_string(),
+            created_task_id: None,
         }),
     ))
 }
@@ -447,7 +451,10 @@ pub async fn handle_respond_to_email(
             return Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse { message: error_msg }),
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: error_msg,
+                    created_task_id: None,
+                }),
             ));
         }
     };
@@ -484,6 +491,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
+                    created_task_id: None,
                 }),
             ));
         }
@@ -552,6 +560,7 @@ pub async fn handle_respond_to_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email response queued".to_string(),
+            created_task_id: None,
         }),
     ))
 }

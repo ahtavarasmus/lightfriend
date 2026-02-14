@@ -80,6 +80,7 @@ fn test_create_task_exceeds_limit() {
             recurrence_rule: None,
             recurrence_time: None,
             sources: None,
+            end_time: None,
         };
         state
             .user_repository
@@ -100,6 +101,7 @@ fn test_create_task_exceeds_limit() {
         recurrence_rule: None,
         recurrence_time: None,
         sources: None,
+        end_time: None,
     };
     let result = state.user_repository.create_task(&new_task);
 
@@ -275,6 +277,7 @@ fn test_reschedule_permanent_weekly() {
         recurrence_rule: Some("weekly:1,3,5".to_string()),
         recurrence_time: Some("10:00".to_string()),
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
@@ -321,6 +324,7 @@ fn test_reschedule_permanent_monthly() {
         recurrence_rule: Some("monthly:15".to_string()),
         recurrence_time: Some("14:00".to_string()),
         sources: None,
+        end_time: None,
     };
     state
         .user_repository
@@ -394,6 +398,7 @@ fn test_no_reschedule_without_recurrence() {
         recurrence_rule: None, // No recurrence rule
         recurrence_time: None, // No recurrence time
         sources: None,
+        end_time: None,
     };
     state
         .user_repository

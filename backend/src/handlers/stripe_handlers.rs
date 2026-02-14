@@ -1417,17 +1417,6 @@ pub async fn stripe_webhook(
                     tracing::error!("Failed to setup subscription: {}", e);
                 }
 
-                // Clear BYOT credentials if switching to non-BYOT plan
-                if !crate::utils::country::is_byot_plan_price(&price_id)
-                    && state.user_core.has_twilio_credentials(user.id)
-                {
-                    tracing::info!(
-                        "User {} switching to non-BYOT plan, clearing BYOT credentials",
-                        user.id
-                    );
-                    let _ = state.user_core.clear_twilio_credentials(user.id);
-                }
-
                 // Set preferred Lightfriend number (for non-BYOT plans)
                 if !crate::utils::country::is_byot_plan_price(&price_id)
                     && user.preferred_number.is_none()
