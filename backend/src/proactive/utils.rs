@@ -472,21 +472,22 @@ fn resolve_sender_name(
         .unwrap_or_else(|| chat_name.to_string())
 }
 
-/// Formats disconnection events into a notice string for digest inclusion
-/// Returns formatted notice and deletes the events from the database
+/// Formats disconnection events into a notice string for digest inclusion.
+/// Reads from triage_items table (bridge_disconnected items).
+/// Does NOT delete the triage items - they persist in the dashboard for user action.
 fn format_disconnection_notice(
     state: &Arc<AppState>,
     user_id: i32,
     timezone: &str,
 ) -> Option<String> {
-    let events = match state
+    let items = match state
         .user_repository
-        .get_pending_disconnection_events(user_id)
+        .get_pending_triage_items_for_digest(user_id, "bridge_disconnected")
     {
-        Ok(events) => events,
+        Ok(items) => items,
         Err(e) => {
             tracing::error!(
-                "Failed to get disconnection events for user {}: {}",
+                "Failed to get bridge disconnection triage items for user {}: {}",
                 user_id,
                 e
             );
@@ -494,7 +495,7 @@ fn format_disconnection_notice(
         }
     };
 
-    if events.is_empty() {
+    if items.is_empty() {
         return None;
     }
 
@@ -507,12 +508,12 @@ fn format_disconnection_notice(
         }
     };
 
-    // Format each disconnection event
-    let notices: Vec<String> = events
+    // Format each disconnection triage item
+    let notices: Vec<String> = items
         .iter()
-        .map(|event| {
+        .map(|item| {
             // Convert timestamp to user's timezone
-            let datetime = chrono::DateTime::from_timestamp(event.detected_at as i64, 0)
+            let datetime = chrono::DateTime::from_timestamp(item.created_at as i64, 0)
                 .unwrap_or_else(Utc::now)
                 .with_timezone(&tz);
 
@@ -528,26 +529,9 @@ fn format_disconnection_notice(
                 (hour - 12, "pm")
             };
 
-            // Capitalize bridge type
-            let bridge_name = match event.bridge_type.as_str() {
-                "whatsapp" => "WhatsApp",
-                "telegram" => "Telegram",
-                "signal" => "Signal",
-                other => other,
-            };
-
-            format!("NOTICE: {} disconnected at {}{}", bridge_name, hour12, ampm)
+            format!("NOTICE: {} at {}{}", item.summary, hour12, ampm)
         })
         .collect();
-
-    // Delete the events after formatting
-    if let Err(e) = state.user_repository.delete_disconnection_events(user_id) {
-        tracing::error!(
-            "Failed to delete disconnection events for user {}: {}",
-            user_id,
-            e
-        );
-    }
 
     Some(notices.join(". "))
 }
@@ -692,6 +676,205 @@ pub async fn check_message_importance(
         }
         Err(e) => {
             tracing::error!("Failed to get message analysis: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Generates a suggested reply for a bridge message.
+/// Returns (needs_reply, suggested_reply, reasoning) where:
+/// - needs_reply: whether this message warrants a response
+/// - suggested_reply: the AI-drafted reply text matching the user's style
+/// - reasoning: why the AI suggested this reply (shown as helper text)
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_suggested_reply(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    chat_name: &str,
+    message_content: &str,
+    recent_user_messages: &[String],
+    conversation_history: &[(String, String, i64)],
+    user_context: Option<&str>,
+) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
+    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+
+    // Build context about the user's messaging style from their recent messages
+    let style_examples = if recent_user_messages.is_empty() {
+        "No previous messages available - use a casual, friendly tone.".to_string()
+    } else {
+        let examples: Vec<String> = recent_user_messages
+            .iter()
+            .take(5)
+            .map(|m| format!("- {}", m))
+            .collect();
+        format!(
+            "Examples of how this user writes messages:\n{}",
+            examples.join("\n")
+        )
+    };
+
+    let conversation_section = if conversation_history.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = conversation_history
+            .iter()
+            .map(|(sender, msg, ts)| {
+                let dt = chrono::DateTime::from_timestamp(*ts, 0)
+                    .map(|d| d.format("%b %d %H:%M").to_string())
+                    .unwrap_or_default();
+                format!("[{}] {}: {}", dt, sender, msg)
+            })
+            .collect();
+        format!("\n\nRecent conversation history:\n{}", lines.join("\n"))
+    };
+
+    let context_section = match user_context {
+        Some(ctx) => format!(
+            "\n\nRelevant context about the user's schedule/tasks:\n{}",
+            ctx
+        ),
+        None => String::new(),
+    };
+
+    let system_prompt = format!(
+        r#"You are drafting a reply on behalf of a user to a message they received on {service}.
+The reply will be sent from the user's account, so it must sound like them - not like an AI.
+
+{style_examples}{conversation_section}{context_section}
+
+Rules:
+1. First decide: does this message NEED a reply? Messages like "love you", "ok", "thumbs up", memes, or broadcast messages do NOT need replies. Questions, requests, invitations, and time-sensitive asks DO.
+2. If a reply is needed, draft one that matches the user's writing style (abbreviations, emoji usage, tone, language).
+3. Keep it short and natural - how a real person would reply on {service}.
+4. If the user has schedule conflicts or relevant context, incorporate that naturally.
+5. Provide brief reasoning for your suggestion."#,
+        service = service,
+        style_examples = style_examples,
+        conversation_section = conversation_section,
+        context_section = context_section,
+    );
+
+    let user_prompt = format!(
+        "Message from {} on {}:\n\"{}\"\n\nShould the user reply? If so, draft a reply.",
+        chat_name, service, message_content
+    );
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(user_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "needs_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether this message needs a reply from the user".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "suggested_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "The drafted reply matching the user's writing style. Empty if no reply needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "reasoning".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Brief explanation of why this reply was suggested or why no reply is needed"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "draft_reply".to_string(),
+            description: Some("Analyzes if a message needs a reply and drafts one".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    "needs_reply".to_string(),
+                    "suggested_reply".to_string(),
+                    "reasoning".to_string(),
+                ]),
+            },
+        },
+    }];
+
+    let model = state
+        .ai_config
+        .model(provider, ModelPurpose::Default)
+        .to_string();
+    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.7)
+        .max_tokens(300);
+
+    #[derive(Deserialize, Debug)]
+    struct ReplyResponse {
+        needs_reply: bool,
+        suggested_reply: Option<String>,
+        reasoning: Option<String>,
+    }
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                if let Some(first_call) = tool_calls.first() {
+                    if let Some(args) = &first_call.function.arguments {
+                        match serde_json::from_str::<ReplyResponse>(args) {
+                            Ok(response) => {
+                                tracing::debug!(target: "triage_reply", ?response, "Reply analysis result");
+                                let reply = if response.needs_reply {
+                                    response.suggested_reply.filter(|s| !s.is_empty())
+                                } else {
+                                    None
+                                };
+                                Ok((response.needs_reply, reply, response.reasoning))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse reply analysis response: {}", e);
+                                Ok((false, None, None))
+                            }
+                        }
+                    } else {
+                        Ok((false, None, None))
+                    }
+                } else {
+                    Ok((false, None, None))
+                }
+            } else {
+                Ok((false, None, None))
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to get reply analysis: {}", e);
             Err(e.into())
         }
     }

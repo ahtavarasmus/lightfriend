@@ -77,12 +77,26 @@ fn get_sender_prefix(service: &str) -> String {
 }
 
 pub fn remove_bridge_suffix(chat_name: &str) -> String {
-    if chat_name.ends_with("(WA)") {
-        chat_name.trim_end_matches("(WA)").trim().to_string()
-    } else if chat_name.ends_with("(Telegram)") {
-        chat_name.trim_end_matches("(Telegram)").trim().to_string()
+    for suffix in &["(WA~)", "(WA)", "(Signal~)", "(Signal)", "(Telegram)"] {
+        if chat_name.ends_with(suffix) {
+            return chat_name.trim_end_matches(suffix).trim().to_string();
+        }
+    }
+    chat_name.to_string()
+}
+
+/// Returns whether the room name indicates a phone contact (from phone book).
+/// (WA) / (Signal) = phone contact (has FullName/ContactName)
+/// (WA~) / (Signal~) = not a phone contact (only PushName/ProfileName)
+/// Telegram / unknown = None (can't determine)
+pub fn is_phone_contact_from_room_name(room_name: &str) -> Option<bool> {
+    let trimmed = room_name.trim();
+    if trimmed.ends_with("(WA)") || trimmed.ends_with("(Signal)") {
+        Some(true)
+    } else if trimmed.ends_with("(WA~)") || trimmed.ends_with("(Signal~)") {
+        Some(false)
     } else {
-        chat_name.to_string()
+        None // Telegram, email, or unknown
     }
 }
 
@@ -91,6 +105,7 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
     let room_name = room_name.to_lowercase();
 
     if room_name.contains("(wa)")
+        || room_name.contains("(wa~)")
         || sender_localpart.starts_with("whatsapp_")
         || sender_localpart.starts_with("whatsapp")
     {
@@ -104,7 +119,8 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
         println!("Detected Telegram");
         return Some("telegram".to_string());
     }
-    if room_name.contains("Signal")
+    if room_name.contains("(signal)")
+        || room_name.contains("(signal~)")
         || sender_localpart.starts_with("signal_")
         || sender_localpart.starts_with("signal")
     {
@@ -2052,21 +2068,37 @@ pub async fn handle_bridge_message(
                 }
             }
             None => {
-                let default_mode = user_settings
-                    .default_notification_mode
-                    .clone()
-                    .unwrap_or_else(|| "critical".to_string());
-                let default_noti_type = user_settings
-                    .default_notification_type
-                    .clone()
-                    .unwrap_or_else(|| "sms".to_string());
-                let default_notify_on_call = user_settings.default_notify_on_call != 0;
-                (
-                    default_mode,
-                    default_noti_type,
-                    default_notify_on_call,
-                    None,
-                )
+                let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
+                // is_phone_contact:
+                //   Some(true)  = phone contact (WA/Signal, has FullName) -> Tier 2
+                //   Some(false) = not phone contact (WA~/Signal~) -> Tier 3
+                //   None        = Telegram or unknown -> default to Tier 2
+
+                if is_phone_contact.unwrap_or(true) {
+                    // Tier 2: Phone contact (or Telegram where we can't distinguish)
+                    let mode = user_settings
+                        .phone_contact_notification_mode
+                        .clone()
+                        .unwrap_or_else(|| "critical".to_string());
+                    let ntype = user_settings
+                        .phone_contact_notification_type
+                        .clone()
+                        .unwrap_or_else(|| "sms".to_string());
+                    let notify = user_settings.phone_contact_notify_on_call != 0;
+                    (mode, ntype, notify, None)
+                } else {
+                    // Tier 3: Unknown person (not in phone contacts)
+                    let mode = user_settings
+                        .default_notification_mode
+                        .clone()
+                        .unwrap_or_else(|| "critical".to_string());
+                    let ntype = user_settings
+                        .default_notification_type
+                        .clone()
+                        .unwrap_or_else(|| "sms".to_string());
+                    let notify = user_settings.default_notify_on_call != 0;
+                    (mode, ntype, notify, None)
+                }
             }
         };
 
@@ -2317,6 +2349,18 @@ pub async fn handle_bridge_message(
                 }
             };
 
+        // Fetch recent conversation history (both sides) for context
+        let conversation_history =
+            match get_conversation_history_from_room(&state_clone, user_id, &room_id_clone, 10)
+                .await
+            {
+                Ok(msgs) => msgs,
+                Err(e) => {
+                    tracing::debug!("Could not fetch conversation history for triage: {}", e);
+                    Vec::new()
+                }
+            };
+
         // Gather user context (calendar, tasks) for better reply drafting
         let user_context = gather_user_context(&state_clone, user_id).await;
 
@@ -2328,6 +2372,7 @@ pub async fn handle_bridge_message(
             &sender_display,
             &content_clone,
             &recent_user_msgs,
+            &conversation_history,
             user_context.as_deref(),
         )
         .await
@@ -2436,6 +2481,47 @@ async fn get_user_messages_from_room(
     }
 
     Ok(user_msgs)
+}
+
+/// Fetches recent conversation history (both sides) from a room for context.
+/// Returns Vec<(sender_name, message_text, unix_timestamp)> in chronological order.
+async fn get_conversation_history_from_room(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    limit: usize,
+) -> Result<Vec<(String, String, i64)>> {
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let room_id_parsed = matrix_sdk::ruma::OwnedRoomId::try_from(room_id)
+        .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+    let room = client
+        .get_room(&room_id_parsed)
+        .ok_or_else(|| anyhow!("Room not found"))?;
+
+    let messages = room.messages(MessagesOptions::backward()).await?;
+
+    let mut history: Vec<(String, String, i64)> = Vec::new();
+    for event in messages.chunk {
+        if let Ok(AnySyncTimelineEvent::MessageLike(
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                SyncRoomMessageEvent::Original(e),
+            ),
+        )) = event.raw().deserialize()
+        {
+            if let MessageType::Text(t) = &e.content.msgtype {
+                let sender_name = e.sender.localpart().to_string();
+                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                history.push((sender_name, t.body.clone(), timestamp));
+                if history.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Reverse to chronological order (messages were fetched backward)
+    history.reverse();
+    Ok(history)
 }
 
 /// Gathers relevant user context (tasks, user info) for better reply drafting.
