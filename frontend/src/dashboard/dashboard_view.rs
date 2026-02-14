@@ -741,6 +741,25 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
+    // Dismiss triage item callback
+    let on_triage_dismiss = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |item: TriageAttentionItem| {
+            let fetch_summary = fetch_summary.clone();
+            spawn_local(async move {
+                let url = format!(
+                    "/api/admin/dashboard/triage/{}/{}",
+                    item.item_type, item.id
+                );
+                if let Ok(resp) = Api::delete(&url).send().await {
+                    if resp.ok() {
+                        fetch_summary.emit(());
+                    }
+                }
+            });
+        })
+    };
+
     // Callback for usage changes (refresh summary after chat)
     let on_usage_change = fetch_summary.clone();
 
@@ -862,6 +881,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <TriageIndicator
                             attention_count={attention_count}
                             attention_items={attention_items}
+                            on_dismiss={on_triage_dismiss.clone()}
                         />
                     }
                 } else {

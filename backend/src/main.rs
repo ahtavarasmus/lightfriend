@@ -640,6 +640,10 @@ async fn main() {
             "/api/admin/alerts/enable/{alert_type}",
             post(admin_handlers::enable_alert_type),
         )
+        .route(
+            "/api/admin/dashboard/triage/{item_type}/{id}",
+            delete(handlers::dashboard_handlers::dismiss_triage_item),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

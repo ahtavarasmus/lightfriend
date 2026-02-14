@@ -477,8 +477,8 @@ enum ModalType {
     DefaultSettings,
     AddContact,
     PeopleInfo,
-    PlatformInfo,
-    ContactSettingsInfo,
+    PlatformInfo(i32, String),
+    ContactSettingsInfo(i32),
 }
 
 // ---------------------------------------------------------------------------
@@ -1894,7 +1894,7 @@ pub fn contact_avatar_row() -> Html {
                                     let modal = modal.clone();
                                     Callback::from(move |e: MouseEvent| {
                                         e.stop_propagation();
-                                        modal.set(Some(ModalType::ContactSettingsInfo));
+                                        modal.set(Some(ModalType::ContactSettingsInfo(pid)));
                                     })
                                 }}>
                                     <i class="fa-solid fa-circle-info"></i>
@@ -2267,9 +2267,10 @@ pub fn contact_avatar_row() -> Html {
                                 <h3>{format!("{} for {}", pi.label, profile.nickname)}</h3>
                                 <button class="avatar-row-info-btn" onclick={{
                                     let modal = modal.clone();
+                                    let platform = platform.clone();
                                     Callback::from(move |e: MouseEvent| {
                                         e.stop_propagation();
-                                        modal.set(Some(ModalType::PlatformInfo));
+                                        modal.set(Some(ModalType::PlatformInfo(pid, platform.clone())));
                                     })
                                 }}>
                                     <i class="fa-solid fa-circle-info"></i>
@@ -2428,7 +2429,7 @@ pub fn contact_avatar_row() -> Html {
                             </div>
                             <div class="people-info-section">
                                 <h4>{"Notification Modes"}</h4>
-                                <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - you only get notified for important messages."}</p>
+                                <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
                                 <p class="people-info-mode"><strong>{"All: "}</strong>{"Get notified about every message from this contact."}</p>
                                 <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are bundled into scheduled digest summaries."}</p>
                                 <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications from this contact."}</p>
@@ -2449,39 +2450,65 @@ pub fn contact_avatar_row() -> Html {
                 }
             }
 
-            ModalType::PlatformInfo => {
+            ModalType::PlatformInfo(return_pid, ref return_platform) => {
+                let return_pid = return_pid;
+                let return_platform = return_platform.clone();
                 html! {
-                    <div class="avatar-modal-overlay" onclick={on_overlay_click}>
+                    <div class="avatar-modal-overlay" onclick={{
+                        let modal = modal.clone();
+                        let platform = return_platform.clone();
+                        Callback::from(move |_: MouseEvent| {
+                            modal.set(Some(ModalType::PlatformException(return_pid, platform.clone())));
+                        })
+                    }}>
                         <div class="avatar-modal-box" onclick={stop_prop}>
-                            <h3>{"Chat Networks"}</h3>
+                            <h3>{"Platform Settings"}</h3>
                             <div class="people-info-section">
-                                <p>{"Each contact can be linked to chats on WhatsApp, Telegram, and Signal through Matrix bridges."}</p>
-                                <p>{"When a message arrives in a linked chat, Lightfriend uses the contact's notification settings to decide whether and how to notify you."}</p>
+                                <p>{"Set per-platform notification overrides for this contact. For example, \"All\" for WhatsApp but \"Critical\" for Telegram."}</p>
+                                <p>{"If no override is saved, the contact's default settings are used."}</p>
                             </div>
                             <div class="people-info-section">
-                                <h4>{"Per-Platform Overrides"}</h4>
-                                <p>{"You can set a different notification mode for each platform. For example, \"All\" for WhatsApp but \"Critical\" for Telegram."}</p>
-                                <p>{"If no override is set, the contact's default mode is used."}</p>
+                                <h4>{"Notification Modes"}</h4>
+                                <p class="people-info-mode"><strong>{"All: "}</strong>{"Every message triggers a notification."}</p>
+                                <p class="people-info-mode"><strong>{"@mention only: "}</strong>{"Only notifies when you're directly mentioned. Useful for group chats."}</p>
+                                <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
+                                <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are collected and sent as a summary on your digest schedule."}</p>
+                                <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications at all."}</p>
                             </div>
                             <div class="people-info-section">
-                                <h4>{"@mention Only"}</h4>
-                                <p>{"For group chats, use @mention mode to only get notified when you're directly mentioned."}</p>
+                                <h4>{"Notification Types"}</h4>
+                                <p class="people-info-mode"><strong>{"SMS: "}</strong>{"You receive a text message with the notification."}</p>
+                                <p class="people-info-mode"><strong>{"Call: "}</strong>{"Lightfriend calls you and reads the message aloud."}</p>
+                                <p class="people-info-mode"><strong>{"Call + SMS: "}</strong>{"Lightfriend calls you first, then sends an SMS. You don't need to answer the call - it's just a ring to get your attention. You won't be charged for unanswered calls."}</p>
+                            </div>
+                            <div class="people-info-section">
+                                <h4>{"Notify on Incoming Call"}</h4>
+                                <p>{"When enabled, Lightfriend notifies you if this contact tries to call you on the linked platform (e.g. a WhatsApp call). Useful when your phone is on silent or you're away from it."}</p>
                             </div>
                             <div class="people-info-tip">
-                                <strong>{"Tip: "}</strong>{"Use \"Remove chat\" to unlink a chat from a contact without deleting the contact."}
+                                <strong>{"Tip: "}</strong>{"Use \"Remove chat\" to unlink a chat from this contact without deleting the contact itself."}
                             </div>
                             <button class="people-info-close" onclick={{
-                                let close = close.clone();
-                                Callback::from(move |_: MouseEvent| close.emit(()))
-                            }}>{"Close"}</button>
+                                let modal = modal.clone();
+                                let platform = return_platform.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    modal.set(Some(ModalType::PlatformException(return_pid, platform.clone())));
+                                })
+                            }}>{"Back"}</button>
                         </div>
                     </div>
                 }
             }
 
-            ModalType::ContactSettingsInfo => {
+            ModalType::ContactSettingsInfo(return_pid) => {
+                let return_pid = return_pid;
                 html! {
-                    <div class="avatar-modal-overlay" onclick={on_overlay_click}>
+                    <div class="avatar-modal-overlay" onclick={{
+                        let modal = modal.clone();
+                        Callback::from(move |_: MouseEvent| {
+                            modal.set(Some(ModalType::ContactSettings(return_pid)));
+                        })
+                    }}>
                         <div class="avatar-modal-box" onclick={stop_prop}>
                             <h3>{"Contact Settings"}</h3>
                             <div class="people-info-section">
@@ -2489,7 +2516,7 @@ pub fn contact_avatar_row() -> Html {
                             </div>
                             <div class="people-info-section">
                                 <h4>{"Nickname"}</h4>
-                                <p>{"The name you use when talking to Lightfriend about this contact. For example, \"has Mom messaged me?\" will match a contact nicknamed \"Mom\"."}</p>
+                                <p>{"The name you use when talking to Lightfriend. For example, \"has Mom messaged me?\" will match a contact nicknamed \"Mom\"."}</p>
                             </div>
                             <div class="people-info-section">
                                 <h4>{"Chat Links"}</h4>
@@ -2500,13 +2527,32 @@ pub fn contact_avatar_row() -> Html {
                                 <h4>{"Email Addresses"}</h4>
                                 <p>{"Add comma-separated email addresses to match incoming emails to this contact."}</p>
                             </div>
+                            <div class="people-info-section">
+                                <h4>{"Notification Modes"}</h4>
+                                <p class="people-info-mode"><strong>{"All: "}</strong>{"Every message triggers a notification."}</p>
+                                <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
+                                <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are collected and sent as a summary on your digest schedule."}</p>
+                                <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications at all."}</p>
+                            </div>
+                            <div class="people-info-section">
+                                <h4>{"Notification Types"}</h4>
+                                <p class="people-info-mode"><strong>{"SMS: "}</strong>{"You receive a text message with the notification."}</p>
+                                <p class="people-info-mode"><strong>{"Call: "}</strong>{"Lightfriend calls you and reads the message aloud."}</p>
+                                <p class="people-info-mode"><strong>{"Call + SMS: "}</strong>{"Lightfriend calls you first, then sends an SMS. You don't need to answer the call - it's just a ring to get your attention. You won't be charged for unanswered calls."}</p>
+                            </div>
+                            <div class="people-info-section">
+                                <h4>{"Notify on Incoming Call"}</h4>
+                                <p>{"When enabled, Lightfriend notifies you if this contact tries to call you on a linked platform (e.g. a WhatsApp call). Useful when your phone is on silent or you're away from it."}</p>
+                            </div>
                             <div class="people-info-tip">
                                 <strong>{"Tip: "}</strong>{"Click the colored platform bubbles on a contact's avatar to set per-platform notification overrides."}
                             </div>
                             <button class="people-info-close" onclick={{
-                                let close = close.clone();
-                                Callback::from(move |_: MouseEvent| close.emit(()))
-                            }}>{"Close"}</button>
+                                let modal = modal.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    modal.set(Some(ModalType::ContactSettings(return_pid)));
+                                })
+                            }}>{"Back"}</button>
                         </div>
                     </div>
                 }

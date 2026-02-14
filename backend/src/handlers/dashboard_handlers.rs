@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -133,23 +133,7 @@ pub async fn get_dashboard_summary(
     // Collect attention items from various sources
     let mut attention_items: Vec<AttentionItem> = Vec::new();
 
-    // 1. Critical emails (should_notify = true) from last 24 hours
-    let twenty_four_hours_ago = now_ts - (24 * 60 * 60);
-    if let Ok(judgments) = state.user_repository.get_user_email_judgments(user_id) {
-        for judgment in judgments {
-            if judgment.should_notify && judgment.processed_at >= twenty_four_hours_ago {
-                attention_items.push(AttentionItem {
-                    id: judgment.id.unwrap_or(0),
-                    item_type: "email_critical".to_string(),
-                    summary: truncate_reason(&judgment.reason, 60),
-                    timestamp: judgment.processed_at,
-                    source: Some("email".to_string()),
-                });
-            }
-        }
-    }
-
-    // 2. Bridge disconnection events (unhandled)
+    // Bridge disconnection events (unhandled)
     if let Ok(events) = state
         .user_repository
         .get_pending_disconnection_events(user_id)
@@ -165,34 +149,6 @@ pub async fn get_dashboard_summary(
                 timestamp: event.detected_at,
                 source: Some(event.bridge_type.clone()),
             });
-        }
-    }
-
-    // 3. Due/overdue tasks (non-digest, non-recurring active tasks)
-    if let Ok(tasks) = state.user_repository.get_user_tasks(user_id) {
-        for task in &tasks {
-            // Skip digest/quiet_mode tasks and permanent recurring tasks for attention
-            if is_digest_task(&task.action) || is_quiet_mode_task(&task.action) {
-                continue;
-            }
-            if task.is_permanent.unwrap_or(0) == 1 {
-                continue;
-            }
-
-            // Check if task is due (trigger timestamp has passed)
-            if let Some(ts_str) = task.trigger.strip_prefix("once_") {
-                if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-                    if trigger_ts <= now_ts {
-                        attention_items.push(AttentionItem {
-                            id: task.id.unwrap_or(0),
-                            item_type: "task_due".to_string(),
-                            summary: task.action.clone(),
-                            timestamp: trigger_ts,
-                            source: None,
-                        });
-                    }
-                }
-            }
         }
     }
 
@@ -876,14 +832,6 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
-fn truncate_reason(reason: &str, max_len: usize) -> String {
-    if reason.len() <= max_len {
-        reason.to_string()
-    } else {
-        format!("{}...", &reason[..max_len - 3])
-    }
-}
-
 fn capitalize_bridge_type(bridge_type: &str) -> String {
     let mut chars = bridge_type.chars();
     match chars.next() {
@@ -988,6 +936,43 @@ fn calculate_sun_times_from_coords(
     let sunset = sunset.clamp(0.0, 24.0) as f32;
 
     (Some(sunrise), Some(sunset))
+}
+
+/// DELETE /api/admin/dashboard/triage/{item_type}/{id}
+/// Dismisses a single triage/attention item by type and ID.
+pub async fn dismiss_triage_item(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path((item_type, id)): Path<(String, i32)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+
+    let deleted = match item_type.as_str() {
+        "bridge_disconnected" => state
+            .user_repository
+            .delete_disconnection_event_by_id(id, user_id)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Failed to delete event: {}", e)})),
+                )
+            })?,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Unknown item type: {}", item_type)})),
+            ));
+        }
+    };
+
+    if deleted {
+        Ok(Json(serde_json::json!({"success": true})))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Item not found"})),
+        ))
+    }
 }
 
 #[cfg(test)]

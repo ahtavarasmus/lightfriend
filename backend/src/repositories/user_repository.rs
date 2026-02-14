@@ -2054,6 +2054,42 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn delete_disconnection_event_by_id(
+        &self,
+        event_id: i32,
+        user_id: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::bridge_disconnection_events;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::delete(
+            bridge_disconnection_events::table
+                .filter(bridge_disconnection_events::id.eq(event_id))
+                .filter(bridge_disconnection_events::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    pub fn delete_email_judgment_by_id(
+        &self,
+        judgment_id: i32,
+        user_id: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = diesel::delete(
+            email_judgments::table
+                .filter(email_judgments::id.eq(judgment_id))
+                .filter(email_judgments::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
     // Mark an email as processed
     pub fn mark_email_as_processed(
         &self,
