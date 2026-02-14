@@ -18,6 +18,9 @@ pub fn privacy_policy() -> Html {
                     <li>{"Email address (for account recovery and identification)"}</li>
                     <li>{"User-provided profile information (for AI assistant personalization)"}</li>
                     <li>{"Access tokens used to access the integrations you setup"}</li>
+                    <li>{"Location coordinates (latitude/longitude) for calculating sunrise/sunset times"}</li>
+                    <li>{"AI-generated triage items (attention summaries, suggested actions, priority levels)"}</li>
+                    <li>{"MCP server configuration data (server URLs, authentication tokens)"}</li>
                 </ul>
             </section>
 
@@ -60,6 +63,9 @@ pub fn privacy_policy() -> Html {
                     <li>{"Personalize responses based on your profile information"}</li>
                     <li>{"Provide context-aware assistance during calls"}</li>
                     <li>{"Improve service quality"}</li>
+                    <li>{"Automatically generate triage items that flag messages and events needing your attention"}</li>
+                    <li>{"Triage items include AI-generated summaries, suggested actions, reasoning, and contextual data"}</li>
+                    <li>{"Triage items are stored until dismissed, actioned, or expired"}</li>
                 </ul>
             </section>
 
@@ -83,6 +89,7 @@ pub fn privacy_policy() -> Html {
                     <li>{"Message Processing: Messages are processed and temporarily stored on our servers to enable format conversion between platforms. This is a technical necessity for service operation."}</li>
                     <li>{"Data Retention: Connection data is retained until you disconnect the service or delete your account. Messages are retained only as long as necessary for delivery."}</li>
                     <li>{"Third-Party Access: We do not share your messaging data with third parties except as required by law."}</li>
+                    <li>{"Room Identifiers: We store messaging platform room identifiers linked to your contact profiles to route messages to the correct contacts."}</li>
                 </ul>
                 <p>{"Important Disclaimers:"}</p>
                 <ul>
@@ -104,6 +111,7 @@ pub fn privacy_policy() -> Html {
                     <li><strong>{"What We Don't Store: "}</strong>{"We do not store your YouTube videos, watch history, search history, or any content beyond the encrypted authentication tokens necessary for the integration."}</li>
                     <li><strong>{"Usage: "}</strong>{"The stored tokens are used exclusively to authenticate with YouTube API when you actively use the YouTube features in our dashboard. We do not access your YouTube data in the background or use it to train AI models."}</li>
                     <li><strong>{"Sharing: "}</strong>{"We do not share your YouTube data or tokens with third parties, except as required by law."}</li>
+                    <li><strong>{"AI-Assisted Access: "}</strong>{"Our AI assistant can search YouTube and access your subscription feed on your behalf when processing your requests, using your stored OAuth tokens."}</li>
                     <li><strong>{"Revoking Access: "}</strong>{"You can disconnect YouTube from Lightfriend at any time through your account settings. You can also revoke Lightfriend's access to your Google account at any time by visiting your "}<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">{"Google Security Settings"}</a>{". Upon revocation through Lightfriend, your tokens are deleted and revoked immediately. Upon revocation through Google Security Settings, we will delete your tokens within 30 days."}</li>
                     <li><strong>{"Contact: "}</strong>{"For questions about our YouTube integration privacy practices, contact rasmus@ahtava.com."}</li>
                 </ul>
@@ -147,7 +155,19 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"12. Data Retention"}</h2>
+                <h2>{"12. MCP Server Integration"}</h2>
+                <p>{"Lightfriend allows you to configure custom third-party MCP (Model Context Protocol) servers to extend your AI assistant's capabilities."}</p>
+                <ul>
+                    <li>{"We store encrypted MCP server URLs and authentication tokens that you provide."}</li>
+                    <li>{"When the AI assistant uses MCP tools, your queries and related data may be sent to these external servers."}</li>
+                    <li>{"You are responsible for the third-party MCP servers you choose to connect."}</li>
+                    <li>{"Lightfriend is not liable for data handling, security practices, or any actions taken by user-configured MCP servers."}</li>
+                    <li>{"You can remove MCP server configurations at any time through your account settings."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"13. Data Retention"}</h2>
                 <p>{"We retain your data until:"}</p>
                 <ul>
                     <li>{"You request account deletion"}</li>
@@ -157,7 +177,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"13. Contact Information"}</h2>
+                <h2>{"14. Contact Information"}</h2>
                 <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
                 <p>{"Email: rasmus@ahtava.com"}</p>
                 <p>{"Location: Tampere, Finland"}</p>
@@ -305,7 +325,18 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"12. Indemnification"}</h2>
+                <h2>{"12. MCP Server Integration"}</h2>
+                <p>{"The Service allows you to configure custom third-party MCP (Model Context Protocol) servers. By using this feature:"}</p>
+                <ul>
+                    <li>{"You assume full responsibility for any third-party MCP servers you configure."}</li>
+                    <li>{"Data sent to MCP servers as part of AI processing is transmitted at your own risk."}</li>
+                    <li>{"Lightfriend is not liable for the behavior, data handling, availability, or security of any third-party MCP server."}</li>
+                    <li>{"You must ensure that your use of third-party MCP servers complies with applicable laws and the terms of those services."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"13. Indemnification"}</h2>
                 <p>{"You agree to indemnify, defend, and hold harmless Lightfriend, its owners, employees, and affiliates from any claims, damages, losses, or expenses (including legal fees) arising from:"}</p>
                 <ul>
                     <li>{"Your use of the Service or any connected integrations."}</li>
@@ -316,22 +347,22 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"13. Changes to Terms"}</h2>
+                <h2>{"14. Changes to Terms"}</h2>
                 <p>{"We may update these Terms from time to time. Continued use of the Service after any such changes constitutes your acceptance of the new Terms."}</p>
             </section>
 
             <section>
-                <h2>{"14. Governing Law"}</h2>
+                <h2>{"15. Governing Law"}</h2>
                 <p>{"These Terms are governed by and construed in accordance with the laws of Finland. Any disputes shall be resolved in the courts of Tampere, Finland."}</p>
             </section>
 
             <section>
-                <h2>{"15. Data Protection and Privacy"}</h2>
+                <h2>{"16. Data Protection and Privacy"}</h2>
                 <p>{"Your privacy and personal data are protected under our Privacy Policy, which forms an integral part of these Terms. By using the Service, you acknowledge that you have read and understood our Privacy Policy and consent to the collection and processing of your personal data as described therein."}</p>
             </section>
 
             <section>
-                <h2>{"16. Contact Us"}</h2>
+                <h2>{"17. Contact Us"}</h2>
                 <p>
                     {"For questions or concerns regarding these Terms, please contact us at "}
                     <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>

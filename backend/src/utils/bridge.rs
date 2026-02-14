@@ -1377,11 +1377,47 @@ pub async fn handle_bridge_message(
                 content
             );
 
-            // Record disconnection event for digest notification
+            // Record disconnection as triage item + legacy event
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32;
+
+            let bridge_name = match bridge.bridge_type.as_str() {
+                "whatsapp" => "WhatsApp",
+                "telegram" => "Telegram",
+                "signal" => "Signal",
+                other => other,
+            };
+
+            let context = serde_json::json!({
+                "bridge_type": bridge.bridge_type,
+            });
+
+            let new_item = crate::models::user_models::NewTriageItem {
+                user_id,
+                item_type: "bridge_disconnected".to_string(),
+                status: "pending".to_string(),
+                summary: format!("{} disconnected", bridge_name),
+                suggested_action: None,
+                reasoning: None,
+                context_json: Some(context.to_string()),
+                priority: 1,
+                source_type: Some("system".to_string()),
+                source_id: None,
+                created_at: current_time,
+                snooze_until: None,
+                expires_at: None,
+            };
+
+            if let Err(e) = state.user_repository.create_triage_item(new_item) {
+                tracing::error!(
+                    "Failed to create triage item for bridge disconnection: {}",
+                    e
+                );
+            }
+
+            // Legacy table (backward compat)
             if let Err(e) = state.user_repository.record_bridge_disconnection(
                 user_id,
                 &bridge.bridge_type,
@@ -1527,6 +1563,10 @@ pub async fn handle_bridge_message(
                         );
                     }
                     tracing::info!("set the last_seen_online to: {}", last_seen_online);
+                    // Auto-dismiss any pending triage items for this room
+                    let _ = state
+                        .user_repository
+                        .dismiss_triage_items_for_room(user_id, &room_id_str);
                     return;
                 }
             }
@@ -1572,6 +1612,10 @@ pub async fn handle_bridge_message(
         }
 
         if found_user_reply {
+            // Auto-dismiss any pending triage items for this room
+            let _ = state
+                .user_repository
+                .dismiss_triage_items_for_room(user_id, &room_id_str);
             return;
         }
     }
@@ -2240,6 +2284,7 @@ pub async fn handle_bridge_message(
             } else {
                 tracing::debug!("Message will be included in digest (notification_mode=digest)");
             }
+            return; // Skip triage item creation for digest/ignore
         }
         _ => {
             // Unknown mode, treat as critical
@@ -2248,6 +2293,178 @@ pub async fn handle_bridge_message(
                 notification_mode
             );
         }
+    }
+
+    // Create triage item with suggested reply for messages that triggered notifications.
+    // Skip for incoming calls (already handled above with early return).
+    // This runs in a spawned task to avoid blocking the main handler.
+    let state_clone = state.clone();
+    let service_clone = service.clone();
+    let chat_name_clone = chat_name.to_string();
+    let content_clone = content.clone();
+    let room_id_clone = room.room_id().to_string();
+    let sender_display = profile_nickname
+        .clone()
+        .unwrap_or_else(|| chat_name.to_string());
+    tokio::spawn(async move {
+        // Fetch recent user messages from the room for style context
+        let recent_user_msgs =
+            match get_user_messages_from_room(&state_clone, user_id, &room_id_clone, 5).await {
+                Ok(msgs) => msgs,
+                Err(e) => {
+                    tracing::debug!("Could not fetch recent user messages for triage: {}", e);
+                    Vec::new()
+                }
+            };
+
+        // Gather user context (calendar, tasks) for better reply drafting
+        let user_context = gather_user_context(&state_clone, user_id).await;
+
+        // Generate suggested reply
+        match crate::proactive::utils::generate_suggested_reply(
+            &state_clone,
+            user_id,
+            &service_clone,
+            &sender_display,
+            &content_clone,
+            &recent_user_msgs,
+            user_context.as_deref(),
+        )
+        .await
+        {
+            Ok((needs_reply, suggested_reply, reasoning)) => {
+                if !needs_reply {
+                    tracing::debug!(
+                        "Message from {} does not need a reply, skipping triage item",
+                        sender_display
+                    );
+                    return;
+                }
+
+                let current_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+
+                let context = serde_json::json!({
+                    "service": service_clone,
+                    "room_id": room_id_clone,
+                    "chat_name": chat_name_clone,
+                    "original_message": content_clone,
+                    "sender_name": sender_display,
+                });
+
+                let summary = format!(
+                    "{}: \"{}\"",
+                    sender_display,
+                    if content_clone.len() > 60 {
+                        format!("{}...", &content_clone[..57])
+                    } else {
+                        content_clone.clone()
+                    }
+                );
+
+                let new_item = crate::models::user_models::NewTriageItem {
+                    user_id,
+                    item_type: "message_reply".to_string(),
+                    status: "pending".to_string(),
+                    summary,
+                    suggested_action: suggested_reply,
+                    reasoning,
+                    context_json: Some(context.to_string()),
+                    priority: 0,
+                    source_type: Some("bridge_message".to_string()),
+                    source_id: Some(room_id_clone.clone()),
+                    created_at: current_time,
+                    snooze_until: None,
+                    expires_at: Some(current_time + 24 * 60 * 60), // expire after 24h
+                };
+
+                if let Err(e) = state_clone.user_repository.create_triage_item(new_item) {
+                    tracing::error!("Failed to create triage item for message reply: {}", e);
+                } else {
+                    tracing::info!(
+                        "Created triage item for message reply from {} on {}",
+                        sender_display,
+                        service_clone
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to generate suggested reply: {}", e);
+            }
+        }
+    });
+}
+
+/// Fetches recent messages sent BY the user in a specific room (for style context).
+async fn get_user_messages_from_room(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let room_id_parsed = matrix_sdk::ruma::OwnedRoomId::try_from(room_id)
+        .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+    let room = client
+        .get_room(&room_id_parsed)
+        .ok_or_else(|| anyhow!("Room not found"))?;
+
+    let own_user_id = client.user_id().unwrap().to_owned();
+    let messages = room.messages(MessagesOptions::backward()).await?;
+
+    let mut user_msgs: Vec<String> = Vec::new();
+    for event in messages.chunk {
+        if let Ok(AnySyncTimelineEvent::MessageLike(msg_event)) = event.raw().deserialize() {
+            if msg_event.sender() == own_user_id {
+                if let AnySyncTimelineEvent::MessageLike(
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(rm),
+                ) = event.raw().deserialize().unwrap()
+                {
+                    if let Some(original) = rm.as_original() {
+                        if let MessageType::Text(t) = &original.content.msgtype {
+                            user_msgs.push(t.body.clone());
+                        }
+                    }
+                }
+                if user_msgs.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(user_msgs)
+}
+
+/// Gathers relevant user context (tasks, user info) for better reply drafting.
+async fn gather_user_context(state: &Arc<AppState>, user_id: i32) -> Option<String> {
+    let mut context_parts: Vec<String> = Vec::new();
+
+    // Get active tasks for schedule awareness
+    if let Ok(tasks) = state.user_repository.get_user_tasks(user_id) {
+        let upcoming: Vec<String> = tasks
+            .iter()
+            .take(5)
+            .filter_map(|t| {
+                if t.action.is_empty() || t.action == "generate_digest" {
+                    None
+                } else {
+                    Some(format!("- {}", t.action))
+                }
+            })
+            .collect();
+
+        if !upcoming.is_empty() {
+            context_parts.push(format!("Active tasks/reminders:\n{}", upcoming.join("\n")));
+        }
+    }
+
+    if context_parts.is_empty() {
+        None
+    } else {
+        Some(context_parts.join("\n\n"))
     }
 }
 
