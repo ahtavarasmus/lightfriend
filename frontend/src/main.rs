@@ -35,7 +35,6 @@ mod pages {
     pub mod landing;
     pub mod money;
     pub mod termsprivacy;
-    pub mod proactive;
     pub mod faq;
     pub mod supported_countries;
     pub mod setup_costs;
@@ -47,13 +46,11 @@ mod pages {
 }
 mod components {
     pub mod notification;
-    pub mod feature_preview;
 }
 mod dashboard {
     pub mod dashboard_view;
     pub mod chat_box;
     pub mod triage_indicator;
-    pub mod next_scheduled;
     pub mod timeline_view;
     pub mod dashboard_footer;
     pub mod settings_panel;
@@ -65,10 +62,6 @@ mod dashboard {
     pub mod contact_avatar_row;
 }
 mod proactive {
-    pub mod common;
-    pub mod waiting_checks;
-    pub mod digest;
-    pub mod critical;
     pub mod contact_profiles;
 }
 mod connections {
@@ -84,12 +77,6 @@ mod connections {
     pub mod tesla;
     pub mod youtube;
     pub mod mcp;
-}
-mod controls {
-    pub mod tesla_controls;
-}
-mod media {
-    pub mod youtube_hub;
 }
 mod auth {
     pub mod connect;

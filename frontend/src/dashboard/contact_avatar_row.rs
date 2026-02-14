@@ -605,24 +605,6 @@ pub struct ContactAvatarRowProps {
     pub on_triage_snooze: Callback<TriageAttentionItem>,
 }
 
-/// Returns triage items that match a given contact profile by comparing source_id
-/// against the profile's room_ids (whatsapp_room_id, telegram_room_id, signal_room_id).
-fn items_for_contact<'a>(
-    items: &'a [TriageAttentionItem],
-    profile: &ContactProfile,
-) -> Vec<&'a TriageAttentionItem> {
-    items.iter().filter(|item| {
-        if let Some(ref sid) = item.source_id {
-            let sid = sid.as_str();
-            profile.whatsapp_room_id.as_deref() == Some(sid)
-                || profile.telegram_room_id.as_deref() == Some(sid)
-                || profile.signal_room_id.as_deref() == Some(sid)
-        } else {
-            false
-        }
-    }).collect()
-}
-
 #[function_component(ContactAvatarRow)]
 pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let profiles = use_state(|| Vec::<ContactProfile>::new());
@@ -1480,70 +1462,6 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 whatsapp_room_id: wa_rid,
                 telegram_room_id: tg_rid,
                 signal_room_id: sg_rid,
-                notes: profile.notes.clone(),
-            };
-
-            let modal = modal.clone();
-            let error_msg = error_msg.clone();
-            let saving = saving.clone();
-            let fetch_profiles = fetch_profiles.clone();
-
-            saving.set(true);
-            spawn_local(async move {
-                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
-                    if let Ok(response) = req.send().await {
-                        if response.ok() {
-                            dispatch_sync_event();
-                            fetch_profiles.emit(());
-                            modal.set(None);
-                        } else {
-                            error_msg.set(Some("Failed to save".to_string()));
-                        }
-                    } else {
-                        error_msg.set(Some("Network error".to_string()));
-                    }
-                }
-                saving.set(false);
-            });
-        })
-    };
-
-    // -----------------------------------------------------------------------
-    // Remove platform exception (use contact default)
-    // -----------------------------------------------------------------------
-    let remove_exception = {
-        let profiles = profiles.clone();
-        let modal = modal.clone();
-        let error_msg = error_msg.clone();
-        let saving = saving.clone();
-        let fetch_profiles = fetch_profiles.clone();
-        Callback::from(move |(profile_id, platform): (i32, String)| {
-            let profile = profiles.iter().find(|p| p.id == profile_id).cloned();
-            let Some(profile) = profile else { return };
-
-            let exceptions: Vec<ExceptionRequest> = profile.exceptions.iter()
-                .filter(|e| e.platform != platform)
-                .map(|e| ExceptionRequest {
-                    platform: e.platform.clone(),
-                    notification_mode: e.notification_mode.clone(),
-                    notification_type: e.notification_type.clone(),
-                    notify_on_call: e.notify_on_call,
-                })
-                .collect();
-
-            let request = CreateProfileRequest {
-                nickname: profile.nickname.clone(),
-                whatsapp_chat: profile.whatsapp_chat.clone(),
-                telegram_chat: profile.telegram_chat.clone(),
-                signal_chat: profile.signal_chat.clone(),
-                email_addresses: profile.email_addresses.clone(),
-                notification_mode: profile.notification_mode.clone(),
-                notification_type: profile.notification_type.clone(),
-                notify_on_call: profile.notify_on_call,
-                exceptions: if exceptions.is_empty() { None } else { Some(exceptions) },
-                whatsapp_room_id: profile.whatsapp_room_id.clone(),
-                telegram_room_id: profile.telegram_room_id.clone(),
-                signal_room_id: profile.signal_room_id.clone(),
                 notes: profile.notes.clone(),
             };
 

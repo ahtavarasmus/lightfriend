@@ -350,54 +350,6 @@ pub struct CommentRequest {
     pub text: String,
 }
 
-// Backend resolve response types for non-YouTube platforms
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct TikTokEmbedResponse {
-    pub video_id: String,
-    pub embed_url: String,
-    pub title: String,
-    pub author: String,
-    pub thumbnail_url: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RumbleEmbedResponse {
-    pub video_id: String,
-    pub embed_url: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct InstagramEmbedResponse {
-    pub post_id: String,
-    pub embed_url: String,
-    pub author: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct TwitterEmbedResponse {
-    pub tweet_id: String,
-    pub embed_url: String,
-    pub author: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct StreamableEmbedResponse {
-    pub video_id: String,
-    pub embed_url: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct DailymotionEmbedResponse {
-    pub video_id: String,
-    pub embed_url: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct VimeoEmbedResponse {
-    pub video_id: String,
-    pub embed_url: String,
-}
-
 // Resolved embed data that can hold any platform's response
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedEmbed {

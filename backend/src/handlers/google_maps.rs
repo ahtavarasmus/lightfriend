@@ -28,7 +28,7 @@ pub async fn handle_get_directions(
     })?;
 
     let client = reqwest::Client::new();
-    println!("haha");
+    tracing::debug!("google_maps: checkpoint");
 
     // Get starting coordinates
     let (start_lat, start_lon, _start_formatted) = match crate::utils::tool_exec::get_coordinates(
@@ -47,7 +47,7 @@ pub async fn handle_get_directions(
         }
     };
 
-    println!("haha");
+    tracing::debug!("google_maps: checkpoint");
     // Get ending coordinates
     let (end_lat, end_lon, _end_formatted) = match crate::utils::tool_exec::get_coordinates(
         &client,
@@ -64,7 +64,7 @@ pub async fn handle_get_directions(
             ));
         }
     };
-    println!("haha");
+    tracing::debug!("google_maps: checkpoint");
 
     // Normalize mode: map "public transport" to "transit", and validate others
     let api_mode = match request.mode.to_lowercase().as_str() {
@@ -88,7 +88,7 @@ pub async fn handle_get_directions(
         "https://maps.googleapis.com/maps/api/directions/json?origin={},{}&destination={},{}&mode={}&key={}",
         start_lat, start_lon, end_lat, end_lon, api_mode, google_maps_api_key
     );
-    println!("haha");
+    tracing::debug!("google_maps: checkpoint");
     let directions_response: Value = match client.get(&directions_url).send().await {
         Ok(res) => {
             let status = res.status();
@@ -103,7 +103,7 @@ pub async fn handle_get_directions(
             match res.json().await {
                 Ok(json) => json,
                 Err(e) => {
-                    println!("JSON parsing error: {}", e);
+                    tracing::debug!("JSON parsing error: {}", e);
                     return Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
                         AxumJson(json!({"error": "Failed to parse Google Maps API response"})),
@@ -112,14 +112,14 @@ pub async fn handle_get_directions(
             }
         }
         Err(e) => {
-            println!("Request error: {}", e);
+            tracing::debug!("Request error: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": "Failed to connect to Google Maps API"})),
             ));
         }
     };
-    println!("haha");
+    tracing::debug!("google_maps: checkpoint");
     // Check for API errors
     if directions_response["status"].as_str() != Some("OK") {
         let error_message = directions_response["error_message"]
@@ -135,7 +135,7 @@ pub async fn handle_get_directions(
     let duration;
     let distance;
     let mut instructions: Vec<String> = Vec::new();
-    println!("works?: {:#?}", directions_response);
+    tracing::debug!("directions response: {:#?}", directions_response);
 
     if let Some(routes) = directions_response["routes"].as_array() {
         if let Some(first_route) = routes.first() {
@@ -203,7 +203,7 @@ pub async fn handle_get_directions(
             AxumJson(json!({"error": "No routes found in response"})),
         ));
     }
-    println!("haha last one");
+    tracing::debug!("google_maps: final checkpoint");
     if instructions.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,

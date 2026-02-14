@@ -473,9 +473,10 @@ pub async fn create_priority_sender(
     auth_user: AuthUser,
     Json(request): Json<PrioritySenderRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!(
+    tracing::debug!(
         "Attempting to create priority sender for user {} with type: {}",
-        auth_user.user_id, request.service_type
+        auth_user.user_id,
+        request.service_type
     );
 
     let new_sender = NewPrioritySender {
@@ -488,9 +489,10 @@ pub async fn create_priority_sender(
 
     match state.user_repository.create_priority_sender(&new_sender) {
         Ok(_) => {
-            println!(
+            tracing::debug!(
                 "Successfully created priority sender {} for user {}",
-                request.sender, auth_user.user_id
+                request.sender,
+                auth_user.user_id
             );
             Ok(Json(
                 json!({"message": "Priority sender created successfully"}),
@@ -519,9 +521,10 @@ pub async fn delete_priority_sender(
     auth_user: AuthUser,
     Path((service_type, sender)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!(
+    tracing::debug!(
         "Attempting to delete priority sender {} for user {}",
-        sender, auth_user.user_id
+        sender,
+        auth_user.user_id
     );
 
     match state
@@ -529,9 +532,10 @@ pub async fn delete_priority_sender(
         .delete_priority_sender(auth_user.user_id, &service_type, &sender)
     {
         Ok(_) => {
-            println!(
+            tracing::debug!(
                 "Successfully deleted priority sender {} for user {}",
-                sender, auth_user.user_id
+                sender,
+                auth_user.user_id
             );
             Ok(Json(
                 json!({"message": "Priority sender deleted successfully"}),
@@ -561,7 +565,7 @@ pub async fn get_priority_senders(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Fetching priority senders for user {}", auth_user.user_id);
+    tracing::debug!("Fetching priority senders for user {}", auth_user.user_id);
     let senders = state
         .user_repository
         .get_priority_senders_all(auth_user.user_id)
@@ -614,7 +618,7 @@ pub async fn create_keyword(
     auth_user: AuthUser,
     Json(request): Json<KeywordRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!(
+    tracing::debug!(
         "Attempting to create keyword for user {}",
         auth_user.user_id
     );
@@ -654,9 +658,10 @@ pub async fn create_keyword(
 
     match state.user_repository.create_keyword(&new_keyword) {
         Ok(_) => {
-            println!(
+            tracing::debug!(
                 "Successfully created keyword {} for user {}",
-                request.keyword, auth_user.user_id
+                request.keyword,
+                auth_user.user_id
             );
             Ok(Json(json!({"message": "Keyword created successfully"})))
         }
@@ -680,9 +685,10 @@ pub async fn delete_keyword(
     auth_user: AuthUser,
     Path((service_type, keyword)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!(
+    tracing::debug!(
         "Attempting to delete keyword {} for user {}",
-        keyword, auth_user.user_id
+        keyword,
+        auth_user.user_id
     );
 
     match state
@@ -690,9 +696,10 @@ pub async fn delete_keyword(
         .delete_keyword(auth_user.user_id, &service_type, &keyword)
     {
         Ok(_) => {
-            println!(
+            tracing::debug!(
                 "Successfully deleted keyword {} for user {}",
-                keyword, auth_user.user_id
+                keyword,
+                auth_user.user_id
             );
             Ok(Json(json!({"message": "Keyword deleted successfully"})))
         }

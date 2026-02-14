@@ -97,7 +97,6 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
-    pub mod connection_auth;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
