@@ -105,20 +105,6 @@ const AVATAR_ROW_STYLES: &str = r#"
     z-index: 3;
 }
 
-.platform-bubble.ignored {
-    background: #555 !important;
-    position: relative;
-}
-.platform-bubble.ignored::after {
-    content: '';
-    position: absolute;
-    width: 2px;
-    height: 14px;
-    background: #e55;
-    transform: rotate(-45deg);
-    border-radius: 1px;
-}
-
 .bubble-pos-br { bottom: -4px; right: -4px; }
 .bubble-pos-bl { bottom: -4px; left: -4px; }
 .bubble-pos-tr { top: -4px; right: -4px; }
@@ -377,6 +363,80 @@ const AVATAR_ROW_STYLES: &str = r#"
 .people-info-close:hover {
     color: #ccc;
 }
+
+/* Override indicator on platform bubbles */
+.platform-bubble.overridden::before {
+    content: '\2605';
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 0.45rem;
+    color: #f5c542;
+    z-index: 4;
+}
+
+/* Mode badge on platform bubbles */
+.mode-badge {
+    position: absolute;
+    bottom: -4px;
+    left: -4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.3rem;
+    color: #fff;
+    z-index: 5;
+    border: 1px solid #1a1a2e;
+    pointer-events: none;
+    line-height: 1;
+}
+.mode-badge.mode-mention { background: #3b82f6; }
+.mode-badge.mode-critical { background: #f59e0b; }
+.mode-badge.mode-digest { background: #8b5cf6; }
+.mode-badge.mode-ignore { background: #ef4444; }
+
+/* Notification type icon below contact name */
+.avatar-noti-type {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 0.5rem;
+    color: #666;
+    margin-top: -2px;
+}
+.avatar-noti-type i { font-size: 0.45rem; }
+
+/* Read-only state for modal fields */
+.avatar-modal-row select:disabled,
+.avatar-modal-check input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Override status text */
+.avatar-modal-override-status {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+/* Customize / Reset to default button */
+.avatar-modal-btn-customize {
+    background: transparent;
+    color: #7EB2FF;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.75rem;
+    border: 1px solid rgba(126,178,255,0.25) !important;
+}
+.avatar-modal-btn-customize:hover {
+    background: rgba(126,178,255,0.08);
+    color: #a0c8ff;
+}
 "#;
 
 // ---------------------------------------------------------------------------
@@ -458,11 +518,23 @@ fn find_exception<'a>(profile: &'a ContactProfile, platform: &str) -> Option<&'a
     profile.exceptions.iter().find(|e| e.platform == platform)
 }
 
-fn is_platform_ignored(profile: &ContactProfile, platform_key: &str) -> bool {
+/// Returns the effective notification mode for a platform: exception mode if overridden, else contact default.
+fn effective_mode_for_platform<'a>(profile: &'a ContactProfile, platform_key: &str) -> &'a str {
     if let Some(exc) = find_exception(profile, platform_key) {
-        exc.notification_mode == "ignore"
+        exc.notification_mode.as_str()
     } else {
-        profile.notification_mode == "ignore"
+        profile.notification_mode.as_str()
+    }
+}
+
+/// Returns (icon_class, css_class) for modes other than "all". None means no badge needed.
+fn mode_badge_info(mode: &str) -> Option<(&'static str, &'static str)> {
+    match mode {
+        "mention" => Some(("fa-solid fa-at", "mode-mention")),
+        "critical" => Some(("fa-solid fa-bell", "mode-critical")),
+        "digest" => Some(("fa-solid fa-clock", "mode-digest")),
+        "ignore" => Some(("fa-solid fa-xmark", "mode-ignore")),
+        _ => None, // "all" or unknown - no badge
     }
 }
 
@@ -518,6 +590,7 @@ pub fn contact_avatar_row() -> Html {
     let exc_mode = use_state(|| String::new());
     let exc_type = use_state(|| "sms".to_string());
     let exc_notify_call = use_state(|| true);
+    let exc_override_mode = use_state(|| false);
 
     // Default settings form state
     let def_form_mode = use_state(|| "critical".to_string());
@@ -795,6 +868,7 @@ pub fn contact_avatar_row() -> Html {
         let exc_mode = exc_mode.clone();
         let exc_type = exc_type.clone();
         let exc_notify_call = exc_notify_call.clone();
+        let exc_override_mode = exc_override_mode.clone();
         let form_whatsapp = form_whatsapp.clone();
         let form_telegram = form_telegram.clone();
         let form_signal = form_signal.clone();
@@ -816,6 +890,8 @@ pub fn contact_avatar_row() -> Html {
         let error_msg = error_msg.clone();
         Callback::from(move |(profile_id, platform): (i32, String)| {
             if let Some(p) = profiles.iter().find(|p| p.id == profile_id) {
+                let has_exc = find_exception(p, &platform).is_some();
+                exc_override_mode.set(has_exc);
                 if let Some(exc) = find_exception(p, &platform) {
                     exc_mode.set(exc.notification_mode.clone());
                     exc_type.set(exc.notification_type.clone());
@@ -1201,6 +1277,118 @@ pub fn contact_avatar_row() -> Html {
     };
 
     // -----------------------------------------------------------------------
+    // Save chat-only changes (no exception created/modified)
+    // -----------------------------------------------------------------------
+    let save_chat_only = {
+        let profiles = profiles.clone();
+        let modal = modal.clone();
+        let form_whatsapp = form_whatsapp.clone();
+        let form_telegram = form_telegram.clone();
+        let form_signal = form_signal.clone();
+        let form_whatsapp_room_id = form_whatsapp_room_id.clone();
+        let form_telegram_room_id = form_telegram_room_id.clone();
+        let form_signal_room_id = form_signal_room_id.clone();
+        let form_whatsapp_selected = form_whatsapp_selected.clone();
+        let form_telegram_selected = form_telegram_selected.clone();
+        let form_signal_selected = form_signal_selected.clone();
+        let error_msg = error_msg.clone();
+        let saving = saving.clone();
+        let fetch_profiles = fetch_profiles.clone();
+        Callback::from(move |(profile_id, platform): (i32, String)| {
+            let profile = profiles.iter().find(|p| p.id == profile_id).cloned();
+            let Some(profile) = profile else { return };
+
+            // Validate that the bridge chat was selected from search results
+            let chat_val = match platform.as_str() {
+                "whatsapp" => (*form_whatsapp).clone(),
+                "telegram" => (*form_telegram).clone(),
+                "signal" => (*form_signal).clone(),
+                _ => String::new(),
+            };
+            let is_selected = match platform.as_str() {
+                "whatsapp" => *form_whatsapp_selected,
+                "telegram" => *form_telegram_selected,
+                "signal" => *form_signal_selected,
+                _ => true,
+            };
+            if !chat_val.is_empty() && !is_selected {
+                error_msg.set(Some("Select a chat from the search results.".to_string()));
+                return;
+            }
+
+            // Keep existing exceptions but exclude this platform (override mode is off)
+            let exceptions: Vec<ExceptionRequest> = profile.exceptions.iter()
+                .filter(|e| e.platform != platform)
+                .map(|e| ExceptionRequest {
+                    platform: e.platform.clone(),
+                    notification_mode: e.notification_mode.clone(),
+                    notification_type: e.notification_type.clone(),
+                    notify_on_call: e.notify_on_call,
+                })
+                .collect();
+
+            // Use form state for the current platform's chat, profile values for others
+            let (wa_chat, wa_rid) = if platform == "whatsapp" {
+                let v = (*form_whatsapp).clone();
+                (if v.is_empty() { None } else { Some(v) }, (*form_whatsapp_room_id).clone())
+            } else {
+                (profile.whatsapp_chat.clone(), profile.whatsapp_room_id.clone())
+            };
+            let (tg_chat, tg_rid) = if platform == "telegram" {
+                let v = (*form_telegram).clone();
+                (if v.is_empty() { None } else { Some(v) }, (*form_telegram_room_id).clone())
+            } else {
+                (profile.telegram_chat.clone(), profile.telegram_room_id.clone())
+            };
+            let (sg_chat, sg_rid) = if platform == "signal" {
+                let v = (*form_signal).clone();
+                (if v.is_empty() { None } else { Some(v) }, (*form_signal_room_id).clone())
+            } else {
+                (profile.signal_chat.clone(), profile.signal_room_id.clone())
+            };
+
+            // Always send Some() so backend replaces exceptions (None = "don't change")
+            let request = CreateProfileRequest {
+                nickname: profile.nickname.clone(),
+                whatsapp_chat: wa_chat,
+                telegram_chat: tg_chat,
+                signal_chat: sg_chat,
+                email_addresses: profile.email_addresses.clone(),
+                notification_mode: profile.notification_mode.clone(),
+                notification_type: profile.notification_type.clone(),
+                notify_on_call: profile.notify_on_call,
+                exceptions: Some(exceptions),
+                whatsapp_room_id: wa_rid,
+                telegram_room_id: tg_rid,
+                signal_room_id: sg_rid,
+            };
+
+            let modal = modal.clone();
+            let error_msg = error_msg.clone();
+            let saving = saving.clone();
+            let fetch_profiles = fetch_profiles.clone();
+
+            saving.set(true);
+            spawn_local(async move {
+                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
+                    if let Ok(response) = req.send().await {
+                        if response.ok() {
+                            dispatch_sync_event();
+                            fetch_profiles.emit(());
+                            modal.set(None);
+                        } else {
+                            error_msg.set(Some("Failed to save".to_string()));
+                        }
+                    } else {
+                        error_msg.set(Some("Network error".to_string()));
+                    }
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    // -----------------------------------------------------------------------
     // Remove platform exception (use contact default)
     // -----------------------------------------------------------------------
     let remove_exception = {
@@ -1508,11 +1696,12 @@ pub fn contact_avatar_row() -> Html {
 
         let bubbles = platforms.iter().enumerate().map(|(idx, pi)| {
             let pos = bubble_position_class(count, idx);
-            let ignored = is_platform_ignored(profile, pi.key);
-            let bubble_bg = if ignored { "#555".to_string() } else { pi.color.to_string() };
-            let ignored_class = if ignored { " ignored" } else { "" };
+            let has_override = find_exception(profile, pi.key).is_some();
+            let overridden_class = if has_override { " overridden" } else { "" };
             let platform_key = pi.key.to_string();
             let icon_class = pi.icon.to_string();
+            let eff_mode = effective_mode_for_platform(profile, pi.key);
+            let badge = mode_badge_info(eff_mode);
             let on_click = {
                 let cb = on_bubble_click.clone();
                 let pk = platform_key.clone();
@@ -1522,17 +1711,59 @@ pub fn contact_avatar_row() -> Html {
                 })
             };
 
+            let badge_html = if let Some((badge_icon, badge_css)) = badge {
+                html! {
+                    <span class={format!("mode-badge {}", badge_css)}>
+                        <i class={badge_icon}></i>
+                    </span>
+                }
+            } else {
+                html! {}
+            };
+
             html! {
                 <div
-                    class={format!("platform-bubble {}{}", pos, ignored_class)}
-                    style={format!("background: {};", bubble_bg)}
+                    class={format!("platform-bubble {}{}", pos, overridden_class)}
+                    style={format!("background: {};", pi.color)}
                     onclick={on_click}
                     title={pi.label.to_string()}
                 >
                     <i class={icon_class}></i>
+                    {badge_html}
                 </div>
             }
         }).collect::<Html>();
+
+        let mode_icon_html = match profile.notification_mode.as_str() {
+            "mention" => html! { <i class="fa-solid fa-at"></i> },
+            "critical" => html! { <i class="fa-solid fa-bell"></i> },
+            "digest" => html! { <i class="fa-solid fa-clock"></i> },
+            "ignore" => html! { <i class="fa-solid fa-xmark"></i> },
+            _ => html! {}, // "all" - no icon
+        };
+
+        let noti_type_html = match profile.notification_type.as_str() {
+            "sms" => html! {
+                <div class="avatar-noti-type">
+                    {mode_icon_html}
+                    <i class="fa-solid fa-comment-sms"></i>
+                </div>
+            },
+            "call" => html! {
+                <div class="avatar-noti-type">
+                    {mode_icon_html}
+                    <i class="fa-solid fa-phone"></i>
+                </div>
+            },
+            "call_sms" => html! {
+                <div class="avatar-noti-type">
+                    {mode_icon_html}
+                    <i class="fa-solid fa-comment-sms"></i>
+                    <i class="fa-solid fa-phone"></i>
+                </div>
+            },
+            _ => html! {},
+        };
 
         html! {
             <div class="avatar-item" onclick={on_avatar}>
@@ -1543,6 +1774,7 @@ pub fn contact_avatar_row() -> Html {
                     {bubbles}
                 </div>
                 <span class="avatar-label" title={nick.clone()}>{nick}</span>
+                {noti_type_html}
             </div>
         }
     };
@@ -1883,7 +2115,7 @@ pub fn contact_avatar_row() -> Html {
                 };
 
                 let current_mode = (*form_mode).clone();
-                let show_type = current_mode != "ignore" && current_mode != "digest";
+                let show_type = current_mode != "digest";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -1951,7 +2183,6 @@ pub fn contact_avatar_row() -> Html {
                                     <option value="all" selected={current_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_mode == "critical"}>{"Critical"}</option>
                                     <option value="digest" selected={current_mode == "digest"}>{"Digest"}</option>
-                                    <option value="ignore" selected={current_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             if show_type {
@@ -1960,7 +2191,7 @@ pub fn contact_avatar_row() -> Html {
                                     <select onchange={on_type}>
                                         <option value="sms" selected={*form_type == "sms"}>{"SMS"}</option>
                                         <option value="call" selected={*form_type == "call"}>{"Call"}</option>
-                                        <option value="call+sms" selected={*form_type == "call+sms"}>{"Call + SMS"}</option>
+                                        <option value="call_sms" selected={*form_type == "call_sms"}>{"Call + SMS"}</option>
                                     </select>
                                 </div>
                                 <div class="avatar-modal-check">
@@ -1991,7 +2222,6 @@ pub fn contact_avatar_row() -> Html {
                 let pi = PLATFORMS.iter().find(|p| p.key == platform.as_str());
                 let Some(pi) = pi else { return html! {} };
 
-                let has_exception = find_exception(&profile, &platform).is_some();
                 let err = (*error_msg).clone();
                 let is_saving = *saving;
                 let is_bridge = platform != "email";
@@ -2207,6 +2437,8 @@ pub fn contact_avatar_row() -> Html {
                     (String::new(), true, html! {}, Callback::noop())
                 };
 
+                let is_override = *exc_override_mode;
+
                 let on_mode = {
                     let exc_mode = exc_mode.clone();
                     Callback::from(move |e: Event| {
@@ -2231,16 +2463,39 @@ pub fn contact_avatar_row() -> Html {
                     })
                 };
 
-                let on_save = {
+                // Save: calls save_exception if override mode, save_chat_only otherwise
+                let on_save = if is_override {
                     let save = save_exception.clone();
+                    let platform = platform.clone();
+                    Callback::from(move |_: MouseEvent| { save.emit((pid, platform.clone())); })
+                } else {
+                    let save = save_chat_only.clone();
                     let platform = platform.clone();
                     Callback::from(move |_: MouseEvent| { save.emit((pid, platform.clone())); })
                 };
 
-                let on_remove = {
-                    let remove = remove_exception.clone();
-                    let platform = platform.clone();
-                    Callback::from(move |_: MouseEvent| { remove.emit((pid, platform.clone())); })
+                let on_customize = {
+                    let exc_override_mode = exc_override_mode.clone();
+                    Callback::from(move |_: MouseEvent| {
+                        exc_override_mode.set(true);
+                    })
+                };
+
+                let on_reset_default = {
+                    let exc_override_mode = exc_override_mode.clone();
+                    let exc_mode = exc_mode.clone();
+                    let exc_type = exc_type.clone();
+                    let exc_notify_call = exc_notify_call.clone();
+                    let profile_mode = profile.notification_mode.clone();
+                    let profile_type = profile.notification_type.clone();
+                    let profile_call = profile.notify_on_call;
+                    Callback::from(move |_: MouseEvent| {
+                        // Reset form to contact defaults (Save will persist the change)
+                        exc_override_mode.set(false);
+                        exc_mode.set(profile_mode.clone());
+                        exc_type.set(profile_type.clone());
+                        exc_notify_call.set(profile_call);
+                    })
                 };
 
                 let on_remove_chat = {
@@ -2290,29 +2545,31 @@ pub fn contact_avatar_row() -> Html {
                             if let Some(e) = err {
                                 <div class="avatar-modal-error">{e}</div>
                             }
+                            <div class="avatar-modal-override-status">
+                                {if is_override { "Custom settings active" } else { "Using contact defaults" }}
+                            </div>
                             <div class="avatar-modal-row">
                                 <label>{"Notification mode"}</label>
-                                <select onchange={on_mode}>
+                                <select onchange={on_mode} disabled={!is_override}>
                                     <option value="all" selected={current_exc_mode == "all"}>{"All"}</option>
                                     if is_bridge {
                                         <option value="mention" selected={current_exc_mode == "mention"}>{"@mention only"}</option>
                                     }
                                     <option value="critical" selected={current_exc_mode == "critical"}>{"Critical"}</option>
                                     <option value="digest" selected={current_exc_mode == "digest"}>{"Digest"}</option>
-                                    <option value="ignore" selected={current_exc_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             if show_type {
                                 <div class="avatar-modal-row">
                                     <label>{"Notification type"}</label>
-                                    <select onchange={on_type}>
+                                    <select onchange={on_type} disabled={!is_override}>
                                         <option value="sms" selected={*exc_type == "sms"}>{"SMS"}</option>
                                         <option value="call" selected={*exc_type == "call"}>{"Call"}</option>
-                                        <option value="call+sms" selected={*exc_type == "call+sms"}>{"Call + SMS"}</option>
+                                        <option value="call_sms" selected={*exc_type == "call_sms"}>{"Call + SMS"}</option>
                                     </select>
                                 </div>
                                 <div class="avatar-modal-check">
-                                    <input type="checkbox" id="av-exc-call" checked={*exc_notify_call} onchange={on_call} />
+                                    <input type="checkbox" id="av-exc-call" checked={*exc_notify_call} onchange={on_call} disabled={!is_override} />
                                     <label for="av-exc-call">{"Notify on incoming call"}</label>
                                 </div>
                             }
@@ -2320,6 +2577,15 @@ pub fn contact_avatar_row() -> Html {
                                 if is_bridge && has_chat {
                                     <button class="avatar-modal-btn-delete" onclick={on_remove_chat} disabled={is_saving}>
                                         {"Remove chat"}
+                                    </button>
+                                }
+                                if is_override {
+                                    <button class="avatar-modal-btn-customize" onclick={on_reset_default} disabled={is_saving}>
+                                        {"Reset to default"}
+                                    </button>
+                                } else {
+                                    <button class="avatar-modal-btn-customize" onclick={on_customize}>
+                                        {"Customize"}
                                     </button>
                                 }
                                 <button class="avatar-modal-btn-cancel" onclick={{
@@ -2369,7 +2635,7 @@ pub fn contact_avatar_row() -> Html {
                 };
 
                 let current_def_mode = (*def_form_mode).clone();
-                let show_type = current_def_mode != "ignore" && current_def_mode != "digest";
+                let show_type = current_def_mode != "digest";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -2387,7 +2653,6 @@ pub fn contact_avatar_row() -> Html {
                                     <option value="all" selected={current_def_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_def_mode == "critical"}>{"Critical"}</option>
                                     <option value="digest" selected={current_def_mode == "digest"}>{"Digest"}</option>
-                                    <option value="ignore" selected={current_def_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             if show_type {
@@ -2396,7 +2661,7 @@ pub fn contact_avatar_row() -> Html {
                                     <select onchange={on_type}>
                                         <option value="sms" selected={*def_form_type == "sms"}>{"SMS"}</option>
                                         <option value="call" selected={*def_form_type == "call"}>{"Call"}</option>
-                                        <option value="call+sms" selected={*def_form_type == "call+sms"}>{"Call + SMS"}</option>
+                                        <option value="call_sms" selected={*def_form_type == "call_sms"}>{"Call + SMS"}</option>
                                     </select>
                                 </div>
                                 <div class="avatar-modal-check">
@@ -2656,7 +2921,7 @@ pub fn contact_avatar_row() -> Html {
                 };
 
                 let current_add_mode = (*add_mode).clone();
-                let show_type = current_add_mode != "ignore" && current_add_mode != "digest";
+                let show_type = current_add_mode != "digest";
 
                 // WhatsApp suggestions
                 let wa_suggestions = if *show_whatsapp_suggestions {
@@ -2888,7 +3153,6 @@ pub fn contact_avatar_row() -> Html {
                                     <option value="all" selected={current_add_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_add_mode == "critical"}>{"Critical"}</option>
                                     <option value="digest" selected={current_add_mode == "digest"}>{"Digest"}</option>
-                                    <option value="ignore" selected={current_add_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             if show_type {
@@ -2897,7 +3161,7 @@ pub fn contact_avatar_row() -> Html {
                                     <select onchange={on_type}>
                                         <option value="sms" selected={*add_type == "sms"}>{"SMS"}</option>
                                         <option value="call" selected={*add_type == "call"}>{"Call"}</option>
-                                        <option value="call+sms" selected={*add_type == "call+sms"}>{"Call + SMS"}</option>
+                                        <option value="call_sms" selected={*add_type == "call_sms"}>{"Call + SMS"}</option>
                                     </select>
                                 </div>
                                 <div class="avatar-modal-check">
