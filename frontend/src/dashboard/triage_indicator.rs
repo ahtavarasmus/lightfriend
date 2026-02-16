@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
+use serde_json;
 
 pub const TRIAGE_STYLES: &str = r#"
 .quick-reply-btn {
@@ -240,6 +241,7 @@ pub struct AttentionItem {
     pub conversation_snippet: Vec<ConversationMessage>,
     pub service: Option<String>,
     pub sender_name: Option<String>,
+    pub context_json: Option<serde_json::Value>,
 }
 
 /// Format a unix timestamp into a relative or absolute time string.
@@ -617,6 +619,252 @@ pub fn quick_reply_flow(props: &QuickReplyFlowProps) -> Html {
                         }
                     }}
                 </div>
+            </div>
+        </>
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TrackedItemsList - compact list of auto-tracked email items
+// ---------------------------------------------------------------------------
+
+pub const TRACKED_ITEMS_STYLES: &str = r#"
+.tracked-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.tracked-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    background: rgba(245, 158, 11, 0.06);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+.tracked-item:hover {
+    background: rgba(245, 158, 11, 0.1);
+}
+.tracked-icon {
+    color: #e8a838;
+    font-size: 0.85rem;
+    width: 1.2rem;
+    text-align: center;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+.tracked-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.tracked-summary {
+    font-size: 0.85rem;
+    color: #ccc;
+    line-height: 1.3;
+}
+.tracked-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.tracked-category {
+    font-size: 0.65rem;
+    color: #e8a838;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+}
+.tracked-due {
+    font-size: 0.65rem;
+    color: #999;
+    flex-shrink: 0;
+}
+.tracked-due.overdue {
+    color: #e57373;
+    font-weight: 600;
+}
+.tracked-due.soon {
+    color: #e8a838;
+}
+.tracked-detected {
+    font-size: 0.65rem;
+    color: #555;
+}
+.tracked-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex-shrink: 0;
+}
+.tracked-btn {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    transition: color 0.15s;
+    flex-shrink: 0;
+}
+.tracked-btn:hover {
+    color: #81c784;
+}
+.tracked-btn.dismiss:hover {
+    color: #e57373;
+}
+"#;
+
+fn tracking_icon_class(item_type: &str) -> &'static str {
+    match item_type {
+        "email_invoice" => "fa-solid fa-file-invoice-dollar",
+        "email_shipment" => "fa-solid fa-box",
+        "email_deadline" => "fa-solid fa-clock",
+        "email_document" => "fa-solid fa-file-signature",
+        "email_appointment" => "fa-solid fa-calendar-check",
+        _ => "fa-solid fa-envelope",
+    }
+}
+
+fn tracking_category_label(item_type: &str) -> &'static str {
+    match item_type {
+        "email_invoice" => "Invoice",
+        "email_shipment" => "Shipment",
+        "email_deadline" => "Deadline",
+        "email_document" => "Document",
+        "email_appointment" => "Appointment",
+        _ => "Email",
+    }
+}
+
+/// Format a due date string (ISO format) into a relative description.
+/// Returns (display_text, css_class) where css_class indicates urgency.
+fn format_due_date(due_str: &str) -> (String, &'static str) {
+    // Parse "YYYY-MM-DD" into components
+    let parts: Vec<&str> = due_str.split('-').collect();
+    if parts.len() != 3 {
+        return (due_str.to_string(), "");
+    }
+    let (y, m, d) = match (parts[0].parse::<i32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+        (Ok(y), Ok(m), Ok(d)) => (y, m, d),
+        _ => return (due_str.to_string(), ""),
+    };
+
+    let now_ms = js_sys::Date::now();
+    let now_secs = (now_ms / 1000.0) as i64;
+
+    // Build target date at midnight local time via JS Date
+    let target = js_sys::Date::new_0();
+    target.set_full_year(y as u32);
+    target.set_month(m - 1);
+    target.set_date(d);
+    target.set_hours(0);
+    target.set_minutes(0);
+    target.set_seconds(0);
+    let target_secs = (target.get_time() / 1000.0) as i64;
+
+    let diff_days = (target_secs - now_secs) / 86400;
+
+    if diff_days < 0 {
+        let abs_days = (-diff_days) as u32;
+        if abs_days == 1 {
+            ("1 day overdue".to_string(), "overdue")
+        } else {
+            (format!("{} days overdue", abs_days), "overdue")
+        }
+    } else if diff_days == 0 {
+        ("Due today".to_string(), "overdue")
+    } else if diff_days == 1 {
+        ("Due tomorrow".to_string(), "soon")
+    } else if diff_days <= 7 {
+        (format!("Due in {} days", diff_days), "soon")
+    } else {
+        (format!("Due {}", due_str), "")
+    }
+}
+
+#[derive(Properties, PartialEq, Clone)]
+pub struct TrackedItemsListProps {
+    pub items: Vec<AttentionItem>,
+    pub on_complete: Callback<AttentionItem>,
+    pub on_dismiss: Callback<AttentionItem>,
+}
+
+#[function_component(TrackedItemsList)]
+pub fn tracked_items_list(props: &TrackedItemsListProps) -> Html {
+    if props.items.is_empty() {
+        return html! {};
+    }
+
+    html! {
+        <>
+            <style>{TRACKED_ITEMS_STYLES}</style>
+            <div class="tracked-list">
+                { for props.items.iter().map(|item| {
+                    let icon = tracking_icon_class(&item.item_type);
+                    let category = tracking_category_label(&item.item_type);
+
+                    let due_date = item.context_json.as_ref()
+                        .and_then(|v| v["due_date"].as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string());
+
+                    let (due_display, due_class) = due_date.as_deref()
+                        .map(format_due_date)
+                        .unwrap_or_default();
+
+                    let detected = format_msg_time(item.timestamp as i64);
+
+                    let complete_item = item.clone();
+                    let on_complete = props.on_complete.clone();
+                    let dismiss_item = item.clone();
+                    let on_dismiss = props.on_dismiss.clone();
+
+                    html! {
+                        <div class="tracked-item">
+                            <i class={classes!("tracked-icon", icon)}></i>
+                            <div class="tracked-body">
+                                <span class="tracked-summary">{&item.summary}</span>
+                                <div class="tracked-meta">
+                                    <span class="tracked-category">{category}</span>
+                                    if !due_display.is_empty() {
+                                        <span class={classes!("tracked-due", due_class)}>{&due_display}</span>
+                                    }
+                                    if !detected.is_empty() {
+                                        <span class="tracked-detected">{format!("Detected {}", detected)}</span>
+                                    }
+                                </div>
+                            </div>
+                            <div class="tracked-actions">
+                                <button
+                                    class="tracked-btn"
+                                    title="Mark complete"
+                                    onclick={Callback::from(move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        on_complete.emit(complete_item.clone());
+                                    })}
+                                >
+                                    <i class="fa-solid fa-check"></i>
+                                </button>
+                                <button
+                                    class="tracked-btn dismiss"
+                                    title="Dismiss"
+                                    onclick={Callback::from(move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        on_dismiss.emit(dismiss_item.clone());
+                                    })}
+                                >
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                })}
             </div>
         </>
     }

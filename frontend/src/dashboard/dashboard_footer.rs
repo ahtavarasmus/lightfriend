@@ -37,6 +37,21 @@ const FOOTER_STYLES: &str = r#"
     border-color: rgba(255, 255, 255, 0.25);
     color: #ccc;
 }
+.footer-btn-digest {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #e8a838;
+    padding: 0.5rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.footer-btn-digest:hover {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #f5b041;
+}
 "#;
 
 #[derive(Clone, PartialEq)]
@@ -51,13 +66,31 @@ pub struct DashboardFooterProps {
     pub on_activity_click: Callback<()>,
     #[prop_or_default]
     pub on_quiet_mode_change: Option<Callback<()>>,
+    #[prop_or_default]
+    pub on_enable_digest: Option<Callback<()>>,
 }
 
 #[function_component(DashboardFooter)]
 pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
-    let digest_text = match &props.next_digest {
-        Some(info) => format!("Next digest: {}", info.time_display),
-        None => "No digest scheduled".to_string(),
+    let digest_html = match &props.next_digest {
+        Some(info) => {
+            html! { <div class="footer-digest">{format!("Next digest: {}", info.time_display)}</div> }
+        }
+        None => {
+            if let Some(ref cb) = props.on_enable_digest {
+                let cb = cb.clone();
+                html! {
+                    <button
+                        class="footer-btn-digest"
+                        onclick={Callback::from(move |_| cb.emit(()))}
+                    >
+                        {"Enable daily digest"}
+                    </button>
+                }
+            } else {
+                html! { <div class="footer-digest">{"No digest scheduled"}</div> }
+            }
+        }
     };
 
     html! {
@@ -65,7 +98,7 @@ pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
             <style>{FOOTER_STYLES}</style>
             <div class="peace-footer">
                 <div class="footer-info">
-                    <div class="footer-digest">{digest_text}</div>
+                    {digest_html}
                 </div>
                 <div class="footer-actions">
                     <QuietModeIndicator

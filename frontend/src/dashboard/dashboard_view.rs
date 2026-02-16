@@ -8,7 +8,7 @@ use crate::profile::billing_models::UserProfile;
 use super::chat_box::ChatBox;
 use super::triage_indicator::{
     AttentionItem as TriageAttentionItem, ConversationMessage,
-    QuickReplyButton, QuickReplyFlow,
+    QuickReplyButton, QuickReplyFlow, TrackedItemsList,
 };
 use super::timeline_view::{UpcomingTask, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
@@ -589,6 +589,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         sender_name: ctx.and_then(|v| v["sender_name"].as_str().map(|s| s.to_string()))
                             .or_else(|| ctx.and_then(|v| v["chat_name"].as_str().map(|s| s.to_string())))
                             .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").nth(1).map(|n| n.to_string()))),
+                        context_json: item.context_json.clone(),
                     }
                 })
                 .collect(),
@@ -841,6 +842,48 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
+    // Complete tracked item callback (mark as done via execute endpoint)
+    let on_tracking_complete = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |item: TriageAttentionItem| {
+            let fetch_summary = fetch_summary.clone();
+            spawn_local(async move {
+                let url = format!("/api/triage/{}/execute", item.id);
+                if let Ok(req) = Api::post(&url).json(&serde_json::json!({"action": "completed"})) {
+                    if let Ok(resp) = req.send().await {
+                        if resp.ok() {
+                            fetch_summary.emit(());
+                        }
+                    }
+                }
+            });
+        })
+    };
+
+    // Enable daily digest callback
+    let on_enable_digest = {
+        let fetch_summary = fetch_summary.clone();
+        Callback::from(move |_: ()| {
+            let fetch_summary = fetch_summary.clone();
+            spawn_local(async move {
+                let body = serde_json::json!({
+                    "action": "generate_digest",
+                    "recurrence_rule": "daily",
+                    "recurrence_time": "08:00",
+                    "sources": "email,whatsapp,telegram,signal,calendar",
+                    "notification_type": "sms"
+                });
+                if let Ok(req) = Api::post("/api/filters/tasks").json(&body) {
+                    if let Ok(resp) = req.send().await {
+                        if resp.ok() {
+                            fetch_summary.emit(());
+                        }
+                    }
+                }
+            });
+        })
+    };
+
     // Callback for usage changes (refresh summary after chat)
     let on_usage_change = fetch_summary.clone();
 
@@ -1004,14 +1047,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 </div>
                 // Filter: message_reply items go to quick reply flow, rest stay as banners
                 { {
-                    let message_reply_items: Vec<TriageAttentionItem> = if props.user_profile.id == 1 {
-                        attention_items.iter()
-                            .filter(|item| item.item_type == "message_reply")
-                            .cloned()
-                            .collect()
-                    } else {
-                        vec![]
-                    };
+                    let message_reply_items: Vec<TriageAttentionItem> = attention_items.iter()
+                        .filter(|item| item.item_type == "message_reply")
+                        .cloned()
+                        .collect();
                     let reply_count = message_reply_items.len();
                     html! {
                         <>
@@ -1030,21 +1069,33 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </>
                     }
                 }}
-                { if props.user_profile.id == 1 {
-                    html! {
-                        <ContactAvatarRow
-                            attention_items={attention_items.clone()}
-                            on_triage_dismiss={on_triage_dismiss.clone()}
-                            on_triage_snooze={on_triage_snooze.clone()}
-                        />
-                    }
-                } else {
-                    html! {
-                        <ContactAvatarRow
-                            attention_items={vec![]}
-                            on_triage_dismiss={on_triage_dismiss.clone()}
-                            on_triage_snooze={on_triage_snooze.clone()}
-                        />
+                <ContactAvatarRow
+                    attention_items={attention_items.clone()}
+                    on_triage_dismiss={on_triage_dismiss.clone()}
+                    on_triage_snooze={on_triage_snooze.clone()}
+                />
+
+                // Tracked items section (email_* triage items)
+                { {
+                    let tracked_items: Vec<TriageAttentionItem> = attention_items.iter()
+                        .filter(|item| item.item_type.starts_with("email_"))
+                        .cloned()
+                        .collect();
+                    if tracked_items.is_empty() {
+                        html! {}
+                    } else {
+                        html! {
+                            <>
+                                <div class="section-label">
+                                    <span>{"Tracking"}</span>
+                                </div>
+                                <TrackedItemsList
+                                    items={tracked_items}
+                                    on_complete={on_tracking_complete.clone()}
+                                    on_dismiss={on_triage_dismiss.clone()}
+                                />
+                            </>
+                        }
                     }
                 }}
 
@@ -1056,6 +1107,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     quiet_mode={quiet_mode}
                     on_activity_click={on_activity_click}
                     on_quiet_mode_change={Some(on_quiet_mode_change)}
+                    on_enable_digest={Some(on_enable_digest)}
                 />
             </div>
 
