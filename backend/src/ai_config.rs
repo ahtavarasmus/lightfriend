@@ -412,6 +412,14 @@ impl AiConfig {
             return Err("No data received from streaming response".to_string());
         }
 
+        // Strip Kimi K2.5 tool-call markers that leak into the content text
+        // The model sometimes emits tool calls both as proper tool_calls deltas
+        // AND as text markers in the content stream
+        if let Some(pos) = content.find("<|tool_calls_section_begin|>") {
+            content.truncate(pos);
+        }
+        let content = content.trim().to_string();
+
         // Build assembled response JSON matching non-streaming format
         let message_content = if content.is_empty() {
             serde_json::Value::Null
