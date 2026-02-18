@@ -727,7 +727,7 @@ pub async fn handle_generate_digest(
         return Ok("No source data available to generate digest.".to_string());
     }
 
-    let (client, provider) = create_openai_client_for_user(state, user_id).map_err(
+    let (_client, provider) = create_openai_client_for_user(state, user_id).map_err(
         |e| -> Box<dyn std::error::Error + Send + Sync> {
             Box::new(std::io::Error::other(e.to_string()))
         },
@@ -806,7 +806,7 @@ Return JSON with a single field:
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .max_tokens(350);
 
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {

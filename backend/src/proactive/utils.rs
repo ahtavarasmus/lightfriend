@@ -118,7 +118,7 @@ pub async fn check_task_condition_match(
     message: &str,
     tasks: &[Task],
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let (_client, provider) = create_openai_client_for_user(state, user_id)?;
 
     // Format tasks with their conditions for matching
     let tasks_str = tasks
@@ -207,7 +207,7 @@ pub async fn check_task_condition_match(
         .temperature(0.0)
         .max_tokens(200);
 
-    let result = client.chat_completion(request).await?;
+    let result = state.ai_config.chat_completion(provider, &request).await?;
     let tool_call = result.choices[0]
         .message
         .tool_calls
@@ -566,7 +566,7 @@ pub async fn check_message_importance(
         }
     }
     // Build the chat payload ----------------------------------------------
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let (_client, provider) = create_openai_client_for_user(state, user_id)?;
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -658,7 +658,7 @@ pub async fn check_message_importance(
         .temperature(0.2)
         .max_tokens(200);
     // ---------------------------------------------------------------------
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {
@@ -714,7 +714,7 @@ pub async fn generate_suggested_reply(
     user_context: Option<&str>,
     contact_notes: Option<&str>,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let (_client, provider) = create_openai_client_for_user(state, user_id)?;
 
     // Build context about the user's messaging style from their recent messages
     let style_examples = if recent_user_messages.is_empty() {
@@ -868,7 +868,7 @@ Rules:
         reasoning: Option<String>,
     }
 
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {
@@ -2475,7 +2475,7 @@ pub async fn generate_digest(
     data: DigestData,
     priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let (_client, provider) = create_openai_client_for_user(state, user_id)?;
     // Format messages for the prompt
     let messages_str = data
         .messages
@@ -2571,7 +2571,7 @@ pub async fn generate_digest(
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .max_tokens(350);
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {

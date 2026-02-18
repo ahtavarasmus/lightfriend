@@ -389,7 +389,7 @@ async fn generate_notification_message(
         return Ok(action_result.to_string());
     }
 
-    let (client, provider) = create_openai_client_for_user(state, user_id)
+    let (_client, provider) = create_openai_client_for_user(state, user_id)
         .map_err(|e| format!("Failed to create AI client: {}", e))?;
 
     let system_prompt = r#"You are generating a brief SMS notification (max 160 chars) for the user.
@@ -430,7 +430,7 @@ Based on the task results, create a concise, friendly message.
 
     let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
 
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => Ok(result
             .choices
             .first()
@@ -454,7 +454,7 @@ async fn evaluate_condition(
         return Ok(false);
     }
 
-    let (client, provider) = create_openai_client_for_user(state, user_id)
+    let (_client, provider) = create_openai_client_for_user(state, user_id)
         .map_err(|e| format!("Failed to create AI client: {}", e))?;
 
     let system_prompt = r#"You are evaluating if source data matches a condition.
@@ -493,7 +493,7 @@ Be strict - only return true if there's a clear match."#;
 
     let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
 
-    match client.chat_completion(request).await {
+    match state.ai_config.chat_completion(provider, &request).await {
         Ok(result) => {
             let content = result
                 .choices

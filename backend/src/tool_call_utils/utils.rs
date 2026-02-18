@@ -171,7 +171,8 @@ pub struct EmailSelectResponse {
 }
 
 pub async fn select_most_relevant_email(
-    client: &OpenAIClient,
+    state: &Arc<AppState>,
+    provider: crate::AiProvider,
     model: String,
     query: &str,
     emails: &str,
@@ -218,7 +219,7 @@ pub async fn select_most_relevant_email(
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .max_tokens(200);
 
-    match client.chat_completion(select_req).await {
+    match state.ai_config.chat_completion(provider, &select_req).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {

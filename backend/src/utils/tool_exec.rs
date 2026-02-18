@@ -219,7 +219,7 @@ pub async fn ask_perplexity(
     system_prompt: &str,
 ) -> Result<String, Box<dyn Error>> {
     // Always use OpenRouter for Perplexity since it's an OpenRouter-specific model
-    let client = create_openai_client(state)?;
+    let _client = create_openai_client(state)?;
 
     let messages = vec![
         ChatCompletionMessage {
@@ -243,7 +243,10 @@ pub async fn ask_perplexity(
         messages,
     );
 
-    let response = client.chat_completion(request).await?;
+    let response = state
+        .ai_config
+        .chat_completion(crate::AiProvider::OpenRouter, &request)
+        .await?;
 
     let content = response.choices[0]
         .message

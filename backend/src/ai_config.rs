@@ -57,14 +57,10 @@ impl AiConfig {
 
     /// Determine which provider to use based on user's preference setting
     ///
-    /// preference: The user's llm_provider setting from the database
-    /// - Some("tinfoil") -> use Tinfoil
-    /// - Some("openai") or None -> use OpenRouter (default)
-    pub fn provider_for_user_with_preference(&self, preference: Option<&str>) -> AiProvider {
-        match preference {
-            Some("tinfoil") if self.tinfoil_api_key.is_some() => AiProvider::Tinfoil,
-            _ => AiProvider::OpenRouter,
-        }
+    /// Currently forced to OpenRouter - Tinfoil models have unreliable tool calling.
+    /// Tinfoil preference is ignored until their models properly support function calling.
+    pub fn provider_for_user_with_preference(&self, _preference: Option<&str>) -> AiProvider {
+        AiProvider::OpenRouter
     }
 
     /// Get the endpoint URL for a provider
@@ -89,16 +85,14 @@ impl AiConfig {
     /// Get the model name for a provider and purpose
     ///
     /// OpenRouter: GPT-4o for everything (supports vision + tools)
-    /// Tinfoil:
-    ///   - Default: kimi-k2-5 (tools + vision multimodal)
-    ///   - VisionOnly: qwen3-vl-30b (vision, no tools)
+    /// Tinfoil: disabled for now - tool calling unreliable on available models
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
             // OpenRouter models
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
             (AiProvider::OpenRouter, ModelPurpose::VisionOnly) => "openai/gpt-4o-2024-11-20",
 
-            // Tinfoil models
+            // Tinfoil models (kept for future use when tool calling is reliable)
             (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
             (AiProvider::Tinfoil, ModelPurpose::VisionOnly) => "qwen3-vl-30b",
         }
@@ -124,6 +118,92 @@ impl AiConfig {
             .build()
     }
 
+    /// Make a chat completion request directly via reqwest.
+    /// This bypasses the openai-api-rs library's response parsing which requires
+    /// fields that some providers (e.g. Tinfoil) don't return.
+    pub async fn chat_completion(
+        &self,
+        provider: AiProvider,
+        request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
+    ) -> Result<
+        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+        openai_api_rs::v1::error::APIError,
+    > {
+        let url = format!("{}/chat/completions", self.endpoint(provider));
+        let api_key = self.api_key(provider);
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(openai_api_rs::v1::error::APIError::CustomError {
+                message: format!("{}: {}", status, text),
+            });
+        }
+
+        // Some providers (Tinfoil) return HTTP 200 but with an error body
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(err_obj) = parsed.get("error").and_then(|e| e.as_object()) {
+                let msg = err_obj
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown error");
+                let err_type = err_obj
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("unknown");
+                return Err(openai_api_rs::v1::error::APIError::CustomError {
+                    message: format!("Provider error ({}): {}", err_type, msg),
+                });
+            }
+        }
+
+        // Parse with tolerance for missing optional fields
+        // Some providers (Tinfoil) omit "object" which openai-api-rs requires
+        let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            openai_api_rs::v1::error::APIError::CustomError {
+                message: format!("Failed to parse JSON: {} / response {}", e, text),
+            }
+        })?;
+
+        // Inject missing fields that openai-api-rs v5.2.7 requires as non-optional
+        // Tinfoil omits several fields (object, created, model, usage)
+        if let Some(obj) = json.as_object_mut() {
+            if !obj.contains_key("object") {
+                obj.insert("object".into(), serde_json::json!("chat.completion"));
+            }
+            if !obj.contains_key("created") {
+                obj.insert("created".into(), serde_json::json!(0));
+            }
+            if !obj.contains_key("model") {
+                obj.insert("model".into(), serde_json::json!("unknown"));
+            }
+            if !obj.contains_key("usage") {
+                obj.insert(
+                    "usage".into(),
+                    serde_json::json!({
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    }),
+                );
+            }
+        }
+
+        serde_json::from_value(json).map_err(|e| openai_api_rs::v1::error::APIError::CustomError {
+            message: format!("Failed to parse response: {}", e),
+        })
+    }
+
     /// Call vision model to describe an image (for two-step processing)
     /// Returns a text description of the image
     pub async fn describe_image(
@@ -137,7 +217,6 @@ impl AiConfig {
             ImageUrlType, MessageRole,
         };
 
-        let client = self.create_client(provider)?;
         let model = self.model(provider, ModelPurpose::VisionOnly);
 
         // Build prompt based on whether user provided text
@@ -173,7 +252,7 @@ impl AiConfig {
 
         let request = ChatCompletionRequest::new(model.to_string(), messages).max_tokens(500);
 
-        let response = client.chat_completion(request).await?;
+        let response = self.chat_completion(provider, &request).await?;
 
         let content = response
             .choices

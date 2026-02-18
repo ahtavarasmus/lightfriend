@@ -923,14 +923,7 @@ CHANGE RULES:
     let ai_config = &state.ai_config;
     let provider = ai_config.provider_for_user_with_preference(None);
     tracing::info!("Using AI provider: {:?}", provider);
-    let client = ai_config.create_client(provider).map_err(|e| {
-        tracing::error!("Failed to create AI client: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "AI service unavailable"})),
-        )
-    })?;
-    tracing::info!("AI client created successfully");
+    tracing::info!("AI provider: {:?}", provider);
 
     let messages = vec![ChatCompletionMessage {
         role: MessageRole::user,
@@ -947,13 +940,17 @@ CHANGE RULES:
         .temperature(0.1);
 
     tracing::info!("Sending request to AI...");
-    let response = client.chat_completion(ai_request).await.map_err(|e| {
-        tracing::error!("AI request failed: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("AI request failed: {}", e)})),
-        )
-    })?;
+    let response = state
+        .ai_config
+        .chat_completion(provider, &ai_request)
+        .await
+        .map_err(|e| {
+            tracing::error!("AI request failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("AI request failed: {}", e)})),
+            )
+        })?;
     tracing::info!("AI response received");
 
     let ai_response = response

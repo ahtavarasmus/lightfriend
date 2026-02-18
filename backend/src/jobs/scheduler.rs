@@ -1104,6 +1104,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         let sources = task.sources.clone();
                         let condition = task.condition.clone();
 
+                        // Mark as running BEFORE spawning to prevent duplicate execution
+                        // on the next cron tick
+                        let _ = state.user_repository.update_task_status(task_id, "running");
+
                         tokio::spawn(async move {
                             debug!(
                                 "Executing scheduled task {} for user {}: {}",
@@ -1132,19 +1136,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 }
                                 crate::utils::action_executor::ActionResult::Failed { error } => {
                                     error!("Task {} failed: {}", task_id, error);
-                                    // Optionally notify user of failure
-                                    let noti_type = format!("task_failed_{}", notification_type);
-                                    crate::proactive::utils::send_notification(
-                                        &state,
-                                        user_id,
-                                        &format!("Your scheduled task failed: {}", error),
-                                        noti_type,
-                                        Some(
-                                            "Sorry, your scheduled task encountered an error."
-                                                .to_string(),
-                                        ),
-                                    )
-                                    .await;
+                                    // Log failure but don't spam user with internal errors
                                 }
                             }
 

@@ -571,7 +571,7 @@ pub async fn handle_fetch_specific_email(
     query: &str,
 ) -> String {
     // Create OpenAI client for email selection (user-based routing)
-    let (client, provider) =
+    let (_client, provider) =
         match crate::tool_call_utils::utils::create_openai_client_for_user(state, user_id) {
             Ok(result) => result,
             Err(e) => {
@@ -641,7 +641,8 @@ pub async fn handle_fetch_specific_email(
                 .model(provider, ModelPurpose::Default)
                 .to_string();
             match crate::tool_call_utils::utils::select_most_relevant_email(
-                &client,
+                state,
+                provider,
                 model,
                 &enhanced_query,
                 &formatted_emails,
