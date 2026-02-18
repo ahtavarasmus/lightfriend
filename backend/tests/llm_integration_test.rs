@@ -60,6 +60,16 @@ fn setup_user_with_location(state: &Arc<AppState>) -> User {
     user
 }
 
+/// Create a test user configured to use Tinfoil provider
+fn setup_tinfoil_user(state: &Arc<AppState>) -> User {
+    let user = setup_user_with_location(state);
+    state
+        .user_core
+        .update_llm_provider(user.id, "tinfoil")
+        .expect("Failed to set llm_provider to tinfoil");
+    user
+}
+
 /// Send a message through the full SMS processing pipeline (with real LLM, no Twilio send)
 async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioResponse {
     let payload = TwilioWebhookPayload {
@@ -716,5 +726,106 @@ async fn test_llm_weather_source_with_action() {
         task.trigger.starts_with("once_"),
         "Expected once_ trigger, got: {}",
         task.trigger
+    );
+}
+
+// =============================================================================
+// Tinfoil provider tests - same scenarios but using Tinfoil streaming
+// Run with: cargo test --test llm_integration_test tinfoil -- --ignored
+// Requires TINFOIL_API_KEY in backend/.env
+// =============================================================================
+
+/// Helper: send message with retry using Tinfoil provider
+async fn send_tinfoil_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResponse) {
+    let mut last_response = None;
+    for attempt in 1..=MAX_RETRIES {
+        let state = create_llm_test_state();
+        let user = setup_tinfoil_user(&state);
+        let response = send_message(&state, &user, body).await;
+        if response.created_task_id.is_some() {
+            return (state, user, response);
+        }
+        eprintln!(
+            "  Tinfoil attempt {}/{} did not create task. Response: {}",
+            attempt, MAX_RETRIES, response.message
+        );
+        last_response = Some((state, user, response));
+    }
+    last_response.unwrap()
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_tinfoil_simple_reminder() {
+    let (state, user, response) =
+        send_tinfoil_message_with_retry("remind me at 9am tomorrow to call the dentist").await;
+
+    assert!(
+        response.created_task_id.is_some(),
+        "Expected Tinfoil to create a task after {} retries. Response: {}",
+        MAX_RETRIES,
+        response.message
+    );
+
+    let tasks = get_user_tasks(&state, user.id);
+    let task = &tasks[0];
+    assert!(
+        task.trigger.starts_with("once_"),
+        "Expected once_ trigger, got: {}",
+        task.trigger
+    );
+    assert!(
+        task.action.contains("send_reminder"),
+        "Expected send_reminder action, got: {}",
+        task.action
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_tinfoil_weather_conditional() {
+    let (state, user, response) = send_tinfoil_message_with_retry(
+        "if it's below freezing at 7am tomorrow, remind me to warm up the car",
+    )
+    .await;
+
+    assert!(
+        response.created_task_id.is_some(),
+        "Expected Tinfoil to create a task after {} retries. Response: {}",
+        MAX_RETRIES,
+        response.message
+    );
+
+    let tasks = get_user_tasks(&state, user.id);
+    let task = &tasks[0];
+    let sources = task.sources.as_deref().unwrap_or("");
+    assert!(
+        sources.contains("weather"),
+        "Expected sources to contain 'weather', got: {:?}",
+        task.sources
+    );
+    assert!(
+        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
+        "Expected non-empty condition, got: {:?}",
+        task.condition
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_tinfoil_realtime_question() {
+    let state = create_llm_test_state();
+    let user = setup_tinfoil_user(&state);
+
+    let response = send_message(&state, &user, "what time is it?").await;
+
+    assert!(
+        response.created_task_id.is_none(),
+        "Expected NO task for realtime question via Tinfoil. Got task_id: {:?}",
+        response.created_task_id
+    );
+    assert!(
+        !response.message.is_empty(),
+        "Expected non-empty response from Tinfoil"
     );
 }
