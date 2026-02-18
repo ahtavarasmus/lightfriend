@@ -76,10 +76,28 @@ impl RequestWrapper {
 
         // Check if we got a 401
         if response.status() == 401 {
-            // Special case: if this is an auth status check, don't attempt refresh
-            // This is expected for non-logged-in users and shouldn't trigger redirect
+            // Special case: if this is an auth status check, try refresh but never redirect
             if self.path == "/api/auth/status" {
-                gloo_console::log!("Auth status check returned 401 (not logged in), returning response");
+                gloo_console::log!("Auth status check returned 401, attempting token refresh...");
+                let refresh_url = format!("{}/api/auth/refresh", config::get_backend_url());
+                if let Ok(refresh_resp) = Request::post(&refresh_url)
+                    .credentials(RequestCredentials::Include)
+                    .send()
+                    .await
+                {
+                    if refresh_resp.ok() {
+                        gloo_console::log!("Token refresh succeeded, retrying auth status check...");
+                        let full_url = format!("{}/api/auth/status", config::get_backend_url());
+                        if let Ok(retry) = Request::get(&full_url)
+                            .credentials(RequestCredentials::Include)
+                            .send()
+                            .await
+                        {
+                            return Ok(retry);
+                        }
+                    }
+                }
+                gloo_console::log!("Token refresh failed, user is not logged in");
                 return Ok(response);
             }
 
