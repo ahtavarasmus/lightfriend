@@ -1181,9 +1181,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     break;
                 }
                 Err(e) => {
-                    last_error = format!("{}", e);
+                    last_error = format!("{:?}", e);
                     tracing::warn!(
-                        "Chat completion attempt {}/{} failed: {}",
+                        "Chat completion attempt {}/{} failed: {:?}",
                         attempt,
                         MAX_RETRIES,
                         e
