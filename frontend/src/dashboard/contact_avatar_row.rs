@@ -8,8 +8,6 @@ use crate::proactive::contact_profiles::{
     CreateProfileRequest, ExceptionRequest, UpdateDefaultModeRequest,
     UpdatePhoneContactModeRequest, Room, SearchResponse,
 };
-use super::triage_indicator::AttentionItem as TriageAttentionItem;
-
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -598,15 +596,10 @@ enum ModalType {
 // ---------------------------------------------------------------------------
 
 #[derive(Properties, PartialEq, Clone)]
-pub struct ContactAvatarRowProps {
-    #[prop_or_default]
-    pub attention_items: Vec<TriageAttentionItem>,
-    pub on_triage_dismiss: Callback<TriageAttentionItem>,
-    pub on_triage_snooze: Callback<TriageAttentionItem>,
-}
+pub struct ContactAvatarRowProps {}
 
 #[function_component(ContactAvatarRow)]
-pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
+pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     let profiles = use_state(|| Vec::<ContactProfile>::new());
     let default_mode = use_state(|| "critical".to_string());
     let default_noti_type = use_state(|| "sms".to_string());

@@ -43,16 +43,10 @@ pub struct QuietModeInfo {
 #[derive(Serialize)]
 pub struct AttentionItem {
     pub id: i32,
-    pub item_type: String, // "message_reply", "bridge_disconnected", "action_approval"
+    pub item_type: String, // "monitor", "tracked_item"
     pub summary: String,
-    pub timestamp: i32,
+    pub next_check_at: Option<i32>,
     pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggested_action: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_json: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
 }
@@ -162,17 +156,19 @@ pub async fn get_dashboard_summary(
             id: item.id.unwrap_or(0),
             item_type: item_type.to_string(),
             summary: item.summary.clone(),
-            timestamp: item.created_at,
+            next_check_at: item.next_check_at,
             source: item.source_id.clone(),
-            suggested_action: None,
-            reasoning: None,
-            context_json: None,
             source_id: item.source_id.clone(),
         });
     }
 
-    // Sort by timestamp (most recent first)
-    attention_items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    // Sort by next_check_at (soonest first, items without it sort last)
+    attention_items.sort_by(|a, b| match (a.next_check_at, b.next_check_at) {
+        (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
     let attention_count = attention_items.len() as i32;
 
     // Find next scheduled item (soonest upcoming non-digest item)

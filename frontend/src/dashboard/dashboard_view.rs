@@ -6,10 +6,7 @@ use crate::utils::api::Api;
 use crate::profile::billing_models::UserProfile;
 
 use super::chat_box::ChatBox;
-use super::triage_indicator::{
-    AttentionItem as TriageAttentionItem, ConversationMessage,
-    QuickReplyButton, QuickReplyFlow, TrackedItemsList,
-};
+use super::triage_indicator::AttentionItem;
 use super::timeline_view::{UpcomingTask, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
@@ -279,14 +276,9 @@ struct AttentionItemResponse {
     id: i32,
     item_type: String,
     summary: String,
-    timestamp: i32,
+    #[serde(default)]
+    next_check_at: Option<i32>,
     source: Option<String>,
-    #[serde(default)]
-    suggested_action: Option<String>,
-    #[serde(default)]
-    reasoning: Option<String>,
-    #[serde(default)]
-    context_json: Option<serde_json::Value>,
     #[serde(default)]
     source_id: Option<String>,
 }
@@ -439,9 +431,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Task preview state (shown below chatbox after creation, before entering edit mode)
     let preview_task = use_state(|| None::<UpcomingTask>);
 
-    // Quick reply card flow state
-    let quick_reply_open = use_state(|| false);
-
     // Fetch YouTube connection status
     {
         let youtube_connected = youtube_connected.clone();
@@ -560,37 +549,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             s.attention_count,
             s.attention_items
                 .iter()
-                .map(|item| {
-                    let ctx = item.context_json.as_ref();
-                    let conversation_snippet = ctx
-                        .and_then(|v| v["conversation_snippet"].as_array())
-                        .map(|arr| arr.iter().filter_map(|entry| {
-                            Some(ConversationMessage {
-                                sender: entry["sender"].as_str()?.to_string(),
-                                text: entry["text"].as_str()?.to_string(),
-                                ts: entry["ts"].as_i64().unwrap_or(0),
-                            })
-                        }).collect())
-                        .unwrap_or_default();
-                    TriageAttentionItem {
-                        id: item.id,
-                        item_type: item.item_type.clone(),
-                        summary: item.summary.clone(),
-                        timestamp: item.timestamp,
-                        source: item.source.clone(),
-                        suggested_action: item.suggested_action.clone(),
-                        reasoning: item.reasoning.clone(),
-                        original_message: ctx
-                            .and_then(|v| v["original_message"].as_str().map(|s| s.to_string())),
-                        source_id: item.source_id.clone(),
-                        conversation_snippet,
-                        service: ctx.and_then(|v| v["service"].as_str().map(|s| s.to_string()))
-                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").next().map(|n| n.to_lowercase()))),
-                        sender_name: ctx.and_then(|v| v["sender_name"].as_str().map(|s| s.to_string()))
-                            .or_else(|| ctx.and_then(|v| v["chat_name"].as_str().map(|s| s.to_string())))
-                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").nth(1).map(|n| n.to_string()))),
-                        context_json: item.context_json.clone(),
-                    }
+                .map(|item| AttentionItem {
+                    id: item.id,
+                    item_type: item.item_type.clone(),
+                    summary: item.summary.clone(),
+                    next_check_at: item.next_check_at,
+                    source: item.source.clone(),
+                    source_id: item.source_id.clone(),
                 })
                 .collect(),
         ),
@@ -779,81 +744,16 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Dismiss triage item callback
-    let on_triage_dismiss = {
+    // Dismiss item callback
+    let on_dismiss_item = {
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: TriageAttentionItem| {
+        Callback::from(move |item: AttentionItem| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                let url = format!("/api/triage/{}", item.id);
+                let url = format!("/api/items/{}", item.id);
                 if let Ok(resp) = Api::delete(&url).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
-                    }
-                }
-            });
-        })
-    };
-
-    // Snooze triage item callback
-    let on_triage_snooze = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: TriageAttentionItem| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                let url = format!("/api/triage/{}/snooze", item.id);
-                if let Ok(req) = Api::post(&url).json(&serde_json::json!({"minutes": 60})) {
-                    if let Ok(resp) = req.send().await {
-                        if resp.ok() {
-                            fetch_summary.emit(());
-                        }
-                    }
-                }
-            });
-        })
-    };
-
-    // Quick reply flow callbacks
-    let on_open_quick_reply = {
-        let quick_reply_open = quick_reply_open.clone();
-        Callback::from(move |_: ()| {
-            quick_reply_open.set(true);
-        })
-    };
-
-    let on_close_quick_reply = {
-        let quick_reply_open = quick_reply_open.clone();
-        Callback::from(move |_: ()| {
-            quick_reply_open.set(false);
-        })
-    };
-
-    let on_item_sent = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_item: TriageAttentionItem| {
-            fetch_summary.emit(());
-        })
-    };
-
-    let on_item_dismissed = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_item: TriageAttentionItem| {
-            fetch_summary.emit(());
-        })
-    };
-
-    // Complete tracked item callback (mark as done via execute endpoint)
-    let on_tracking_complete = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: TriageAttentionItem| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                let url = format!("/api/triage/{}/execute", item.id);
-                if let Ok(req) = Api::post(&url).json(&serde_json::json!({"action": "completed"})) {
-                    if let Ok(resp) = req.send().await {
-                        if resp.ok() {
-                            fetch_summary.emit(());
-                        }
                     }
                 }
             });
@@ -1018,7 +918,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             <div>
                                 { for system_items.iter().map(|item| {
                                     let dismiss_item = (*item).clone();
-                                    let on_dismiss = on_triage_dismiss.clone();
+                                    let on_dismiss = on_dismiss_item.clone();
                                     html! {
                                         <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.2);border-radius:8px;margin-bottom:0.5rem;">
                                             <span style="color:#f59e0b;font-size:0.8rem;font-weight:600;">{"!"}</span>
@@ -1045,59 +945,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 <div class="section-label">
                     <span>{"People"}</span>
                 </div>
-                // Filter: message_reply items go to quick reply flow, rest stay as banners
-                { {
-                    let message_reply_items: Vec<TriageAttentionItem> = attention_items.iter()
-                        .filter(|item| item.item_type == "message_reply")
-                        .cloned()
-                        .collect();
-                    let reply_count = message_reply_items.len();
-                    html! {
-                        <>
-                            <QuickReplyButton
-                                message_reply_count={reply_count}
-                                on_open={on_open_quick_reply.clone()}
-                            />
-                            if *quick_reply_open {
-                                <QuickReplyFlow
-                                    items={message_reply_items}
-                                    on_close={on_close_quick_reply.clone()}
-                                    on_item_sent={on_item_sent.clone()}
-                                    on_item_dismissed={on_item_dismissed.clone()}
-                                />
-                            }
-                        </>
-                    }
-                }}
-                <ContactAvatarRow
-                    attention_items={attention_items.clone()}
-                    on_triage_dismiss={on_triage_dismiss.clone()}
-                    on_triage_snooze={on_triage_snooze.clone()}
-                />
-
-                // Tracked items section (email_* triage items)
-                { {
-                    let tracked_items: Vec<TriageAttentionItem> = attention_items.iter()
-                        .filter(|item| item.item_type.starts_with("email_"))
-                        .cloned()
-                        .collect();
-                    if tracked_items.is_empty() {
-                        html! {}
-                    } else {
-                        html! {
-                            <>
-                                <div class="section-label">
-                                    <span>{"Tracking"}</span>
-                                </div>
-                                <TrackedItemsList
-                                    items={tracked_items}
-                                    on_complete={on_tracking_complete.clone()}
-                                    on_dismiss={on_triage_dismiss.clone()}
-                                />
-                            </>
-                        }
-                    }
-                }}
+                <ContactAvatarRow />
 
                 <div class="peace-separator"></div>
 
