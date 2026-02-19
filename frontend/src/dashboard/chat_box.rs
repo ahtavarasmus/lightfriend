@@ -479,7 +479,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let result = if let Some(task) = &focused_task {
                     // Task edit mode - call edit endpoint
                     if let Some(task_id) = task.task_id {
-                        Api::post(&format!("/api/tasks/{}/edit-ai", task_id))
+                        Api::post(&format!("/api/items/{}/edit-ai", task_id))
                             .json(&json!({ "instruction": message }))
                             .unwrap()
                             .send()
@@ -1159,20 +1159,15 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         let task_for_click = task.clone();
                         let on_click = props.on_preview_click.clone();
                         let on_close = props.on_preview_close.clone();
-                        let is_recurring = task.trigger_type == "recurring_email" || task.trigger_type == "recurring_messaging";
                         html! {
                             <div class="task-preview-panel">
                                 <div class="task-preview-header">
-                                    <span class="task-preview-label">{if is_recurring { "Monitoring active" } else { "Task scheduled" }}</span>
+                                    <span class="task-preview-label">{"Task scheduled"}</span>
                                     <button class="task-preview-close" onclick={Callback::from(move |_: MouseEvent| on_close.emit(()))}>{"x"}</button>
                                 </div>
                                 <div class="task-preview-content" onclick={Callback::from(move |_: MouseEvent| on_click.emit(task_for_click.clone()))}>
                                     <div class="task-preview-time">
-                                        {if is_recurring {
-                                            html! { <i class="fa-solid fa-eye"></i> }
-                                        } else {
-                                            html! { <i class="fa-regular fa-clock"></i> }
-                                        }}
+                                        <i class="fa-regular fa-clock"></i>
                                         {&task.time_display}
                                         {if !task.date_display.is_empty() {
                                             html! { <span class="task-preview-date">{format!(" - {}", &task.date_display)}</span> }

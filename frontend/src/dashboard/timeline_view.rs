@@ -2,7 +2,6 @@
 pub struct UpcomingTask {
     pub task_id: Option<i32>,
     pub timestamp: i32,
-    pub trigger_type: String,
     pub time_display: String,
     pub description: String,
     pub date_display: String,

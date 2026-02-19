@@ -615,7 +615,6 @@ fn render_upcoming_item(
                         let task = UpcomingTask {
                             task_id: d.task_id,
                             timestamp: d.timestamp,
-                            trigger_type: "once".to_string(),
                             time_display: d.time_display.clone(),
                             description: format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
                             date_display: String::new(),

@@ -294,8 +294,6 @@ struct ScheduledItemResponse {
 struct UpcomingTaskResponse {
     task_id: Option<i32>,
     timestamp: i32,
-    #[serde(default)]
-    trigger_type: String,
     time_display: String,
     description: String,
     #[serde(default)]
@@ -570,7 +568,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 .map(|t| UpcomingTask {
                     task_id: t.task_id,
                     timestamp: t.timestamp,
-                    trigger_type: t.trigger_type.clone(),
                     time_display: t.time_display.clone(),
                     description: t.description.clone(),
                     date_display: t.date_display.clone(),
@@ -613,7 +610,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             let task = UpcomingTask {
                                 task_id: updated_digest.task_id,
                                 timestamp: updated_digest.timestamp,
-                                trigger_type: "once".to_string(),
                                 time_display: updated_digest.time_display.clone(),
                                 description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
                                 date_display: String::new(),
@@ -695,7 +691,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         Callback::from(move |task_id: i32| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                if let Ok(resp) = Api::delete(&format!("/api/tasks/{}", task_id)).send().await {
+                if let Ok(resp) = Api::delete(&format!("/api/items/{}", task_id)).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
                     }
@@ -722,7 +718,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     let selected_task = selected_task.clone();
                     let fetch_summary = fetch_summary.clone();
                     spawn_local(async move {
-                        if let Ok(resp) = Api::delete(&format!("/api/tasks/{}", task_id)).send().await {
+                        if let Ok(resp) = Api::delete(&format!("/api/items/{}", task_id)).send().await {
                             if resp.ok() {
                                 selected_task.set(None);
                                 fetch_summary.emit(());
@@ -801,13 +797,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             gloo_timers::callback::Timeout::new(500, move || {
                 let preview_task = preview_task.clone();
                 spawn_local(async move {
-                    if let Ok(response) = Api::get(&format!("/api/tasks/{}", task_id)).send().await {
+                    if let Ok(response) = Api::get(&format!("/api/items/{}", task_id)).send().await {
                         if response.ok() {
                             if let Ok(task_data) = response.json::<serde_json::Value>().await {
                                 let task = UpcomingTask {
                                     task_id: task_data["id"].as_i64().map(|i| i as i32),
                                     timestamp: task_data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
-                                    trigger_type: task_data["trigger_type"].as_str().unwrap_or("once").to_string(),
                                     time_display: task_data["time_display"].as_str().unwrap_or("").to_string(),
                                     description: task_data["description"].as_str().unwrap_or("").to_string(),
                                     date_display: task_data["date_display"].as_str().unwrap_or("").to_string(),
@@ -893,9 +888,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         task.description.clone()
                                     }}
                                 </div>
-                                if task.trigger_type != "reminder" {
-                                    <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
-                                }
+                                <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
                             </div>
                             <button class="task-btn-delete" onclick={on_delete_task}>{"Delete"}</button>
                             <button class="task-btn-close" onclick={on_task_modal_close.clone()}>{"x"}</button>
