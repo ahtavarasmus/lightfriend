@@ -1098,7 +1098,7 @@ impl UserCoreOps for UserCore {
     }
 
     fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
-        use crate::schema::tasks;
+        use crate::schema::items;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let now = SystemTime::now()
@@ -1106,38 +1106,29 @@ impl UserCoreOps for UserCore {
             .unwrap()
             .as_secs() as i32;
 
-        // Cancel any active quiet_mode tasks for this user
-        diesel::update(
-            tasks::table
-                .filter(tasks::user_id.eq(user_id))
-                .filter(tasks::status.eq("active"))
-                .filter(tasks::action.like("%quiet_mode%")),
+        // Remove any existing quiet_mode items for this user
+        diesel::delete(
+            items::table
+                .filter(items::user_id.eq(user_id))
+                .filter(items::source_id.eq("quiet_mode")),
         )
-        .set((
-            tasks::status.eq("completed"),
-            tasks::completed_at.eq(Some(now)),
-        ))
         .execute(&mut conn)?;
 
-        // If enabling quiet mode, insert a new task
+        // If enabling quiet mode, insert a new item
         if let Some(end_ts) = until {
             let end_time = if end_ts == 0 { None } else { Some(end_ts) };
-            let new_task = crate::models::user_models::NewTask {
+            let new_item = crate::models::user_models::NewItem {
                 user_id,
-                trigger: format!("once_{}", now),
-                condition: None,
-                action: r#"{"tool":"quiet_mode"}"#.to_string(),
-                notification_type: None,
-                status: "active".to_string(),
+                summary: "Quiet mode.".to_string(),
+                monitor: false,
+                due_at: end_time,
+                next_check_at: end_time,
+                priority: 0,
+                source_id: Some("quiet_mode".to_string()),
                 created_at: now,
-                is_permanent: None,
-                recurrence_rule: None,
-                recurrence_time: None,
-                sources: None,
-                end_time,
             };
-            diesel::insert_into(tasks::table)
-                .values(&new_task)
+            diesel::insert_into(items::table)
+                .values(&new_item)
                 .execute(&mut conn)?;
         }
 
@@ -1145,7 +1136,7 @@ impl UserCoreOps for UserCore {
     }
 
     fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-        use crate::schema::tasks;
+        use crate::schema::items;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let now = SystemTime::now()
@@ -1153,15 +1144,14 @@ impl UserCoreOps for UserCore {
             .unwrap()
             .as_secs() as i32;
 
-        // Find active quiet_mode tasks for this user
-        let active_tasks = tasks::table
-            .filter(tasks::user_id.eq(user_id))
-            .filter(tasks::status.eq("active"))
-            .filter(tasks::action.like("%quiet_mode%"))
-            .load::<crate::models::user_models::Task>(&mut conn)?;
+        // Find quiet_mode items for this user
+        let quiet_items = items::table
+            .filter(items::user_id.eq(user_id))
+            .filter(items::source_id.eq("quiet_mode"))
+            .load::<crate::models::user_models::Item>(&mut conn)?;
 
-        for task in &active_tasks {
-            match task.end_time {
+        for item in &quiet_items {
+            match item.due_at {
                 None => {
                     // Indefinite quiet mode
                     return Ok(Some(0));
@@ -1171,13 +1161,11 @@ impl UserCoreOps for UserCore {
                     return Ok(Some(end_ts));
                 }
                 Some(_) => {
-                    // Expired - auto-complete this task
-                    diesel::update(tasks::table.filter(tasks::id.eq(task.id)))
-                        .set((
-                            tasks::status.eq("completed"),
-                            tasks::completed_at.eq(Some(now)),
-                        ))
-                        .execute(&mut conn)?;
+                    // Expired - delete this item
+                    if let Some(item_id) = item.id {
+                        diesel::delete(items::table.filter(items::id.eq(item_id)))
+                            .execute(&mut conn)?;
+                    }
                 }
             }
         }

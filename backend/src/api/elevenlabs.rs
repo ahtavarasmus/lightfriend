@@ -458,22 +458,54 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
-/// Payload for creating a task via ElevenLabs voice call
+/// ElevenLabs voice tool: create_item
+///
+/// Tool description for ElevenLabs configuration:
+/// ---
+/// name: create_item
+/// description: >
+///   Create an item in the user's assistant. Items are the assistant's working
+///   memory: reminders, monitors, and tracked things. The summary field is the
+///   most important - it must be a self-contained natural language description
+///   that a different AI will read later with zero conversation context.
+/// parameters:
+///   summary:
+///     type: string
+///     required: true
+///     description: >
+///       Self-contained natural language description of the item. Include: what
+///       it is, when it's due, what action to take, and how to notify the user.
+///       Examples: "Reminder: Call mom at 5pm. One-shot - delete after notifying."
+///       "Monitor: emails from IRS about tax return. Alert user via SMS when match arrives."
+///       "Invoice from AWS for $45. Due Feb 20. Notify user 3 days before."
+///   monitor:
+///     type: boolean
+///     required: true
+///     description: >
+///       true if this watches for incoming data (emails, messages matching a
+///       pattern). false for scheduled reminders or tracked deadlines.
+///   next_check_at:
+///     type: string
+///     required: false
+///     description: >
+///       ISO datetime for when to first check this item (e.g. "2026-02-20T17:00").
+///       Required for scheduled reminders. Omit for monitors (they trigger on
+///       incoming data, not time).
+/// ---
+
 #[derive(Deserialize)]
-pub struct CreateTaskPayload {
-    pub trigger_type: String, // "once", "recurring_email", "recurring_messaging"
-    pub trigger_time: Option<String>, // ISO datetime for "once" triggers
-    pub condition: Option<String>,
-    pub action_spec: String, // Detailed step-by-step instructions for runtime AI
-    pub notification_type: Option<String>,
+pub struct CreateItemVoicePayload {
+    pub summary: String,
+    pub monitor: bool,
+    pub next_check_at: Option<String>,
 }
 
 pub async fn handle_create_item_voice(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<CreateTaskPayload>,
+    Json(payload): Json<CreateItemVoicePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received task creation request");
+    tracing::debug!("Received voice item creation request");
 
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
         Some(id) => id,
@@ -487,129 +519,69 @@ pub async fn handle_create_item_voice(
         }
     };
 
-    // Build trigger field
-    let trigger = match payload.trigger_type.as_str() {
-        "once" => {
-            let time_str = match &payload.trigger_time {
-                Some(t) => t,
-                None => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "trigger_time is required for 'once' trigger type"
-                        })),
-                    ));
-                }
-            };
-
-            // Get user's timezone
-            let user_info = state.user_core.get_user_info(user_id).map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to get user info: {:?}", e)})),
-                )
-            })?;
-            let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-            let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-
-            // Parse datetime and convert to timestamp
-            let timestamp = parse_datetime_to_timestamp_elevenlabs(time_str, &tz).map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Invalid trigger_time: {}", e)})),
-                )
-            })?;
-            format!("once_{}", timestamp)
-        }
-        "recurring_email" => "recurring_email".to_string(),
-        "recurring_messaging" => "recurring_messaging".to_string(),
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": format!("Invalid trigger_type: {}", payload.trigger_type)
-                })),
-            ));
-        }
-    };
-
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
 
-    let new_task = crate::models::user_models::NewTask {
-        user_id,
-        trigger: trigger.clone(),
-        condition: payload.condition.clone(),
-        action: payload.action_spec.clone(),
-        notification_type: payload.notification_type.or(Some("sms".to_string())),
-        status: "active".to_string(),
-        created_at: now,
-        is_permanent: None,
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        end_time: None,
-    };
+    // Parse next_check_at into a unix timestamp if provided
+    let next_check_at = if let Some(ref time_str) = payload.next_check_at {
+        let user_info = state.user_core.get_user_info(user_id).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get user info: {:?}", e)})),
+            )
+        })?;
+        let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
+        let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
 
-    // Build confirmation message (use a short summary, not full action_spec)
-    let action_summary = if payload.action_spec.len() > 50 {
-        format!("{}...", &payload.action_spec[..50])
+        let ts = parse_datetime_to_timestamp_elevenlabs(time_str, &tz).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Invalid next_check_at: {}", e)})),
+            )
+        })?;
+        Some(ts)
     } else {
-        payload.action_spec.clone()
+        None
     };
 
-    match state.user_repository.create_task(&new_task) {
-        Ok(_) => {
-            tracing::debug!("Successfully created task for user: {}", user_id);
+    let new_item = crate::models::user_models::NewItem {
+        user_id,
+        summary: payload.summary.clone(),
+        monitor: payload.monitor,
+        due_at: next_check_at,
+        next_check_at,
+        priority: 0,
+        source_id: None,
+        created_at: now,
+    };
 
-            let confirmation = match payload.trigger_type.as_str() {
-                "once" => format!(
-                    "Got it! I'll handle '{}' at the scheduled time.",
-                    action_summary
-                ),
-                "recurring_email" => {
-                    if let Some(cond) = &payload.condition {
-                        format!(
-                            "Got it! I'll watch for emails matching '{}' and execute the task.",
-                            cond
-                        )
-                    } else {
-                        format!(
-                            "Got it! I'll monitor your emails and execute: {}",
-                            action_summary
-                        )
-                    }
-                }
-                "recurring_messaging" => {
-                    if let Some(cond) = &payload.condition {
-                        format!(
-                            "Got it! I'll watch for messages matching '{}' and execute the task.",
-                            cond
-                        )
-                    } else {
-                        format!(
-                            "Got it! I'll monitor your messages and execute: {}",
-                            action_summary
-                        )
-                    }
-                }
-                _ => format!("Task created: {}", action_summary),
+    match state.item_repository.create_item(&new_item) {
+        Ok(item_id) => {
+            tracing::debug!("Created item {} for user {}", item_id, user_id);
+
+            let confirmation = if payload.monitor {
+                "Got it! I'll watch for that and alert you.".to_string()
+            } else if payload.next_check_at.is_some() {
+                "Got it! I'll remind you at the scheduled time.".to_string()
+            } else {
+                "Got it! I've noted that down.".to_string()
             };
 
             Ok(Json(json!({
                 "response": confirmation,
                 "status": "success",
                 "user_id": user_id,
+                "item_id": item_id,
             })))
         }
         Err(e) => {
-            error!("Failed to create task: {}", e);
+            error!("Failed to create item: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to create task",
+                    "error": "Failed to create item",
                     "details": e.to_string()
                 })),
             ))

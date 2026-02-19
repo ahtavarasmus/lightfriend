@@ -880,27 +880,28 @@ fn resolve_sender_name(
 }
 
 /// Formats disconnection events into a notice string for digest inclusion.
-/// Reads from triage_items table (bridge_disconnected items).
-/// Does NOT delete the triage items - they persist in the dashboard for user action.
+/// Reads from items table (system disconnection items).
+/// Does NOT delete the items - they persist in the dashboard for user action.
 fn format_disconnection_notice(
     state: &Arc<AppState>,
     user_id: i32,
     timezone: &str,
 ) -> Option<String> {
-    let items = match state
-        .user_repository
-        .get_pending_triage_items_for_digest(user_id, "bridge_disconnected")
-    {
+    let all_items = match state.item_repository.get_items(user_id) {
         Ok(items) => items,
         Err(e) => {
             tracing::error!(
-                "Failed to get bridge disconnection triage items for user {}: {}",
+                "Failed to get items for user {} (disconnection notice): {}",
                 user_id,
                 e
             );
             return None;
         }
     };
+    let items: Vec<_> = all_items
+        .into_iter()
+        .filter(|item| item.summary.starts_with("System:") && item.summary.contains("disconnected"))
+        .collect();
 
     if items.is_empty() {
         return None;
