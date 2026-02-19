@@ -8,6 +8,7 @@ use crate::schema::country_availability;
 use crate::schema::email_judgments;
 use crate::schema::google_calendar;
 use crate::schema::imap_connection;
+use crate::schema::items;
 use crate::schema::keywords;
 use crate::schema::message_history;
 use crate::schema::message_status_log;
@@ -950,4 +951,33 @@ pub struct NewTriageItem {
     pub created_at: i32,
     pub snooze_until: Option<i32>,
     pub expires_at: Option<i32>,
+}
+
+// Unified items - replaces triage_items + tasks
+#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = items)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Item {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub summary: String,
+    pub kind: String,
+    pub due_at: Option<i32>,
+    pub next_check_at: Option<i32>,
+    pub priority: i32,
+    pub source_id: Option<String>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = items)]
+pub struct NewItem {
+    pub user_id: i32,
+    pub summary: String,
+    pub kind: String,
+    pub due_at: Option<i32>,
+    pub next_check_at: Option<i32>,
+    pub priority: i32,
+    pub source_id: Option<String>,
+    pub created_at: i32,
 }

@@ -1,4 +1,4 @@
-use crate::models::user_models::{ContactProfile, Task};
+use crate::models::user_models::ContactProfile;
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use crate::UserCoreOps;
@@ -8,8 +8,45 @@ use std::sync::Arc;
 
 use crate::context::ContextBuilder;
 use chrono::Timelike;
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+/// Parse an ISO datetime string to a unix timestamp (seconds).
+///
+/// Handles:
+/// - `2026-02-28T09:00:00Z` (full datetime with Z)
+/// - `2026-02-28T09:00:00` (full datetime, assumed UTC)
+/// - `2026-02-28` (date only, noon UTC)
+///
+/// Returns `None` on parse failure.
+pub fn parse_iso_to_timestamp(s: &str) -> Option<i32> {
+    let s = s.trim();
+    // Try full datetime with Z suffix
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp() as i32);
+    }
+    // Try with Z appended (input like "2026-02-28T09:00:00")
+    if s.contains('T') && !s.ends_with('Z') {
+        let with_z = format!("{}Z", s);
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&with_z) {
+            return Some(dt.timestamp() as i32);
+        }
+        // Try NaiveDateTime parse
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+            return Some(ndt.and_utc().timestamp() as i32);
+        }
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+            return Some(ndt.and_utc().timestamp() as i32);
+        }
+    }
+    // Try date-only (noon UTC)
+    if let Ok(nd) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return nd
+            .and_hms_opt(12, 0, 0)
+            .map(|ndt| ndt.and_utc().timestamp() as i32);
+    }
+    None
+}
 
 /// Definition of a **critical** message: something that will cause human‑safety risk,
 /// major financial/data loss, legal breach, or production outage if it waits >2 h.
@@ -17,29 +54,51 @@ use serde::{Deserialize, Serialize};
 /// Prompt for matching incoming messages against the user’s *waiting checks*.
 /// A waiting check represents something the user explicitly asked to be notified
 /// about (e.g. \"Tell me when the shipment arrives\").
-const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message *definitively* satisfies **one** of the outstanding waiting checks listed below. Each waiting check's 'Content' describes the condition the message must meet.
+const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message matches **one** of the user's monitor items listed below. Each item's 'Content' describes what the user wants to track.
+
     **Match rules**
-    • Interpret the waiting check 'Content' as the user's condition or instruction for matching.
-    • If the content is descriptive or instructional (e.g., a sentence >5 words), use semantic reasoning (synonyms, paraphrases, context) to evaluate fulfillment. Translate non-English text internally.
-    • If the content is short (≤5 words, e.g., keywords), require the message to contain *all* those words (case-insensitive, but exact matches preferred; stems/synonyms only if explicitly related).
-    • A match must be *unambiguous*: the message clearly fulfills the condition. Ambiguous, partial, or sender-only matches DO NOT count.
-    • Do not match based solely on sender or metadata unless explicitly stated in the content.
-    • If multiple checks could match, choose the single *best* match (highest confidence). Return `null` if none match.
+    - Interpret the item 'Content' as the user's condition or instruction for matching.
+    - If the content is descriptive (>5 words), use semantic reasoning. Translate non-English text internally.
+    - If the content is short (<=5 words), require the message to contain *all* those words (case-insensitive).
+    - A match must be *unambiguous*. Ambiguous, partial, or sender-only matches DO NOT count.
+    - If multiple items could match, choose the single *best* match. Return `null` if none match.
 
-    **Edge cases**:
-    • If the check mentions a sender (e.g., 'from Rasmus'), require the message metadata to match exactly.
-    • For conditions like 'related to [topic]', use broad semantic similarity but ensure at least 70% conceptual overlap.
-    • Ignore irrelevant message parts; focus only on fulfilling the core condition.
+    **Resolution rules**
+    Set `is_resolved=true` when the tracked thing is clearly complete:
+    - Payment confirmed, invoice paid
+    - Package delivered (not just shipped or in transit)
+    - Question answered definitively
+    - Appointment completed
+    - Document signed/approved
+    Use common sense for `should_notify` on resolution: only notify if the user would actually
+    want to hear about it. A routine invoice being paid (user probably paid it themselves) does
+    NOT need a notification. A package delivered after delays, or an important question answered,
+    might warrant one. When in doubt on resolution, do NOT notify - just silently resolve.
 
-    If a match is found you MUST additionally craft two short notifications:
-    1. `sms_message` (≤160 chars) – a concise SMS describing the event.
-    2. `first_message` (≤100 chars) – an attention-grabbing first sentence a voice assistant would speak on a call.
+    **Lifecycle rules**
+    - `next_check_at`: Set an ISO datetime for the next scheduled check if the item needs follow-up.
+      Example: package shipped today, set next_check_at to 2 days from now. Leave null if no follow-up needed.
+    - `priority`: Escalate importance. 0 = background (digest only), 1 = important (standalone notification), 2 = urgent.
+      Only change if the situation warrants it (e.g. approaching deadline, overdue payment).
+    - `notification_type`: Override notification method. "sms" (default), "call" for urgent items, "call_sms" for both.
+      Only change if urgency warrants escalation.
 
-    Return JSON with:
-    • `waiting_check_id` – integer ID of the matched check, or null
-    • `sms_message` – String (required when matched, else empty string). Ensure `sms_message` is neutral and factual, e.g., 'Matched waiting check: Update from Rasmus on phone received.'
-    • `first_message` – String (required when matched, else empty string). `first_message` should be urgent and spoken-friendly, e.g., 'Hey, you have an update from Rasmus about the phone!'
-    • `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
+    **Notification decision**
+    When a match is found, decide whether to **notify** the user or just **silently update** the item:
+    - Set `should_notify=true` if the match represents something the user would want to know RIGHT NOW
+      (e.g., "mom replied", "package delivered", "flight delayed", "job application response").
+    - Set `should_notify=false` if this is just a background tracking update that doesn't need immediate attention
+      (e.g., routine shipping status "in transit", background price tracking, periodic status update).
+    - When in doubt, notify.
+
+    **Updated summary**
+    Provide an `updated_summary` that incorporates what was matched. This replaces the item's current summary.
+    Keep it concise (max 120 chars). Include key details from the match.
+    Example: "Watch for emails from mom" -> "Mom replied: 'Sure, dinner at 7 works!'"
+
+    If a match is found AND should_notify=true, craft two short notifications:
+    1. `sms_message` (<=160 chars) - concise SMS describing the event.
+    2. `first_message` (<=100 chars) - voice assistant opening line.
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
@@ -95,9 +154,15 @@ If `is_critical` is false, leave the other two fields empty strings.
 "#;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TaskMatchResponse {
+pub struct ItemMatchResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<i32>,
+    pub task_id: Option<i32>, // actually item_id - kept as task_id for LLM schema compat
+
+    #[serde(default)]
+    pub should_notify: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_summary: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sms_message: Option<String>,
@@ -107,27 +172,36 @@ pub struct TaskMatchResponse {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_explanation: Option<String>,
+
+    // Lifecycle fields - LLM-controlled monitor management
+    #[serde(default)]
+    pub is_resolved: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_check_at: Option<String>, // ISO datetime string, parsed at call site
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>, // 0/1/2 escalation
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_type: Option<String>, // "sms" or "call" escalation
 }
 
-/// Determine whether `message` satisfies **one** of the supplied recurring tasks.
-/// Returns `(task_id, sms_message, first_message)`.
-pub async fn check_task_condition_match(
+/// Determine whether `message` matches **one** of the supplied monitor items.
+/// Uses the item's summary as the matching condition.
+/// Returns the full `ItemMatchResponse` with match decision, notification decision,
+/// updated summary, and optional notification messages.
+pub async fn check_item_monitor_match(
     state: &Arc<AppState>,
     user_id: i32,
     message: &str,
-    tasks: &[Task],
-) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
+    items: &[crate::models::user_models::Item],
+) -> Result<Option<ItemMatchResponse>, Box<dyn std::error::Error>> {
     let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
-    // Format tasks with their conditions for matching
-    let tasks_str = tasks
+    let items_str = items
         .iter()
-        .filter_map(|task| {
-            // Only include tasks with conditions
-            task.condition
-                .as_ref()
-                .map(|cond| format!("ID: {}, Condition: {}", task.id.unwrap_or(-1), cond))
-        })
+        .map(|item| format!("ID: {}, Content: {}", item.id.unwrap_or(-1), item.summary))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -142,8 +216,8 @@ pub async fn check_task_condition_match(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Incoming message:\n\n{}\n\nWaiting checks:\n\n{}\n\nReturn the best match or null.",
-                message, tasks_str
+                "Incoming message:\n\n{}\n\nMonitor items:\n\n{}\n\nReturn the best match or null.",
+                message, items_str
             )),
             name: None,
             tool_calls: None,
@@ -151,13 +225,36 @@ pub async fn check_task_condition_match(
         },
     ];
 
-    // JSON schema -----------------------------------------------------------
     let mut properties = std::collections::HashMap::new();
     properties.insert(
         "task_id".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("ID of the matched task, or null".to_string()),
+            description: Some("ID of the matched item, or null if no match".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "should_notify".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Whether to notify the user now. true for actionable/important matches, \
+                false for background tracking updates that don't need immediate attention."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "updated_summary".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Updated summary incorporating match details (max 120 chars). \
+                Replaces the item's current summary."
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -165,7 +262,10 @@ pub async fn check_task_condition_match(
         "sms_message".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Concise SMS (≤160 chars) when matched, else empty".to_string()),
+            description: Some(
+                "Concise SMS (max 160 chars) when matched AND should_notify=true, else empty"
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -174,7 +274,56 @@ pub async fn check_task_condition_match(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Voice‑assistant opening line (≤100 chars) when matched, else empty".to_string(),
+                "Voice-assistant opening line (max 100 chars) when matched AND should_notify=true, else empty"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "is_resolved".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Set true when the tracked thing is clearly complete (delivered, paid, answered). \
+                Item will be deleted. Default false."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "next_check_at".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "ISO datetime for next scheduled check, e.g. '2026-03-01T09:00:00Z'. \
+                Set if the item needs follow-up later. Null if no follow-up needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "priority".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some(
+                "Escalate importance: 0 = background/digest-only, 1 = standalone notification, \
+                2 = urgent. Only change if situation warrants."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "notification_type".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Override notification method: 'sms', 'call', or 'call_sms'. \
+                Only change if urgency warrants escalation."
+                    .to_string(),
             ),
             ..Default::default()
         }),
@@ -183,15 +332,271 @@ pub async fn check_task_condition_match(
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: "analyze_task_match".to_string(),
+            name: "analyze_item_match".to_string(),
             description: Some(
-                "Determines whether the message matches a task condition and drafts notifications"
+                "Determines whether the message matches a monitor item, evaluates lifecycle \
+                (resolution, next check, priority escalation), and provides an updated summary."
                     .to_string(),
             ),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["task_id".to_string()]),
+                required: Some(vec!["task_id".to_string(), "should_notify".to_string()]),
+            },
+        },
+    }];
+
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.0)
+        .max_tokens(500);
+
+    let result = ctx.client.chat_completion(request).await?;
+    let tool_call = result.choices[0]
+        .message
+        .tool_calls
+        .as_ref()
+        .and_then(|tc| tc.first())
+        .ok_or("No tool call in item monitor response")?;
+
+    let args = tool_call
+        .function
+        .arguments
+        .as_ref()
+        .ok_or("No arguments in item monitor tool call")?;
+
+    let response: ItemMatchResponse = serde_json::from_str(args)?;
+
+    if let Some(explanation) = &response.match_explanation {
+        tracing::debug!("Item monitor match explanation: {}", explanation);
+    }
+
+    if response.task_id.is_some() {
+        Ok(Some(response))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Apply monitor lifecycle changes from an `ItemMatchResponse` to an item.
+///
+/// Handles:
+/// - Resolution: deletes the item, optionally notifies
+/// - Update: applies summary, next_check_at, priority, notification_type changes
+/// - Priority gate: only sends standalone notification if effective priority >= 1
+///
+/// Safety guards on next_check_at:
+/// - LLM returns null + item has due_at: fall back to heuristic (check in 1-3 days)
+/// - LLM returns date >30 days out: cap at 30 days
+/// - LLM returns date in the past: clamp to now + 3600
+pub async fn apply_monitor_lifecycle(
+    state: &Arc<AppState>,
+    item: &crate::models::user_models::Item,
+    response: &ItemMatchResponse,
+) {
+    let item_id = item.id.unwrap_or(0);
+    let user_id = item.user_id;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    // Resolution: delete item
+    if response.is_resolved {
+        let _ = state.item_repository.delete_item(item_id, user_id);
+        tracing::debug!("Monitor item {} resolved and deleted", item_id);
+
+        // Notify about resolution if should_notify is true and priority >= 1
+        let effective_priority = response.priority.unwrap_or(item.priority);
+        if response.should_notify && effective_priority >= 1 {
+            let notification_type = response
+                .notification_type
+                .clone()
+                .unwrap_or_else(|| "sms".to_string());
+            let message = response
+                .sms_message
+                .clone()
+                .unwrap_or_else(|| format!("Resolved: {}", item.summary));
+            let opener = response
+                .first_message
+                .clone()
+                .unwrap_or_else(|| "Hey, one of your monitors was resolved!".to_string());
+
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                send_notification(
+                    &state_clone,
+                    user_id,
+                    &message,
+                    format!("monitor_{}", notification_type),
+                    Some(opener),
+                )
+                .await;
+            });
+        }
+        return;
+    }
+
+    // Update item fields
+    let updated_summary = response
+        .updated_summary
+        .clone()
+        .unwrap_or_else(|| item.summary.clone());
+    let effective_priority = response.priority.unwrap_or(item.priority);
+
+    // Parse and apply safety guards to next_check_at
+    let max_future = now + 30 * 86400; // 30 days cap
+    let parsed_next_check = response
+        .next_check_at
+        .as_deref()
+        .and_then(parse_iso_to_timestamp);
+
+    let safe_next_check = match parsed_next_check {
+        Some(ts) if ts <= now => Some(now + 3600), // Past: clamp to now + 1 hour
+        Some(ts) if ts > max_future => Some(max_future), // >30 days: cap
+        Some(ts) => Some(ts),
+        None => {
+            // LLM returned null: if item has due_at, fall back to heuristic
+            if let Some(due) = item.due_at {
+                let days_until = (due - now) / 86400;
+                let check_in = if days_until <= 2 {
+                    86400 // 1 day
+                } else if days_until <= 7 {
+                    2 * 86400 // 2 days
+                } else {
+                    3 * 86400 // 3 days
+                };
+                Some(now + check_in)
+            } else {
+                item.next_check_at // Keep existing (likely None for match-only monitors)
+            }
+        }
+    };
+
+    let _ = state.item_repository.update_item(
+        item_id,
+        user_id,
+        &updated_summary,
+        safe_next_check,
+        effective_priority,
+    );
+
+    // Notification: only send standalone if effective priority >= 1
+    if response.should_notify && effective_priority >= 1 {
+        let notification_type = response
+            .notification_type
+            .clone()
+            .unwrap_or_else(|| "sms".to_string());
+        let message = response
+            .sms_message
+            .clone()
+            .unwrap_or_else(|| format!("Monitor matched: {}", item.summary));
+        let opener = response
+            .first_message
+            .clone()
+            .unwrap_or_else(|| "Hey, one of your monitors matched!".to_string());
+
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            send_notification(
+                &state_clone,
+                user_id,
+                &message,
+                format!("monitor_{}", notification_type),
+                Some(opener),
+            )
+            .await;
+        });
+    } else if response.should_notify {
+        tracing::debug!(
+            "Monitor item {} matched with should_notify but priority {} < 1, digest only",
+            item_id,
+            effective_priority
+        );
+    }
+}
+
+/// Generate a notification message from a triggered item's summary.
+/// The LLM reads the summary and produces an SMS and voice opener.
+pub async fn generate_item_notification(
+    state: &Arc<AppState>,
+    user_id: i32,
+    summary: &str,
+) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "You generate notification messages from item descriptions. \
+                The user has a scheduled item that just triggered. \
+                Craft two short notifications from the item summary:\n\
+                1. sms_message (max 160 chars) - concise SMS notification\n\
+                2. first_message (max 100 chars) - voice assistant opening line\n\
+                3. notification_type - delivery method: 'sms' or 'call'\n\
+                Be direct and informative. Use second person ('you')."
+                    .to_string(),
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!("Item summary: {}", summary)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "sms_message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Concise SMS notification (max 160 chars)".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "first_message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Voice assistant opening line (max 100 chars)".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "notification_type".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Delivery method: 'sms' for text, 'call' for voice call. \
+                Infer from the summary - if it mentions calling someone or says [VIA CALL], \
+                use 'call'. Default to 'sms'."
+                    .to_string(),
+            ),
+            enum_values: Some(vec!["sms".to_string(), "call".to_string()]),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "generate_notification".to_string(),
+            description: Some("Generate notification messages from item summary".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    "sms_message".to_string(),
+                    "first_message".to_string(),
+                    "notification_type".to_string(),
+                ]),
             },
         },
     }];
@@ -208,24 +613,31 @@ pub async fn check_task_condition_match(
         .tool_calls
         .as_ref()
         .and_then(|tc| tc.first())
-        .ok_or("No tool call in task condition response")?;
+        .ok_or("No tool call in notification generation response")?;
 
     let args = tool_call
         .function
         .arguments
         .as_ref()
-        .ok_or("No arguments in task condition tool call")?;
+        .ok_or("No arguments in notification tool call")?;
 
-    let response: TaskMatchResponse = serde_json::from_str(args)?;
-
-    if let Some(explanation) = &response.match_explanation {
-        tracing::debug!("Task condition match explanation: {}", explanation);
+    #[derive(Deserialize)]
+    struct NotificationResponse {
+        sms_message: String,
+        first_message: String,
+        #[serde(default = "default_notification_type")]
+        notification_type: String,
     }
 
+    fn default_notification_type() -> String {
+        "sms".to_string()
+    }
+
+    let response: NotificationResponse = serde_json::from_str(args)?;
     Ok((
-        response.task_id,
         response.sms_message,
         response.first_message,
+        response.notification_type,
     ))
 }
 
@@ -531,20 +943,13 @@ fn format_disconnection_notice(
     Some(notices.join(". "))
 }
 
-/// Formats pending trackable triage items (email_invoice, email_shipment, etc.)
-/// into a TRACKING line for digest inclusion.
+/// Formats tracked items (monitors, reminders) into a TRACKING line for digest inclusion.
+/// Reads from the items table instead of the legacy triage_items table.
 fn format_tracking_notice(state: &Arc<AppState>, user_id: i32) -> Option<String> {
-    let items = match state
-        .user_repository
-        .get_pending_trackable_items_for_digest(user_id)
-    {
+    let items = match state.item_repository.get_items(user_id) {
         Ok(items) => items,
         Err(e) => {
-            tracing::error!(
-                "Failed to get trackable triage items for user {}: {}",
-                user_id,
-                e
-            );
+            tracing::error!("Failed to get tracked items for user {}: {}", user_id, e);
             return None;
         }
     };
@@ -718,56 +1123,47 @@ pub async fn check_message_importance(
 // Trackable item detection for auto-triage
 // ---------------------------------------------------------------------------
 
-const TRACKABLE_PROMPT: &str = r#"You are an AI that detects trackable items from emails. A "trackable item" is something the user might want to follow up on later - not urgent enough for an immediate notification, but worth silently recording.
+const TRACKABLE_PROMPT: &str = r#"You are an AI that detects trackable items from emails. A "trackable item" is something the user might need to follow up on or track.
 
-Detect these categories:
-- invoice/bill: payment due, amount owed, subscription charge
-- shipment: package tracking, delivery confirmation, shipping notification
-- deadline: action required by a date, form to submit, renewal date
-- document: document to sign, review, or approve
-- appointment: booking confirmation, reservation, scheduled service
-
-Rules:
-- Only detect items with concrete actionable details (amounts, dates, tracking numbers, etc.)
-- Marketing emails, newsletters, and promotional content are NOT trackable
-- Social notifications (likes, follows, comments) are NOT trackable
-- Automated status updates without action needed are NOT trackable
+Use common sense. Only flag things with concrete actionable details. Skip:
+- Marketing emails, newsletters, promotional content
+- Social notifications (likes, follows, comments)
+- Routine status updates without action needed
 - If uncertain, say not trackable
 
 Return JSON with:
-- `is_trackable` (boolean): whether this email contains a trackable item
-- `category` (string): one of "invoice", "shipment", "deadline", "document", "appointment", or "" if not trackable
+- `is_trackable` (boolean): whether this email contains something worth tracking
 - `summary` (string, max 80 chars): concise description e.g. "AWS invoice $45.20 due Feb 20" or "" if not trackable
 - `due_date` (string): ISO date if a due/delivery date is mentioned, or "" if none
-- `auto_expiry_days` (integer): suggested days until this item auto-expires (7-90), or 0 if not trackable
+- `needs_monitoring` (boolean): true if the item should be actively watched for resolution (e.g. invoice awaiting payment, package in transit, pending approval). false for one-time info items.
 "#;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TrackableResponse {
     is_trackable: bool,
-    #[serde(default)]
-    category: String,
     #[serde(default)]
     summary: String,
     #[serde(default)]
     due_date: String,
     #[serde(default)]
-    auto_expiry_days: i32,
+    needs_monitoring: bool, // Included in LLM schema for future use
 }
 
-/// Checks whether an email contains a trackable item (invoice, shipment, deadline, etc.)
-/// and silently creates a TriageItem if detected. Uses source_id for dedup.
+/// Checks whether an email contains a trackable item and silently creates
+/// a monitor item if detected. All trackable items become monitors.
+/// Uses source_id for dedup. Priority is based on due_at urgency.
 pub async fn check_trackable_items(
     state: &Arc<AppState>,
     user_id: i32,
     email_uid: &str,
     email_content: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Dedup: skip if we already have a triage item for this email
+    // Dedup: skip if we already have an item for this email
     let source_id = format!("email_{}", email_uid);
     if state
-        .user_repository
-        .triage_item_exists_by_source(user_id, &source_id)?
+        .item_repository
+        .item_exists_by_source(user_id, &source_id)?
     {
         return Ok(());
     }
@@ -799,17 +1195,7 @@ pub async fn check_trackable_items(
         "is_trackable".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the email contains a trackable item".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "category".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Category: invoice, shipment, deadline, document, appointment".to_string(),
-            ),
+            description: Some("Whether the email contains something worth tracking".to_string()),
             ..Default::default()
         }),
     );
@@ -830,10 +1216,13 @@ pub async fn check_trackable_items(
         }),
     );
     properties.insert(
-        "auto_expiry_days".to_string(),
+        "needs_monitoring".to_string(),
         Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Days until auto-expiry (7-90)".to_string()),
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "true if item should be actively watched for resolution (invoice, package, approval)"
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -848,10 +1237,9 @@ pub async fn check_trackable_items(
                 properties: Some(properties),
                 required: Some(vec![
                     "is_trackable".to_string(),
-                    "category".to_string(),
                     "summary".to_string(),
                     "due_date".to_string(),
-                    "auto_expiry_days".to_string(),
+                    "needs_monitoring".to_string(),
                 ]),
             },
         },
@@ -874,49 +1262,71 @@ pub async fn check_trackable_items(
         .and_then(|args| serde_json::from_str::<TrackableResponse>(args).ok());
 
     if let Some(resp) = response {
-        if resp.is_trackable && !resp.category.is_empty() && !resp.summary.is_empty() {
-            let current_time = std::time::SystemTime::now()
+        if resp.is_trackable && !resp.summary.is_empty() {
+            let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32;
 
-            let expiry_days = resp.auto_expiry_days.clamp(7, 90);
-            let expires_at = current_time + (expiry_days * 86400);
+            // Parse due_date to unix timestamp
+            let due_at = parse_iso_to_timestamp(&resp.due_date);
 
-            let context = serde_json::json!({
-                "category": resp.category,
-                "due_date": resp.due_date,
-            });
-
-            let item_type = format!("email_{}", resp.category);
-
-            let new_item = crate::models::user_models::NewTriageItem {
-                user_id,
-                item_type,
-                status: "pending".to_string(),
-                summary: resp.summary,
-                suggested_action: None,
-                reasoning: None,
-                context_json: Some(context.to_string()),
-                priority: 0, // normal - these are silent background items
-                source_type: Some("email".to_string()),
-                source_id: Some(source_id),
-                created_at: current_time,
-                snooze_until: None,
-                expires_at: Some(expires_at),
+            // All trackable items become monitors.
+            // Priority based on due_at urgency:
+            // - No due_at or >7 days away: priority 0 (digest-only)
+            // - 2-7 days away: priority 1 (standalone notifications)
+            // - <2 days or overdue: priority 2 (urgent)
+            let priority = match due_at {
+                Some(due) => {
+                    let days_until = (due - now) / 86400;
+                    if days_until < 2 {
+                        2
+                    } else if days_until <= 7 {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                None => 0,
             };
 
-            if let Err(e) = state.user_repository.create_triage_item(new_item) {
+            // Initial next_check_at based on due_at proximity
+            let next_check_at = match due_at {
+                Some(due) => {
+                    let days_until = (due - now) / 86400;
+                    if days_until <= 2 {
+                        Some(now + 86400) // Check in 1 day
+                    } else if days_until <= 7 {
+                        Some(now + 2 * 86400) // Check in 2 days
+                    } else {
+                        Some(now + 3 * 86400) // Check in 3 days
+                    }
+                }
+                None => None, // No due_at: match-only, no scheduled checks
+            };
+
+            let new_item = crate::models::user_models::NewItem {
+                user_id,
+                summary: resp.summary,
+                kind: "monitor".to_string(),
+                due_at,
+                next_check_at,
+                priority,
+                source_id: Some(source_id),
+                created_at: now,
+            };
+
+            if let Err(e) = state.item_repository.create_item(&new_item) {
                 tracing::error!(
-                    "Failed to create trackable triage item for user {}: {}",
+                    "Failed to create trackable item for user {}: {}",
                     user_id,
                     e
                 );
             } else {
                 tracing::debug!(
-                    "Created trackable triage item for user {}: email_{}",
+                    "Created monitor item for user {} (priority {})",
                     user_id,
-                    resp.category
+                    priority
                 );
             }
         }
@@ -3332,9 +3742,11 @@ mod tests {
     #[test]
     fn test_waiting_check_prompt_contains_key_elements() {
         // Verify the waiting check prompt has required elements
-        assert!(WAITING_CHECK_PROMPT.contains("waiting check"));
+        assert!(WAITING_CHECK_PROMPT.contains("monitor"));
         assert!(WAITING_CHECK_PROMPT.contains("sms_message"));
         assert!(WAITING_CHECK_PROMPT.contains("first_message"));
         assert!(WAITING_CHECK_PROMPT.contains("match"));
+        assert!(WAITING_CHECK_PROMPT.contains("should_notify"));
+        assert!(WAITING_CHECK_PROMPT.contains("updated_summary"));
     }
 }

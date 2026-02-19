@@ -116,7 +116,7 @@ pub async fn check_all_bridges_health(
                     user_id
                 );
 
-                // Record disconnection as a triage item
+                // Record disconnection as an item
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -129,29 +129,20 @@ pub async fn check_all_bridges_health(
                     other => other,
                 };
 
-                let context = serde_json::json!({
-                    "bridge_type": bridge.bridge_type,
-                });
-
-                let new_item = crate::models::user_models::NewTriageItem {
+                let new_item = crate::models::user_models::NewItem {
                     user_id,
-                    item_type: "bridge_disconnected".to_string(),
-                    status: "pending".to_string(),
-                    summary: format!("{} disconnected", bridge_name),
-                    suggested_action: None,
-                    reasoning: None,
-                    context_json: Some(context.to_string()),
-                    priority: 1, // elevated - user should reconnect
-                    source_type: Some("system".to_string()),
+                    summary: format!("System: {} bridge disconnected.", bridge_name),
+                    kind: "alert".to_string(),
+                    due_at: None,
+                    next_check_at: None,
+                    priority: 1,
                     source_id: None,
                     created_at: current_time,
-                    snooze_until: None,
-                    expires_at: None,
                 };
 
-                if let Err(e) = state.user_repository.create_triage_item(new_item) {
+                if let Err(e) = state.item_repository.create_item(&new_item) {
                     error!(
-                        "Failed to create triage item for bridge disconnection for user {}: {}",
+                        "Failed to create item for bridge disconnection for user {}: {}",
                         user_id, e
                     );
                 }
@@ -429,6 +420,153 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
     );
 }
 
+/// Migrate existing tasks to unified items table (one-time migration).
+/// For each active task, builds a natural language summary and creates an item.
+/// Successfully migrated tasks are marked as "migrated" to prevent re-processing.
+pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
+    tracing::info!("Starting task -> item migration...");
+
+    let users = match state.user_core.get_all_users() {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("Failed to get users for task migration: {}", e);
+            return;
+        }
+    };
+
+    let mut migrated_count = 0;
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    for user in users {
+        let user_id = user.id;
+
+        let tasks = match state.user_repository.get_user_tasks(user_id) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        if tasks.is_empty() {
+            continue;
+        }
+
+        // Get user timezone for recurring task scheduling
+        let user_tz = state
+            .user_core
+            .get_user_info(user_id)
+            .ok()
+            .and_then(|info| info.timezone)
+            .unwrap_or_else(|| "UTC".to_string());
+
+        for task in &tasks {
+            let task_id = match task.id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Parse trigger timestamp from "once_<ts>"
+            let trigger_ts: Option<i32> = task
+                .trigger
+                .strip_prefix("once_")
+                .and_then(|s| s.parse().ok());
+
+            // Determine item fields based on task type
+            let (summary, kind, due_at, next_check_at) = if task.action == "generate_digest" {
+                // Digest task: recurring, has sources
+                let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
+                let time = task.recurrence_time.as_deref().unwrap_or("08:00");
+                let sources = task
+                    .sources
+                    .as_deref()
+                    .unwrap_or("email,whatsapp,telegram,signal,calendar");
+                let summary = format!(
+                    "Daily digest. Sources: {}. Repeats {} at {}.",
+                    sources, rule, time
+                );
+                // Calculate next trigger for recurring
+                let next_ts = state
+                    .user_repository
+                    .calculate_next_trigger_public(task, &user_tz)
+                    .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
+                (summary, "digest", None, next_ts)
+            } else if task.action.contains("quiet_mode") {
+                // Quiet mode task
+                let end = task.end_time.unwrap_or(now + 3600);
+                let summary = format!("Quiet mode until {}.", format_ts_short(end));
+                (summary, "reminder", Some(end), Some(end))
+            } else if task.trigger.starts_with("recurring_email")
+                || task.trigger.starts_with("recurring_messaging")
+            {
+                // Monitor task: has condition
+                let condition_text = task.condition.as_deref().unwrap_or("any matching content");
+                let summary = format!("Monitor: {}. Alert when match arrives.", condition_text);
+                (summary, "monitor", None, None)
+            } else if task.is_permanent == Some(1) {
+                // Recurring non-digest task
+                let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
+                let time = task.recurrence_time.as_deref().unwrap_or("08:00");
+                let summary = format!("Reminder: {}. Repeats {} at {}.", task.action, rule, time);
+                let next_ts = state
+                    .user_repository
+                    .calculate_next_trigger_public(task, &user_tz)
+                    .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
+                (summary, "reminder", None, next_ts)
+            } else {
+                // One-shot reminder
+                let summary = format!("Reminder: {}", task.action);
+                (summary, "reminder", trigger_ts, trigger_ts)
+            };
+
+            // Create the item
+            let new_item = crate::models::user_models::NewItem {
+                user_id,
+                summary,
+                kind: kind.to_string(),
+                due_at,
+                next_check_at,
+                priority: 0,
+                source_id: None,
+                created_at: task.created_at,
+            };
+
+            match state.item_repository.create_item(&new_item) {
+                Ok(_) => {
+                    // Mark task as migrated
+                    if let Err(e) = state
+                        .user_repository
+                        .update_task_status(task_id, "migrated")
+                    {
+                        tracing::warn!("Failed to mark task {} as migrated: {}", task_id, e);
+                    }
+                    migrated_count += 1;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create item from task {} for user {}: {}",
+                        task_id,
+                        user_id,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    tracing::info!(
+        "Task migration complete: {} tasks migrated to items",
+        migrated_count
+    );
+}
+
+/// Format a unix timestamp as a short human-readable string (for migration summaries)
+fn format_ts_short(ts: i32) -> String {
+    use chrono::TimeZone;
+    chrono::Utc
+        .timestamp_opt(ts as i64, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_else(|| ts.to_string())
+}
+
 /// Initialize the smartphone-free days metric if it doesn't exist.
 /// This runs on startup to ensure the metric is available immediately.
 async fn initialize_smartphone_free_days_metric(state: Arc<AppState>) {
@@ -477,8 +615,9 @@ async fn initialize_smartphone_free_days_metric(state: Arc<AppState>) {
 }
 
 pub async fn start_scheduler(state: Arc<AppState>) {
-    // One-time migration: convert digest settings to tasks
+    // One-time migrations
     migrate_digests_to_tasks(&state).await;
+    migrate_tasks_to_items(&state).await;
 
     // Initialize matrix clients and sync tasks once on startup
     tracing::debug!("Initializing Matrix clients and sync tasks...");
@@ -645,81 +784,35 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             email.body.as_deref().unwrap_or("No content")
                                         );
 
-                                        // Check recurring_email tasks if they exist
-                                        let email_tasks = match state.user_repository.get_recurring_tasks_for_user(user.id, "recurring_email") {
-                                            Ok(tasks) => tasks,
+                                        // Check monitor items (kind = "monitor") for email matches
+                                        let monitor_items = match state.item_repository.get_monitor_items(user.id) {
+                                            Ok(items) => items,
                                             Err(e) => {
-                                                tracing::error!("Failed to get recurring email tasks for user {}: {}", user.id, e);
+                                                tracing::error!("Failed to get monitor items for user {}: {}", user.id, e);
                                                 Vec::new()
                                             }
                                         };
-                                        if !email_tasks.is_empty() {
-                                            // Check if any tasks match the message
-                                            if let Ok((Some(task_id), _message, _first_message)) = crate::proactive::utils::check_task_condition_match(
+                                        if !monitor_items.is_empty() {
+                                            // Extract data from Result immediately to drop non-Send Box<dyn Error>
+                                            let maybe_match: Option<(
+                                                crate::proactive::utils::ItemMatchResponse,
+                                                crate::models::user_models::Item,
+                                            )> = crate::proactive::utils::check_item_monitor_match(
                                                 &state,
                                                 user.id,
                                                 &email_content,
-                                                &email_tasks,
-                                            ).await {
-                                                // Find the matched task to get its action and notification_type
-                                                let matched_task = email_tasks.iter().find(|t| t.id == Some(task_id)).cloned();
-                                                if let Some(task) = matched_task {
-                                                        let notification_type = task.notification_type.clone().unwrap_or_else(|| "sms".to_string());
-                                                        let action_spec = task.action.clone();
-
-                                                        // Complete or reschedule the task (for permanent recurring tasks)
-                                                        let user_tz = state.user_core.get_user_info(user.id)
-                                                            .ok()
-                                                            .and_then(|info| info.timezone)
-                                                            .unwrap_or_else(|| "UTC".to_string());
-                                                        match state.user_repository.complete_or_reschedule_task(&task, &user_tz) {
-                                                            Ok(rescheduled) => {
-                                                                if rescheduled {
-                                                                    tracing::debug!("Rescheduled permanent task {}", task_id);
-                                                                }
-                                                            }
-                                                            Err(e) => tracing::error!("Failed to complete task {}: {}", task_id, e),
-                                                        }
-
-                                                        // Check if email sender matches a contact profile
-                                                        let sender_trusted = crate::utils::action_executor::is_sender_trusted(
-                                                            &state,
-                                                            user.id,
-                                                            &crate::utils::action_executor::SenderContext::Email {
-                                                                from_email: email.from_email.as_deref().unwrap_or(""),
-                                                                from_display: email.from.as_deref().unwrap_or(""),
-                                                            },
-                                                        );
-
-                                                        // Execute the action_spec through AI + tools, passing the email context
-                                                        let state_clone = state.clone();
-                                                        let user_id = user.id;
-                                                        let trigger_context = email_content.clone();
-                                                        tokio::spawn(async move {
-                                                            tracing::debug!("Executing email task {} for user {}: {}", task_id, user_id, action_spec);
-                                                            match crate::utils::action_executor::execute_action_spec(
-                                                                &state_clone,
-                                                                user_id,
-                                                                &action_spec,
-                                                                &notification_type,
-                                                                Some(&trigger_context),
-                                                                None, // No sources for recurring email tasks
-                                                                None, // Condition already matched
-                                                                sender_trusted,
-                                                            ).await {
-                                                                crate::utils::action_executor::ActionResult::Success { message } => {
-                                                                    tracing::debug!("Email task {} completed successfully: {}", task_id, message);
-                                                                }
-                                                                crate::utils::action_executor::ActionResult::Skipped { reason } => {
-                                                                    tracing::debug!("Email task {} skipped: {}", task_id, reason);
-                                                                }
-                                                                crate::utils::action_executor::ActionResult::Failed { error } => {
-                                                                    tracing::error!("Email task {} failed: {}", task_id, error);
-                                                                }
-                                                            }
-                                                        });
-                                                        continue;
-                                                    }
+                                                &monitor_items,
+                                            ).await.ok().flatten().and_then(|resp| {
+                                                let item_id = resp.task_id.unwrap_or(0);
+                                                monitor_items.iter().find(|i| i.id == Some(item_id)).cloned().map(|item| (resp, item))
+                                            });
+                                            if let Some((match_response, matched_item)) = maybe_match {
+                                                crate::proactive::utils::apply_monitor_lifecycle(
+                                                    &state,
+                                                    &matched_item,
+                                                    &match_response,
+                                                ).await;
+                                                continue;
                                             }
                                         }
 
@@ -1060,165 +1153,163 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add bridge health check job to scheduler");
 
-    // Triage item maintenance - runs every minute to resurface snoozed items and expire old ones
+    // Triggered items - runs every minute to process items whose next_check_at has passed
     let state_clone = Arc::clone(&state);
-    let triage_maintenance_job = Job::new_async("0 */1 * * * *", move |_, _| {
+    let triggered_items_job = Job::new_async("0 */1 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
+            debug!("Checking for triggered items...");
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32;
 
-            // Resurface snoozed items whose snooze_until has passed
-            match state.user_repository.resurface_snoozed_items(now) {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!("Resurfaced {} snoozed triage items", count);
-                    }
-                }
-                Err(e) => error!("Failed to resurface snoozed triage items: {}", e),
-            }
-
-            // Expire items past their expires_at timestamp
-            match state.user_repository.expire_old_items(now) {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!("Expired {} triage items", count);
-                    }
-                }
-                Err(e) => error!("Failed to expire triage items: {}", e),
-            }
-        })
-    })
-    .expect("Failed to create triage maintenance job");
-
-    sched
-        .add(triage_maintenance_job)
-        .await
-        .expect("Failed to add triage maintenance job to scheduler");
-
-    // Time-triggered tasks - runs every minute to execute due "once_*" tasks
-    let state_clone = Arc::clone(&state);
-    let once_tasks_job = Job::new_async("0 */1 * * * *", move |_, _| {
-        let state = state_clone.clone();
-        Box::pin(async move {
-            debug!("Checking for due scheduled tasks...");
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            match state.user_repository.get_due_once_tasks(now) {
-                Ok(tasks) => {
-                    debug!("Found {} due scheduled tasks", tasks.len());
-                    for task in tasks {
-                        // Skip quiet_mode tasks - they're not executable actions.
-                        // Auto-complete expired ones.
-                        if crate::handlers::dashboard_handlers::is_quiet_mode_task(&task.action) {
-                            if let Some(end_ts) = task.end_time {
-                                if end_ts <= now {
-                                    let _ = state
-                                        .user_repository
-                                        .update_task_status(task.id.unwrap_or(0), "completed");
-                                }
-                            }
-                            continue;
-                        }
-
+            match state.item_repository.get_triggered_items(now) {
+                Ok(items) => {
+                    debug!("Found {} triggered items", items.len());
+                    for item in items {
+                        let item_id = item.id.unwrap_or(0);
+                        let user_id = item.user_id;
                         let state = state.clone();
-                        let task_clone = task.clone();
-                        let task_id = task.id.unwrap_or(0);
-                        let user_id = task.user_id;
-                        let action = task.action.clone();
-                        let notification_type = task
-                            .notification_type
-                            .clone()
-                            .unwrap_or_else(|| "sms".to_string());
-
-                        // Clone task fields for use in async block
-                        let sources = task.sources.clone();
-                        let condition = task.condition.clone();
+                        let item_clone = item.clone();
 
                         tokio::spawn(async move {
                             debug!(
-                                "Executing scheduled task {} for user {}: {}",
-                                task_id, user_id, action
+                                "Processing triggered item {} (kind={}) for user {}: {}",
+                                item_id, item_clone.kind, user_id, item_clone.summary
                             );
 
-                            // Execute the action with sources, condition, and auto-notification
-                            // Time-triggered tasks have no external sender - always trusted
-                            match crate::utils::action_executor::execute_action_spec(
-                                &state,
-                                user_id,
-                                &action,
-                                &notification_type,
-                                None, // No trigger context for time-based tasks
-                                sources.as_deref(),
-                                condition.as_deref(),
-                                true, // sender_trusted: time-triggered, no external sender
-                            )
-                            .await
-                            {
-                                crate::utils::action_executor::ActionResult::Success {
-                                    message,
-                                } => {
-                                    debug!("Task {} completed successfully: {}", task_id, message);
-                                }
-                                crate::utils::action_executor::ActionResult::Skipped { reason } => {
-                                    debug!("Task {} skipped: {}", task_id, reason);
-                                }
-                                crate::utils::action_executor::ActionResult::Failed { error } => {
-                                    error!("Task {} failed: {}", task_id, error);
-                                    // Optionally notify user of failure
-                                    let noti_type = format!("task_failed_{}", notification_type);
-                                    crate::proactive::utils::send_notification(
-                                        &state,
-                                        user_id,
-                                        &format!("Your scheduled task failed: {}", error),
-                                        noti_type,
-                                        Some(
-                                            "Sorry, your scheduled task encountered an error."
-                                                .to_string(),
-                                        ),
-                                    )
-                                    .await;
-                                }
-                            }
+                            match item_clone.kind.as_str() {
+                                "monitor" => {
+                                    // Monitor path: call LLM to evaluate lifecycle
+                                    let due_str = item_clone
+                                        .due_at
+                                        .and_then(|ts| {
+                                            chrono::DateTime::from_timestamp(ts as i64, 0)
+                                                .map(|dt| dt.to_rfc3339())
+                                        })
+                                        .unwrap_or_else(|| "none".to_string());
 
-                            // Complete or reschedule the task (for permanent recurring tasks)
-                            let user_tz = state
-                                .user_core
-                                .get_user_info(user_id)
-                                .ok()
-                                .and_then(|info| info.timezone)
-                                .unwrap_or_else(|| "UTC".to_string());
-                            match state
-                                .user_repository
-                                .complete_or_reschedule_task(&task_clone, &user_tz)
-                            {
-                                Ok(rescheduled) => {
-                                    if rescheduled {
-                                        debug!("Rescheduled permanent task {}", task_id);
+                                    let now_str = chrono::Utc::now().to_rfc3339();
+                                    let synthetic_message = format!(
+                                        "SYSTEM: Scheduled check triggered for this item. \
+                                        Current time: {}. Due date: {}. \
+                                        Evaluate if this item needs attention, escalation, or resolution.",
+                                        now_str, due_str
+                                    );
+
+                                    // Re-fetch monitor items for this user to get the full list
+                                    let monitor_items = match state.item_repository.get_monitor_items(user_id) {
+                                        Ok(items) => items,
+                                        Err(e) => {
+                                            error!("Failed to get monitor items for user {}: {}", user_id, e);
+                                            // Reschedule +24h on failure
+                                            let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
+                                            return;
+                                        }
+                                    };
+
+                                    // Find this specific item in the list
+                                    let this_item: Vec<_> = monitor_items.iter().filter(|i| i.id == Some(item_id)).cloned().collect();
+                                    if this_item.is_empty() {
+                                        debug!("Monitor item {} no longer exists, skipping", item_id);
+                                        return;
+                                    }
+
+                                    // Map error to String immediately to make the Result Send-safe
+                                    let llm_result: Result<Option<crate::proactive::utils::ItemMatchResponse>, String> =
+                                        crate::proactive::utils::check_item_monitor_match(
+                                            &state,
+                                            user_id,
+                                            &synthetic_message,
+                                            &this_item,
+                                        ).await.map_err(|e| e.to_string());
+                                    let (is_ok, maybe_response) = match llm_result {
+                                        Ok(resp) => (true, resp),
+                                        Err(e) => {
+                                            error!("LLM check failed for monitor item {}: {}", item_id, e);
+                                            (false, None)
+                                        }
+                                    };
+
+                                    if let Some(match_response) = maybe_response {
+                                        crate::proactive::utils::apply_monitor_lifecycle(
+                                            &state,
+                                            &this_item[0],
+                                            &match_response,
+                                        ).await;
+                                    } else if is_ok {
+                                        // Ok(None) - No match from LLM, reschedule based on heuristic
+                                        let next = if let Some(due) = item_clone.due_at {
+                                            let days_until = (due - now) / 86400;
+                                            if days_until <= 2 { now + 86400 }
+                                            else if days_until <= 7 { now + 2 * 86400 }
+                                            else { now + 3 * 86400 }
+                                        } else {
+                                            now + 86400
+                                        };
+                                        let _ = state.item_repository.update_next_check_at(item_id, Some(next));
+                                        debug!("Monitor item {} rescheduled (no LLM match)", item_id);
                                     } else {
-                                        debug!("Task {} marked as completed", task_id);
+                                        // Err case - reschedule +24h
+                                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
                                     }
                                 }
-                                Err(e) => error!("Failed to complete task {}: {}", task_id, e),
+                                _ => {
+                                    // One-shot path (reminder/digest/alert): fire and delete
+                                    let summary = item_clone.summary.clone();
+
+                                    let notification_result =
+                                        crate::proactive::utils::generate_item_notification(
+                                            &state, user_id, &summary,
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string());
+
+                                    match notification_result {
+                                        Ok((sms_message, first_message, notification_type)) => {
+                                            crate::proactive::utils::send_notification(
+                                                &state,
+                                                user_id,
+                                                &sms_message,
+                                                format!("item_{}", notification_type),
+                                                Some(first_message),
+                                            )
+                                            .await;
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Failed to generate notification for item {}: {}",
+                                                item_id, e
+                                            );
+                                            crate::proactive::utils::send_notification(
+                                                &state,
+                                                user_id,
+                                                &summary,
+                                                "item_sms".to_string(),
+                                                Some("Hey, you have a reminder!".to_string()),
+                                            )
+                                            .await;
+                                        }
+                                    }
+
+                                    let _ = state.item_repository.delete_item(item_id, user_id);
+                                    debug!("Item {} (one-shot) completed and deleted", item_id);
+                                }
                             }
                         });
                     }
                 }
-                Err(e) => error!("Failed to get due scheduled tasks: {}", e),
+                Err(e) => error!("Failed to get triggered items: {}", e),
             }
         })
     })
-    .expect("Failed to create once tasks job");
+    .expect("Failed to create triggered items job");
 
     sched
-        .add(once_tasks_job)
+        .add(triggered_items_job)
         .await
-        .expect("Failed to add once tasks job to scheduler");
+        .expect("Failed to add triggered items job to scheduler");
 
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);
@@ -1266,6 +1357,22 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Err(e) => error!("Failed to cleanup old tasks: {}", e),
             }
 
+            // Clean up old items (30 days past due_at)
+            let item_cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32
+                - (30 * 24 * 60 * 60); // 30 days ago
+
+            match state.item_repository.delete_old_items(item_cutoff) {
+                Ok(count) => {
+                    if count > 0 {
+                        debug!("Cleaned up {} old items", count);
+                    }
+                }
+                Err(e) => error!("Failed to cleanup old items: {}", e),
+            }
+
             // Clean up old message status logs (30 days)
             let message_log_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1279,6 +1386,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             {
                 Ok(count) => debug!("Cleaned up {} old message status logs", count),
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
+            }
+
+            // Auto-expire stale monitors (due_at >7 days past, no next_check_at)
+            let monitor_now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            match state.item_repository.delete_stale_monitors(monitor_now) {
+                Ok(count) => {
+                    if count > 0 {
+                        debug!("Auto-expired {} stale monitors", count);
+                    }
+                }
+                Err(e) => error!("Failed to auto-expire stale monitors: {}", e),
             }
         })
     })

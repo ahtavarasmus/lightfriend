@@ -138,62 +138,60 @@ pub async fn get_dashboard_summary(
     let (sunrise_hour, sunset_hour) =
         calculate_sun_times_from_coords(latitude, longitude, now, &tz);
 
-    // Collect attention items from triage_items
+    // Get all items for this user (single query replaces triage_items + tasks)
+    let items = state
+        .item_repository
+        .get_dashboard_items(user_id)
+        .unwrap_or_default();
+
+    // Split items into categories for display
     let mut attention_items: Vec<AttentionItem> = Vec::new();
-
-    if let Ok(triage_items) = state.user_repository.get_pending_triage_items(user_id) {
-        for item in triage_items {
-            let source = item
-                .context_json
-                .as_ref()
-                .and_then(|ctx| {
-                    serde_json::from_str::<serde_json::Value>(ctx)
-                        .ok()
-                        .and_then(|v| v["bridge_type"].as_str().map(|s| s.to_string()))
-                })
-                .or(item.source_type.clone());
-
-            let context_parsed = item
-                .context_json
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok());
-
-            attention_items.push(AttentionItem {
-                id: item.id.unwrap_or(0),
-                item_type: item.item_type.clone(),
-                summary: item.summary.clone(),
-                timestamp: item.created_at,
-                source,
-                suggested_action: item.suggested_action.clone(),
-                reasoning: item.reasoning.clone(),
-                context_json: context_parsed,
-                source_id: item.source_id.clone(),
-            });
+    for item in &items {
+        let is_future_scheduled = item.next_check_at.is_some_and(|nca| nca > now_ts);
+        // Items scheduled for the future (non-priority) go to upcoming_tasks/upcoming_digests
+        if is_future_scheduled && item.priority == 0 {
+            continue;
         }
+        // Everything else is an attention item (monitors, high-priority, tracked items)
+        let item_type = match item.kind.as_str() {
+            "monitor" => "monitor",
+            "alert" => "bridge_disconnected",
+            _ => "tracked_item",
+        };
+        attention_items.push(AttentionItem {
+            id: item.id.unwrap_or(0),
+            item_type: item_type.to_string(),
+            summary: item.summary.clone(),
+            timestamp: item.created_at,
+            source: item.source_id.clone(),
+            suggested_action: None,
+            reasoning: None,
+            context_json: None,
+            source_id: item.source_id.clone(),
+        });
     }
 
     // Sort by timestamp (most recent first)
     attention_items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     let attention_count = attention_items.len() as i32;
 
-    // Find next scheduled item (soonest upcoming task)
-    let next_scheduled = find_next_scheduled(&state, user_id, now_ts, &tz);
+    // Find next scheduled item (soonest upcoming non-digest item)
+    let next_scheduled = find_next_scheduled_item(&items, now_ts, &tz);
 
     // Find all upcoming tasks within the timeline range
-    let upcoming_tasks = find_upcoming_tasks(&state, user_id, now_ts, max_ts, &tz);
+    let upcoming_tasks = find_upcoming_items(&items, now_ts, max_ts, &tz);
 
     // Find all upcoming digests within the timeline range
-    let upcoming_digests = find_upcoming_digests(&state, user_id, now_ts, max_ts, &tz);
+    let upcoming_digests = find_upcoming_digest_items(&items, now_ts, max_ts, &tz);
 
     // Find tasks beyond the timeline range (for extend button)
-    let (tasks_beyond, tasks_beyond_count) =
-        find_tasks_beyond(&state, user_id, now_ts, max_ts, &tz);
+    let (tasks_beyond, tasks_beyond_count) = find_items_beyond(&items, now_ts, max_ts, &tz);
 
     // Get watched contacts (contact profiles with notification modes)
     let watched_contacts = get_watched_contacts(&state, user_id);
 
     // Find next digest time
-    let next_digest = find_next_digest(&state, user_id, now_ts, &tz);
+    let next_digest = find_next_digest_item(&items, now_ts, &tz);
 
     // Get quiet mode status
     let quiet_mode = get_quiet_mode_info(&state, user_id, now_ts, &tz);
@@ -214,259 +212,116 @@ pub async fn get_dashboard_summary(
     }))
 }
 
-fn find_next_scheduled(
-    state: &Arc<AppState>,
-    user_id: i32,
+fn find_next_scheduled_item(
+    items: &[crate::models::user_models::Item],
     now_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Option<ScheduledItem> {
-    let tasks = state.user_repository.get_user_tasks(user_id).ok()?;
-
-    let mut next_task: Option<(&crate::models::user_models::Task, i32)> = None;
-
-    for task in &tasks {
-        // Skip digest/quiet_mode tasks - they have their own display
-        if is_digest_task(&task.action) || is_quiet_mode_task(&task.action) {
-            continue;
-        }
-
-        // Parse trigger timestamp
-        if let Some(ts_str) = task.trigger.strip_prefix("once_") {
-            if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-                // Only consider future tasks
-                if trigger_ts > now_ts {
-                    match &next_task {
-                        Some((_, current_ts)) if trigger_ts < *current_ts => {
-                            next_task = Some((task, trigger_ts));
-                        }
-                        None => {
-                            next_task = Some((task, trigger_ts));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    next_task.map(|(task, trigger_ts)| {
-        let time_display = format_time_display(trigger_ts, tz);
-        // Use formatted action description if action exists, otherwise format condition
-        let description = if !task.action.is_empty() {
-            format_action_description(&task.action)
-        } else if let Some(ref cond) = task.condition {
-            // Also format condition if it looks like a tool call
-            format_action_description(cond)
-        } else {
-            "Scheduled task".to_string()
-        };
-
-        ScheduledItem {
-            time_display,
-            description,
-            task_id: task.id,
-        }
-    })
+    items
+        .iter()
+        .filter(|item| item.kind == "reminder")
+        .filter_map(|item| {
+            item.next_check_at
+                .filter(|&nca| nca > now_ts)
+                .map(|nca| (item, nca))
+        })
+        .min_by_key(|(_, nca)| *nca)
+        .map(|(item, nca)| ScheduledItem {
+            time_display: format_time_display(nca, tz),
+            description: item.summary.clone(),
+            task_id: item.id,
+        })
 }
 
-fn find_upcoming_tasks(
-    state: &Arc<AppState>,
-    user_id: i32,
+fn find_upcoming_items(
+    items: &[crate::models::user_models::Item],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Vec<UpcomingTask> {
-    let tasks = match state.user_repository.get_user_tasks(user_id) {
-        Ok(t) => t,
-        Err(_) => return vec![],
-    };
+    let mut upcoming: Vec<UpcomingTask> = items
+        .iter()
+        .filter(|item| item.kind == "reminder")
+        .filter_map(|item| {
+            item.next_check_at
+                .filter(|&nca| nca > now_ts && nca <= max_ts)
+                .map(|nca| UpcomingTask {
+                    task_id: item.id,
+                    timestamp: nca,
+                    time_display: format_time_display(nca, tz),
+                    description: item.summary.clone(),
+                    date_display: format_date_display(nca, tz),
+                    relative_display: format_relative_days(nca, now_ts, tz),
+                    condition: None,
+                    sources: None,
+                    sources_display: None,
+                })
+        })
+        .collect();
 
-    let mut upcoming: Vec<UpcomingTask> = Vec::new();
-
-    for task in &tasks {
-        // Skip digest/quiet_mode tasks - they have their own display
-        if is_digest_task(&task.action) || is_quiet_mode_task(&task.action) {
-            continue;
-        }
-
-        // Parse trigger timestamp
-        if let Some(ts_str) = task.trigger.strip_prefix("once_") {
-            if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-                // Only consider future tasks within the timeline range
-                if trigger_ts > now_ts && trigger_ts <= max_ts {
-                    let time_display = format_time_display(trigger_ts, tz);
-                    let date_display = format_date_display(trigger_ts, tz);
-                    let relative_display = format_relative_days(trigger_ts, now_ts, tz);
-                    // Use formatted action description if action exists, otherwise format condition
-                    let description = if !task.action.is_empty() {
-                        format_action_description(&task.action)
-                    } else if let Some(ref cond) = task.condition {
-                        // Also format condition if it looks like a tool call
-                        format_action_description(cond)
-                    } else {
-                        "Scheduled task".to_string()
-                    };
-
-                    // Extract condition - filter out JSON objects (those are action data, not conditions)
-                    let condition = task.condition.as_ref().and_then(|c| {
-                        let trimmed = c.trim();
-                        if trimmed.starts_with('{') || trimmed.is_empty() {
-                            None
-                        } else {
-                            Some(c.clone())
-                        }
-                    });
-
-                    let sources = task.sources.clone();
-                    let sources_display = sources
-                        .as_ref()
-                        .map(|s| format_sources_display(s, state, user_id));
-
-                    upcoming.push(UpcomingTask {
-                        task_id: task.id,
-                        timestamp: trigger_ts,
-                        time_display,
-                        description,
-                        date_display,
-                        relative_display,
-                        condition,
-                        sources,
-                        sources_display,
-                    });
-                }
-            }
-        }
-    }
-
-    // Sort by timestamp (earliest first)
     upcoming.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-
     upcoming
 }
 
-fn find_upcoming_digests(
-    state: &Arc<AppState>,
-    user_id: i32,
+fn find_upcoming_digest_items(
+    items: &[crate::models::user_models::Item],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Vec<UpcomingDigest> {
-    let tasks = match state.user_repository.get_user_tasks(user_id) {
-        Ok(t) => t,
-        Err(_) => return vec![],
-    };
+    let mut digests: Vec<UpcomingDigest> = items
+        .iter()
+        .filter(|item| item.kind == "digest")
+        .filter_map(|item| {
+            item.next_check_at
+                .filter(|&nca| nca > now_ts && nca <= max_ts)
+                .map(|nca| UpcomingDigest {
+                    task_id: item.id,
+                    timestamp: nca,
+                    time_display: format_time_display(nca, tz),
+                    sources: None,
+                })
+        })
+        .collect();
 
-    let mut digests: Vec<UpcomingDigest> = Vec::new();
-
-    for task in &tasks {
-        // Only include digest tasks
-        if !is_digest_task(&task.action) {
-            continue;
-        }
-
-        // Parse trigger timestamp
-        if let Some(ts_str) = task.trigger.strip_prefix("once_") {
-            if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-                // Only consider future digests within the timeline range
-                if trigger_ts > now_ts && trigger_ts <= max_ts {
-                    let time_display = format_time_display(trigger_ts, tz);
-
-                    digests.push(UpcomingDigest {
-                        task_id: task.id,
-                        timestamp: trigger_ts,
-                        time_display,
-                        sources: task.sources.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    // Sort by timestamp (earliest first)
     digests.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-
     digests
 }
 
-/// Find tasks beyond the current timeline range (for the extend button)
-/// Returns up to 5 tasks for preview and the total count
-fn find_tasks_beyond(
-    state: &Arc<AppState>,
-    user_id: i32,
+/// Find items beyond the current timeline range (for the extend button)
+/// Returns up to 5 items for preview and the total count
+fn find_items_beyond(
+    items: &[crate::models::user_models::Item],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> (Vec<UpcomingTask>, i32) {
-    let tasks = match state.user_repository.get_user_tasks(user_id) {
-        Ok(t) => t,
-        Err(_) => return (vec![], 0),
-    };
-
-    // Look up to 90 days ahead to avoid scanning forever
     let ninety_days = 90 * 24 * 60 * 60;
     let lookahead_ts = max_ts + ninety_days;
 
-    let mut beyond: Vec<UpcomingTask> = Vec::new();
+    let mut beyond: Vec<UpcomingTask> = items
+        .iter()
+        .filter(|item| item.kind == "reminder")
+        .filter_map(|item| {
+            item.next_check_at
+                .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
+                .map(|nca| UpcomingTask {
+                    task_id: item.id,
+                    timestamp: nca,
+                    time_display: format_time_display(nca, tz),
+                    description: item.summary.clone(),
+                    date_display: format_date_display(nca, tz),
+                    relative_display: format_relative_days(nca, now_ts, tz),
+                    condition: None,
+                    sources: None,
+                    sources_display: None,
+                })
+        })
+        .collect();
 
-    for task in &tasks {
-        // Skip digest/quiet_mode tasks - they have their own display
-        if is_digest_task(&task.action) || is_quiet_mode_task(&task.action) {
-            continue;
-        }
-
-        // Parse trigger timestamp
-        if let Some(ts_str) = task.trigger.strip_prefix("once_") {
-            if let Ok(trigger_ts) = ts_str.parse::<i32>() {
-                // Only consider tasks beyond max_ts but within lookahead
-                if trigger_ts > max_ts && trigger_ts <= lookahead_ts {
-                    let time_display = format_time_display(trigger_ts, tz);
-                    let date_display = format_date_display(trigger_ts, tz);
-                    let relative_display = format_relative_days(trigger_ts, now_ts, tz);
-                    let description = if !task.action.is_empty() {
-                        format_action_description(&task.action)
-                    } else if let Some(ref cond) = task.condition {
-                        format_action_description(cond)
-                    } else {
-                        "Scheduled task".to_string()
-                    };
-
-                    let condition = task.condition.as_ref().and_then(|c| {
-                        let trimmed = c.trim();
-                        if trimmed.starts_with('{') || trimmed.is_empty() {
-                            None
-                        } else {
-                            Some(c.clone())
-                        }
-                    });
-
-                    let sources = task.sources.clone();
-                    let sources_display = sources
-                        .as_ref()
-                        .map(|s| format_sources_display(s, state, user_id));
-
-                    beyond.push(UpcomingTask {
-                        task_id: task.id,
-                        timestamp: trigger_ts,
-                        time_display,
-                        description,
-                        date_display,
-                        relative_display,
-                        condition,
-                        sources,
-                        sources_display,
-                    });
-                }
-            }
-        }
-    }
-
-    // Sort by timestamp (earliest first)
     beyond.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-
     let total_count = beyond.len() as i32;
-    // Return up to 5 for preview
     let preview = beyond.into_iter().take(5).collect();
-
     (preview, total_count)
 }
 
@@ -484,27 +339,18 @@ fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedConta
         .collect()
 }
 
-fn find_next_digest(
-    state: &Arc<AppState>,
-    user_id: i32,
+fn find_next_digest_item(
+    items: &[crate::models::user_models::Item],
     now_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Option<NextDigestInfo> {
-    let tasks = state.user_repository.get_user_tasks(user_id).ok()?;
-
-    // Find the earliest future digest task
-    let earliest_ts = tasks
+    let earliest_nca = items
         .iter()
-        .filter(|t| is_digest_task(&t.action) && t.is_permanent.unwrap_or(0) == 1)
-        .filter_map(|t| {
-            t.trigger
-                .strip_prefix("once_")
-                .and_then(|s| s.parse::<i32>().ok())
-        })
-        .filter(|&ts| ts > now_ts)
+        .filter(|item| item.kind == "digest")
+        .filter_map(|item| item.next_check_at.filter(|&nca| nca > now_ts))
         .min()?;
 
-    let time_display = format_relative_time(earliest_ts, now_ts, tz);
+    let time_display = format_relative_time(earliest_nca, now_ts, tz);
     Some(NextDigestInfo { time_display })
 }
 
@@ -616,242 +462,6 @@ pub fn format_relative_days(timestamp: i32, now_ts: i32, tz: &chrono_tz::Tz) -> 
     }
 }
 
-/// Format source types into a human-readable display string.
-/// e.g., "weather" -> "Weather (Helsinki)", "email,calendar" -> "Email + Calendar"
-pub fn format_sources_display(sources: &str, state: &Arc<AppState>, user_id: i32) -> String {
-    let parts: Vec<String> = sources
-        .split(',')
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .map(|source| match source.as_str() {
-            "weather" => {
-                let location = state
-                    .user_core
-                    .get_user_info(user_id)
-                    .ok()
-                    .and_then(|u| u.location);
-                match location {
-                    Some(loc) => format!("Weather ({})", loc),
-                    None => "Weather".to_string(),
-                }
-            }
-            "email" => "Email".to_string(),
-            "calendar" => "Calendar".to_string(),
-            "whatsapp" => "WhatsApp".to_string(),
-            "telegram" => "Telegram".to_string(),
-            "signal" => "Signal".to_string(),
-            other => capitalize_first(other),
-        })
-        .collect();
-
-    parts.join(" + ")
-}
-
-/// Check if a task's action is a digest task.
-/// Handles both old format ("generate_digest") and new JSON format ({"tool":"generate_digest"}).
-pub fn is_digest_task(action: &str) -> bool {
-    if action == "generate_digest" {
-        return true;
-    }
-    // Try JSON parse
-    if let Ok(structured) =
-        serde_json::from_str::<crate::utils::action_executor::StructuredAction>(action)
-    {
-        return structured.tool == "generate_digest";
-    }
-    false
-}
-
-/// Check if a task's action is a quiet mode task.
-/// Handles both JSON format ({"tool":"quiet_mode"}) and plain string "quiet_mode".
-pub fn is_quiet_mode_task(action: &str) -> bool {
-    if action == "quiet_mode" {
-        return true;
-    }
-    if let Ok(structured) =
-        serde_json::from_str::<crate::utils::action_executor::StructuredAction>(action)
-    {
-        return structured.tool == "quiet_mode";
-    }
-    false
-}
-
-/// Format an action spec into a human-readable description.
-/// Handles both new JSON format and old `tool(param)` format.
-///
-/// Examples:
-/// - `{"tool":"send_reminder","params":{"message":"Call mom"}}` -> "Reminder: Call mom"
-/// - "control_tesla(climate_on)" -> "Tesla: Turn on climate"
-/// - "send_reminder(Pick up package)" -> "Reminder: Pick up package"
-/// - "generate_digest" -> "Generate digest"
-pub fn format_action_description(action: &str) -> String {
-    let action = action.trim();
-    if action.is_empty() {
-        return "Scheduled task".to_string();
-    }
-
-    // Try JSON parse first (new structured format)
-    if let Ok(structured) =
-        serde_json::from_str::<crate::utils::action_executor::StructuredAction>(action)
-    {
-        return format_structured_action(&structured);
-    }
-
-    // Fall back to old format parsing
-    // Handle multiple actions separated by periods - just take the first one for display
-    let first_action = action.split('.').next().unwrap_or(action).trim();
-
-    // Parse action(param) format
-    let (tool, param) = if let Some(idx) = first_action.find('(') {
-        if first_action.ends_with(')') {
-            let tool = &first_action[..idx];
-            let param = &first_action[idx + 1..first_action.len() - 1];
-            (tool, Some(param))
-        } else {
-            // Doesn't look like a tool call - return as-is (natural language)
-            return capitalize_first(first_action);
-        }
-    } else {
-        // No parentheses - might be a simple tool name or natural language
-        if is_known_tool(first_action) {
-            (first_action, None)
-        } else {
-            return capitalize_first(first_action);
-        }
-    };
-
-    format_tool_display(tool, param)
-}
-
-/// Format a StructuredAction into human-readable text
-fn format_structured_action(action: &crate::utils::action_executor::StructuredAction) -> String {
-    let params = action.params.as_ref();
-    let tool = action.tool.as_str();
-
-    // Extract the primary param as a string for display
-    let param_str: Option<String> = params.and_then(|p| {
-        let obj = p.as_object()?;
-        let val = match tool {
-            "send_reminder" => obj.get("message"),
-            "control_tesla" => obj.get("command"),
-            "get_weather" => obj.get("location"),
-            "send_chat_message" => {
-                // Build "platform,contact,message" for format_tool_display
-                let platform = obj.get("platform").and_then(|v| v.as_str()).unwrap_or("");
-                let contact = obj
-                    .get("contact")
-                    .or_else(|| obj.get("chat_name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let message = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                return Some(format!("{},{},{}", platform, contact, message));
-            }
-            "send_email" => {
-                // Build "to,subject,body" for format_tool_display
-                let to = obj.get("to").and_then(|v| v.as_str()).unwrap_or("");
-                let subject = obj.get("subject").and_then(|v| v.as_str()).unwrap_or("");
-                let body = obj.get("body").and_then(|v| v.as_str()).unwrap_or("");
-                return Some(format!("{},{},{}", to, subject, body));
-            }
-            _ => obj.values().next(),
-        };
-        val.and_then(|v| v.as_str()).map(|s| s.to_string())
-    });
-
-    format_tool_display(tool, param_str.as_deref())
-}
-
-/// Shared formatting logic for tool + param display
-fn format_tool_display(tool: &str, param: Option<&str>) -> String {
-    match tool {
-        "control_tesla" => {
-            let cmd = param.unwrap_or("command");
-            match cmd {
-                "climate_on" => "Tesla: Turn on climate".to_string(),
-                "climate_off" => "Tesla: Turn off climate".to_string(),
-                "lock" => "Tesla: Lock".to_string(),
-                "unlock" => "Tesla: Unlock".to_string(),
-                "honk" => "Tesla: Honk horn".to_string(),
-                "flash" => "Tesla: Flash lights".to_string(),
-                "start" => "Tesla: Start vehicle".to_string(),
-                "status" => "Tesla: Check status".to_string(),
-                "location" => "Tesla: Get location".to_string(),
-                _ => format!("Tesla: {}", cmd.replace('_', " ")),
-            }
-        }
-        "send_reminder" => {
-            let message = param.unwrap_or("reminder");
-            format!("Reminder: {}", message)
-        }
-        "send_chat_message" => {
-            if let Some(p) = param {
-                let parts: Vec<&str> = p.splitn(3, ',').collect();
-                let platform = capitalize_first(parts[0].trim());
-                let contact = parts.get(1).map(|s| s.trim()).unwrap_or("");
-                let message = parts.get(2).map(|s| s.trim()).unwrap_or("");
-                match (!contact.is_empty(), !message.is_empty()) {
-                    (true, true) => format!("{} to {}: {}", platform, contact, message),
-                    (true, false) => format!("{} to {}", platform, contact),
-                    (false, true) => format!("{}: {}", platform, message),
-                    _ => format!("{}: Send message", platform),
-                }
-            } else {
-                "Send message".to_string()
-            }
-        }
-        "get_weather" => {
-            let location = param.unwrap_or("current location");
-            format!("Weather: {}", location)
-        }
-        "send_email" => {
-            if let Some(p) = param {
-                let parts: Vec<&str> = p.splitn(3, ',').collect();
-                let to = parts[0].trim();
-                let subject = parts.get(1).map(|s| s.trim()).unwrap_or("");
-                let body = parts.get(2).map(|s| s.trim()).unwrap_or("");
-                match (!to.is_empty(), !subject.is_empty(), !body.is_empty()) {
-                    (true, true, true) => format!("Email to {} - {}: {}", to, subject, body),
-                    (true, true, false) => format!("Email to {} - {}", to, subject),
-                    (true, false, true) => format!("Email to {}: {}", to, body),
-                    (true, false, false) => format!("Email to {}", to),
-                    _ => "Send email".to_string(),
-                }
-            } else {
-                "Send email".to_string()
-            }
-        }
-        "fetch_calendar_events" => "Calendar: Fetch events".to_string(),
-        "generate_digest" => "Generate digest".to_string(),
-        _ => {
-            let formatted = tool.replace('_', " ");
-            capitalize_first(&formatted)
-        }
-    }
-}
-
-/// Check if a string looks like a known tool name
-fn is_known_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "control_tesla"
-            | "send_reminder"
-            | "send_chat_message"
-            | "send_email"
-            | "get_weather"
-            | "fetch_calendar_events"
-            | "generate_digest"
-    )
-}
-
-/// Capitalize the first letter of a string
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => "Scheduled task".to_string(),
-    }
-}
-
 fn get_quiet_mode_info(
     state: &Arc<AppState>,
     user_id: i32,
@@ -950,65 +560,24 @@ fn calculate_sun_times_from_coords(
     (Some(sunrise), Some(sunset))
 }
 
-/// DELETE /api/admin/dashboard/triage/{item_type}/{id}
-/// Dismisses a single triage/attention item by type and ID.
-/// Legacy endpoint - now delegates to triage_items table.
-pub async fn dismiss_triage_item(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path((_item_type, id)): Path<(String, i32)>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-
-    // Dismiss from triage_items table
-    let updated = state
-        .user_repository
-        .update_triage_item_status(id, user_id, "dismissed")
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to dismiss: {}", e)})),
-            )
-        })?;
-
-    if updated {
-        Ok(Json(serde_json::json!({"success": true})))
-    } else {
-        Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Item not found"})),
-        ))
-    }
-}
-
-// Triage API types
+// Item API types
 
 #[derive(Serialize)]
-pub struct TriageItemResponse {
+pub struct ItemResponse {
     pub id: i32,
-    pub item_type: String,
-    pub status: String,
     pub summary: String,
-    pub suggested_action: Option<String>,
-    pub reasoning: Option<String>,
-    pub context_json: Option<serde_json::Value>,
+    pub kind: String,
+    pub due_at: Option<i32>,
+    pub next_check_at: Option<i32>,
     pub priority: i32,
-    pub source_type: Option<String>,
     pub source_id: Option<String>,
     pub created_at: i32,
-    pub snooze_until: Option<i32>,
-    pub expires_at: Option<i32>,
 }
 
 #[derive(Serialize)]
-pub struct TriageListResponse {
-    pub items: Vec<TriageItemResponse>,
+pub struct ItemListResponse {
+    pub items: Vec<ItemResponse>,
     pub count: i32,
-}
-
-#[derive(Deserialize)]
-pub struct ExecuteRequest {
-    pub action: Option<String>, // edited reply text, if user modified it
 }
 
 #[derive(Deserialize)]
@@ -1016,70 +585,56 @@ pub struct SnoozeRequest {
     pub minutes: Option<i32>, // default 60
 }
 
-fn triage_item_to_response(item: crate::models::user_models::TriageItem) -> TriageItemResponse {
-    let context_parsed = item
-        .context_json
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-
-    TriageItemResponse {
+fn item_to_response(item: crate::models::user_models::Item) -> ItemResponse {
+    ItemResponse {
         id: item.id.unwrap_or(0),
-        item_type: item.item_type,
-        status: item.status,
         summary: item.summary,
-        suggested_action: item.suggested_action,
-        reasoning: item.reasoning,
-        context_json: context_parsed,
+        kind: item.kind,
+        due_at: item.due_at,
+        next_check_at: item.next_check_at,
         priority: item.priority,
-        source_type: item.source_type,
         source_id: item.source_id,
         created_at: item.created_at,
-        snooze_until: item.snooze_until,
-        expires_at: item.expires_at,
     }
 }
 
-/// GET /api/triage
-/// Returns all pending triage items for the authenticated user.
-pub async fn get_triage_items(
+/// GET /api/items
+/// Returns all items for the authenticated user.
+pub async fn get_items(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<Json<TriageListResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-
+) -> Result<Json<ItemListResponse>, (StatusCode, Json<serde_json::Value>)> {
     let items = state
-        .user_repository
-        .get_pending_triage_items(user_id)
+        .item_repository
+        .get_items(auth_user.user_id)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to get triage items: {}", e)})),
+                Json(serde_json::json!({"error": format!("Failed to get items: {}", e)})),
             )
         })?;
 
     let count = items.len() as i32;
-    let responses: Vec<TriageItemResponse> =
-        items.into_iter().map(triage_item_to_response).collect();
+    let responses: Vec<ItemResponse> = items.into_iter().map(item_to_response).collect();
 
-    Ok(Json(TriageListResponse {
+    Ok(Json(ItemListResponse {
         items: responses,
         count,
     }))
 }
 
-/// POST /api/triage/{id}/execute
-/// Executes the suggested action for a triage item (e.g., sends a reply via bridge).
-pub async fn execute_triage_item(
+/// POST /api/items/{id}/snooze
+/// Snoozes an item by setting next_check_at to a future time.
+pub async fn snooze_item(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<i32>,
-    body: Option<Json<ExecuteRequest>>,
+    body: Option<Json<SnoozeRequest>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-
+    // Verify ownership
     let item = state
-        .user_repository
-        .get_triage_item_by_id(id, user_id)
+        .item_repository
+        .get_item(id, auth_user.user_id)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1089,114 +644,20 @@ pub async fn execute_triage_item(
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Triage item not found"})),
+                Json(serde_json::json!({"error": "Item not found"})),
             )
         })?;
 
-    // Determine the action text: use edited version if provided, otherwise the suggested action
-    let action_text = body
-        .as_ref()
-        .and_then(|b| b.action.clone())
-        .or(item.suggested_action.clone());
-
-    match item.item_type.as_str() {
-        "message_reply" => {
-            let reply_text = action_text.ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": "No reply text available"})),
-                )
-            })?;
-
-            // Parse context_json for service and chat_name
-            let context: serde_json::Value = item
-                .context_json
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok())
-                .ok_or_else(|| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "Invalid context data"})),
-                    )
-                })?;
-
-            let service = context["service"].as_str().ok_or_else(|| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "Missing service in context"})),
-                )
-            })?;
-
-            let chat_name = context["chat_name"].as_str().ok_or_else(|| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "Missing chat_name in context"})),
-                )
-            })?;
-
-            // Send the reply via bridge
-            crate::utils::bridge::send_bridge_message(
-                service,
-                &state,
-                user_id,
-                chat_name,
-                &reply_text,
-                None,
-            )
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("Failed to send message: {}", e)})),
-                )
-            })?;
-        }
-        "bridge_disconnected" => {
-            // No action to execute for bridge disconnections - just mark completed
-        }
-        // Auto-detected trackable items from emails - no execute action, just mark completed
-        "email_invoice" | "email_shipment" | "email_deadline" | "email_document"
-        | "email_appointment" => {}
-        _ => {
-            // For unknown types, just mark completed
-        }
-    }
-
-    // Mark item as completed
-    state
-        .user_repository
-        .update_triage_item_status(id, user_id, "completed")
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to update status: {}", e)})),
-            )
-        })?;
-
-    Ok(Json(serde_json::json!({"success": true})))
-}
-
-/// POST /api/triage/{id}/snooze
-/// Snoozes a triage item for a specified duration (default: 60 minutes).
-pub async fn snooze_triage_item(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(id): Path<i32>,
-    body: Option<Json<SnoozeRequest>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
     let minutes = body.as_ref().and_then(|b| b.minutes).unwrap_or(60);
-
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
-
     let snooze_until = now + (minutes * 60);
 
-    let updated = state
-        .user_repository
-        .snooze_triage_item(id, user_id, snooze_until)
+    state
+        .item_repository
+        .update_next_check_at(item.id.unwrap_or(0), Some(snooze_until))
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1204,30 +665,21 @@ pub async fn snooze_triage_item(
             )
         })?;
 
-    if updated {
-        Ok(Json(
-            serde_json::json!({"success": true, "snooze_until": snooze_until}),
-        ))
-    } else {
-        Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Triage item not found"})),
-        ))
-    }
+    Ok(Json(
+        serde_json::json!({"success": true, "snooze_until": snooze_until}),
+    ))
 }
 
-/// DELETE /api/triage/{id}
-/// Permanently dismisses a triage item.
-pub async fn dismiss_triage_item_by_id(
+/// DELETE /api/items/{id}
+/// Dismisses an item by deleting it.
+pub async fn dismiss_item(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-
-    let updated = state
-        .user_repository
-        .update_triage_item_status(id, user_id, "dismissed")
+    let deleted = state
+        .item_repository
+        .delete_item(id, auth_user.user_id)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1235,99 +687,12 @@ pub async fn dismiss_triage_item_by_id(
             )
         })?;
 
-    if updated {
+    if deleted {
         Ok(Json(serde_json::json!({"success": true})))
     } else {
         Err((
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Triage item not found"})),
+            Json(serde_json::json!({"error": "Item not found"})),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_digest_task_old_format() {
-        assert!(is_digest_task("generate_digest"));
-    }
-
-    #[test]
-    fn test_is_digest_task_new_format() {
-        assert!(is_digest_task(r#"{"tool":"generate_digest"}"#));
-    }
-
-    #[test]
-    fn test_is_digest_task_not_digest() {
-        assert!(!is_digest_task("send_reminder(Call mom)"));
-        assert!(!is_digest_task(
-            r#"{"tool":"send_reminder","params":{"message":"hi"}}"#
-        ));
-    }
-
-    #[test]
-    fn test_format_action_new_json_reminder() {
-        let action = r#"{"tool":"send_reminder","params":{"message":"Call lena"}}"#;
-        assert_eq!(format_action_description(action), "Reminder: Call lena");
-    }
-
-    #[test]
-    fn test_format_action_new_json_tesla() {
-        let action = r#"{"tool":"control_tesla","params":{"command":"climate_on"}}"#;
-        assert_eq!(format_action_description(action), "Tesla: Turn on climate");
-    }
-
-    #[test]
-    fn test_format_action_old_format_reminder() {
-        assert_eq!(
-            format_action_description("send_reminder(Pick up package)"),
-            "Reminder: Pick up package"
-        );
-    }
-
-    #[test]
-    fn test_format_action_old_format_tesla() {
-        assert_eq!(
-            format_action_description("control_tesla(climate_on)"),
-            "Tesla: Turn on climate"
-        );
-    }
-
-    #[test]
-    fn test_format_action_simple_tool() {
-        assert_eq!(
-            format_action_description("generate_digest"),
-            "Generate digest"
-        );
-    }
-
-    #[test]
-    fn test_format_action_new_json_email() {
-        let action = r#"{"tool":"send_email","params":{"to":"john@example.com","subject":"Meeting Update","body":"The meeting is moved"}}"#;
-        assert_eq!(
-            format_action_description(action),
-            "Email to john@example.com - Meeting Update: The meeting is moved"
-        );
-    }
-
-    #[test]
-    fn test_format_action_new_json_email_no_subject() {
-        let action = r#"{"tool":"send_email","params":{"to":"john@example.com","body":"Hello"}}"#;
-        assert_eq!(
-            format_action_description(action),
-            "Email to john@example.com: Hello"
-        );
-    }
-
-    #[test]
-    fn test_format_action_old_format_email() {
-        // Old format with dots in param is lossy (splits on '.') - known limitation
-        // New JSON format handles this correctly
-        assert_eq!(
-            format_action_description("send_email(john)"),
-            "Email to john"
-        );
     }
 }

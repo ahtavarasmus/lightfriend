@@ -176,6 +176,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    items (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        summary -> Text,
+        kind -> Text,
+        due_at -> Nullable<Integer>,
+        next_check_at -> Nullable<Integer>,
+        priority -> Integer,
+        source_id -> Nullable<Text>,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     keywords (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -553,6 +567,7 @@ diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
+diesel::joinable!(items -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(mcp_servers -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
@@ -584,6 +599,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     email_judgments,
     google_calendar,
     imap_connection,
+    items,
     keywords,
     mcp_servers,
     message_history,

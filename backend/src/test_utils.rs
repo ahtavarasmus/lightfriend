@@ -72,6 +72,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 
     let user_core = Arc::new(crate::UserCore::new(pool.clone()));
     let user_repository = Arc::new(crate::UserRepository::new(pool.clone()));
+    let item_repository = Arc::new(crate::ItemRepository::new(pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
         pool.clone(),
     ));
@@ -97,6 +98,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         db_pool: pool,
         user_core,
         user_repository,
+        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
@@ -1452,6 +1454,173 @@ pub fn get_digest_settings(
         .user_core
         .get_digests(user_id)
         .expect("Failed to get digest settings")
+}
+
+// =============================================================================
+// Item Testing Helpers
+// =============================================================================
+
+/// Builder for test item parameters
+#[derive(Debug, Clone)]
+pub struct TestItemParams {
+    pub user_id: i32,
+    pub summary: String,
+    pub kind: String,
+    pub due_at: Option<i32>,
+    pub next_check_at: Option<i32>,
+    pub priority: i32,
+    pub source_id: Option<String>,
+}
+
+impl TestItemParams {
+    /// Simple reminder item
+    pub fn reminder(user_id: i32, summary: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "reminder".to_string(),
+            due_at: None,
+            next_check_at: None,
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Scheduled reminder (fires at next_check_at)
+    pub fn scheduled_reminder(user_id: i32, summary: &str, trigger_at: i32) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "reminder".to_string(),
+            due_at: Some(trigger_at),
+            next_check_at: Some(trigger_at),
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Digest item
+    pub fn digest(user_id: i32, summary: &str, trigger_at: i32) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "digest".to_string(),
+            due_at: None,
+            next_check_at: Some(trigger_at),
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Monitor item (matches against incoming data)
+    pub fn monitor(user_id: i32, summary: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "monitor".to_string(),
+            due_at: None,
+            next_check_at: None,
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Alert item (system alerts like bridge disconnect)
+    pub fn alert(user_id: i32, summary: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "alert".to_string(),
+            due_at: None,
+            next_check_at: None,
+            priority: 1,
+            source_id: None,
+        }
+    }
+
+    /// Email-sourced item (with source_id for dedup)
+    pub fn from_email(user_id: i32, summary: &str, source_id: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            kind: "reminder".to_string(),
+            due_at: None,
+            next_check_at: None,
+            priority: 0,
+            source_id: Some(source_id.to_string()),
+        }
+    }
+
+    pub fn with_priority(mut self, priority: i32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_next_check_at(mut self, ts: i32) -> Self {
+        self.next_check_at = Some(ts);
+        self
+    }
+
+    pub fn with_source_id(mut self, source_id: &str) -> Self {
+        self.source_id = Some(source_id.to_string());
+        self
+    }
+
+    pub fn with_due_at(mut self, ts: i32) -> Self {
+        self.due_at = Some(ts);
+        self
+    }
+
+    pub fn with_kind(mut self, kind: &str) -> Self {
+        self.kind = kind.to_string();
+        self
+    }
+}
+
+/// Create a test item in the database from TestItemParams, returns the item
+pub fn create_test_item(
+    state: &Arc<crate::AppState>,
+    params: &TestItemParams,
+) -> crate::models::user_models::Item {
+    use crate::models::user_models::NewItem;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_item = NewItem {
+        user_id: params.user_id,
+        summary: params.summary.clone(),
+        kind: params.kind.clone(),
+        due_at: params.due_at,
+        next_check_at: params.next_check_at,
+        priority: params.priority,
+        source_id: params.source_id.clone(),
+        created_at: now,
+    };
+
+    let item_id = state
+        .item_repository
+        .create_item(&new_item)
+        .expect("Failed to create test item");
+
+    state
+        .item_repository
+        .get_item(item_id, params.user_id)
+        .expect("Failed to get test item")
+        .expect("Item not found after creation")
+}
+
+/// Get all items for a user
+pub fn get_user_items(
+    state: &Arc<crate::AppState>,
+    user_id: i32,
+) -> Vec<crate::models::user_models::Item> {
+    state
+        .item_repository
+        .get_items(user_id)
+        .expect("Failed to get user items")
 }
 
 #[cfg(test)]

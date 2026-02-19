@@ -37,20 +37,12 @@ pub struct TaskResponse {
     trigger: String,
     condition: Option<String>,
     action: String,
-    notification_type: Option<String>,
     status: Option<String>,
     created_at: i32,
     is_permanent: Option<i32>,
     recurrence_rule: Option<String>,
     recurrence_time: Option<String>,
     sources: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct SetPermanenceRequest {
-    pub is_permanent: bool,
-    pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
-    pub recurrence_time: Option<String>, // "09:00" (HH:MM)
 }
 
 #[derive(Deserialize)]
@@ -78,18 +70,18 @@ pub async fn cancel_task(
     Path(task_id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!(
-        "Attempting to cancel task {} for user {}",
+        "Attempting to delete item {} for user {}",
         task_id,
         auth_user.user_id
     );
 
     match state
-        .user_repository
-        .cancel_task(auth_user.user_id, task_id)
+        .item_repository
+        .delete_item(task_id, auth_user.user_id)
     {
         Ok(true) => {
             tracing::debug!(
-                "Successfully cancelled task {} for user {}",
+                "Successfully deleted item {} for user {}",
                 task_id,
                 auth_user.user_id
             );
@@ -100,77 +92,7 @@ pub async fn cancel_task(
             Json(json!({"error": "Task not found or already completed"})),
         )),
         Err(e) => {
-            tracing::error!("Failed to cancel task {}: {}", task_id, e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            ))
-        }
-    }
-}
-
-pub async fn set_task_permanence(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(task_id): Path<i32>,
-    Json(request): Json<SetPermanenceRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!(
-        "Setting permanence for task {} for user {}",
-        task_id,
-        auth_user.user_id
-    );
-
-    // Validate recurrence settings
-    if request.is_permanent {
-        if let Some(ref rule) = request.recurrence_rule {
-            // Validate rule format
-            if !rule.starts_with("daily")
-                && !rule.starts_with("weekly:")
-                && !rule.starts_with("monthly:")
-            {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "Invalid recurrence rule. Use 'daily', 'weekly:1,2,3', or 'monthly:15'"}),
-                    ),
-                ));
-            }
-        }
-        if let Some(ref time) = request.recurrence_time {
-            // Validate time format (HH:MM)
-            if time.len() != 5 || !time.contains(':') {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid time format. Use HH:MM (e.g., '09:00')"})),
-                ));
-            }
-        }
-    }
-
-    match state.user_repository.update_task_permanence(
-        auth_user.user_id,
-        task_id,
-        request.is_permanent,
-        request.recurrence_rule,
-        request.recurrence_time,
-    ) {
-        Ok(true) => {
-            tracing::debug!(
-                "Successfully updated permanence for task {} for user {}",
-                task_id,
-                auth_user.user_id
-            );
-            Ok(Json(
-                json!({"message": "Task permanence updated successfully"}),
-            ))
-        }
-        Ok(false) => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "Task not found"})),
-        )),
-        Err(e) => {
-            tracing::error!("Failed to update task permanence {}: {}", task_id, e);
+            tracing::error!("Failed to delete item {}: {}", task_id, e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)})),
@@ -183,14 +105,14 @@ pub async fn get_tasks(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<TaskResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Fetching tasks for user {}", auth_user.user_id);
+    tracing::debug!("Fetching items for user {}", auth_user.user_id);
 
-    let tasks = state
-        .user_repository
-        .get_user_tasks(auth_user.user_id)
+    let items = state
+        .item_repository
+        .get_items(auth_user.user_id)
         .map_err(|e| {
             tracing::error!(
-                "Failed to fetch tasks for user {}: {}",
+                "Failed to fetch items for user {}: {}",
                 auth_user.user_id,
                 e
             );
@@ -200,21 +122,33 @@ pub async fn get_tasks(
             )
         })?;
 
-    let response: Vec<TaskResponse> = tasks
+    let response: Vec<TaskResponse> = items
         .into_iter()
-        .map(|task| TaskResponse {
-            id: task.id,
-            user_id: task.user_id,
-            trigger: task.trigger,
-            condition: task.condition,
-            action: task.action,
-            notification_type: task.notification_type,
-            status: task.status,
-            created_at: task.created_at,
-            is_permanent: task.is_permanent,
-            recurrence_rule: task.recurrence_rule,
-            recurrence_time: task.recurrence_time,
-            sources: task.sources,
+        .map(|item| {
+            let trigger = if item.kind == "monitor" {
+                "recurring_email".to_string()
+            } else if let Some(nca) = item.next_check_at {
+                format!("once_{}", nca)
+            } else {
+                "once_0".to_string()
+            };
+            TaskResponse {
+                id: item.id,
+                user_id: item.user_id,
+                trigger,
+                condition: None,
+                action: item.summary.clone(),
+                status: Some("active".to_string()),
+                created_at: item.created_at,
+                is_permanent: if item.kind == "monitor" {
+                    Some(1)
+                } else {
+                    Some(0)
+                },
+                recurrence_rule: None,
+                recurrence_time: None,
+                sources: None,
+            }
         })
         .collect();
 
@@ -239,25 +173,21 @@ pub struct SingleTaskResponse {
     pub sources_display: Option<String>,
 }
 
-/// Get a single task by ID - used for auto-showing newly created tasks
+/// Get a single item by ID - used for auto-showing newly created items
 pub async fn get_task(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(task_id): Path<i32>,
 ) -> Result<Json<SingleTaskResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let tasks = state
-        .user_repository
-        .get_user_tasks(auth_user.user_id)
+    let item = state
+        .item_repository
+        .get_item(task_id, auth_user.user_id)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)})),
             )
-        })?;
-
-    let task = tasks
-        .into_iter()
-        .find(|t| t.id == Some(task_id))
+        })?
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
@@ -265,16 +195,13 @@ pub async fn get_task(
             )
         })?;
 
-    // Determine trigger type and timestamp
-    let (trigger_type, trigger_timestamp) = if let Some(ts_str) = task.trigger.strip_prefix("once_")
-    {
-        ("once".to_string(), ts_str.parse::<i32>().unwrap_or(0))
-    } else if task.trigger == "recurring_email" {
+    // Determine trigger type and timestamp from item fields
+    let (trigger_type, trigger_timestamp) = if item.kind == "monitor" {
         ("recurring_email".to_string(), 0)
-    } else if task.trigger == "recurring_messaging" {
-        ("recurring_messaging".to_string(), 0)
+    } else if let Some(nca) = item.next_check_at {
+        ("once".to_string(), nca)
     } else {
-        (task.trigger.clone(), 0)
+        ("once".to_string(), 0)
     };
 
     // Get user timezone for formatting
@@ -284,66 +211,44 @@ pub async fn get_task(
         .unwrap_or_else(|| "UTC".to_string());
     let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
 
-    // Get current timestamp for relative display
     let now_ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
 
-    // Use the formatting functions from dashboard_handlers
     use crate::handlers::dashboard_handlers::{
-        format_action_description, format_date_display, format_relative_days, format_time_display,
+        format_date_display, format_relative_days, format_time_display,
     };
 
-    // For recurring tasks, show "Ongoing" instead of a timestamp-based time
-    let (time_display, date_display, relative_display) =
-        if trigger_type == "recurring_email" || trigger_type == "recurring_messaging" {
-            (
-                "Ongoing".to_string(),
-                String::new(),
-                "Always active".to_string(),
-            )
-        } else {
-            (
-                format_time_display(trigger_timestamp, &tz),
-                format_date_display(trigger_timestamp, &tz),
-                format_relative_days(trigger_timestamp, now_ts, &tz),
-            )
-        };
-
-    // Format the action as a human-readable description
-    let description = format_action_description(&task.action);
-
-    // Extract condition - filter out JSON objects (those are action data, not display conditions)
-    let condition = task.condition.as_ref().and_then(|c| {
-        let trimmed = c.trim();
-        if trimmed.starts_with('{') || trimmed.is_empty() {
-            None
-        } else {
-            Some(c.clone())
-        }
-    });
-
-    let sources = task.sources.clone();
-    let sources_display = sources.as_ref().map(|s| {
-        crate::handlers::dashboard_handlers::format_sources_display(s, &state, auth_user.user_id)
-    });
+    let (time_display, date_display, relative_display) = if item.kind == "monitor" {
+        (
+            "Ongoing".to_string(),
+            String::new(),
+            "Always active".to_string(),
+        )
+    } else {
+        (
+            format_time_display(trigger_timestamp, &tz),
+            format_date_display(trigger_timestamp, &tz),
+            format_relative_days(trigger_timestamp, now_ts, &tz),
+        )
+    };
 
     Ok(Json(SingleTaskResponse {
-        id: task.id.unwrap_or(0),
+        id: item.id.unwrap_or(0),
         trigger_timestamp,
         trigger_type,
         time_display,
-        description,
+        description: item.summary,
         date_display,
         relative_display,
-        condition,
-        sources,
-        sources_display,
+        condition: None,
+        sources: None,
+        sources_display: None,
     }))
 }
 
-/// Create a new scheduled/recurring task from the frontend
+/// Create a new scheduled/recurring item from the frontend
 pub async fn create_task(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -352,7 +257,7 @@ pub async fn create_task(
     use chrono::TimeZone;
 
     let user_id = auth_user.user_id;
-    tracing::debug!("Creating task for user {}: {:?}", user_id, request.action);
+    tracing::debug!("Creating item for user {}: {:?}", user_id, request.action);
 
     // Get user timezone for trigger calculation
     let user_tz_str = state
@@ -412,58 +317,101 @@ pub async fn create_task(
     })?;
     let trigger_ts = next_dt.timestamp() as i32;
 
-    let new_task = crate::models::user_models::NewTask {
-        user_id,
-        trigger: format!("once_{}", trigger_ts),
-        condition: request.condition,
-        action: request.action,
-        notification_type: request.notification_type.or(Some("sms".to_string())),
-        status: "active".to_string(),
-        created_at: current_ts,
-        is_permanent: Some(1), // Recurring tasks are permanent
-        recurrence_rule: request.recurrence_rule,
-        recurrence_time: request.recurrence_time,
-        sources: request.sources,
-        end_time: None,
+    // Build natural language summary
+    let rule = request.recurrence_rule.as_deref().unwrap_or("daily");
+    let time = request.recurrence_time.as_deref().unwrap_or("08:00");
+    let kind = if request.condition.is_some() {
+        "monitor"
+    } else if request.action == "generate_digest" {
+        "digest"
+    } else {
+        "reminder"
     };
 
-    state.user_repository.create_task(&new_task).map_err(|e| {
-        tracing::error!("Failed to create task for user {}: {}", user_id, e);
+    let summary = if kind == "monitor" {
+        format!(
+            "Monitor: {}. Alert when match arrives.",
+            request
+                .condition
+                .as_deref()
+                .unwrap_or("any matching content")
+        )
+    } else if kind == "digest" {
+        let sources = request
+            .sources
+            .as_deref()
+            .unwrap_or("email,whatsapp,telegram,signal,calendar");
+        format!(
+            "Daily digest. Sources: {}. Repeats {} at {}.",
+            sources, rule, time
+        )
+    } else {
+        format!(
+            "Reminder: {}. Repeats {} at {}.",
+            request.action, rule, time
+        )
+    };
+
+    // Encode notification_type into summary if it's "call" or "call_sms"
+    let noti_type = request.notification_type.as_deref().unwrap_or("sms");
+    let summary = if noti_type == "call" || noti_type == "call_sms" {
+        format!("{} [VIA CALL]", summary)
+    } else {
+        summary
+    };
+
+    let new_item = crate::models::user_models::NewItem {
+        user_id,
+        summary: summary.clone(),
+        kind: kind.to_string(),
+        due_at: None,
+        next_check_at: Some(trigger_ts),
+        priority: 0,
+        source_id: None,
+        created_at: current_ts,
+    };
+
+    let item_id = state.item_repository.create_item(&new_item).map_err(|e| {
+        tracing::error!("Failed to create item for user {}: {}", user_id, e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create task: {}", e)})),
+            Json(json!({"error": format!("Failed to create item: {}", e)})),
         )
     })?;
 
-    // Return the created task (fetch it back to get the ID)
-    let tasks = state.user_repository.get_user_tasks(user_id).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
-
-    // Find the most recently created task
-    let created_task = tasks.into_iter().next().ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Task not found after creation"})),
-        )
-    })?;
+    // Fetch the created item
+    let created_item = state
+        .item_repository
+        .get_item(item_id, user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Item not found after creation"})),
+            )
+        })?;
 
     Ok(Json(TaskResponse {
-        id: created_task.id,
-        user_id: created_task.user_id,
-        trigger: created_task.trigger,
-        condition: created_task.condition,
-        action: created_task.action,
-        notification_type: created_task.notification_type,
-        status: created_task.status,
-        created_at: created_task.created_at,
-        is_permanent: created_task.is_permanent,
-        recurrence_rule: created_task.recurrence_rule,
-        recurrence_time: created_task.recurrence_time,
-        sources: created_task.sources,
+        id: created_item.id,
+        user_id: created_item.user_id,
+        trigger: format!("once_{}", trigger_ts),
+        condition: if kind == "monitor" {
+            request.condition.clone()
+        } else {
+            None
+        },
+        action: request.action,
+        status: Some("active".to_string()),
+        created_at: created_item.created_at,
+        is_permanent: Some(1),
+        recurrence_rule: Some(rule.to_string()),
+        recurrence_time: Some(time.to_string()),
+        sources: request.sources,
     }))
 }
 
@@ -729,13 +677,11 @@ pub struct TaskEditResponse {
     pub success: bool,
 }
 
-/// AI response structure for task editing
+/// AI response structure for item editing
 #[derive(Deserialize)]
-struct AiTaskEditResult {
+struct AiItemEditResult {
     new_trigger_time: Option<String>,
-    new_action: Option<serde_json::Value>,
-    new_condition: Option<String>,
-    new_sources: Option<String>,
+    new_summary: Option<String>,
     explanation: String,
 }
 
@@ -750,37 +696,31 @@ pub async fn edit_task_with_ai(
     };
 
     tracing::info!(
-        "edit_task_with_ai called: task_id={}, user_id={}, instruction={}",
+        "edit_task_with_ai called: item_id={}, user_id={}, instruction={}",
         task_id,
         auth_user.user_id,
         request.instruction
     );
 
-    // Get the task and verify ownership
-    let tasks = state
-        .user_repository
-        .get_user_tasks(auth_user.user_id)
+    // Get the item and verify ownership
+    let item = state
+        .item_repository
+        .get_item(task_id, auth_user.user_id)
         .map_err(|e| {
-            tracing::error!("Failed to get user tasks: {}", e);
+            tracing::error!("Failed to get item: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)})),
             )
-        })?;
-
-    tracing::info!("Found {} tasks for user", tasks.len());
-
-    let task = tasks
-        .into_iter()
-        .find(|t| t.id == Some(task_id))
+        })?
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "Task not found"})),
+                Json(json!({"error": "Item not found"})),
             )
         })?;
 
-    // Build context for LLM client and timezone (respects user's LLM provider preference)
+    // Build context for LLM client and timezone
     let ctx = crate::context::ContextBuilder::for_user(&state, auth_user.user_id)
         .with_user_context()
         .build()
@@ -804,138 +744,55 @@ pub async fn edit_task_with_ai(
         .map(|tz| tz.formatted_now.clone())
         .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
 
-    // Parse trigger to get time display
-    let trigger_ts = task
-        .trigger
-        .strip_prefix("once_")
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
-    let current_time = chrono::DateTime::from_timestamp(trigger_ts, 0)
+    // Format current scheduled time
+    let current_time = item
+        .next_check_at
+        .and_then(|nca| chrono::DateTime::from_timestamp(nca as i64, 0))
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "Not scheduled".to_string());
 
-    // Build AI prompt - show action, condition, and sources separately
-    let action_display = if !task.action.trim().is_empty() {
-        task.action.trim().to_string()
+    let item_type = if item.kind == "monitor" {
+        "monitor (watches incoming data)"
     } else {
-        "(empty)".to_string()
+        "scheduled item"
     };
-    let condition_display = task
-        .condition
-        .as_ref()
-        .filter(|c| !c.trim().is_empty() && !c.trim().starts_with('{'))
-        .cloned()
-        .unwrap_or_else(|| "(none)".to_string());
-    let sources_display = task
-        .sources
-        .as_ref()
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .unwrap_or_else(|| "(none)".to_string());
-
-    // Get available tools dynamically
-    let tools_prompt = crate::tool_call_utils::utils::get_runtime_tools_prompt();
 
     let system_prompt = format!(
-        r#"You are editing a scheduled task that will be executed by an AI assistant.
+        r#"You are editing an item tracked by an AI assistant.
 
-CURRENT TASK:
+CURRENT ITEM:
+- Type: {}
+- Summary: {}
 - Scheduled time: {} (timezone: {})
-- Action: {}
-- Condition: {}
-- Sources: {}
 
 USER'S EDIT REQUEST: "{}"
-
-{}
-IMPORTANT RULES:
-1. If the task is ONLY to remind/notify the user (no other action), set new_action to: {{"tool":"send_reminder","params":{{"message":"Your message"}}}}
-2. For tasks with actual actions (Tesla, email, etc.), the user is automatically notified when the task completes
-3. Use exact tool names from the list above
-4. send_reminder is NOT a standalone tool - it is only valid as new_action.tool
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {{
   "new_trigger_time": "YYYY-MM-DDTHH:MM:SS" or null,
-  "new_action": {{"tool": "tool_name", "params": {{...}}}} or null,
-  "new_condition": "natural language condition text" or null,
-  "new_sources": "comma-separated source types" or null,
+  "new_summary": "updated summary text" or null,
   "explanation": "Brief explanation"
 }}
 
-FIELD SEPARATION (CRITICAL):
-- new_action: ONLY change the action (what to do). Do NOT change this when user only asks to change the condition.
-- new_condition: ONLY change the condition (what to check). Do NOT change this when user only asks to change the action.
-- new_sources: ONLY change the data sources to fetch (e.g., "weather", "email", "calendar"). Set this when the condition depends on external data.
-- When the user asks to change the condition, ONLY return new_condition (and new_sources if needed). Do NOT change the action.
-- When the user asks to change the action, ONLY return new_action. Do NOT change the condition.
-
-SOURCE TYPES:
-- "weather" - fetch weather data (for temperature/rain conditions)
-- "email" - fetch recent emails
-- "calendar" - fetch calendar events
-- "whatsapp" - fetch WhatsApp messages
-- "telegram" - fetch Telegram messages
-- "signal" - fetch Signal messages
-- Multiple sources: "weather,email"
-
-SOURCE EDITING RULES:
-- To REMOVE a source: return new_sources with the FULL remaining list (excluding the removed source)
-  Example: Current sources = "email,whatsapp,telegram,signal,calendar"
-  User: "remove calendar" -> new_sources = "email,whatsapp,telegram,signal"
-- To ADD a source: return new_sources with the full list INCLUDING the new source
-  Example: Current sources = "email,weather"
-  User: "add calendar" -> new_sources = "email,weather,calendar"
-- To REPLACE all sources: return the new complete list
-- NEVER return null for new_sources when the user asks to add or remove a source
-
-ACTION FORMAT (CRITICAL):
-- new_action MUST be a JSON object with "tool" and optional "params" keys
-- For reminders: {{"tool":"send_reminder","params":{{"message":"Call mom"}}}}
-- For Tesla: {{"tool":"control_tesla","params":{{"command":"climate_on"}}}}
-- For weather: {{"tool":"get_weather","params":{{"location":"New York"}}}}
-
-CRITICAL - REMINDER vs ACTION:
-- "remind me to X" = {{"tool":"send_reminder","params":{{"message":"X"}}}}
-- "do X" / "turn on X" = {{"tool":"control_tesla","params":{{"command":"climate_on"}}}}
-
-LANGUAGE: Never use 'you' or 'your' - use descriptive third-person text.
-
-CORRECT EXAMPLES:
-- User: "change to 11pm" -> new_trigger_time with 11pm, everything else null
-- User: "change the condition to if it's snowing" -> new_condition = "if it's snowing", new_sources = "weather", new_action = null
-- User: "make it a reminder about the package" -> new_action = {{"tool":"send_reminder","params":{{"message":"Package reminder"}}}}, new_condition = null
-- User: "add weather check" -> new_sources = "weather", everything else null
-- User: "remove calendar from the sources" (current sources: "email,whatsapp,calendar") -> new_sources = "email,whatsapp", everything else null
-- User: "don't check email" (current sources: "email,weather") -> new_sources = "weather", everything else null
-
-WRONG:
-- new_action = "send_reminder(Call you)" - WRONG! Must be JSON object, never a string
-- Changing new_action when user only asked to change the condition
-- Returning null for all fields when user clearly wants a change
+RULES:
+- new_trigger_time: Only set if user wants to change the scheduled time
+- new_summary: Only set if user wants to change what the item does/tracks
+- explanation: Always provide a brief explanation of the change
+- Return null for unchanged fields
 
 TIME RULES:
 - Calculate actual datetime for "tomorrow", "9am", "in 2 hours", etc.
 - Timezone: {}
 - Current time: {}
-- Return null if no time change
-
-CHANGE RULES:
-- Return null for unchanged fields
-- Only set fields that the user explicitly asked to change"#,
+- Return null if no time change"#,
+        item_type,
+        item.summary,
         current_time,
         user_tz_str,
-        action_display,
-        condition_display,
-        sources_display,
         request.instruction,
-        tools_prompt,
         user_tz_str,
         formatted_now
     );
-
-    // Call AI to interpret the edit instruction
-    tracing::info!("Calling AI to interpret edit instruction");
 
     let messages = vec![ChatCompletionMessage {
         role: MessageRole::user,
@@ -949,7 +806,6 @@ CHANGE RULES:
         .max_tokens(500)
         .temperature(0.1);
 
-    tracing::info!("Sending request to AI...");
     let response = ctx.client.chat_completion(ai_request).await.map_err(|e| {
         tracing::error!("AI request failed: {}", e);
         (
@@ -957,7 +813,6 @@ CHANGE RULES:
             Json(json!({"error": format!("AI request failed: {}", e)})),
         )
     })?;
-    tracing::info!("AI response received");
 
     let ai_response = response
         .choices
@@ -970,7 +825,7 @@ CHANGE RULES:
             )
         })?;
 
-    tracing::debug!("AI response for task edit: {}", ai_response);
+    tracing::debug!("AI response for item edit: {}", ai_response);
 
     // Clean up AI response - remove markdown code blocks if present
     let cleaned_response = ai_response
@@ -983,8 +838,7 @@ CHANGE RULES:
         .unwrap_or(&ai_response)
         .trim();
 
-    // Parse the AI response
-    let edit_result: AiTaskEditResult = serde_json::from_str(cleaned_response).map_err(|e| {
+    let edit_result: AiItemEditResult = serde_json::from_str(cleaned_response).map_err(|e| {
         tracing::error!(
             "Failed to parse AI response: {} - Response was: {}",
             e,
@@ -996,28 +850,25 @@ CHANGE RULES:
         )
     })?;
 
-    // Apply the changes
     let mut changes_made = false;
 
     // Update trigger time if specified
     if let Some(new_time_str) = &edit_result.new_trigger_time {
         let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
 
-        // Parse the datetime string
         if let Ok(naive_dt) =
             chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S")
         {
             use chrono::TimeZone;
             if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
                 let new_ts = local_dt.timestamp() as i32;
-                let new_trigger = format!("once_{}", new_ts);
                 state
-                    .user_repository
-                    .reschedule_task(task_id, &new_trigger)
+                    .item_repository
+                    .update_next_check_at(task_id, Some(new_ts))
                     .map_err(|e| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": format!("Failed to update task time: {}", e)})),
+                            Json(json!({"error": format!("Failed to update time: {}", e)})),
                         )
                     })?;
                 changes_made = true;
@@ -1025,49 +876,15 @@ CHANGE RULES:
         }
     }
 
-    // Update action if specified - serialize the JSON Value to a string for storage
-    if let Some(new_action) = &edit_result.new_action {
-        let action_str = serde_json::to_string(new_action).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to serialize action: {}", e)})),
-            )
-        })?;
+    // Update summary if specified
+    if let Some(new_summary) = &edit_result.new_summary {
         state
-            .user_repository
-            .update_task_action(auth_user.user_id, task_id, &action_str)
+            .item_repository
+            .update_summary(task_id, new_summary)
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to update task action: {}", e)})),
-                )
-            })?;
-        changes_made = true;
-    }
-
-    // Update condition if specified
-    if let Some(new_condition) = &edit_result.new_condition {
-        state
-            .user_repository
-            .update_task_condition_only(auth_user.user_id, task_id, Some(new_condition))
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to update task condition: {}", e)})),
-                )
-            })?;
-        changes_made = true;
-    }
-
-    // Update sources if specified
-    if let Some(new_sources) = &edit_result.new_sources {
-        state
-            .user_repository
-            .update_task_sources(auth_user.user_id, task_id, Some(new_sources))
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to update task sources: {}", e)})),
+                    Json(json!({"error": format!("Failed to update summary: {}", e)})),
                 )
             })?;
         changes_made = true;
