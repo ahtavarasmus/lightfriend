@@ -451,7 +451,6 @@ pub fn pricing_wrapper() -> Html {
             user_plan_type={profile_data.as_ref().and_then(|p| p.plan_type.clone())}
             is_logged_in={*is_logged_in}
             phone_number={profile_data.as_ref().and_then(|p| Some(p.phone_number.clone()))}
-            verified={profile_data.as_ref().map(|p| p.verified).unwrap_or(false)}
             selected_country={(*selected_country).clone()}
             country_name={(*country_name).clone()}
             on_country_change={on_country_change}

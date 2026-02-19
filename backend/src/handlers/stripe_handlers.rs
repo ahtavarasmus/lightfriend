@@ -150,7 +150,10 @@ async fn setup_user_subscription(
     use crate::utils::country::{
         is_byot_plan_price, is_digest_plan_price, is_legacy_euro_plan_price, is_monitor_plan_price,
     };
-    let plan_type = if is_digest_plan_price(price_id) {
+    // Manual override: user 12 was subscribed with wrong price ID, force BYOT
+    let plan_type = if user_id == 12 {
+        "byot"
+    } else if is_digest_plan_price(price_id) {
         "digest"
     } else if is_byot_plan_price(price_id) {
         "byot"
@@ -176,7 +179,9 @@ async fn setup_user_subscription(
                 "FI"
             }
         };
-        if country == "US" || country == "CA" {
+        if user_id == 12 {
+            0.0 // Manual override: BYOT user on wrong price ID
+        } else if country == "US" || country == "CA" {
             400.0
         } else if is_monitor_plan_price(price_id) || is_legacy_euro_plan_price(price_id) {
             // Legacy sentinel price IDs (€19) get same credits as Monitor plan (40 messages)
@@ -436,10 +441,12 @@ pub async fn create_unified_subscription_checkout(
                 std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
                     .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
             } else {
-                // Non-US/CA countries: Monitor or Digest plan
+                // Non-US/CA countries: Monitor, Digest, or BYOT plan
                 match body.plan_type.as_deref() {
                     Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
                         .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
+                    Some("byot") => std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
+                        .expect("STRIPE_BYOT_PLAN_PRICE_ID not set"),
                     _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
                         .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"), // Default to Monitor
                 }
@@ -572,14 +579,14 @@ pub async fn create_guest_checkout(
                 std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
                     .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
             } else {
-                // Non-US/CA countries: use monitor or digest plan based on selection
-                let plan_type = body.plan_type.as_deref().unwrap_or("monitor");
-                if plan_type == "digest" {
-                    std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
-                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set")
-                } else {
-                    std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
-                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set")
+                // Non-US/CA countries: use monitor, digest, or byot plan based on selection
+                match body.plan_type.as_deref() {
+                    Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
+                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
+                    Some("byot") => std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
+                        .expect("STRIPE_BYOT_PLAN_PRICE_ID not set"),
+                    _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
+                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"),
                 }
             }
         }
