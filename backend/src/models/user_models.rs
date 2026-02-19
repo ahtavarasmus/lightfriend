@@ -18,7 +18,6 @@ use crate::schema::subaccounts;
 use crate::schema::tasks;
 use crate::schema::totp_backup_codes;
 use crate::schema::totp_secrets;
-use crate::schema::triage_items;
 use crate::schema::uber;
 use crate::schema::usage_logs;
 use crate::schema::user_info;
@@ -914,46 +913,7 @@ pub struct NewSiteMetric {
     pub updated_at: i32,
 }
 
-// Triage items - AI decision queue for user actions
-#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
-#[diesel(table_name = triage_items)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct TriageItem {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub item_type: String, // "message_reply", "bridge_disconnected", "action_approval"
-    pub status: String,    // "pending", "snoozed", "completed", "dismissed", "expired"
-    pub summary: String,
-    pub suggested_action: Option<String>,
-    pub reasoning: Option<String>,
-    pub context_json: Option<String>,
-    pub priority: i32,               // 0=normal, 1=elevated, 2=urgent
-    pub source_type: Option<String>, // "bridge_message", "email", "system"
-    pub source_id: Option<String>,   // room_id, email_uid, etc.
-    pub created_at: i32,
-    pub snooze_until: Option<i32>,
-    pub expires_at: Option<i32>,
-}
-
-#[derive(Insertable, Debug)]
-#[diesel(table_name = triage_items)]
-pub struct NewTriageItem {
-    pub user_id: i32,
-    pub item_type: String,
-    pub status: String,
-    pub summary: String,
-    pub suggested_action: Option<String>,
-    pub reasoning: Option<String>,
-    pub context_json: Option<String>,
-    pub priority: i32,
-    pub source_type: Option<String>,
-    pub source_id: Option<String>,
-    pub created_at: i32,
-    pub snooze_until: Option<i32>,
-    pub expires_at: Option<i32>,
-}
-
-// Unified items - replaces triage_items + tasks
+// Unified items
 #[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
 #[diesel(table_name = items)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]

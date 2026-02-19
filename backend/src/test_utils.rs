@@ -1412,28 +1412,6 @@ pub fn create_test_task(
         .expect("No tasks found after creation")
 }
 
-/// Set digest settings for a user (for migration testing)
-pub fn set_digest_settings(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-    morning: Option<&str>,
-    day: Option<&str>,
-    evening: Option<&str>,
-) {
-    state
-        .user_core
-        .update_digests(user_id, morning, day, evening)
-        .expect("Failed to set digest settings");
-}
-
-/// Set user timezone
-pub fn set_user_timezone(state: &Arc<crate::AppState>, user_id: i32, tz: &str) {
-    state
-        .user_core
-        .update_timezone(user_id, tz)
-        .expect("Failed to set user timezone");
-}
-
 /// Get all tasks for a user
 pub fn get_user_tasks(
     state: &Arc<crate::AppState>,
@@ -1443,17 +1421,6 @@ pub fn get_user_tasks(
         .user_repository
         .get_user_tasks(user_id)
         .expect("Failed to get user tasks")
-}
-
-/// Get user's digest settings
-pub fn get_digest_settings(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-) -> (Option<String>, Option<String>, Option<String>) {
-    state
-        .user_core
-        .get_digests(user_id)
-        .expect("Failed to get digest settings")
 }
 
 // =============================================================================

@@ -945,7 +945,6 @@ fn format_disconnection_notice(
 }
 
 /// Formats tracked items (monitors, reminders) into a TRACKING line for digest inclusion.
-/// Reads from the items table instead of the legacy triage_items table.
 fn format_tracking_notice(state: &Arc<AppState>, user_id: i32) -> Option<String> {
     let items = match state.item_repository.get_items(user_id) {
         Ok(items) => items,

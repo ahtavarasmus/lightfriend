@@ -421,44 +421,62 @@ Had next_check_at but lacked notification_type and last_sender. Added those two 
 
 **Verification:** cargo build clean, cargo test all pass, cargo clippy clean
 
-### Remaining Steps
+### Completed: Steps 5-8
 
-5. Data migration (Rust startup: tasks -> items)
-6. Remove auto-reply system (message_reply triage items, QuickReplyFlow)
-7. Switch all callers to ItemRepository
-8. Simplify frontend to single items list
+**Step 5 - Data migration:** Handled by startup migration in scheduler.rs.
+
+**Step 6 - Remove auto-reply system:** Done. QuickReplyButton, QuickReplyFlow,
+message_reply triage items, on_item_sent/on_item_dismissed callbacks, and
+TrackedItemsList all removed.
+
+**Step 7 - Switch callers to ItemRepository:** Done for handlers and most of the
+codebase. All `/api/items/` endpoints use ItemRepository. Note: scheduler.rs
+still has legacy `create_task()`/`get_user_tasks()` calls for the data migration
+path - these reference the old tables and will be removed when tables are dropped.
+
+**Step 8 - Frontend cleanup:** Done. Removed dead `trigger_type` field from
+UpcomingTask struct and all usage sites, switched `/api/tasks/` URLs to canonical
+`/api/items/` endpoints, replaced "triage items" with "attention items" in
+privacy policy.
+
+### Remaining: Steps 9-10
+
 9. Full test + manual verify
+10. Drop old tables and remove dead code (cleanup PR)
 
 ---
 
-## Cleanup Debt (for cleanup PR after switchover)
+## Cleanup Debt (Step 10 - separate PR)
 
-These remain in the codebase until all callers are switched:
+**Tables to drop (Diesel migration):**
+- `triage_items` table
+- `tasks` table
+- Remove from schema.rs joinable/allow_tables macros
 
-**Tables to drop:**
-- `triage_items` - schema.rs lines 346-363, joinable line 583, allow_tables line 617
-- `tasks` - schema.rs lines 289-306, joinable line 579, allow_tables line 614
-
-**Models to remove:**
-- `TriageItem`, `NewTriageItem` in user_models.rs (lines ~917-953)
-- `Task`, `NewTask` in user_models.rs (lines ~387-422)
-- `use crate::schema::triage_items` import in user_models.rs
-- `use crate::schema::tasks` import in user_models.rs
+**Models to remove (user_models.rs):**
+- `TriageItem`, `NewTriageItem` structs
+- `Task`, `NewTask` structs
+- Related `use crate::schema::` imports
 
 **Repository methods to remove (user_repository.rs):**
-- Triage: create_triage_item, get_pending_triage_items, get_triage_item_by_id, update_triage_item_status, snooze_triage_item, get_snoozed_items_due, get_expired_items, resurface_snoozed_items, expire_old_items, dismiss_triage_items_for_room, get_pending_triage_items_for_digest, triage_item_exists_by_source, get_pending_trackable_items_for_digest
-- Tasks: create_task, get_user_tasks, get_due_once_tasks, get_recurring_tasks_for_user, update_task_status, cancel_task, update_task_permanence, MAX_ACTIVE_TASKS_PER_USER
+- Triage (12): create_triage_item, get_pending_triage_items, get_triage_item_by_id,
+  update_triage_item_status, snooze_triage_item, get_snoozed_items_due, get_expired_items,
+  resurface_snoozed_items, expire_old_items, dismiss_triage_items_for_room,
+  get_pending_triage_items_for_digest, triage_item_exists_by_source
+- Tasks (15+): create_task, get_user_tasks, get_due_once_tasks, get_recurring_tasks_for_user,
+  update_task_status, cancel_task, update_task_permanence, reschedule_task,
+  update_task_condition, update_task_action, update_task_condition_only,
+  update_task_sources, complete_or_reschedule_task, delete_old_tasks,
+  get_last_completed_task_time, MAX_ACTIVE_TASKS_PER_USER
 
-**Test helpers to remove (test_utils.rs):**
-- TestTaskParams struct + all methods
-- create_test_task, get_user_tasks helpers
+**Scheduler (jobs/scheduler.rs):**
+- Remove legacy `create_task()`/`get_user_tasks()` calls used for data migration
+- Remove any remaining references to old task/triage tables
 
-**Migration files to create:**
-- Drop migration for triage_items table
-- Drop migration for tasks table
+**Test files to remove:**
+- `backend/tests/task_repository_test.rs`
+- `TestTaskParams` struct + helpers in test_utils.rs
 
-**Frontend components to remove:**
-- QuickReplyButton, QuickReplyFlow in triage_indicator.rs
-- message_reply filtering in dashboard_view.rs
-- on_item_sent, on_item_dismissed callbacks
-- Separate TrackedItemsList section
+**Migration to create:**
+- `DROP TABLE triage_items`
+- `DROP TABLE tasks`

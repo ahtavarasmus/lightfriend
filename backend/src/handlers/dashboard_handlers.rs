@@ -132,7 +132,7 @@ pub async fn get_dashboard_summary(
     let (sunrise_hour, sunset_hour) =
         calculate_sun_times_from_coords(latitude, longitude, now, &tz);
 
-    // Get all items for this user (single query replaces triage_items + tasks)
+    // Get all items for this user
     let items = state
         .item_repository
         .get_dashboard_items(user_id)

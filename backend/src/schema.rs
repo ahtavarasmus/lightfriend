@@ -358,25 +358,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    triage_items (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        item_type -> Text,
-        status -> Text,
-        summary -> Text,
-        suggested_action -> Nullable<Text>,
-        reasoning -> Nullable<Text>,
-        context_json -> Nullable<Text>,
-        priority -> Integer,
-        source_type -> Nullable<Text>,
-        source_id -> Nullable<Text>,
-        created_at -> Integer,
-        snooze_until -> Nullable<Integer>,
-        expires_at -> Nullable<Integer>,
-    }
-}
-
-diesel::table! {
     uber (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -578,7 +559,6 @@ diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
-diesel::joinable!(triage_items -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(webauthn_challenges -> users (user_id));
@@ -613,7 +593,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     tesla,
     totp_backup_codes,
     totp_secrets,
-    triage_items,
     uber,
     usage_logs,
     user_info,
