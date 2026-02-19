@@ -245,6 +245,23 @@ pub async fn create_contact_profile(
         ));
     }
 
+    // Gate "critical" mode to Autopilot/BYOT plans
+    if request.notification_mode == "critical" {
+        let user_plan = state
+            .user_repository
+            .get_plan_type(auth_user.user_id)
+            .unwrap_or(None);
+        if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "Critical notification mode requires the Autopilot plan. Upgrade to have Lightfriend analyze message urgency automatically.",
+                    "upgrade_required": true
+                })),
+            ));
+        }
+    }
+
     // Validate notification_type
     if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
         return Err((
@@ -387,6 +404,23 @@ pub async fn update_contact_profile(
         ));
     }
 
+    // Gate "critical" mode to Autopilot/BYOT plans
+    if request.notification_mode == "critical" {
+        let user_plan = state
+            .user_repository
+            .get_plan_type(auth_user.user_id)
+            .unwrap_or(None);
+        if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "Critical notification mode requires the Autopilot plan. Upgrade to have Lightfriend analyze message urgency automatically.",
+                    "upgrade_required": true
+                })),
+            ));
+        }
+    }
+
     // Validate notification_type
     if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
         return Err((
@@ -514,6 +548,22 @@ pub async fn update_default_mode(
                 Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" })),
             ));
         }
+        // Gate "critical" mode to Autopilot/BYOT plans
+        if mode == "critical" {
+            let user_plan = state
+                .user_repository
+                .get_plan_type(auth_user.user_id)
+                .unwrap_or(None);
+            if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "Critical notification mode requires the Autopilot plan. Upgrade to have Lightfriend analyze message urgency automatically.",
+                        "upgrade_required": true
+                    })),
+                ));
+            }
+        }
         if let Err(e) = state
             .user_core
             .set_default_notification_mode(auth_user.user_id, mode)
@@ -575,6 +625,22 @@ pub async fn update_phone_contact_mode(
                 StatusCode::BAD_REQUEST,
                 Json(json!({ "error": "Invalid mode. Must be 'critical', 'digest', or 'ignore'" })),
             ));
+        }
+        // Gate "critical" mode to Autopilot/BYOT plans
+        if mode == "critical" {
+            let user_plan = state
+                .user_repository
+                .get_plan_type(auth_user.user_id)
+                .unwrap_or(None);
+            if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "Critical notification mode requires the Autopilot plan. Upgrade to have Lightfriend analyze message urgency automatically.",
+                        "upgrade_required": true
+                    })),
+                ));
+            }
         }
         if let Err(e) = state
             .user_core

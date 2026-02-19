@@ -63,7 +63,7 @@ pub struct User {
     pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub magic_token: Option<String>, // token for magic link login/password setup
-    pub plan_type: Option<String>, // "monitor" or "digest" for euro plan users, NULL for US/CA
+    pub plan_type: Option<String>, // "assistant", "autopilot", or "byot"
     pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
     pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
     pub last_backup_at: Option<i32>, // Unix timestamp of last backup

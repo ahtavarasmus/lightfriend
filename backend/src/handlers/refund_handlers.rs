@@ -41,9 +41,10 @@ pub async fn get_max_credits_left(
 ) -> f32 {
     use crate::api::twilio_pricing::get_euro_country_pricing;
 
-    let plan_messages: f32 = match plan_type {
-        Some("digest") => 120.0,
-        _ => 40.0, // monitor or default
+    let plan_messages: f32 = if crate::utils::plan_features::has_auto_features(plan_type) {
+        120.0 // autopilot/byot
+    } else {
+        40.0 // assistant or default
     };
 
     // US/CA: credits_left is message count (always 400 for all plans)

@@ -110,7 +110,7 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,    // "monitor" or "digest"
+    plan_type: Option<String>,    // "assistant", "autopilot", or "byot"
     phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
@@ -800,10 +800,11 @@ async fn recalculate_credits_for_country_change(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use crate::api::twilio_pricing::get_euro_country_pricing;
 
-    // Determine plan messages (40 for monitor, 120 for digest)
-    let plan_messages: f32 = match plan_type {
-        Some("digest") => 120.0,
-        _ => 40.0, // monitor or default
+    // Determine plan messages (120 for autopilot/byot, 40 for assistant or default)
+    let plan_messages: f32 = if crate::utils::plan_features::has_auto_features(plan_type) {
+        120.0
+    } else {
+        40.0
     };
 
     // Check if country is US/CA

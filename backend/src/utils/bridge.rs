@@ -1643,6 +1643,16 @@ pub async fn handle_bridge_message(
         );
         return;
     }
+    // Only Autopilot and BYOT plan users get automatic LLM processing
+    let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
+    if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+        tracing::debug!(
+            "User {} on {:?} plan - no automatic message processing",
+            user_id,
+            user_plan
+        );
+        return;
+    }
     if !state
         .user_core
         .get_proactive_agent_on(user_id)

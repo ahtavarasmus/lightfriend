@@ -1402,10 +1402,10 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 }
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
-    // Monitor plan prices (€29 for euro countries, $29 for US/CA)
+    // Assistant plan prices (lower tier)
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 29.00),
-        ("CA".to_string(), 29.00),
+        ("US".to_string(), 19.00),
+        ("CA".to_string(), 19.00),
         ("FI".to_string(), 29.00),
         ("NL".to_string(), 29.00),
         ("GB".to_string(), 29.00),
@@ -1426,31 +1426,9 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("NO".to_string(), 29.00),
         ("IE".to_string(), 29.00),
         ("NZ".to_string(), 29.00),
-        ("Other".to_string(), 19.00),  // BYOT plan stays at €19
+        ("Other".to_string(), 19.00),  // BYOT plan stays at 19 EUR
     ]);
-    let hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
-    let hosted_features = vec![
-        Feature {
-            text: "Fully managed service hosted in EU".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Simple setup, connect apps and go".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Secure no-logging policy".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "All future updates, security, and priority support".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "7-day one-click refund, no questions asked".to_string(),
-            sub_items: vec![],
-        },
-    ];
+    let _hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
     let pricing_css = r#"
     .subscription-blocked-notice {
         max-width: 800px;
@@ -1968,29 +1946,68 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             <div class="pricing-grid">
                 {
                     if props.selected_country == "US" || props.selected_country == "CA" {
-                        // US/CA: Show single Hosted Plan with messages included
+                        // US/CA: Show Assistant and Autopilot plans
+                        let assistant_features = vec![
+                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
+                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
+                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
+                            Feature { text: "Buy more credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
+                        ];
+                        let autopilot_features = vec![
+                            Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
+                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
+                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
+                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
+                        ];
                         html! {
-                            <PricingCard
-                                plan_name={"Hosted Plan"}
-                                best_for={"Full-featured cloud service ready to go. Reclaim 2-4 hours per day* for just"}
-                                price={*hosted_total_price}
-                                currency={"$"}
-                                period={"/month"}
-                                features={hosted_features.clone()}
-                                subscription_type={"hosted"}
-                                is_popular={true}
-                                is_premium={false}
-                                user_id={props.user_id}
-                                user_email={props.user_email.clone()}
-                                is_logged_in={props.is_logged_in}
-                                verified={props.verified}
-                                sub_tier={props.sub_tier.clone()}
-                                user_plan_type={props.user_plan_type.clone()}
-                                selected_country={props.selected_country.clone()}
-                                coming_soon={false}
-                                plan_type={Some("monitor".to_string())}
-                                hosted_prices={hosted_prices.clone()}
-                            />
+                            <>
+                                <PricingCard
+                                    plan_name={"Assistant Plan"}
+                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
+                                    price={19.0}
+                                    currency={"$"}
+                                    period={"/month"}
+                                    features={assistant_features}
+                                    subscription_type={"hosted"}
+                                    is_popular={false}
+                                    is_premium={false}
+                                    user_id={props.user_id}
+                                    user_email={props.user_email.clone()}
+                                    is_logged_in={props.is_logged_in}
+                                    verified={props.verified}
+                                    sub_tier={props.sub_tier.clone()}
+                                    user_plan_type={props.user_plan_type.clone()}
+                                    selected_country={props.selected_country.clone()}
+                                    coming_soon={false}
+                                    plan_type={Some("assistant".to_string())}
+                                    hosted_prices={hosted_prices.clone()}
+                                />
+                                <PricingCard
+                                    plan_name={"Autopilot Plan"}
+                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
+                                    price={29.0}
+                                    currency={"$"}
+                                    period={"/month"}
+                                    features={autopilot_features}
+                                    subscription_type={"hosted"}
+                                    is_popular={true}
+                                    is_premium={false}
+                                    user_id={props.user_id}
+                                    user_email={props.user_email.clone()}
+                                    is_logged_in={props.is_logged_in}
+                                    verified={props.verified}
+                                    sub_tier={props.sub_tier.clone()}
+                                    user_plan_type={props.user_plan_type.clone()}
+                                    selected_country={props.selected_country.clone()}
+                                    coming_soon={false}
+                                    plan_type={Some("autopilot".to_string())}
+                                    hosted_prices={hosted_prices.clone()}
+                                />
+                            </>
                         }
                     } else if props.selected_country == "Other" {
                         // Other countries: BYOT Plan only (bring your own Twilio)
@@ -2026,59 +2043,42 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             </PricingCard>
                         }
                     } else {
-                        // Euro countries: Show Monitor and Digest plans
-                        // Both plans have ALL features - they only differ in prepaid message count
-                        let is_local_number_country = matches!(props.selected_country.as_str(), "FI" | "NL" | "GB" | "AU");
+                        // Euro countries: Show Assistant and Autopilot plans
                         let is_notification_only = is_notification_only_country(&props.selected_country);
 
-                        let base_features: Vec<Feature> = if is_local_number_country {
-                            vec![
-                                Feature { text: "Local phone number included".to_string(), sub_items: vec![] },
-                                Feature { text: "All features included".to_string(), sub_items: vec![] },
-                                Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
-                            ]
-                        } else {
-                            // Notification-only countries - reframe as proactive-first
-                            vec![
-                                Feature {
-                                    text: "Proactive notifications".to_string(),
-                                    sub_items: vec![
-                                        "Choose sender: US, CA, FI, NL, GB, or AU number".to_string(),
-                                        "Texting back possible (international rates may apply)".to_string()
-                                    ]
-                                },
-                                Feature { text: "All features included".to_string(), sub_items: vec![] },
-                                Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
-                            ]
-                        };
-
-                        let mut monitor_features = base_features.clone();
-                        monitor_features.push(Feature { text: "Go off-grid knowing critical alerts reach you".to_string(), sub_items: vec![] });
-                        monitor_features.push(Feature { text: "Fixed monthly quota (no overage credits)".to_string(), sub_items: vec![] });
-
-                        let mut digest_features = base_features;
-                        digest_features.push(Feature { text: "Eliminates FOMO - stay caught up without checking".to_string(), sub_items: vec![] });
-                        digest_features.push(Feature { text: "Can purchase overage credits if needed".to_string(), sub_items: vec![] });
+                        let assistant_features = vec![
+                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
+                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
+                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
+                            Feature { text: "Buy more credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
+                        ];
+                        let autopilot_features = vec![
+                            Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
+                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
+                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
+                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
+                        ];
 
                         let byot_features = vec![
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
-                            Feature { text: "All features included".to_string(), sub_items: vec![] },
+                            Feature { text: "All Autopilot features included".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
+                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
-
-                        let selected_country_clone = props.selected_country.clone();
-                        let selected_country_clone2 = props.selected_country.clone();
 
                         html! {
                             <>
                                 <PricingCard
-                                    plan_name={"Monitor Plan"}
-                                    best_for={"Peace of mind. Get alerted to what matters, ignore the rest."}
+                                    plan_name={"Assistant Plan"}
+                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
                                     price={29.0}
                                     currency={"€"}
                                     period={"/month"}
-                                    features={monitor_features}
+                                    features={assistant_features}
                                     subscription_type={"hosted"}
                                     is_popular={false}
                                     is_premium={false}
@@ -2091,20 +2091,15 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     selected_country={props.selected_country.clone()}
                                     coming_soon={false}
                                     hosted_prices={hosted_prices.clone()}
-                                    plan_type={Some("monitor".to_string())}
-                                >
-                                    <MessageEquivalentDisplay
-                                        plan_messages={40}
-                                        country={selected_country_clone}
-                                    />
-                                </PricingCard>
+                                    plan_type={Some("assistant".to_string())}
+                                />
                                 <PricingCard
-                                    plan_name={"Digest Plan"}
-                                    best_for={"Stay informed without the urge to check. Regular updates keep you ahead."}
+                                    plan_name={"Autopilot Plan"}
+                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
                                     price={49.0}
                                     currency={"€"}
                                     period={"/month"}
-                                    features={digest_features}
+                                    features={autopilot_features}
                                     subscription_type={"hosted"}
                                     is_popular={true}
                                     is_premium={false}
@@ -2117,13 +2112,8 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     selected_country={props.selected_country.clone()}
                                     coming_soon={false}
                                     hosted_prices={hosted_prices.clone()}
-                                    plan_type={Some("digest".to_string())}
-                                >
-                                    <MessageEquivalentDisplay
-                                        plan_messages={120}
-                                        country={selected_country_clone2}
-                                    />
-                                </PricingCard>
+                                    plan_type={Some("autopilot".to_string())}
+                                />
                                 // Show BYOT option for notification-only countries (they may want their own local number)
                                 if is_notification_only {
                                     <PricingCard
@@ -2165,11 +2155,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
+                                    <p>{"Plans bill monthly. Both plans include the same generous message allowance. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30%."}</p>
                                 </details>
                                 <details>
-                                    <summary>{"What counts as a Message?"}</summary>
-                                    <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message)."}</p>
+                                    <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
+                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
                                 </details>
                                 </>
                             }
@@ -2178,15 +2168,15 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Phone number included. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
+                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Phone number included. No hidden fees. One-click refund within 7 days."}</p>
                                 </details>
                                 <details>
-                                    <summary>{"What's the difference between Monitor and Digest?"}</summary>
-                                    <p>{"Monitor is for critical notifications only - you get 40 credits and cannot buy more. Digest includes 120 credits with the ability to purchase additional credits when needed, perfect for daily summaries and regular use."}</p>
+                                    <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
+                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
-                                    <p>{"Different message types cost different amounts: notifications cost less than responses, which cost less than digests. The exact pricing is shown above based on your country's SMS rates. Digest plan users can purchase additional credits when needed."}</p>
+                                    <p>{"Different message types cost different amounts based on your country's SMS rates. Both plans can purchase additional credits when needed."}</p>
                                 </details>
                                 </>
                             }
@@ -2195,15 +2185,15 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Monitor (€29) includes 40 credits. Digest (€49) includes 120 credits. Messages sent from a US number. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
+                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Messages sent from a US number. No hidden fees. One-click refund within 7 days."}</p>
                                 </details>
                                 <details>
-                                    <summary>{"What's the difference between Monitor and Digest?"}</summary>
-                                    <p>{"Monitor is for critical notifications only - you get 40 credits and cannot buy more. Digest includes 120 credits with the ability to purchase additional credits when needed, perfect for daily summaries and regular use."}</p>
+                                    <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
+                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
-                                    <p>{"Different message types cost different amounts: notifications cost less than digests. Voice calls also use credits. The exact pricing is shown above based on your country's SMS rates. Digest plan users can purchase additional credits when needed."}</p>
+                                    <p>{"Different message types cost different amounts based on your country's SMS rates. Both plans can purchase additional credits when needed."}</p>
                                 </details>
                                 <details>
                                     <summary>{"Can I bring my own phone number?"}</summary>
@@ -2212,10 +2202,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <details>
                                     <summary>{"Do I need to text back?"}</summary>
                                     <p>{"Rarely! Lightfriend is proactive-first - it monitors your emails, calendar, and messages, then notifies you about what matters. You can ask questions via web chat or voice calls from the dashboard anytime."}</p>
-                                </details>
-                                <details>
-                                    <summary>{"What can I do from the dashboard?"}</summary>
-                                    <p>{"The web dashboard lets you chat with the AI, make voice calls, control your Tesla (climate, locks, charging), configure all proactive features, and soon watch videos from links friends share - all without texting."}</p>
                                 </details>
                                 </>
                             }

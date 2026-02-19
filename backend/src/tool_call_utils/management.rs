@@ -176,6 +176,14 @@ pub async fn handle_create_item(
 ) -> Result<CreateItemResult, Box<dyn Error>> {
     let args: CreateItemArgs = serde_json::from_str(args)?;
 
+    // Gate monitor items to Autopilot/BYOT plans only
+    if args.monitor {
+        let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
+        if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+            return Err("Monitoring items is an Autopilot plan feature. Upgrade to Autopilot to have Lightfriend automatically watch your messages for updates on this item.".into());
+        }
+    }
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

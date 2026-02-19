@@ -58,6 +58,7 @@ pub mod utils {
     pub mod matrix_auth;
     pub mod migration_proxy;
     pub mod notification_utils;
+    pub mod plan_features;
     pub mod tesla_keys;
     pub mod tool_exec;
     pub mod usage;
