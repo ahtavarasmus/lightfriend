@@ -7,11 +7,13 @@
 //! require mocking external services (AI, Twilio). These are structured
 //! to document expected behavior.
 
-use backend::models::user_models::NewTask;
+use backend::models::user_models::{NewContactProfile, NewTask};
 use backend::test_utils::{
     create_test_state, create_test_task, create_test_user, TestTaskParams, TestUserParams,
 };
-use backend::utils::action_executor::ActionResult;
+use backend::utils::action_executor::{
+    is_sender_trusted, parse_action_structured, ActionResult, SenderContext, StructuredAction,
+};
 
 /// Fixed reference timestamp for deterministic tests.
 /// T - 60 = "60s ago", T + 3600 = "1h later".
@@ -488,8 +490,6 @@ fn test_task_lifecycle_permanent_recurring() {
 // Action Parsing - New JSON Format
 // =============================================================================
 
-use backend::utils::action_executor::parse_action_structured;
-
 /// Query a task by id regardless of status (get_user_tasks only returns active tasks)
 fn get_task_by_id(
     state: &std::sync::Arc<backend::AppState>,
@@ -886,8 +886,6 @@ fn test_parse_action_old_format_param_with_nested_parens() {
 // Action Parsing - Roundtrip (parse -> to_action_string -> parse)
 // =============================================================================
 
-use backend::utils::action_executor::StructuredAction;
-
 #[test]
 fn test_roundtrip_json_to_display_to_parse() {
     // Parse JSON format
@@ -1234,4 +1232,452 @@ fn test_lifecycle_completed_at_is_set_on_completion() {
         before,
         after
     );
+}
+
+// =============================================================================
+// parse_action_structured Tests
+// =============================================================================
+
+#[test]
+fn test_parse_structured_json_format() {
+    let action = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
+    let result = parse_action_structured(action);
+    assert_eq!(result.tool, "send_reminder");
+    let msg = result.params.unwrap();
+    assert_eq!(msg["message"], "Call mom");
+}
+
+#[test]
+fn test_parse_structured_old_format() {
+    let result = parse_action_structured("send_reminder(Call mom)");
+    assert_eq!(result.tool, "send_reminder");
+    let params = result.params.unwrap();
+    assert_eq!(params["message"], "Call mom");
+}
+
+#[test]
+fn test_parse_structured_old_tesla() {
+    let result = parse_action_structured("control_tesla(climate_on)");
+    assert_eq!(result.tool, "control_tesla");
+    let params = result.params.unwrap();
+    assert_eq!(params["command"], "climate_on");
+}
+
+#[test]
+fn test_parse_structured_simple_tool() {
+    let result = parse_action_structured("generate_digest");
+    assert_eq!(result.tool, "generate_digest");
+    assert!(result.params.is_none());
+}
+
+#[test]
+fn test_parse_structured_empty() {
+    let result = parse_action_structured("");
+    assert_eq!(result.tool, "");
+    assert!(result.params.is_none());
+}
+
+#[test]
+fn test_structured_to_action_string() {
+    let action = StructuredAction {
+        tool: "send_reminder".to_string(),
+        params: Some(serde_json::json!({"message": "Call mom"})),
+    };
+    assert_eq!(action.to_action_string(), "send_reminder(Call mom)");
+}
+
+#[test]
+fn test_structured_to_action_string_no_params() {
+    let action = StructuredAction {
+        tool: "generate_digest".to_string(),
+        params: None,
+    };
+    assert_eq!(action.to_action_string(), "generate_digest");
+}
+
+#[test]
+fn test_roundtrip_json_serialize() {
+    let action = StructuredAction {
+        tool: "control_tesla".to_string(),
+        params: Some(serde_json::json!({"command": "climate_on"})),
+    };
+    let json = serde_json::to_string(&action).unwrap();
+    let parsed = parse_action_structured(&json);
+    assert_eq!(parsed.tool, "control_tesla");
+    assert_eq!(parsed.params.unwrap()["command"], "climate_on");
+}
+
+// =============================================================================
+// Sender Trust Tier Tests
+// =============================================================================
+
+#[test]
+fn test_registry_restricted_tools() {
+    let registry = backend::build_tool_registry();
+    // These tools perform external actions and should be restricted
+    assert!(registry.is_restricted("send_email"));
+    assert!(registry.is_restricted("respond_to_email"));
+    assert!(registry.is_restricted("send_chat_message"));
+    assert!(registry.is_restricted("control_tesla"));
+    // Safe/read-only tools should NOT be restricted
+    assert!(!registry.is_restricted("get_weather"));
+    assert!(!registry.is_restricted("fetch_calendar_events"));
+    assert!(!registry.is_restricted("fetch_emails"));
+    assert!(!registry.is_restricted("direct_response"));
+    // Unknown tools should not be restricted (fall through)
+    assert!(!registry.is_restricted("nonexistent_tool"));
+}
+
+#[test]
+fn test_sender_trust_time_based_always_trusted() {
+    let state = create_test_state();
+    assert!(is_sender_trusted(&state, 999, &SenderContext::TimeBased));
+}
+
+#[test]
+fn test_sender_trust_email_no_profiles() {
+    let state = create_test_state();
+    // No contact profiles exist, so any email sender is untrusted
+    let trusted = is_sender_trusted(
+        &state,
+        999,
+        &SenderContext::Email {
+            from_email: "attacker@evil.com",
+            from_display: "Attacker",
+        },
+    );
+    assert!(!trusted);
+}
+
+#[test]
+fn test_sender_trust_email_matching_profile() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Mom".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("mom@family.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Matching sender is trusted
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "mom@family.com",
+            from_display: "Mom",
+        },
+    ));
+
+    // Non-matching sender is untrusted
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "stranger@unknown.com",
+            from_display: "Stranger",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_email_case_insensitive() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Boss".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("Boss@Work.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "boss@work.com",
+            from_display: "boss",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_email_multiple_addresses() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Partner".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("partner@gmail.com, partner@work.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Both addresses should match
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "partner@gmail.com",
+            from_display: "",
+        },
+    ));
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "partner@work.com",
+            from_display: "",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_messaging_by_room_id() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Alice".to_string(),
+        whatsapp_chat: Some("Alice (WA)".to_string()),
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: None,
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: Some("!room123:matrix.org".to_string()),
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Matching room_id is trusted
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!room123:matrix.org",
+            room_name: "Alice",
+        },
+    ));
+
+    // Non-matching room_id and name is untrusted
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!different:matrix.org",
+            room_name: "UnknownPerson",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_messaging_chat_name_fallback() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Bob".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: Some("Bob Smith (Telegram)".to_string()),
+        signal_chat: None,
+        email_addresses: None,
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None, // No room_id - forces name fallback
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Name match should work even without room_id
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "telegram",
+            room_id: "!unknown:matrix.org",
+            room_name: "Bob Smith",
+        },
+    ));
+
+    // Wrong service should not match
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!unknown:matrix.org",
+            room_name: "Bob Smith",
+        },
+    ));
+}
+
+// =============================================================================
+// Sender Trust - execute_action_spec integration tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_untrusted_sender_blocked_from_restricted_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Untrusted sender tries to send email via action spec
+    let action_spec =
+        r#"{"tool":"send_email","params":{"to":"victim@example.com","subject":"hi"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        false, // untrusted sender
+    )
+    .await;
+
+    match result {
+        ActionResult::Failed { error } => {
+            assert!(
+                error.contains("blocked"),
+                "Error should mention 'blocked': {}",
+                error
+            );
+            assert!(
+                error.contains("send_email"),
+                "Error should mention tool name: {}",
+                error
+            );
+        }
+        ActionResult::Success { message } => {
+            panic!("Expected ActionResult::Failed, got Success: {}", message)
+        }
+        ActionResult::Skipped { reason } => {
+            panic!("Expected ActionResult::Failed, got Skipped: {}", reason)
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_untrusted_sender_allowed_safe_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Untrusted sender can use send_reminder (not restricted)
+    let action_spec = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        false, // untrusted sender
+    )
+    .await;
+
+    match result {
+        ActionResult::Success { message } => {
+            assert_eq!(message, "Call mom");
+        }
+        ActionResult::Failed { error } => {
+            panic!("Expected ActionResult::Success, got Failed: {}", error)
+        }
+        ActionResult::Skipped { reason } => {
+            panic!("Expected ActionResult::Success, got Skipped: {}", reason)
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_trusted_sender_allowed_restricted_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Trusted sender tries control_tesla - should NOT get "blocked" error.
+    // May fail for other reasons (no tesla credentials), but trust gate passes.
+    let action_spec = r#"{"tool":"control_tesla","params":{"command":"status"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        true, // trusted sender
+    )
+    .await;
+
+    if let ActionResult::Failed { error } = result {
+        assert!(
+            !error.contains("blocked"),
+            "Trusted sender should not be blocked: {}",
+            error
+        );
+    }
 }

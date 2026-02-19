@@ -1,13 +1,12 @@
 use crate::models::user_models::{ContactProfile, Task};
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
-use crate::ModelPurpose;
 use crate::UserCoreOps;
 use openai_api_rs::v1::{chat_completion, types};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::tool_call_utils::utils::create_openai_client_for_user;
+use crate::context::ContextBuilder;
 use chrono::Timelike;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -118,7 +117,7 @@ pub async fn check_task_condition_match(
     message: &str,
     tasks: &[Task],
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
     // Format tasks with their conditions for matching
     let tasks_str = tasks
@@ -197,17 +196,13 @@ pub async fn check_task_condition_match(
         },
     }];
 
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
-    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0)
         .max_tokens(200);
 
-    let result = client.chat_completion(request).await?;
+    let result = ctx.client.chat_completion(request).await?;
     let tool_call = result.choices[0]
         .message
         .tool_calls
@@ -536,6 +531,32 @@ fn format_disconnection_notice(
     Some(notices.join(". "))
 }
 
+/// Formats pending trackable triage items (email_invoice, email_shipment, etc.)
+/// into a TRACKING line for digest inclusion.
+fn format_tracking_notice(state: &Arc<AppState>, user_id: i32) -> Option<String> {
+    let items = match state
+        .user_repository
+        .get_pending_trackable_items_for_digest(user_id)
+    {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::error!(
+                "Failed to get trackable triage items for user {}: {}",
+                user_id,
+                e
+            );
+            return None;
+        }
+    };
+
+    if items.is_empty() {
+        return None;
+    }
+
+    let summaries: Vec<String> = items.iter().map(|item| item.summary.clone()).collect();
+    Some(format!("TRACKING: {}", summaries.join(", ")))
+}
+
 /// Checks whether a single message is critical.
 /// Returns `(is_critical, what_to_inform, first_message)`.
 #[allow(clippy::too_many_arguments)]
@@ -566,7 +587,7 @@ pub async fn check_message_importance(
         }
     }
     // Build the chat payload ----------------------------------------------
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -647,18 +668,14 @@ pub async fn check_message_importance(
             },
         },
     }];
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
-    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         // Lower temperature for more deterministic classification
         .temperature(0.2)
         .max_tokens(200);
     // ---------------------------------------------------------------------
-    match client.chat_completion(request).await {
+    match ctx.client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {
@@ -697,6 +714,217 @@ pub async fn check_message_importance(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Trackable item detection for auto-triage
+// ---------------------------------------------------------------------------
+
+const TRACKABLE_PROMPT: &str = r#"You are an AI that detects trackable items from emails. A "trackable item" is something the user might want to follow up on later - not urgent enough for an immediate notification, but worth silently recording.
+
+Detect these categories:
+- invoice/bill: payment due, amount owed, subscription charge
+- shipment: package tracking, delivery confirmation, shipping notification
+- deadline: action required by a date, form to submit, renewal date
+- document: document to sign, review, or approve
+- appointment: booking confirmation, reservation, scheduled service
+
+Rules:
+- Only detect items with concrete actionable details (amounts, dates, tracking numbers, etc.)
+- Marketing emails, newsletters, and promotional content are NOT trackable
+- Social notifications (likes, follows, comments) are NOT trackable
+- Automated status updates without action needed are NOT trackable
+- If uncertain, say not trackable
+
+Return JSON with:
+- `is_trackable` (boolean): whether this email contains a trackable item
+- `category` (string): one of "invoice", "shipment", "deadline", "document", "appointment", or "" if not trackable
+- `summary` (string, max 80 chars): concise description e.g. "AWS invoice $45.20 due Feb 20" or "" if not trackable
+- `due_date` (string): ISO date if a due/delivery date is mentioned, or "" if none
+- `auto_expiry_days` (integer): suggested days until this item auto-expires (7-90), or 0 if not trackable
+"#;
+
+#[derive(Debug, Deserialize)]
+struct TrackableResponse {
+    is_trackable: bool,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    due_date: String,
+    #[serde(default)]
+    auto_expiry_days: i32,
+}
+
+/// Checks whether an email contains a trackable item (invoice, shipment, deadline, etc.)
+/// and silently creates a TriageItem if detected. Uses source_id for dedup.
+pub async fn check_trackable_items(
+    state: &Arc<AppState>,
+    user_id: i32,
+    email_uid: &str,
+    email_content: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Dedup: skip if we already have a triage item for this email
+    let source_id = format!("email_{}", email_uid);
+    if state
+        .user_repository
+        .triage_item_exists_by_source(user_id, &source_id)?
+    {
+        return Ok(());
+    }
+
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(TRACKABLE_PROMPT.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!(
+                "Analyze this email for trackable items:\n\n{}",
+                email_content
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "is_trackable".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether the email contains a trackable item".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "category".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Category: invoice, shipment, deadline, document, appointment".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "summary".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Concise summary of the trackable item (max 80 chars)".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "due_date".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("ISO date if a due/delivery date is mentioned".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "auto_expiry_days".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("Days until auto-expiry (7-90)".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "analyze_trackable".to_string(),
+            description: Some("Analyzes if an email contains a trackable item".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    "is_trackable".to_string(),
+                    "category".to_string(),
+                    "summary".to_string(),
+                    "due_date".to_string(),
+                    "auto_expiry_days".to_string(),
+                ]),
+            },
+        },
+    }];
+
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.1)
+        .max_tokens(200);
+
+    let result = ctx.client.chat_completion(request).await?;
+
+    let response = result.choices[0]
+        .message
+        .tool_calls
+        .as_ref()
+        .and_then(|tc| tc.first())
+        .and_then(|tc| tc.function.arguments.as_ref())
+        .and_then(|args| serde_json::from_str::<TrackableResponse>(args).ok());
+
+    if let Some(resp) = response {
+        if resp.is_trackable && !resp.category.is_empty() && !resp.summary.is_empty() {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let expiry_days = resp.auto_expiry_days.clamp(7, 90);
+            let expires_at = current_time + (expiry_days * 86400);
+
+            let context = serde_json::json!({
+                "category": resp.category,
+                "due_date": resp.due_date,
+            });
+
+            let item_type = format!("email_{}", resp.category);
+
+            let new_item = crate::models::user_models::NewTriageItem {
+                user_id,
+                item_type,
+                status: "pending".to_string(),
+                summary: resp.summary,
+                suggested_action: None,
+                reasoning: None,
+                context_json: Some(context.to_string()),
+                priority: 0, // normal - these are silent background items
+                source_type: Some("email".to_string()),
+                source_id: Some(source_id),
+                created_at: current_time,
+                snooze_until: None,
+                expires_at: Some(expires_at),
+            };
+
+            if let Err(e) = state.user_repository.create_triage_item(new_item) {
+                tracing::error!(
+                    "Failed to create trackable triage item for user {}: {}",
+                    user_id,
+                    e
+                );
+            } else {
+                tracing::debug!(
+                    "Created trackable triage item for user {}: email_{}",
+                    user_id,
+                    resp.category
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Generates a suggested reply for a bridge message.
 /// Returns (needs_reply, suggested_reply, reasoning) where:
 /// - needs_reply: whether this message warrants a response
@@ -714,7 +942,7 @@ pub async fn generate_suggested_reply(
     user_context: Option<&str>,
     contact_notes: Option<&str>,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
     // Build context about the user's messaging style from their recent messages
     let style_examples = if recent_user_messages.is_empty() {
@@ -851,11 +1079,7 @@ Rules:
         },
     }];
 
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
-    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.7)
@@ -868,7 +1092,7 @@ Rules:
         reasoning: Option<String>,
     }
 
-    match client.chat_completion(request).await {
+    match ctx.client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {
@@ -1438,6 +1662,11 @@ pub async fn check_morning_digest(
                 digest_message = format!("{} {}", digest_message, notice);
             }
 
+            // Append trackable item notices (invoices, shipments, deadlines)
+            if let Some(tracking) = format_tracking_notice(state, user_id) {
+                digest_message = format!("{} {}", digest_message, tracking);
+            }
+
             tracing::info!(
                 "Sending morning digest for user {} at {}:00 in timezone {}",
                 user_id,
@@ -1921,6 +2150,11 @@ pub async fn check_day_digest(
             // Append disconnection notices if any
             if let Some(notice) = format_disconnection_notice(state, user_id, &timezone) {
                 digest_message = format!("{} {}", digest_message, notice);
+            }
+
+            // Append trackable item notices (invoices, shipments, deadlines)
+            if let Some(tracking) = format_tracking_notice(state, user_id) {
+                digest_message = format!("{} {}", digest_message, tracking);
             }
 
             tracing::info!(
@@ -2433,6 +2667,11 @@ pub async fn check_evening_digest(
                 digest_message = format!("{} {}", digest_message, notice);
             }
 
+            // Append trackable item notices (invoices, shipments, deadlines)
+            if let Some(tracking) = format_tracking_notice(state, user_id) {
+                digest_message = format!("{} {}", digest_message, tracking);
+            }
+
             tracing::info!(
                 "Sending evening digest for user {} at {}:00 in timezone {}",
                 user_id,
@@ -2475,7 +2714,7 @@ pub async fn generate_digest(
     data: DigestData,
     priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let (client, provider) = create_openai_client_for_user(state, user_id)?;
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
     // Format messages for the prompt
     let messages_str = data
         .messages
@@ -2563,15 +2802,11 @@ pub async fn generate_digest(
             },
         },
     }];
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
-    let request = chat_completion::ChatCompletionRequest::new(model, messages)
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .max_tokens(350);
-    match client.chat_completion(request).await {
+    match ctx.client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {

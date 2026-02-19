@@ -22,7 +22,7 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
     SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
     WebauthnRepository,
 };
@@ -219,6 +219,7 @@ async fn main() {
     }
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
+    let item_repository = Arc::new(ItemRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
@@ -328,6 +329,7 @@ async fn main() {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
+        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: AiConfig::from_env(),
@@ -358,6 +360,7 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        tool_registry: backend::build_tool_registry(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -551,7 +554,6 @@ async fn main() {
         );
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
-        .route("/testing", post(auth_handlers::testing_handler))
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route(
             "/api/admin/verify/{user_id}",
@@ -639,10 +641,6 @@ async fn main() {
         .route(
             "/api/admin/alerts/enable/{alert_type}",
             post(admin_handlers::enable_alert_type),
-        )
-        .route(
-            "/api/admin/dashboard/triage/{item_type}/{id}",
-            delete(handlers::dashboard_handlers::dismiss_triage_item),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1187,10 +1185,6 @@ async fn main() {
             delete(filter_handlers::cancel_task),
         )
         .route(
-            "/api/filters/task/{task_id}/permanence",
-            patch(filter_handlers::set_task_permanence),
-        )
-        .route(
             "/api/tasks/{task_id}/edit-ai",
             post(filter_handlers::edit_task_with_ai),
         )
@@ -1235,20 +1229,13 @@ async fn main() {
             "/api/dashboard/summary",
             get(dashboard_handlers::get_dashboard_summary),
         )
-        // Triage routes
-        .route("/api/triage", get(dashboard_handlers::get_triage_items))
+        // Item routes
+        .route("/api/items", get(dashboard_handlers::get_items))
         .route(
-            "/api/triage/{id}/execute",
-            post(dashboard_handlers::execute_triage_item),
+            "/api/items/{id}/snooze",
+            post(dashboard_handlers::snooze_item),
         )
-        .route(
-            "/api/triage/{id}/snooze",
-            post(dashboard_handlers::snooze_triage_item),
-        )
-        .route(
-            "/api/triage/{id}",
-            delete(dashboard_handlers::dismiss_triage_item_by_id),
-        )
+        .route("/api/items/{id}", delete(dashboard_handlers::dismiss_item))
         // Contact Profiles routes
         .route(
             "/api/contact-profiles",

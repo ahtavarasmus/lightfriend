@@ -1,5 +1,6 @@
+use crate::context::ContextBuilder;
 use crate::repositories::user_repository::LogUsageParams;
-use crate::tool_call_utils::utils::{create_openai_client_for_user, ChatMessage};
+use crate::tool_call_utils::utils::ChatMessage;
 use crate::AppState;
 use crate::UserCoreOps;
 use crate::{AiProvider, ModelPurpose};
@@ -19,16 +20,9 @@ use openai_api_rs::v1::chat_completion;
 
 /// Error messages for tool call failures - privacy-safe, user-facing
 mod tool_error_messages {
-    /// Internal Lightfriend errors (our fault)
+    /// Generic error shown to users when a tool fails
     pub const INTERNAL_ERROR: &str =
         "Sorry, we encountered an issue processing your request. Our team has been notified.";
-    /// External service errors (not our fault)
-    pub const PERPLEXITY_UNAVAILABLE: &str =
-        "Sorry, I couldn't reach the search service right now.";
-    pub const WEATHER_UNAVAILABLE: &str =
-        "Sorry, I couldn't get the weather information right now.";
-    pub const FIRECRAWL_UNAVAILABLE: &str = "Sorry, I couldn't search the web right now.";
-    pub const DIRECTIONS_UNAVAILABLE: &str = "Sorry, I couldn't get directions right now.";
 }
 
 /// Log a tool call error without exposing user content (privacy-safe)
@@ -712,77 +706,32 @@ pub async fn process_sms(
         tracing::error!("Failed to store user message in history: {}", e);
     }
 
-    // Get user settings to access timezone
-    let user_settings = match state.user_core.get_user_settings(user.id) {
-        Ok(settings) => settings,
+    // Build agent context (settings, timezone, contacts, LLM client, tools)
+    let wants_history = !payload.body.to_lowercase().starts_with("forget");
+    let mut builder = ContextBuilder::for_resolved_user(state, user.clone())
+        .with_user_context()
+        .with_tools()
+        .with_mcp_tools();
+    if wants_history {
+        builder = builder.with_history();
+    }
+    let ctx = match builder.build().await {
+        Ok(ctx) => ctx,
         Err(e) => {
-            tracing::error!("Failed to get user settings: {}", e);
+            tracing::error!("Failed to build agent context: {}", e);
             return SmsResult::SystemError {
-                log_msg: format!("Failed to get user settings: {}", e),
+                log_msg: format!("Failed to build agent context: {}", e),
             }
             .into_response();
         }
     };
 
-    let user_info = match state.user_core.get_user_info(user.id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get user info: {}", e);
-            return SmsResult::SystemError {
-                log_msg: format!("Failed to get user info: {}", e),
-            }
-            .into_response();
-        }
-    };
-
-    let user_given_info = match user_info.clone().info {
-        Some(info) => info,
-        None => "".to_string(),
-    };
-
-    let timezone_str = match user_info.timezone {
-        Some(ref tz) => tz.as_str(),
-        None => "UTC",
-    };
-
-    // Get timezone offset using jiff
-    let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
-        Ok((h, m)) => (h, m),
-        Err(_) => {
-            tracing::error!(
-                "Failed to get timezone offset for {}, defaulting to UTC",
-                timezone_str
-            );
-            (0, 0) // UTC default
-        }
-    };
-
-    // Calculate total offset in seconds
-    let offset_seconds = hours * 3600 + minutes * 60 * if hours >= 0 { 1 } else { -1 };
-
-    // Create FixedOffset for chrono
-    let user_timezone = chrono::FixedOffset::east_opt(offset_seconds)
-        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap()); // Fallback to UTC if invalid
-
-    // Format current time in RFC3339 for the user's timezone
-    let formatted_time = Utc::now().with_timezone(&user_timezone).to_rfc3339();
-
-    // Format offset string (e.g., "+02:00" or "-05:30")
-    let offset = format!(
-        "{}{:02}:{:02}",
-        if hours >= 0 { "+" } else { "-" },
-        hours.abs(),
-        minutes.abs()
-    );
-
-    // Load contact profiles for the system prompt
-    let contacts_info = match state.user_repository.get_contact_profiles(user.id) {
-        Ok(profiles) if !profiles.is_empty() => {
-            let nicknames: Vec<&str> = profiles.iter().map(|p| p.nickname.as_str()).collect();
-            format!("\n\nYour contacts: {}. When the user refers to a contact by name, use the matching nickname in tool calls.", nicknames.join(", "))
-        }
-        _ => String::new(),
-    };
+    let tz = ctx.timezone.as_ref().unwrap();
+    let formatted_time = &tz.formatted_now;
+    let timezone_str = &tz.tz_str;
+    let offset = &tz.offset_string;
+    let contacts_info = ctx.contacts_prompt_fragment.as_deref().unwrap_or("");
+    let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
 
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
@@ -795,7 +744,14 @@ pub async fn process_sms(
 - Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
 - When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
 - CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
+- FUTURE ACTIONS MUST BE SCHEDULED: If the user asks to do something at a future time (e.g. 'at 5pm text my wife', 'in 2 hours send an email'), you MUST use create_task to schedule it. NEVER call send_chat_message, send_email, create_calendar_event, or control_tesla directly for future-time requests - those tools execute immediately and cannot be delayed.
+  Example: 'at 5pm text my wife on WhatsApp that I'm running late' -> create_task(trigger_type='once', trigger_time='...T17:00', action_tool='send_chat_message', action_params='{{\"platform\":\"whatsapp\",\"contact\":\"wife\",\"message\":\"I'm running late\"}}')
+  WRONG: calling send_chat_message directly when the user said 'at 5pm' - that sends it NOW, not at 5pm.
 - When users request conditional tasks that check data sources at a specific time (e.g. 'at 8am check my email and if...', 'at 7am check the weather and if...'), use trigger_type='once' with the specified trigger_time AND set the sources field. The system will automatically fetch the data at the scheduled time. For example, 'at 8am tomorrow check my email and if there is anything from my boss, remind me to reply' should use trigger_type='once', trigger_time='2026-02-08T08:00', sources='email', condition='email from boss'. Only use trigger_type='recurring_email' when the user wants to be notified on EVERY matching incoming email with no specific time.
+
+### Questions vs Tasks:
+- If the user is ASKING A QUESTION about an event or topic (e.g. 'I have a dentist appointment tomorrow, what should I bring?', 'what's the weather like this weekend?'), answer the question directly using tools like ask_perplexity. Do NOT create a task.
+- Only create a task when the user explicitly requests a reminder, scheduled action, or monitoring (e.g. 'remind me', 'text me at', 'notify me when', 'at 5pm do X').
 
 ### Task vs Calendar Event:
 - 'add task', 'remind me', 'set a reminder', 'schedule a task' -> use create_task (Lightfriend's built-in task system)
@@ -813,6 +769,7 @@ pub async fn process_sms(
 ### Date and Time Handling:
 - Always work with times in the user's timezone: {} with offset {}.
 - When user mentions times without dates, assume they mean the nearest future occurrence.
+- RELATIVE TIMES: For 'in X hours/minutes', compute the exact trigger_time by adding X to the current time. Example: if current time is 14:30 and user says 'in 3 hours', trigger_time must be 17:30 (not an approximation).
 - For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').
 - For displaying times to users:
   - Use 12-hour format with AM/PM (e.g., '2:30 PM')
@@ -875,89 +832,25 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     }
 
-    // Only include conversation history if message doesn't start with "forget"
-    if !payload.body.to_lowercase().starts_with("forget") {
-        // Get user's save_context setting
-        let save_context = user_settings.save_context.unwrap_or(0);
-
-        if save_context > 0 {
-            // Get the last N back-and-forth exchanges based on save_context
-            let history = state
-                .user_repository
-                .get_conversation_history(user.id, save_context as i64, true)
-                .unwrap_or_default();
-
-            let mut context_messages: Vec<ChatMessage> = Vec::new();
-
-            // Process messages in chronological order
-            for msg in history.into_iter().rev() {
-                // Skip assistant messages that triggered tool calls (they have empty content)
-                // Including these with structured format causes the model to mimic the pattern
-                if msg.role == "assistant" && msg.tool_calls_json.is_some() {
-                    continue;
-                }
-
-                // For tool messages: format as context that won't be mimicked
-                // BUT skip tools that should always be called fresh
-                if msg.role == "tool" {
-                    const SKIP_FROM_HISTORY: &[&str] = &[
-                        "fetch_chat_messages",
-                        "fetch_recent_messages",
-                        "fetch_emails",
-                        "fetch_specific_email",
-                        "get_weather",
-                        "fetch_calendar_events",
-                        "direct_response",
-                    ];
-
-                    // Skip these tool results - LLM should call them fresh each time
-                    if let Some(ref tool_name) = msg.tool_name {
-                        if SKIP_FROM_HISTORY.contains(&tool_name.as_str()) {
-                            continue;
-                        }
-                    }
-
-                    let context_content = format!("[Previous result: {}]", msg.encrypted_content);
-                    let chat_msg = ChatMessage {
-                        role: "assistant".to_string(),
-                        content: chat_completion::Content::Text(context_content),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    };
-                    context_messages.push(chat_msg);
-                    continue;
-                }
-
-                let role = match msg.role.as_str() {
-                    "user" => "user",
-                    "assistant" => "assistant",
-                    _ => continue,
-                };
-
-                // Skip messages with empty content (can cause API errors)
-                if msg.encrypted_content.trim().is_empty() {
-                    continue;
-                }
-
-                // Regular messages (user, final assistant responses)
-                let chat_msg = ChatMessage {
-                    role: role.to_string(),
-                    content: chat_completion::Content::Text(msg.encrypted_content.clone()),
-                    tool_calls: None,
-                    tool_call_id: None,
-                };
-                context_messages.push(chat_msg);
-            }
-
-            // Combine system message with conversation history
-            chat_messages.extend(context_messages);
+    // Add conversation history from context builder (already filtered and converted)
+    if let Some(ref history) = ctx.conversation_history {
+        for msg in history {
+            let role = match msg.role {
+                chat_completion::MessageRole::user => "user",
+                chat_completion::MessageRole::assistant => "assistant",
+                chat_completion::MessageRole::system => "system",
+                _ => "user",
+            };
+            chat_messages.push(ChatMessage {
+                role: role.to_string(),
+                content: msg.content.clone(),
+                tool_calls: None,
+                tool_call_id: None,
+            });
         }
     }
-    // Get the user's LLM provider preference from settings
-    let llm_provider_preference = state.user_core.get_llm_provider(user.id).unwrap_or(None);
-    let provider = state
-        .ai_config
-        .provider_for_user_with_preference(llm_provider_preference.as_deref());
+
+    let provider = ctx.provider;
     let needs_two_step = state.ai_config.needs_two_step_vision(provider);
 
     // Handle image if present
@@ -1089,50 +982,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         });
     }
 
-    // Define static tools
-    let mut tools = vec![
-        crate::tool_call_utils::bridge::get_send_chat_message_tool(),
-        crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
-        crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
-        crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this
-        crate::tool_call_utils::email::get_fetch_emails_tool(),
-        crate::tool_call_utils::email::get_fetch_specific_email_tool(),
-        crate::tool_call_utils::email::get_send_email_tool(),
-        crate::tool_call_utils::email::get_respond_to_email_tool(),
-        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
-        crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
-        crate::tool_call_utils::management::get_create_task_tool(),
-        crate::tool_call_utils::management::get_update_monitoring_status_tool(),
-        crate::tool_call_utils::internet::get_scan_qr_code_tool(),
-        crate::tool_call_utils::internet::get_ask_perplexity_tool(),
-        crate::tool_call_utils::internet::get_firecrawl_search_tool(),
-        crate::tool_call_utils::internet::get_weather_tool(),
-        crate::tool_call_utils::internet::get_directions_tool(),
-        crate::tool_call_utils::tesla::get_tesla_control_tool(),
-        crate::tool_call_utils::tesla::get_tesla_switch_vehicle_tool(),
-        crate::tool_call_utils::internet::get_direct_response_tool(),
-        crate::tool_call_utils::youtube::get_youtube_tool(),
-    ];
-
-    // Add dynamic MCP tools for this user
-    let mcp_tools = crate::tool_call_utils::mcp::get_mcp_tools_for_user(state, user.id).await;
-    tools.extend(mcp_tools);
-
-    // Create client for the user's provider
-    let client = match create_openai_client_for_user(state, user.id) {
-        Ok((client, _)) => client,
-        Err(e) => {
-            tracing::error!("Failed to create AI client: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Failed to initialize AI service".to_string(),
-                    created_task_id: None,
-                }),
-            );
-        }
-    };
+    // Tools and model from context builder
+    let tools = ctx.tools.unwrap_or_default();
+    let model = ctx.model.clone();
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
     let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
@@ -1143,7 +995,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 "user" => chat_completion::MessageRole::user,
                 "assistant" => chat_completion::MessageRole::assistant,
                 "system" => chat_completion::MessageRole::system,
-                _ => chat_completion::MessageRole::user, // default to user if unknown
+                _ => chat_completion::MessageRole::user,
             },
             content: msg.content.clone(),
             name: None,
@@ -1151,11 +1003,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             tool_call_id: msg.tool_call_id.clone(),
         })
         .collect();
-
-    // Get the model for this provider
-    // For two-step vision providers, images were already converted to text,
-    // so we always use the Default (tool-calling) model
-    let model = get_model(state, provider, ModelPurpose::Default);
 
     // Use mock response if provided (for testing), otherwise call real LLM with retry
     let result = if let Some(mock_response) = options.mock_llm_response {
@@ -1175,7 +1022,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             .tool_choice(chat_completion::ToolChoiceType::Required)
             .max_tokens(250);
 
-            match client.chat_completion(request).await {
+            match ctx.client.chat_completion(request).await {
                 Ok(result) => {
                     attempt_result = Some(result);
                     break;
@@ -1305,7 +1152,8 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         .into_response();
                     }
                 };
-                // Handle MCP tool calls (prefixed with "mcp:")
+
+                // Handle MCP tool calls (dynamic, per-user)
                 if crate::tool_call_utils::mcp::is_mcp_tool(name) {
                     tracing::debug!("Executing MCP tool call: {}", name);
                     let result = crate::tool_call_utils::mcp::handle_mcp_tool_call(
@@ -1313,739 +1161,66 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     )
                     .await;
                     tool_answers.insert(tool_call_id, result);
-                } else if name == "ask_perplexity" {
-                    tracing::debug!("Executing ask_perplexity tool call");
-                    #[derive(Deserialize, Serialize)]
-                    struct PerplexityQuestion {
-                        query: String,
-                    }
+                    continue;
+                }
 
-                    let c: PerplexityQuestion = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
+                // Registry dispatch for static tools
+                let ctx = crate::tools::registry::ToolContext {
+                    state,
+                    user: &user,
+                    user_id: user.id,
+                    arguments,
+                    image_url: image_url.as_deref(),
+                    tool_call_id: tool_call_id.clone(),
+                    user_given_info,
+                    current_time,
+                    // Fields for create_task retry logic
+                    client: Some(&ctx.client),
+                    model: Some(&model),
+                    tools: Some(&tools),
+                    completion_messages: Some(&completion_messages),
+                    assistant_content: result.choices[0].message.content.as_deref(),
+                    tool_call: Some(tool_call),
+                };
+
+                match state.tool_registry.get(name) {
+                    Some(handler) => match handler.execute(ctx).await {
+                        Ok(crate::tools::registry::ToolResult::Answer(answer)) => {
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Ok(crate::tools::registry::ToolResult::AnswerWithTask {
+                            answer,
+                            task_id,
+                        }) => {
+                            created_task_id = Some(task_id);
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Ok(crate::tools::registry::ToolResult::EarlyReturn {
+                            response,
+                            status,
+                        }) => {
+                            let headers = [(axum::http::header::CONTENT_TYPE, "application/json")];
+                            return (status, headers, Json(response));
+                        }
                         Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "ask_perplexity",
-                                "llm_malformed",
-                                "json_parse_failure",
-                                &e.to_string(),
-                            );
+                            log_tool_error(user.id, name, "execution", "handler_error", &e);
                             tool_answers.insert(
                                 tool_call_id,
                                 tool_error_messages::INTERNAL_ERROR.to_string(),
                             );
-                            continue;
                         }
-                    };
-                    let query = format!("User info: {}. Query: {}", user_given_info, c.query);
-
-                    let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_given_info);
-                    match crate::utils::tool_exec::ask_perplexity(state, &query, &sys_prompt).await
-                    {
-                        Ok(answer) => {
-                            tracing::debug!("Successfully received Perplexity answer");
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "ask_perplexity",
-                                "external_service",
-                                "api_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::PERPLEXITY_UNAVAILABLE.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                } else if name == "get_weather" {
-                    tracing::debug!("Executing get_weather tool call");
-                    #[derive(Deserialize, Serialize)]
-                    struct WeatherQuestion {
-                        location: String,
-                        units: String,
-                        forecast_type: Option<String>,
+                    },
+                    None => {
+                        tracing::error!("Unknown tool called: {}", name);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            Json(TwilioResponse {
+                                message: format!("Unknown tool: {}", name),
+                                created_task_id: None,
+                            }),
+                        );
                     }
-                    let c: WeatherQuestion = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "get_weather",
-                                "llm_malformed",
-                                "json_parse_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::INTERNAL_ERROR.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                    let location = c.location;
-                    let units = c.units;
-                    let forecast_type = c.forecast_type.unwrap_or_else(|| "current".to_string());
-
-                    match crate::utils::tool_exec::get_weather(
-                        state,
-                        &location,
-                        &units,
-                        &forecast_type,
-                        user.id,
-                    )
-                    .await
-                    {
-                        Ok(answer) => {
-                            tracing::debug!("Successfully received weather answer");
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "get_weather",
-                                "external_service",
-                                "api_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::WEATHER_UNAVAILABLE.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                } else if name == "search_firecrawl" {
-                    tracing::debug!("Executing search_firecrawl tool call");
-                    #[derive(Deserialize, Serialize)]
-                    struct FireCrawlQuestion {
-                        query: String,
-                    }
-                    let c: FireCrawlQuestion = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "search_firecrawl",
-                                "llm_malformed",
-                                "json_parse_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::INTERNAL_ERROR.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                    let query = c.query;
-                    match crate::utils::tool_exec::handle_firecrawl_search(query, 5).await {
-                        Ok(answer) => {
-                            tracing::debug!("Successfully received fire crawl answer");
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "search_firecrawl",
-                                "external_service",
-                                "api_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::FIRECRAWL_UNAVAILABLE.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                } else if name == "get_directions" {
-                    tracing::debug!("Executing get_directions tool call");
-                    #[derive(Deserialize, Serialize)]
-                    struct DirectionsQuestion {
-                        start_address: String,
-                        end_address: String,
-                        mode: Option<String>,
-                    }
-                    let c: DirectionsQuestion = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "get_directions",
-                                "llm_malformed",
-                                "json_parse_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::INTERNAL_ERROR.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                    let start_address = c.start_address;
-                    let end_address = c.end_address;
-                    let mode = c.mode;
-                    match crate::tool_call_utils::internet::handle_directions_tool(
-                        start_address,
-                        end_address,
-                        mode,
-                    )
-                    .await
-                    {
-                        Ok(answer) => {
-                            tracing::debug!("Successfully received directions answer");
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "get_directions",
-                                "external_service",
-                                "api_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::DIRECTIONS_UNAVAILABLE.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                } else if name == "fetch_emails" {
-                    tracing::debug!("Executing fetch_emails tool call");
-                    let response =
-                        crate::tool_call_utils::email::handle_fetch_emails(state, user.id).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_specific_email" {
-                    tracing::debug!("Executing fetch_specific_email tool call");
-                    #[derive(Deserialize)]
-                    struct EmailQuery {
-                        query: String,
-                    }
-
-                    let query: EmailQuery = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                "fetch_specific_email",
-                                "llm_malformed",
-                                "json_parse_failure",
-                                &e.to_string(),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::INTERNAL_ERROR.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-
-                    // First get the email ID
-                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(
-                        state,
-                        user.id,
-                        &query.query,
-                    )
-                    .await;
-                    let auth_user = crate::handlers::auth_middleware::AuthUser {
-                        user_id: user.id,
-                        is_admin: false,
-                    };
-
-                    // Then fetch the complete email with that ID
-                    match crate::handlers::imap_handlers::fetch_single_imap_email(
-                        axum::extract::State(state.clone()),
-                        auth_user,
-                        axum::extract::Path(email_id),
-                    )
-                    .await
-                    {
-                        Ok(email) => {
-                            let email = &email["email"];
-
-                            // Format the response with all email details
-                            let response = format!(
-                                "From: {}\nSubject: {}\nDate: {}\n\n{}",
-                                email["from"],
-                                email["subject"],
-                                email["date_formatted"],
-                                email["body"]
-                            );
-                            tool_answers.insert(tool_call_id, response);
-                        }
-                        Err(_) => {
-                            tool_answers.insert(
-                                tool_call_id,
-                                "Failed to fetch the complete email".to_string(),
-                            );
-                        }
-                    }
-                } else if name == "send_email" {
-                    tracing::debug!("Executing send_email tool call");
-                    match crate::tool_call_utils::email::handle_send_email(
-                        state, user.id, arguments, &user,
-                    )
-                    .await
-                    {
-                        Ok((status, headers, Json(twilio_response))) => {
-                            let history_entry = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "assistant".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("send_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&history_entry)
-                            {
-                                tracing::error!(
-                                    "Failed to store email tool message in history: {}",
-                                    e
-                                );
-                            }
-                            // Store the matching "tool" response history before returning
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(), // Or "Email sent successfully" if you want a standard msg
-                                tool_name: Some("send_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool response for send_email: {}",
-                                    e
-                                );
-                            }
-                            return (status, headers, Json(twilio_response));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to handle email sending: {}", e);
-                            let error_msg = "Failed to send email".to_string();
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: error_msg.clone(),
-                                tool_name: Some("send_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(store_e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool error response for send_email: {}",
-                                    store_e
-                                );
-                            }
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to process email request".to_string(),
-                                    created_task_id: None,
-                                }),
-                            );
-                        }
-                    }
-                } else if name == "respond_to_email" {
-                    tracing::debug!("Executing respond_to_email tool call");
-                    match crate::tool_call_utils::email::handle_respond_to_email(
-                        state, user.id, arguments, &user,
-                    )
-                    .await
-                    {
-                        Ok((status, headers, Json(twilio_response))) => {
-                            let history_entry = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "assistant".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("respond_to_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&history_entry)
-                            {
-                                tracing::error!(
-                                    "Failed to store respond_to_email tool message in history: {}",
-                                    e
-                                );
-                            }
-                            // Store the matching "tool" response history before returning
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(), // Or "Email sent successfully" if you want a standard msg
-                                tool_name: Some("respond_to_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time + 1,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool response for send_email: {}",
-                                    e
-                                );
-                            }
-                            return (status, headers, Json(twilio_response));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to handle respond_to_email: {}", e);
-                            // OPTIONAL NEW: Store error as "tool" response for consistency
-                            let error_msg = "Failed to send email".to_string();
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: error_msg.clone(),
-                                tool_name: Some("respond_to_email".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(store_e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool error response for send_email: {}",
-                                    store_e
-                                );
-                            }
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to process respond_to_email request"
-                                        .to_string(),
-                                    created_task_id: None,
-                                }),
-                            );
-                        }
-                    }
-                } else if name == "create_task" {
-                    tracing::debug!("Executing create_task tool call");
-                    let assistant_content = result.choices[0].message.content.as_deref();
-                    match crate::tool_call_utils::management::handle_create_task_with_retry(
-                        state,
-                        user.id,
-                        arguments,
-                        &client,
-                        &model,
-                        &tools,
-                        &completion_messages,
-                        tool_call,
-                        assistant_content,
-                    )
-                    .await
-                    {
-                        Ok(task_result) => {
-                            created_task_id = Some(task_result.task_id);
-                            tool_answers.insert(tool_call_id, task_result.message);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to create task after retry: {}", e);
-                            tool_answers.insert(
-                                tool_call_id,
-                                format!("Sorry, I couldn't create the task: {}", e),
-                            );
-                        }
-                    }
-                } else if name == "update_monitoring_status" {
-                    tracing::debug!("Executing update_monitoring_status tool call");
-                    match crate::tool_call_utils::management::handle_set_proactive_agent(
-                        state, user.id, arguments,
-                    )
-                    .await
-                    {
-                        Ok(answer) => {
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to toggle monitoring status: {}", e);
-                            tool_answers.insert(tool_call_id, "Sorry, I failed to toggle monitoring status. (Contact rasmus@ahtava.com pls:D)".to_string());
-                        }
-                    }
-                } else if name == "create_calendar_event" {
-                    tracing::debug!("Executing create_calendar_event tool call");
-                    match crate::tool_call_utils::calendar::handle_create_calendar_event(
-                        state, user.id, arguments, &user,
-                    )
-                    .await
-                    {
-                        Ok((status, headers, Json(twilio_response))) => {
-                            let history_entry = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "assistant".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("create_calendar_event".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: "".to_string(),
-                            };
-
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&history_entry)
-                            {
-                                tracing::error!(
-                                    "Failed to store calendar tool message in history: {}",
-                                    e
-                                );
-                            }
-                            // Store the matching "tool" response history before returning
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("create_calendar_event".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool response for create_calendar_event: {}",
-                                    e
-                                );
-                            }
-
-                            return (status, headers, Json(twilio_response));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to handle calendar event creation: {}", e);
-                            // Store error as "tool" response for consistency
-                            let error_msg = "Failed to create_calendar event".to_string();
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: error_msg.clone(),
-                                tool_name: Some("create_calendar_event".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(store_e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!("Failed to store tool error response for create_calendar_event: {}", store_e);
-                            }
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to process calendar event request".to_string(),
-                                    created_task_id: None,
-                                }),
-                            );
-                        }
-                    }
-                } else if name == "search_chat_contacts" {
-                    tracing::debug!("Executing search_chat_contacts tool call");
-                    let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
-                        state, user.id, arguments,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_recent_messages" {
-                    tracing::debug!("Executing fetch_recent_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_recent_messages(
-                        state, user.id, arguments,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_chat_messages" {
-                    tracing::debug!("Executing fetch_chat_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_chat_messages(
-                        state, user.id, arguments,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "send_chat_message" {
-                    tracing::debug!("Executing send_chat_message tool call");
-                    match crate::tool_call_utils::bridge::handle_send_chat_message(
-                        state,
-                        user.id,
-                        arguments,
-                        &user,
-                        image_url.as_deref(),
-                    )
-                    .await
-                    {
-                        Ok((status, headers, Json(twilio_response))) => {
-                            let history_entry = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "assistant".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("send_chat_message".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&history_entry)
-                            {
-                                tracing::error!(
-                                    "Failed to store send chat message tool message in history: {}",
-                                    e
-                                );
-                            }
-                            // Store the matching "tool" response history before returning
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("send_chat_message".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool response for send_chat_message: {}",
-                                    e
-                                );
-                            }
-                            return (status, headers, Json(twilio_response));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to handle chat message sending: {}", e);
-                            // Store error as "tool" response for consistency
-                            let error_msg = "Failed to send chat message".to_string();
-                            let tool_message = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "tool".to_string(),
-                                encrypted_content: error_msg.clone(),
-                                tool_name: Some("send_chat_message".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: current_time,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(store_e) =
-                                state.user_repository.create_message_history(&tool_message)
-                            {
-                                tracing::error!(
-                                    "Failed to store tool error response for send_chat_message: {}",
-                                    store_e
-                                );
-                            }
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to process chat message request".to_string(),
-                                    created_task_id: None,
-                                }),
-                            );
-                        }
-                    }
-                } else if name == "scan_qr_code" {
-                    tracing::debug!(
-                        "Executing scan_qr_code tool call with url: {:#?}",
-                        image_url
-                    );
-                    let response =
-                        crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref())
-                            .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_calendar_events" {
-                    tracing::debug!("Executing fetch_calendar_events tool call");
-                    let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state, user.id, arguments,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "control_tesla" {
-                    tracing::debug!("Executing control_tesla tool call");
-                    let response = crate::tool_call_utils::tesla::handle_tesla_command(
-                        state, user.id, arguments,
-                        false, // send notification for SMS-initiated commands
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "switch_selected_tesla_vehicle" {
-                    tracing::debug!("Executing switch_selected_tesla_vehicle tool call");
-                    let response =
-                        crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(state, user.id)
-                            .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "direct_response" {
-                    tracing::debug!("Executing direct_response tool call");
-                    // Don't echo the response back - instead tell the follow-up model to answer directly
-                    // This prevents the model from thinking the answer was already delivered
-                    tool_answers.insert(
-                        tool_call_id,
-                        "No external data needed for this question. Answer the user's question directly and helpfully from your own knowledge.".to_string()
-                    );
-                } else if name == "youtube" {
-                    tracing::debug!("Executing youtube tool call");
-                    #[derive(serde::Deserialize)]
-                    struct YouTubeQuery {
-                        query: String,
-                    }
-                    let query = match serde_json::from_str::<YouTubeQuery>(arguments) {
-                        Ok(q) => q.query,
-                        Err(e) => {
-                            log_tool_error(
-                                user.id,
-                                name,
-                                "llm_malformed",
-                                "invalid_youtube_args",
-                                &format!("Failed to parse YouTube arguments: {}", e),
-                            );
-                            tool_answers.insert(
-                                tool_call_id,
-                                "Invalid YouTube query format. Please try again.".to_string(),
-                            );
-                            continue;
-                        }
-                    };
-                    let response = crate::tool_call_utils::youtube::handle_youtube_tool(
-                        state, user.id, &query,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, response);
-                } else {
-                    // Unknown tool - this is a system error, not a user error
-                    tracing::error!("Unknown tool called: {}", name);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        Json(TwilioResponse {
-                            message: format!("Unknown tool: {}", name),
-                            created_task_id: None,
-                        }),
-                    );
                 }
             }
 
@@ -2119,7 +1294,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 )
                 .max_tokens(250);
 
-                match client.chat_completion(follow_up_req).await {
+                match ctx.client.chat_completion(follow_up_req).await {
                     Ok(result) => {
                         followup_result = Some(result);
                         break;
@@ -2253,7 +1428,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, &client, &model)
+        SmsResponse::new(final_response, &ctx.client, &model)
             .await
             .into_inner()
     } else {
@@ -2276,7 +1451,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
     // Clean up old message history based on save_context setting
-    let save_context = user_settings.save_context.unwrap_or(0);
+    let save_context = ctx
+        .user_settings
+        .as_ref()
+        .and_then(|s| s.save_context)
+        .unwrap_or(0);
     if let Err(e) = state
         .user_repository
         .delete_old_message_history(user.id, save_context as i64)

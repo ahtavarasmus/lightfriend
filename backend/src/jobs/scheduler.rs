@@ -567,6 +567,31 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     // Mark emails as processed and format them for importance checking
                                     let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
+                                        // Auto-detect trackable items (invoices, shipments, deadlines)
+                                        // Runs for every email - spawned in background to avoid blocking
+                                        {
+                                            let state_clone = state.clone();
+                                            let user_id = user.id;
+                                            let email_uid = email.id.clone();
+                                            let trackable_content = format!(
+                                                "From: {}\nSubject: {}\nDate: {}\nBody: {}",
+                                                email.from.as_deref().unwrap_or("Unknown"),
+                                                email.subject.as_deref().unwrap_or("No subject"),
+                                                email.date_formatted.as_deref().unwrap_or("Unknown date"),
+                                                email.body.as_deref().unwrap_or("No content")
+                                            );
+                                            tokio::spawn(async move {
+                                                if let Err(e) = crate::proactive::utils::check_trackable_items(
+                                                    &state_clone,
+                                                    user_id,
+                                                    &email_uid,
+                                                    &trackable_content,
+                                                ).await {
+                                                    tracing::debug!("Trackable item check failed for email {}: {}", email_uid, e);
+                                                }
+                                            });
+                                        }
+
                                         // Check if sender matches priority senders and send the noti anyways about it
                                         if let Some(matched_sender) = priority_senders.iter().filter(|p_send| p_send.noti_mode == "all").find(|priority_sender| {
                                             let priority_lower = priority_sender.sender.to_lowercase();
@@ -656,6 +681,16 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             Err(e) => tracing::error!("Failed to complete task {}: {}", task_id, e),
                                                         }
 
+                                                        // Check if email sender matches a contact profile
+                                                        let sender_trusted = crate::utils::action_executor::is_sender_trusted(
+                                                            &state,
+                                                            user.id,
+                                                            &crate::utils::action_executor::SenderContext::Email {
+                                                                from_email: email.from_email.as_deref().unwrap_or(""),
+                                                                from_display: email.from.as_deref().unwrap_or(""),
+                                                            },
+                                                        );
+
                                                         // Execute the action_spec through AI + tools, passing the email context
                                                         let state_clone = state.clone();
                                                         let user_id = user.id;
@@ -670,6 +705,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                 Some(&trigger_context),
                                                                 None, // No sources for recurring email tasks
                                                                 None, // Condition already matched
+                                                                sender_trusted,
                                                             ).await {
                                                                 crate::utils::action_executor::ActionResult::Success { message } => {
                                                                     tracing::debug!("Email task {} completed successfully: {}", task_id, message);
@@ -1111,6 +1147,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             );
 
                             // Execute the action with sources, condition, and auto-notification
+                            // Time-triggered tasks have no external sender - always trusted
                             match crate::utils::action_executor::execute_action_spec(
                                 &state,
                                 user_id,
@@ -1119,6 +1156,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 None, // No trigger context for time-based tasks
                                 sources.as_deref(),
                                 condition.as_deref(),
+                                true, // sender_trusted: time-triggered, no external sender
                             )
                             .await
                             {

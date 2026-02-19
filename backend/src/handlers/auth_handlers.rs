@@ -575,32 +575,6 @@ pub async fn refresh_token(
     generate_tokens_and_response(user_id)
 }
 
-pub async fn testing_handler(
-    State(_state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(params): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Testing route called by user ID: {}", auth_user.user_id);
-    tracing::debug!("Received params: {:?}", params);
-
-    let location = "Vuores, Tampere, Finland";
-
-    match crate::utils::tool_exec::get_nearby_towns(location).await {
-        Ok(towns) => {
-            tracing::debug!("Nearby towns: {:?}", towns);
-            tracing::debug!("Location: {}", location);
-            Ok(Json(json!({"message": "Test successful"})))
-        }
-        Err(e) => {
-            tracing::error!("Error in get_nearby_towns: {:?}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get nearby towns: {}", e)})),
-            ))
-        }
-    }
-}
-
 pub fn generate_tokens_and_response(
     user_id: i32,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {

@@ -37,7 +37,6 @@ mod pages {
     pub mod termsprivacy;
     pub mod faq;
     pub mod supported_countries;
-    pub mod setup_costs;
     pub mod bring_own_number;
     pub mod lightphone3_whatsapp_guide;
     pub mod blog;

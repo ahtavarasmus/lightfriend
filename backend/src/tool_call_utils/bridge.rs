@@ -166,9 +166,10 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
             name: String::from("send_chat_message"),
             description:
                 Some(String::from(
-                    "Sends a message to a specific chat on the specified platform. \
-                    Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
-                    This tool will fuzzy search for the chat_name, add the message to the sending queue and unless user replies cancel the message will be sent after 60 seconds.
+                    "Sends a message to a specific chat on the specified platform IMMEDIATELY. \
+                    Use this when the user asks to send a message RIGHT NOW to a contact or group on Telegram, WhatsApp or Signal. \
+                    IMPORTANT: If the user specifies a future time (e.g. 'at 5pm text...', 'in 2 hours send...'), do NOT call this tool - use create_task instead with action_tool='send_chat_message'. This tool executes immediately and cannot be scheduled. \
+                    This tool will fuzzy search for the chat_name, add the message to the sending queue and unless user replies cancel the message will be sent after 60 seconds. \
                     Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content, recipient and platform before calling the tool."
                 )),
             parameters: types::FunctionParameters {

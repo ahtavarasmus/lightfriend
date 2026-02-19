@@ -90,7 +90,21 @@ pub mod api {
     pub mod twilio_sms;
     pub mod twilio_utils;
 }
+pub mod context;
 pub mod error;
+pub mod tools {
+    pub mod calendar;
+    pub mod email;
+    pub mod messaging;
+    pub mod registry;
+    pub mod respond;
+    pub mod schedule;
+    pub mod search;
+    pub mod tesla;
+    pub mod triage;
+    pub mod weather;
+    pub mod youtube;
+}
 pub mod models {
     pub mod mcp_models;
     pub mod user_models;
@@ -226,4 +240,57 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub tool_registry: tools::registry::ToolRegistry,
+}
+
+/// Build the tool registry with all static tool handlers.
+pub fn build_tool_registry() -> tools::registry::ToolRegistry {
+    use tools::registry::ToolRegistry;
+
+    let mut registry = ToolRegistry::new();
+
+    // Search tools
+    registry.register(Arc::new(tools::search::PerplexityHandler));
+    registry.register(Arc::new(tools::search::FirecrawlHandler));
+    registry.register(Arc::new(tools::search::DirectionsHandler));
+    registry.register(Arc::new(tools::search::QrScanHandler));
+
+    // Weather
+    registry.register(Arc::new(tools::weather::WeatherHandler));
+
+    // Email tools
+    registry.register(Arc::new(tools::email::FetchEmailsHandler));
+    registry.register(Arc::new(tools::email::FetchSpecificEmailHandler));
+    registry.register(Arc::new(tools::email::SendEmailHandler));
+    registry.register(Arc::new(tools::email::RespondEmailHandler));
+
+    // Messaging tools
+    registry.register(Arc::new(tools::messaging::SearchContactsHandler));
+    registry.register(Arc::new(tools::messaging::FetchRecentHandler));
+    registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
+    registry.register(Arc::new(tools::messaging::SendMessageHandler));
+
+    // Calendar tools
+    registry.register(Arc::new(tools::calendar::FetchEventsHandler));
+    registry.register(Arc::new(tools::calendar::CreateEventHandler));
+
+    // Schedule/management tools
+    registry.register(Arc::new(tools::schedule::CreateTaskHandler));
+    registry.register(Arc::new(tools::schedule::UpdateMonitoringHandler));
+
+    // Tesla tools
+    registry.register(Arc::new(tools::tesla::TeslaControlHandler));
+    registry.register(Arc::new(tools::tesla::TeslaSwitchHandler));
+
+    // YouTube
+    registry.register(Arc::new(tools::youtube::YouTubeHandler));
+
+    // Triage / tracking tools
+    registry.register(Arc::new(tools::triage::ListTrackedItemsHandler));
+    registry.register(Arc::new(tools::triage::UpdateTrackedItemHandler));
+
+    // Direct response
+    registry.register(Arc::new(tools::respond::DirectResponseHandler));
+
+    registry
 }

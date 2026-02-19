@@ -780,13 +780,29 @@ pub async fn edit_task_with_ai(
             )
         })?;
 
-    // Get user timezone
-    let user_tz_str = state
-        .user_core
-        .get_user_info(auth_user.user_id)
-        .ok()
-        .and_then(|info| info.timezone)
+    // Build context for LLM client and timezone (respects user's LLM provider preference)
+    let ctx = crate::context::ContextBuilder::for_user(&state, auth_user.user_id)
+        .with_user_context()
+        .build()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to build context: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "AI service unavailable"})),
+            )
+        })?;
+
+    let user_tz_str = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.tz_str.clone())
         .unwrap_or_else(|| "UTC".to_string());
+    let formatted_now = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.formatted_now.clone())
+        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
 
     // Parse trigger to get time display
     let trigger_ts = task
@@ -915,22 +931,11 @@ CHANGE RULES:
         request.instruction,
         tools_prompt,
         user_tz_str,
-        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+        formatted_now
     );
 
     // Call AI to interpret the edit instruction
     tracing::info!("Calling AI to interpret edit instruction");
-    let ai_config = &state.ai_config;
-    let provider = ai_config.provider_for_user_with_preference(None);
-    tracing::info!("Using AI provider: {:?}", provider);
-    let client = ai_config.create_client(provider).map_err(|e| {
-        tracing::error!("Failed to create AI client: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "AI service unavailable"})),
-        )
-    })?;
-    tracing::info!("AI client created successfully");
 
     let messages = vec![ChatCompletionMessage {
         role: MessageRole::user,
@@ -940,14 +945,12 @@ CHANGE RULES:
         tool_call_id: None,
     }];
 
-    let model = ai_config.model(provider, crate::ai_config::ModelPurpose::Default);
-
-    let ai_request = ChatCompletionRequest::new(model.to_string(), messages)
+    let ai_request = ChatCompletionRequest::new(ctx.model.clone(), messages)
         .max_tokens(500)
         .temperature(0.1);
 
     tracing::info!("Sending request to AI...");
-    let response = client.chat_completion(ai_request).await.map_err(|e| {
+    let response = ctx.client.chat_completion(ai_request).await.map_err(|e| {
         tracing::error!("AI request failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,

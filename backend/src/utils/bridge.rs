@@ -1741,6 +1741,17 @@ pub async fn handle_bridge_message(
                     Err(e) => tracing::error!("Failed to complete task {}: {}", task_id, e),
                 }
 
+                // Check if sender matches a contact profile (by room_id or chat name)
+                let sender_trusted = crate::utils::action_executor::is_sender_trusted(
+                    &state,
+                    user_id,
+                    &crate::utils::action_executor::SenderContext::Messaging {
+                        service: &service,
+                        room_id: room.room_id().as_str(),
+                        room_name: room_name.as_str(),
+                    },
+                );
+
                 // Execute the action_spec through AI + tools, passing the message context
                 let state_clone = state.clone();
                 let trigger_context = message_context.clone();
@@ -1759,6 +1770,7 @@ pub async fn handle_bridge_message(
                         Some(&trigger_context),
                         None, // No sources for recurring messaging tasks
                         None, // Condition already matched by check_task_condition_match
+                        sender_trusted,
                     )
                     .await
                     {

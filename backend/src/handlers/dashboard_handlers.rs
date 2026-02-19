@@ -1154,6 +1154,9 @@ pub async fn execute_triage_item(
         "bridge_disconnected" => {
             // No action to execute for bridge disconnections - just mark completed
         }
+        // Auto-detected trackable items from emails - no execute action, just mark completed
+        "email_invoice" | "email_shipment" | "email_deadline" | "email_document"
+        | "email_appointment" => {}
         _ => {
             // For unknown types, just mark completed
         }

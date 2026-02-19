@@ -2516,4 +2516,41 @@ impl UserRepository {
 
         Ok(items)
     }
+
+    /// Check if a triage item already exists for a given user and source_id (dedup).
+    pub fn triage_item_exists_by_source(
+        &self,
+        user_id: i32,
+        source_id_val: &str,
+    ) -> Result<bool, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count: i64 = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::source_id.eq(source_id_val))
+            .count()
+            .get_result(&mut conn)?;
+
+        Ok(count > 0)
+    }
+
+    /// Get all pending triage items for digest (any type matching prefix).
+    pub fn get_pending_trackable_items_for_digest(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
+        use crate::schema::triage_items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let items = triage_items::table
+            .filter(triage_items::user_id.eq(user_id))
+            .filter(triage_items::status.eq("pending"))
+            .filter(triage_items::item_type.like("email_%"))
+            .order(triage_items::priority.desc())
+            .then_order_by(triage_items::created_at.desc())
+            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
+
+        Ok(items)
+    }
 }
