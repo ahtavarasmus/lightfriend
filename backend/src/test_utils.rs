@@ -1465,7 +1465,7 @@ pub fn get_digest_settings(
 pub struct TestItemParams {
     pub user_id: i32,
     pub summary: String,
-    pub kind: String,
+    pub monitor: bool,
     pub due_at: Option<i32>,
     pub next_check_at: Option<i32>,
     pub priority: i32,
@@ -1478,7 +1478,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "reminder".to_string(),
+            monitor: false,
             due_at: None,
             next_check_at: None,
             priority: 0,
@@ -1491,7 +1491,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "reminder".to_string(),
+            monitor: false,
             due_at: Some(trigger_at),
             next_check_at: Some(trigger_at),
             priority: 0,
@@ -1504,7 +1504,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "digest".to_string(),
+            monitor: false,
             due_at: None,
             next_check_at: Some(trigger_at),
             priority: 0,
@@ -1517,7 +1517,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "monitor".to_string(),
+            monitor: true,
             due_at: None,
             next_check_at: None,
             priority: 0,
@@ -1530,7 +1530,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "alert".to_string(),
+            monitor: false,
             due_at: None,
             next_check_at: None,
             priority: 1,
@@ -1543,7 +1543,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            kind: "reminder".to_string(),
+            monitor: false,
             due_at: None,
             next_check_at: None,
             priority: 0,
@@ -1571,8 +1571,8 @@ impl TestItemParams {
         self
     }
 
-    pub fn with_kind(mut self, kind: &str) -> Self {
-        self.kind = kind.to_string();
+    pub fn with_monitor(mut self, monitor: bool) -> Self {
+        self.monitor = monitor;
         self
     }
 }
@@ -1592,7 +1592,7 @@ pub fn create_test_item(
     let new_item = NewItem {
         user_id: params.user_id,
         summary: params.summary.clone(),
-        kind: params.kind.clone(),
+        monitor: params.monitor,
         due_at: params.due_at,
         next_check_at: params.next_check_at,
         priority: params.priority,

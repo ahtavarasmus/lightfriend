@@ -180,7 +180,7 @@ diesel::table! {
         id -> Nullable<Integer>,
         user_id -> Integer,
         summary -> Text,
-        kind -> Text,
+        monitor -> Bool,
         due_at -> Nullable<Integer>,
         next_check_at -> Nullable<Integer>,
         priority -> Integer,

@@ -38,32 +38,38 @@ impl ToolHandler for ListTrackedItemsHandler {
 
         let items = ctx
             .state
-            .user_repository
-            .get_pending_trackable_items_for_digest(ctx.user_id)
-            .map_err(|e| format!("Failed to get tracked items: {}", e))?;
+            .item_repository
+            .get_items(ctx.user_id)
+            .map_err(|e| format!("Failed to get items: {}", e))?;
 
         if items.is_empty() {
             return Ok(ToolResult::Answer(
-                "No tracked items right now. Items are auto-detected from your emails (invoices, packages, deadlines).".to_string(),
+                "No tracked items right now. Items are auto-detected from your emails (invoices, packages, deadlines) or created manually.".to_string(),
             ));
         }
 
-        let mut result = format!("{} tracked item(s):\n", items.len());
+        let mut result = format!("{} item(s):\n", items.len());
         for item in &items {
             let due_info = item
-                .context_json
-                .as_ref()
-                .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-                .and_then(|v| v["due_date"].as_str().map(|s| s.to_string()))
-                .filter(|s| !s.is_empty())
-                .map(|d| format!(" (due {})", d))
+                .due_at
+                .map(|ts| {
+                    let dt = chrono::DateTime::from_timestamp(ts as i64, 0).unwrap_or_default();
+                    format!(" (due {})", dt.format("%b %d"))
+                })
                 .unwrap_or_default();
 
+            let kind_tag = if item.monitor {
+                " [monitor]".to_string()
+            } else {
+                String::new()
+            };
+
             result.push_str(&format!(
-                "- [{}] {}{}\n",
+                "- [{}] {}{}{}\n",
                 item.id.unwrap_or(0),
                 item.summary,
                 due_info,
+                kind_tag,
             ));
         }
 
@@ -133,22 +139,21 @@ impl ToolHandler for UpdateTrackedItemHandler {
         let args: UpdateTrackedArgs =
             serde_json::from_str(ctx.arguments).map_err(|e| e.to_string())?;
 
-        let new_status = match args.action.as_str() {
-            "complete" => "completed",
-            "dismiss" => "dismissed",
+        match args.action.as_str() {
+            "complete" | "dismiss" => {}
             other => return Err(format!("Unknown action: {}", other)),
         };
 
-        let updated = ctx
+        let deleted = ctx
             .state
-            .user_repository
-            .update_triage_item_status(args.item_id, ctx.user_id, new_status)
-            .map_err(|e| format!("Failed to update item: {}", e))?;
+            .item_repository
+            .delete_item(args.item_id, ctx.user_id)
+            .map_err(|e| format!("Failed to delete item: {}", e))?;
 
-        if updated {
+        if deleted {
             Ok(ToolResult::Answer(format!(
-                "Tracked item {} marked as {}.",
-                args.item_id, new_status
+                "Item {} {}.",
+                args.item_id, args.action
             )))
         } else {
             Ok(ToolResult::Answer(format!(

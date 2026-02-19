@@ -1161,11 +1161,6 @@ impl UserCoreOps for UserCore {
             .load::<crate::models::user_models::Task>(&mut conn)?;
 
         for task in &active_tasks {
-            // Verify this is actually a quiet_mode task (not just containing the string)
-            if !crate::handlers::dashboard_handlers::is_quiet_mode_task(&task.action) {
-                continue;
-            }
-
             match task.end_time {
                 None => {
                     // Indefinite quiet mode

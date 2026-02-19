@@ -153,10 +153,10 @@ pub async fn get_dashboard_summary(
             continue;
         }
         // Everything else is an attention item (monitors, high-priority, tracked items)
-        let item_type = match item.kind.as_str() {
-            "monitor" => "monitor",
-            "alert" => "bridge_disconnected",
-            _ => "tracked_item",
+        let item_type = if item.monitor {
+            "monitor"
+        } else {
+            "tracked_item"
         };
         attention_items.push(AttentionItem {
             id: item.id.unwrap_or(0),
@@ -219,7 +219,7 @@ fn find_next_scheduled_item(
 ) -> Option<ScheduledItem> {
     items
         .iter()
-        .filter(|item| item.kind == "reminder")
+        .filter(|item| !item.monitor)
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > now_ts)
@@ -241,7 +241,7 @@ fn find_upcoming_items(
 ) -> Vec<UpcomingTask> {
     let mut upcoming: Vec<UpcomingTask> = items
         .iter()
-        .filter(|item| item.kind == "reminder")
+        .filter(|item| !item.monitor)
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
@@ -271,7 +271,7 @@ fn find_upcoming_digest_items(
 ) -> Vec<UpcomingDigest> {
     let mut digests: Vec<UpcomingDigest> = items
         .iter()
-        .filter(|item| item.kind == "digest")
+        .filter(|item| !item.monitor && item.summary.starts_with("Daily digest"))
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
@@ -301,7 +301,7 @@ fn find_items_beyond(
 
     let mut beyond: Vec<UpcomingTask> = items
         .iter()
-        .filter(|item| item.kind == "reminder")
+        .filter(|item| !item.monitor)
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
@@ -346,7 +346,7 @@ fn find_next_digest_item(
 ) -> Option<NextDigestInfo> {
     let earliest_nca = items
         .iter()
-        .filter(|item| item.kind == "digest")
+        .filter(|item| !item.monitor && item.summary.starts_with("Daily digest"))
         .filter_map(|item| item.next_check_at.filter(|&nca| nca > now_ts))
         .min()?;
 
@@ -566,7 +566,7 @@ fn calculate_sun_times_from_coords(
 pub struct ItemResponse {
     pub id: i32,
     pub summary: String,
-    pub kind: String,
+    pub monitor: bool,
     pub due_at: Option<i32>,
     pub next_check_at: Option<i32>,
     pub priority: i32,
@@ -589,7 +589,7 @@ fn item_to_response(item: crate::models::user_models::Item) -> ItemResponse {
     ItemResponse {
         id: item.id.unwrap_or(0),
         summary: item.summary,
-        kind: item.kind,
+        monitor: item.monitor,
         due_at: item.due_at,
         next_check_at: item.next_check_at,
         priority: item.priority,

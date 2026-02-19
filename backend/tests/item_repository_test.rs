@@ -26,7 +26,7 @@ fn test_create_and_read_item() {
     assert_eq!(item.user_id, user.id);
     assert_eq!(item.summary, "Buy groceries");
     assert_eq!(item.priority, 0);
-    assert_eq!(item.kind, "reminder");
+    assert!(!item.monitor);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_get_triggered_items() {
 }
 
 // =============================================================================
-// Monitor Items Query (kind = "monitor")
+// Monitor Items Query (monitor = true)
 // =============================================================================
 
 #[test]
@@ -109,7 +109,7 @@ fn test_get_monitor_items() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Monitor item (kind = "monitor")
+    // Monitor item (monitor = true)
     create_test_item(
         &state,
         &TestItemParams::monitor(user.id, "Watch for AWS invoices"),
@@ -124,7 +124,7 @@ fn test_get_monitor_items() {
     let monitors = state.item_repository.get_monitor_items(user.id).unwrap();
     assert_eq!(monitors.len(), 1);
     assert_eq!(monitors[0].summary, "Watch for AWS invoices");
-    assert_eq!(monitors[0].kind, "monitor");
+    assert!(monitors[0].monitor);
 }
 
 // =============================================================================
@@ -337,7 +337,7 @@ fn test_delete_old_items() {
     let old_item = NewItem {
         user_id: user.id,
         summary: "Old item".to_string(),
-        kind: "reminder".to_string(),
+        monitor: false,
         due_at: None,
         next_check_at: None,
         priority: 0,
@@ -461,7 +461,7 @@ fn test_item_limit_enforcement() {
     let result = state.item_repository.create_item(&NewItem {
         user_id: user.id,
         summary: "Item 101".to_string(),
-        kind: "reminder".to_string(),
+        monitor: false,
         due_at: None,
         next_check_at: None,
         priority: 0,
@@ -491,7 +491,7 @@ fn test_monitor_with_next_check_at_triggers() {
     let triggered = state.item_repository.get_triggered_items(T).unwrap();
     assert_eq!(triggered.len(), 1);
     assert_eq!(triggered[0].summary, "Watch for invoices");
-    assert_eq!(triggered[0].kind, "monitor");
+    assert!(triggered[0].monitor);
 }
 
 #[test]
@@ -668,11 +668,11 @@ fn test_multi_user_triggered_isolation() {
 }
 
 #[test]
-fn test_mixed_kind_dashboard() {
+fn test_mixed_items_dashboard() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Create all four kinds with different priorities
+    // Create monitors and non-monitors with different priorities
     create_test_item(
         &state,
         &TestItemParams::monitor(user.id, "Background monitor").with_priority(0),
@@ -699,12 +699,11 @@ fn test_mixed_kind_dashboard() {
     assert!(items[1].priority >= items[2].priority);
     assert!(items[2].priority >= items[3].priority);
 
-    // All four kinds present
-    let kinds: Vec<&str> = items.iter().map(|i| i.kind.as_str()).collect();
-    assert!(kinds.contains(&"monitor"));
-    assert!(kinds.contains(&"reminder"));
-    assert!(kinds.contains(&"alert"));
-    assert!(kinds.contains(&"digest"));
+    // One monitor and three non-monitors
+    let monitor_count = items.iter().filter(|i| i.monitor).count();
+    let non_monitor_count = items.iter().filter(|i| !i.monitor).count();
+    assert_eq!(monitor_count, 1);
+    assert_eq!(non_monitor_count, 3);
 }
 
 #[test]
@@ -716,7 +715,7 @@ fn test_stale_monitor_cleanup() {
     let stale = NewItem {
         user_id: user.id,
         summary: "Old invoice".to_string(),
-        kind: "monitor".to_string(),
+        monitor: true,
         due_at: Some(T - 8 * 86400), // 8 days ago
         next_check_at: None,
         priority: 0,
@@ -729,7 +728,7 @@ fn test_stale_monitor_cleanup() {
     let active = NewItem {
         user_id: user.id,
         summary: "Active tracking".to_string(),
-        kind: "monitor".to_string(),
+        monitor: true,
         due_at: Some(T - 8 * 86400),
         next_check_at: Some(T + 86400), // Still has a scheduled check
         priority: 1,

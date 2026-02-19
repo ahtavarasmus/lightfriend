@@ -418,10 +418,7 @@ async fn main() {
             post(elevenlabs::handle_respond_to_email),
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
-        .route(
-            "/api/call/task",
-            post(elevenlabs::handle_create_task_tool_call),
-        )
+        .route("/api/call/task", post(elevenlabs::handle_create_item_voice))
         .route(
             "/api/call/monitoring-status",
             post(elevenlabs::handle_update_monitoring_status_tool_call),
@@ -1178,7 +1175,7 @@ async fn main() {
         // Task routes (reminders and message monitoring)
         .route(
             "/api/filters/tasks",
-            get(filter_handlers::get_tasks).post(filter_handlers::create_task),
+            get(filter_handlers::get_tasks).post(filter_handlers::create_task_item),
         )
         .route(
             "/api/filters/task/{task_id}",

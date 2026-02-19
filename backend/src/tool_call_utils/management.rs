@@ -54,7 +54,7 @@ pub async fn handle_set_proactive_agent(
 }
 
 /// Unified item creation tool for scheduled reminders and message monitoring.
-pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
 
@@ -65,16 +65,20 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "A concise, natural language description of the item. This is what the user will see \
-                and what the system uses to generate notifications.\n\
-                LANGUAGE: Always use third person ('the user'), NEVER 'you' or 'me'.\n\
+                "A concise description of what to remind or watch for.\n\
+                At notification time, a separate LLM reads ONLY this summary to craft an SMS (max 160 chars)\n\
+                and a voice opener (max 100 chars), and to decide delivery method (SMS or voice call).\n\n\
+                RULES:\n\
+                - Use third person: 'the user', never 'you' or 'me'\n\
+                - Include all relevant context: names, times, locations, what to watch for\n\
+                - If the user wants a PHONE CALL (e.g. 'call me', 'give me a call'), append ' [VIA CALL]'\n\
+                  at the end. Otherwise omit it - SMS is the default.\n\n\
                 EXAMPLES:\n\
-                - 'remind me to call mom' -> \"Remind the user to call mom\"\n\
-                - 'call me at midnight' -> \"Scheduled check-in call for the user\"\n\
-                - 'remind me at 10pm to turn on tesla' -> \"Remind the user to turn on Tesla climate\"\n\
-                - 'let me know if mom emails' -> \"Watch for emails from mom\"\n\
-                - 'notify me when my package ships' -> \"Watch for package shipping notification\"\n\
-                Include relevant details like event times, contact names, or what to watch for."
+                - 'remind me to call mom at 10pm' -> \"Remind the user to call mom\"\n\
+                - 'call me at midnight' -> \"Scheduled check-in for the user [VIA CALL]\"\n\
+                - 'let me know if mom emails' -> \"Watch for emails from mom. Notify the user when one arrives.\"\n\
+                - 'tell me when John messages about the project' -> \"Watch for messages from John about the project. Remind the user when a match arrives.\"\n\
+                - 'remind me about my 2pm dentist appointment' -> \"Dentist appointment at 2pm\""
                     .to_string(),
             ),
             ..Default::default()
@@ -82,59 +86,32 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
     );
 
     properties.insert(
-        "trigger_type".to_string(),
+        "monitor".to_string(),
         Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
+            schema_type: Some(types::JSONSchemaType::Boolean),
             description: Some(
-                "How the item should be triggered. Options:\n\
-                - \"once\": Fire at a specific time (requires trigger_time)\n\
-                - \"recurring_email\": Watch each incoming email for a match\n\
-                - \"recurring_messaging\": Watch each incoming message for a match"
+                "true to watch incoming emails/messages for matches, false if item only fires at next_check_at (can be rescheduled)."
                     .to_string(),
             ),
-            enum_values: Some(vec![
-                "once".to_string(),
-                "recurring_email".to_string(),
-                "recurring_messaging".to_string(),
-            ]),
             ..Default::default()
         }),
     );
 
     properties.insert(
-        "trigger_time".to_string(),
+        "next_check_at".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "When to fire the item. Required for trigger_type='once'. \
-                Format: ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. \
-                Convert relative times like 'in 3 hours', 'tomorrow at 9am' to this format.\n\
-                SMART TIMING: Set trigger_time BEFORE events so reminders arrive early:\n\
-                - Virtual/same-location (meeting, call): 5 minutes before\n\
+                "ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone.\n\
+                For reminders (monitor=false): when to fire. Required.\n\
+                For monitors (monitor=true): optional safety-net deadline.\n\n\
+                SMART TIMING for reminders (monitor=false):\n\
+                - Virtual/same-location events (meeting, call): 5 minutes before\n\
                 - Appointments (doctor, interview): 45 minutes before\n\
                 - Travel needed (restaurant, airport): 60 minutes before\n\
-                - OVERRIDE: If user specifies exact time ('remind me at 1pm'), use that time."
+                - OVERRIDE: If user specifies exact time ('remind me at 1pm'), use that time exactly"
                     .to_string(),
             ),
-            ..Default::default()
-        }),
-    );
-
-    properties.insert(
-        "notification_type".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "How to notify the user. If not specified, uses user's default preference. \
-                Only set this if user explicitly asks (e.g., 'call me', 'text me'). \
-                Options: 'sms', 'call', or 'call_sms'."
-                    .to_string(),
-            ),
-            enum_values: Some(vec![
-                "sms".to_string(),
-                "call".to_string(),
-                "call_sms".to_string(),
-            ]),
             ..Default::default()
         }),
     );
@@ -142,22 +119,31 @@ pub fn get_create_task_tool() -> openai_api_rs::v1::chat_completion::Tool {
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("create_task"),
+            name: String::from("create_item"),
             description: Some(String::from(
-                "Creates a scheduled reminder or sets up monitoring for incoming emails/messages. \
-                Items are informational - they track things and notify the user.\n\n\
+                "Creates a tracked item: a scheduled reminder or a monitor for incoming emails/messages.\n\
+                - monitor=false: fires at next_check_at. Can be rescheduled with a new next_check_at.\n\
+                  Provide next_check_at as ISO datetime in the user's timezone.\n\
+                - monitor=true: watches every incoming email/message for matches.\n\
+                  Optionally set next_check_at as a safety-net deadline to follow up if nothing is caught.\n\n\
                 EXAMPLES:\n\
-                - 'call me at midnight' -> summary=\"Scheduled check-in\", trigger_type=\"once\", notification_type=\"call\"\n\
-                - 'remind me to call mom at 10pm' -> summary=\"Remind the user to call mom\", trigger_type=\"once\"\n\
-                - 'let me know if mom emails' -> summary=\"Watch for emails from mom\", trigger_type=\"recurring_email\"\n\
-                - 'tell me when John messages' -> summary=\"Watch for messages from John\", trigger_type=\"recurring_messaging\"",
+                - 'remind me to call mom at 10pm' ->\n\
+                    summary=\"Remind the user to call mom\", monitor=false, next_check_at=\"2026-02-28T22:00\"\n\
+                - 'call me at midnight' ->\n\
+                    summary=\"Scheduled check-in [VIA CALL]\", monitor=false, next_check_at=\"2026-02-29T00:00\"\n\
+                - 'let me know if mom emails' ->\n\
+                    summary=\"Watch for emails from mom. Notify the user when one arrives.\", monitor=true\n\
+                - 'watch for invoice payment, check March 1 if unpaid' ->\n\
+                    summary=\"Watch for invoice payment confirmation. Remind user if still unpaid.\", monitor=true, next_check_at=\"2026-03-01T09:00\"\n\
+                - 'tell me when John messages' ->\n\
+                    summary=\"Watch for messages from John. Notify the user when a match arrives.\", monitor=true",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
                 required: Some(vec![
                     String::from("summary"),
-                    String::from("trigger_type"),
+                    String::from("monitor"),
                 ]),
             },
         },
@@ -171,104 +157,67 @@ use std::error::Error;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
-pub struct CreateTaskArgs {
+pub struct CreateItemArgs {
     pub summary: String,
-    pub trigger_type: String, // "once" | "recurring_email" | "recurring_messaging"
-    pub trigger_time: Option<String>, // "2025-12-30T13:00" (required for "once")
-    pub notification_type: Option<String>,
+    pub monitor: bool,
+    pub next_check_at: Option<String>,
 }
 
-/// Result from handle_create_task containing the confirmation message and item ID
-pub struct CreateTaskResult {
+/// Result from handle_create_item containing the confirmation message and item ID
+pub struct CreateItemResult {
     pub message: String,
-    pub task_id: i32, // actually item_id now
+    pub task_id: i32, // item_id
 }
 
-pub async fn handle_create_task(
+pub async fn handle_create_item(
     state: &Arc<AppState>,
     user_id: i32,
     args: &str,
-) -> Result<CreateTaskResult, Box<dyn Error>> {
-    let args: CreateTaskArgs = serde_json::from_str(args)?;
+) -> Result<CreateItemResult, Box<dyn Error>> {
+    let args: CreateItemArgs = serde_json::from_str(args)?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
 
-    // Get user's default notification type from settings
-    let user_settings = state
-        .user_core
-        .get_user_settings(user_id)
-        .map_err(|e| format!("Failed to get user settings: {:?}", e))?;
-    let default_noti_type = user_settings
-        .notification_type
-        .unwrap_or_else(|| "sms".to_string());
-
-    let notification_type = args.notification_type.unwrap_or(default_noti_type);
-
-    // Determine item fields based on trigger type
-    let (kind, due_at, next_check_at, priority) = match args.trigger_type.as_str() {
-        "once" => {
-            let time_str = args
-                .trigger_time
-                .as_ref()
-                .ok_or("trigger_time is required for 'once' trigger type")?;
-
-            let user_info = state
-                .user_core
-                .get_user_info(user_id)
-                .map_err(|e| format!("Failed to get user info: {:?}", e))?;
-            let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-            let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-
-            let timestamp = parse_datetime_to_timestamp(time_str, &tz)?;
-            ("reminder", Some(timestamp), Some(timestamp), 1)
-        }
-        "recurring_email" | "recurring_messaging" => {
-            // User explicitly asked: priority 1 (more important than auto-detected)
-            ("monitor", None, None, 1)
-        }
-        _ => return Err(format!("Invalid trigger_type: {}", args.trigger_type).into()),
-    };
-
-    // For reminders (trigger_type="once"), format summary as structured reminder
-    // Encode notification_type into summary text when it's "call" or "call_sms"
-    let via_call_tag = if notification_type == "call" || notification_type == "call_sms" {
-        " [VIA CALL]"
+    // Parse next_check_at if provided
+    let (due_at, next_check_at_ts) = if let Some(ref nca_str) = args.next_check_at {
+        let user_info = state
+            .user_core
+            .get_user_info(user_id)
+            .map_err(|e| format!("Failed to get user info: {:?}", e))?;
+        let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
+        let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+        let ts = parse_datetime_to_timestamp(nca_str, &tz)?;
+        (Some(ts), Some(ts))
     } else {
-        ""
+        (None, None)
     };
 
-    let summary = if kind == "reminder" {
-        if let Some(ref time_str) = args.trigger_time {
+    // For reminders, format summary as structured reminder with time/tz prefix
+    let summary = if !args.monitor {
+        if let Some(ref nca_str) = args.next_check_at {
             let user_info = state
                 .user_core
                 .get_user_info(user_id)
                 .map_err(|e| format!("Failed to get user info: {:?}", e))?;
             let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-            format!(
-                "REMINDER {} {}{}: {}",
-                time_str, tz_str, via_call_tag, args.summary
-            )
-        } else if via_call_tag.is_empty() {
-            args.summary.clone()
+            format!("REMINDER {} {}: {}", nca_str, tz_str, args.summary)
         } else {
-            format!("{}{}", args.summary, via_call_tag)
+            args.summary.clone()
         }
-    } else if via_call_tag.is_empty() {
-        args.summary.clone()
     } else {
-        format!("{}{}", args.summary, via_call_tag)
+        args.summary.clone()
     };
 
     let new_item = crate::models::user_models::NewItem {
         user_id,
         summary,
-        kind: kind.to_string(),
+        monitor: args.monitor,
         due_at,
-        next_check_at,
-        priority,
+        next_check_at: next_check_at_ts,
+        priority: 1,
         source_id: None,
         created_at: now,
     };
@@ -278,22 +227,23 @@ pub async fn handle_create_task(
         .create_item(&new_item)
         .map_err(|e| format!("Failed to create item: {:?}", e))?;
 
-    let confirmation = match args.trigger_type.as_str() {
-        "once" => format!("Got it! I'll remind you: {}", args.summary),
-        _ => format!("Got it! I'll watch for: {}", args.summary),
+    let confirmation = if !args.monitor {
+        format!("Got it! I'll remind you: {}", args.summary)
+    } else {
+        format!("Got it! I'll watch for: {}", args.summary)
     };
 
-    Ok(CreateTaskResult {
+    Ok(CreateItemResult {
         message: confirmation,
         task_id: item_id,
     })
 }
 
-/// Wrapper around handle_create_task that retries once via LLM if the first attempt fails.
+/// Wrapper around handle_create_item that retries once via LLM if the first attempt fails.
 /// On first failure, sends the error back to the LLM asking it to fix the arguments,
-/// then executes the corrected create_task call.
+/// then executes the corrected create_item call.
 #[allow(clippy::too_many_arguments)]
-pub async fn handle_create_task_with_retry(
+pub async fn handle_create_item_with_retry(
     state: &Arc<AppState>,
     user_id: i32,
     arguments: &str,
@@ -303,17 +253,17 @@ pub async fn handle_create_task_with_retry(
     completion_messages: &[openai_api_rs::v1::chat_completion::ChatCompletionMessage],
     failed_tool_call: &openai_api_rs::v1::chat_completion::ToolCall,
     assistant_content: Option<&str>,
-) -> Result<CreateTaskResult, Box<dyn Error>> {
+) -> Result<CreateItemResult, Box<dyn Error>> {
     use openai_api_rs::v1::chat_completion;
 
     // Attempt 1: try with original arguments
     // Convert error to String immediately so Box<dyn Error> (non-Send) doesn't live across .await
-    let first_err_msg = match handle_create_task(state, user_id, arguments).await {
+    let first_err_msg = match handle_create_item(state, user_id, arguments).await {
         Ok(result) => return Ok(result),
         Err(e) => e.to_string(),
     };
 
-    tracing::warn!("create_task attempt 1/2 failed: {}", first_err_msg);
+    tracing::warn!("create_item attempt 1/2 failed: {}", first_err_msg);
 
     // Build retry messages: conversation + failed assistant call + error feedback
     let mut retry_msgs = completion_messages.to_vec();
@@ -327,7 +277,7 @@ pub async fn handle_create_task_with_retry(
     retry_msgs.push(chat_completion::ChatCompletionMessage {
         role: chat_completion::MessageRole::tool,
         content: chat_completion::Content::Text(format!(
-            "Error: {}. Please fix the arguments and call create_task again.",
+            "Error: {}. Please fix the arguments and call create_item again.",
             first_err_msg
         )),
         name: None,
@@ -344,9 +294,9 @@ pub async fn handle_create_task_with_retry(
     let retry_result = client
         .chat_completion(retry_req)
         .await
-        .map_err(|e| format!("create_task retry API call failed: {}", e))?;
+        .map_err(|e| format!("create_item retry API call failed: {}", e))?;
 
-    // Find create_task in the retry response
+    // Find create_item in the retry response
     let retry_task_call = retry_result
         .choices
         .first()
@@ -354,26 +304,26 @@ pub async fn handle_create_task_with_retry(
         .and_then(|calls| {
             calls
                 .iter()
-                .find(|c| c.function.name.as_deref() == Some("create_task"))
+                .find(|c| c.function.name.as_deref() == Some("create_item"))
         });
 
     match retry_task_call {
         Some(retry_call) => {
             let retry_args = retry_call.function.arguments.as_deref().unwrap_or("{}");
-            match handle_create_task(state, user_id, retry_args).await {
+            match handle_create_item(state, user_id, retry_args).await {
                 Ok(result) => {
-                    tracing::info!("create_task succeeded on retry (attempt 2/2)");
+                    tracing::info!("create_item succeeded on retry (attempt 2/2)");
                     Ok(result)
                 }
                 Err(second_err) => {
-                    tracing::error!("create_task attempt 2/2 also failed: {}", second_err);
+                    tracing::error!("create_item attempt 2/2 also failed: {}", second_err);
                     Err(second_err)
                 }
             }
         }
         None => {
-            // LLM didn't call create_task on retry
-            tracing::error!("LLM did not retry create_task after error feedback");
+            // LLM didn't call create_item on retry
+            tracing::error!("LLM did not retry create_item after error feedback");
             Err(first_err_msg.into())
         }
     }

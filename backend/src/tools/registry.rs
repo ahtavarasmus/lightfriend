@@ -20,7 +20,7 @@ pub struct ToolContext<'a> {
     pub user_given_info: &'a str,
     /// Current timestamp for history entries
     pub current_time: i32,
-    // Fields needed by create_task which requires the full completion context
+    // Fields needed by create_item which requires the full completion context
     pub client: Option<&'a openai_api_rs::v1::api::OpenAIClient>,
     pub model: Option<&'a str>,
     pub tools: Option<&'a Vec<chat_completion::Tool>>,

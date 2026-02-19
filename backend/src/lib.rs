@@ -95,13 +95,13 @@ pub mod error;
 pub mod tools {
     pub mod calendar;
     pub mod email;
+    pub mod items;
     pub mod messaging;
     pub mod registry;
     pub mod respond;
     pub mod schedule;
     pub mod search;
     pub mod tesla;
-    pub mod triage;
     pub mod weather;
     pub mod youtube;
 }
@@ -111,6 +111,7 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
+    pub mod item_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
@@ -150,6 +151,7 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
+pub use repositories::item_repository::ItemRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
@@ -201,6 +203,7 @@ pub struct AppState {
     pub db_pool: DbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
+    pub item_repository: Arc<ItemRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
@@ -275,7 +278,7 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::calendar::CreateEventHandler));
 
     // Schedule/management tools
-    registry.register(Arc::new(tools::schedule::CreateTaskHandler));
+    registry.register(Arc::new(tools::schedule::CreateItemHandler));
     registry.register(Arc::new(tools::schedule::UpdateMonitoringHandler));
 
     // Tesla tools
@@ -285,9 +288,9 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
 
-    // Triage / tracking tools
-    registry.register(Arc::new(tools::triage::ListTrackedItemsHandler));
-    registry.register(Arc::new(tools::triage::UpdateTrackedItemHandler));
+    // Item tracking tools
+    registry.register(Arc::new(tools::items::ListTrackedItemsHandler));
+    registry.register(Arc::new(tools::items::UpdateTrackedItemHandler));
 
     // Direct response
     registry.register(Arc::new(tools::respond::DirectResponseHandler));

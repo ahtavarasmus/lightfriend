@@ -81,12 +81,12 @@ impl ItemRepository {
             .load::<Item>(&mut conn)
     }
 
-    /// Get monitor items (kind = "monitor") for email/message matching.
+    /// Get monitor items (monitor = true) for email/message matching.
     pub fn get_monitor_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         items::table
             .filter(items::user_id.eq(user_id))
-            .filter(items::kind.eq("monitor"))
+            .filter(items::monitor.eq(true))
             .load::<Item>(&mut conn)
     }
 
@@ -208,7 +208,7 @@ impl ItemRepository {
         let cutoff = now - (7 * 86400); // 7 days ago
         let count = diesel::delete(
             items::table
-                .filter(items::kind.eq("monitor"))
+                .filter(items::monitor.eq(true))
                 .filter(items::due_at.is_not_null())
                 .filter(items::due_at.lt(cutoff))
                 .filter(items::next_check_at.is_null()),

@@ -125,7 +125,7 @@ pub async fn get_tasks(
     let response: Vec<TaskResponse> = items
         .into_iter()
         .map(|item| {
-            let trigger = if item.kind == "monitor" {
+            let trigger = if item.monitor {
                 "recurring_email".to_string()
             } else if let Some(nca) = item.next_check_at {
                 format!("once_{}", nca)
@@ -140,11 +140,7 @@ pub async fn get_tasks(
                 action: item.summary.clone(),
                 status: Some("active".to_string()),
                 created_at: item.created_at,
-                is_permanent: if item.kind == "monitor" {
-                    Some(1)
-                } else {
-                    Some(0)
-                },
+                is_permanent: if item.monitor { Some(1) } else { Some(0) },
                 recurrence_rule: None,
                 recurrence_time: None,
                 sources: None,
@@ -196,7 +192,7 @@ pub async fn get_task(
         })?;
 
     // Determine trigger type and timestamp from item fields
-    let (trigger_type, trigger_timestamp) = if item.kind == "monitor" {
+    let (trigger_type, trigger_timestamp) = if item.monitor {
         ("recurring_email".to_string(), 0)
     } else if let Some(nca) = item.next_check_at {
         ("once".to_string(), nca)
@@ -220,7 +216,7 @@ pub async fn get_task(
         format_date_display, format_relative_days, format_time_display,
     };
 
-    let (time_display, date_display, relative_display) = if item.kind == "monitor" {
+    let (time_display, date_display, relative_display) = if item.monitor {
         (
             "Ongoing".to_string(),
             String::new(),
@@ -249,7 +245,7 @@ pub async fn get_task(
 }
 
 /// Create a new scheduled/recurring item from the frontend
-pub async fn create_task(
+pub async fn create_task_item(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(request): Json<CreateTaskRequest>,
@@ -320,15 +316,9 @@ pub async fn create_task(
     // Build natural language summary
     let rule = request.recurrence_rule.as_deref().unwrap_or("daily");
     let time = request.recurrence_time.as_deref().unwrap_or("08:00");
-    let kind = if request.condition.is_some() {
-        "monitor"
-    } else if request.action == "generate_digest" {
-        "digest"
-    } else {
-        "reminder"
-    };
+    let is_monitor = request.condition.is_some();
 
-    let summary = if kind == "monitor" {
+    let summary = if is_monitor {
         format!(
             "Monitor: {}. Alert when match arrives.",
             request
@@ -336,7 +326,7 @@ pub async fn create_task(
                 .as_deref()
                 .unwrap_or("any matching content")
         )
-    } else if kind == "digest" {
+    } else if request.action == "generate_digest" {
         let sources = request
             .sources
             .as_deref()
@@ -363,7 +353,7 @@ pub async fn create_task(
     let new_item = crate::models::user_models::NewItem {
         user_id,
         summary: summary.clone(),
-        kind: kind.to_string(),
+        monitor: is_monitor,
         due_at: None,
         next_check_at: Some(trigger_ts),
         priority: 0,
@@ -400,7 +390,7 @@ pub async fn create_task(
         id: created_item.id,
         user_id: created_item.user_id,
         trigger: format!("once_{}", trigger_ts),
-        condition: if kind == "monitor" {
+        condition: if is_monitor {
             request.condition.clone()
         } else {
             None
@@ -751,7 +741,7 @@ pub async fn edit_task_with_ai(
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "Not scheduled".to_string());
 
-    let item_type = if item.kind == "monitor" {
+    let item_type = if item.monitor {
         "monitor (watches incoming data)"
     } else {
         "scheduled item"

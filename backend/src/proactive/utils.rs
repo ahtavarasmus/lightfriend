@@ -1308,7 +1308,7 @@ pub async fn check_trackable_items(
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary: resp.summary,
-                kind: "monitor".to_string(),
+                monitor: true,
                 due_at,
                 next_check_at,
                 priority,

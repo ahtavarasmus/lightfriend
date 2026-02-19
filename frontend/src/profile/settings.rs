@@ -239,7 +239,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
     let notification_type = use_state(|| (*user_profile).notification_type.clone().or(Some("sms".to_string())));
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
-    let llm_provider = use_state(|| (*user_profile).llm_provider.clone().unwrap_or_else(|| "openai".to_string()));
     let feature_updates = use_state(|| (*user_profile).notify);
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
@@ -261,7 +260,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let agent_language_save_state = use_state(|| FieldSaveState::Idle);
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let save_context_save_state = use_state(|| FieldSaveState::Idle);
-    let llm_provider_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
@@ -992,53 +990,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     }
                 });
             }
-        })
-    };
-
-    // LLM provider change handler
-    let on_llm_provider_change = {
-        let llm_provider = llm_provider.clone();
-        let save_state = llm_provider_save_state.clone();
-        let user_profile = user_profile.clone();
-        let on_profile_update = props.on_profile_update.clone();
-        Callback::from(move |e: Event| {
-            let select: HtmlInputElement = e.target_unchecked_into();
-            let new_val = select.value();
-            llm_provider.set(new_val.clone());
-            let save_state = save_state.clone();
-            let user_profile = user_profile.clone();
-            let on_profile_update = on_profile_update.clone();
-            save_state.set(FieldSaveState::Saving);
-            spawn_local(async move {
-                let request = PatchFieldRequest {
-                    field: "llm_provider".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
-                };
-                match Api::patch("/api/profile/field")
-                    .json(&request)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        let mut profile = (*user_profile).clone();
-                        profile.llm_provider = Some(new_val);
-                        on_profile_update.emit(profile);
-                        save_state.set(FieldSaveState::Success);
-                        let save_state_clone = save_state.clone();
-                        spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                            save_state_clone.set(FieldSaveState::Idle);
-                        });
-                    }
-                    Ok(_) => {
-                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                    }
-                    Err(_) => {
-                        save_state.set(FieldSaveState::Error("Network error".to_string()));
-                    }
-                }
-            });
         })
     };
 
@@ -2093,38 +2044,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*agent_language_save_state)}
                 </div>
             </div>
-
-            // LLM Provider field (only show to subscribers)
-            {
-                if (*user_profile).sub_tier.is_some() {
-                    html! {
-                        <div class="profile-field">
-                            <div class="field-label-group">
-                                <span class="field-label">{"AI Provider"}</span>
-                                <div class="tooltip">
-                                    <span class="tooltip-icon">{"?"}</span>
-                                    <span class="tooltip-text">
-                                        {"Choose which AI provider to use for SMS and chat messages. OpenAI is faster and smarter. Tinfoil is privacy-focused but slower."}
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="field-input-container">
-                                <select
-                                    class="profile-input"
-                                    value={(*llm_provider).clone()}
-                                    onchange={on_llm_provider_change.clone()}
-                                >
-                                    <option value="openai" selected={*llm_provider == "openai"}>{"OpenAI (faster, smarter)"}</option>
-                                    <option value="tinfoil" selected={*llm_provider == "tinfoil"}>{"Tinfoil (privacy-focused)"}</option>
-                                </select>
-                                {render_save_indicator(&*llm_provider_save_state)}
-                            </div>
-                        </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
 
             // Notification Type field
             <div class="profile-field">

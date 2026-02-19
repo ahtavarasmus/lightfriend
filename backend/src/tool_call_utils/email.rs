@@ -90,7 +90,7 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_email"),
-            description: Some(String::from("Sends an email IMMEDIATELY to the specified recipient using the user's email account. Use this when the user asks to send a new email RIGHT NOW. IMPORTANT: If the user specifies a future time (e.g. 'at 5pm email...', 'tomorrow morning send an email...'), do NOT call this tool - use create_task instead with action_tool='send_email'. This tool executes immediately and cannot be scheduled.")),
+            description: Some(String::from("Sends an email IMMEDIATELY to the specified recipient using the user's email account. Use this when the user asks to send a new email RIGHT NOW. IMPORTANT: If the user specifies a future time (e.g. 'at 5pm email...', 'tomorrow morning send an email...'), do NOT call this tool - use create_item instead to schedule it. This tool executes immediately and cannot be scheduled.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),

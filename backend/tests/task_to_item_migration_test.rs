@@ -1,7 +1,7 @@
 //! Tests for the tasks -> items startup migration.
 //!
 //! Verifies that each task type is correctly converted into an item
-//! with the right summary, kind, due_at, and next_check_at values,
+//! with the right summary, monitor, due_at, and next_check_at values,
 //! and that migrated tasks are marked as "migrated" (idempotency).
 
 use backend::jobs::scheduler::migrate_tasks_to_items;
@@ -31,7 +31,7 @@ async fn test_migrate_once_task() {
     let items = get_user_items(&state, user.id);
     assert_eq!(items.len(), 1);
     assert!(items[0].summary.contains("Pick up dry cleaning"));
-    assert_eq!(items[0].kind, "reminder");
+    assert!(!items[0].monitor);
     assert_eq!(items[0].due_at, Some(trigger_ts));
     assert_eq!(items[0].next_check_at, Some(trigger_ts));
 
@@ -68,7 +68,7 @@ async fn test_migrate_digest_task() {
         .contains("email,whatsapp,telegram,signal,calendar"));
     assert!(items[0].summary.contains("daily"));
     assert!(items[0].summary.contains("08:00"));
-    assert_eq!(items[0].kind, "digest");
+    assert!(!items[0].monitor);
     assert!(
         items[0].next_check_at.is_some(),
         "Digest should have next_check_at"
@@ -104,7 +104,7 @@ async fn test_migrate_monitor_task() {
 
     let items = get_user_items(&state, user.id);
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].kind, "monitor");
+    assert!(items[0].monitor);
     assert!(items[0].summary.contains("Monitor:"));
     assert!(items[0].summary.contains("invoice from AWS about payment"));
     assert!(items[0].due_at.is_none());
@@ -134,7 +134,7 @@ async fn test_migrate_messaging_monitor_task() {
 
     let items = get_user_items(&state, user.id);
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].kind, "monitor");
+    assert!(items[0].monitor);
     assert!(items[0].summary.contains("message about project deadline"));
 }
 
@@ -158,7 +158,7 @@ async fn test_migrate_quiet_mode_task() {
     let items = get_user_items(&state, user.id);
     assert_eq!(items.len(), 1);
     assert!(items[0].summary.contains("Quiet mode"));
-    assert_eq!(items[0].kind, "reminder");
+    assert!(!items[0].monitor);
     assert_eq!(items[0].due_at, Some(end_ts));
     assert_eq!(items[0].next_check_at, Some(end_ts));
 }
@@ -187,7 +187,7 @@ async fn test_migrate_recurring_task() {
     assert!(items[0].summary.contains("Repeats"));
     assert!(items[0].summary.contains("daily"));
     assert!(items[0].summary.contains("09:00"));
-    assert_eq!(items[0].kind, "reminder");
+    assert!(!items[0].monitor);
     assert!(items[0].next_check_at.is_some());
 }
 
@@ -258,7 +258,7 @@ async fn test_migrate_multiple_task_types() {
     assert_eq!(items.len(), 3);
 
     // Check that we have the right mix of types
-    let monitors: Vec<_> = items.iter().filter(|i| i.kind == "monitor").collect();
+    let monitors: Vec<_> = items.iter().filter(|i| i.monitor).collect();
     assert_eq!(monitors.len(), 1);
 
     let with_due: Vec<_> = items.iter().filter(|i| i.due_at.is_some()).collect();

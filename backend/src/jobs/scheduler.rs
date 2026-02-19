@@ -132,7 +132,7 @@ pub async fn check_all_bridges_health(
                 let new_item = crate::models::user_models::NewItem {
                     user_id,
                     summary: format!("System: {} bridge disconnected.", bridge_name),
-                    kind: "alert".to_string(),
+                    monitor: false,
                     due_at: None,
                     next_check_at: None,
                     priority: 1,
@@ -470,7 +470,7 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                 .and_then(|s| s.parse().ok());
 
             // Determine item fields based on task type
-            let (summary, kind, due_at, next_check_at) = if task.action == "generate_digest" {
+            let (summary, is_monitor, due_at, next_check_at) = if task.action == "generate_digest" {
                 // Digest task: recurring, has sources
                 let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
                 let time = task.recurrence_time.as_deref().unwrap_or("08:00");
@@ -487,19 +487,19 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                     .user_repository
                     .calculate_next_trigger_public(task, &user_tz)
                     .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, "digest", None, next_ts)
+                (summary, false, None, next_ts)
             } else if task.action.contains("quiet_mode") {
                 // Quiet mode task
                 let end = task.end_time.unwrap_or(now + 3600);
                 let summary = format!("Quiet mode until {}.", format_ts_short(end));
-                (summary, "reminder", Some(end), Some(end))
+                (summary, false, Some(end), Some(end))
             } else if task.trigger.starts_with("recurring_email")
                 || task.trigger.starts_with("recurring_messaging")
             {
                 // Monitor task: has condition
                 let condition_text = task.condition.as_deref().unwrap_or("any matching content");
                 let summary = format!("Monitor: {}. Alert when match arrives.", condition_text);
-                (summary, "monitor", None, None)
+                (summary, true, None, None)
             } else if task.is_permanent == Some(1) {
                 // Recurring non-digest task
                 let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
@@ -509,18 +509,18 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                     .user_repository
                     .calculate_next_trigger_public(task, &user_tz)
                     .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, "reminder", None, next_ts)
+                (summary, false, None, next_ts)
             } else {
                 // One-shot reminder
                 let summary = format!("Reminder: {}", task.action);
-                (summary, "reminder", trigger_ts, trigger_ts)
+                (summary, false, trigger_ts, trigger_ts)
             };
 
             // Create the item
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary,
-                kind: kind.to_string(),
+                monitor: is_monitor,
                 due_at,
                 next_check_at,
                 priority: 0,
@@ -1175,12 +1175,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                         tokio::spawn(async move {
                             debug!(
-                                "Processing triggered item {} (kind={}) for user {}: {}",
-                                item_id, item_clone.kind, user_id, item_clone.summary
+                                "Processing triggered item {} (monitor={}) for user {}: {}",
+                                item_id, item_clone.monitor, user_id, item_clone.summary
                             );
 
-                            match item_clone.kind.as_str() {
-                                "monitor" => {
+                            if item_clone.monitor {
                                     // Monitor path: call LLM to evaluate lifecycle
                                     let due_str = item_clone
                                         .due_at
@@ -1254,8 +1253,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         // Err case - reschedule +24h
                                         let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
                                     }
-                                }
-                                _ => {
+                            } else {
                                     // One-shot path (reminder/digest/alert): fire and delete
                                     let summary = item_clone.summary.clone();
 
@@ -1295,7 +1293,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                     let _ = state.item_repository.delete_item(item_id, user_id);
                                     debug!("Item {} (one-shot) completed and deleted", item_id);
-                                }
                             }
                         });
                     }

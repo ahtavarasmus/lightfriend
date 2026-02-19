@@ -961,7 +961,7 @@ pub struct Item {
     pub id: Option<i32>,
     pub user_id: i32,
     pub summary: String,
-    pub kind: String,
+    pub monitor: bool,
     pub due_at: Option<i32>,
     pub next_check_at: Option<i32>,
     pub priority: i32,
@@ -974,7 +974,7 @@ pub struct Item {
 pub struct NewItem {
     pub user_id: i32,
     pub summary: String,
-    pub kind: String,
+    pub monitor: bool,
     pub due_at: Option<i32>,
     pub next_check_at: Option<i32>,
     pub priority: i32,

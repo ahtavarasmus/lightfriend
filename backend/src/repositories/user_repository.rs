@@ -832,6 +832,15 @@ impl UserRepository {
         Some(format!("once_{}", next_utc.timestamp()))
     }
 
+    /// Public wrapper for calculate_next_trigger (used by migration code).
+    pub fn calculate_next_trigger_public(
+        &self,
+        task: &Task,
+        user_timezone: &str,
+    ) -> Option<String> {
+        self.calculate_next_trigger(task, user_timezone)
+    }
+
     pub fn delete_old_tasks(&self, before_timestamp: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::delete(
@@ -2533,24 +2542,5 @@ impl UserRepository {
             .get_result(&mut conn)?;
 
         Ok(count > 0)
-    }
-
-    /// Get all pending triage items for digest (any type matching prefix).
-    pub fn get_pending_trackable_items_for_digest(
-        &self,
-        user_id: i32,
-    ) -> Result<Vec<crate::models::user_models::TriageItem>, DieselError> {
-        use crate::schema::triage_items;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let items = triage_items::table
-            .filter(triage_items::user_id.eq(user_id))
-            .filter(triage_items::status.eq("pending"))
-            .filter(triage_items::item_type.like("email_%"))
-            .order(triage_items::priority.desc())
-            .then_order_by(triage_items::created_at.desc())
-            .load::<crate::models::user_models::TriageItem>(&mut conn)?;
-
-        Ok(items)
     }
 }

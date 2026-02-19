@@ -709,28 +709,9 @@ pub async fn patch_profile_field(
                 })?;
         }
         "llm_provider" => {
-            let value = request.value.as_str().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "llm_provider must be a string"})),
-                )
-            })?;
-            // Validate the value is either "openai" or "tinfoil"
-            if value != "openai" && value != "tinfoil" {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "llm_provider must be 'openai' or 'tinfoil'"})),
-                ));
-            }
-            state
-                .user_core
-                .update_llm_provider(user_id, value)
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)})),
-                    )
-                })?;
+            // No-op: Tinfoil is now the sole provider. Accept silently for
+            // backward compatibility with older frontends.
+            tracing::debug!("llm_provider change ignored - Tinfoil is sole provider");
         }
         "preferred_number" => {
             let value = request.value.as_str().ok_or_else(|| {

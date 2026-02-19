@@ -2,33 +2,33 @@ use openai_api_rs::v1::chat_completion;
 
 use crate::tools::registry::{ToolContext, ToolHandler, ToolResult};
 
-// ─── create_task ─────────────────────────────────────────────────────────────
+// --- create_item ---------------------------------------------------------------
 
-pub struct CreateTaskHandler;
+pub struct CreateItemHandler;
 
 #[async_trait::async_trait]
-impl ToolHandler for CreateTaskHandler {
+impl ToolHandler for CreateItemHandler {
     fn name(&self) -> &'static str {
-        "create_task"
+        "create_item"
     }
 
     fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::management::get_create_task_tool()
+        crate::tool_call_utils::management::get_create_item_tool()
     }
 
     async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing create_task tool call");
+        tracing::debug!("Executing create_item tool call");
 
-        // create_task needs the full completion context for retry logic
-        let client = ctx.client.ok_or("create_task requires client")?;
-        let model = ctx.model.ok_or("create_task requires model")?;
-        let tools = ctx.tools.ok_or("create_task requires tools")?;
+        // create_item needs the full completion context for retry logic
+        let client = ctx.client.ok_or("create_item requires client")?;
+        let model = ctx.model.ok_or("create_item requires model")?;
+        let tools = ctx.tools.ok_or("create_item requires tools")?;
         let completion_messages = ctx
             .completion_messages
-            .ok_or("create_task requires completion_messages")?;
-        let tool_call = ctx.tool_call.ok_or("create_task requires tool_call")?;
+            .ok_or("create_item requires completion_messages")?;
+        let tool_call = ctx.tool_call.ok_or("create_item requires tool_call")?;
 
-        match crate::tool_call_utils::management::handle_create_task_with_retry(
+        match crate::tool_call_utils::management::handle_create_item_with_retry(
             ctx.state,
             ctx.user_id,
             ctx.arguments,
@@ -46,9 +46,9 @@ impl ToolHandler for CreateTaskHandler {
                 task_id: task_result.task_id,
             }),
             Err(e) => {
-                tracing::error!("Failed to create task after retry: {}", e);
+                tracing::error!("Failed to create item after retry: {}", e);
                 Ok(ToolResult::Answer(format!(
-                    "Sorry, I couldn't create the task: {}",
+                    "Sorry, I couldn't create the item: {}",
                     e
                 )))
             }
@@ -56,7 +56,7 @@ impl ToolHandler for CreateTaskHandler {
     }
 }
 
-// ─── update_monitoring_status ────────────────────────────────────────────────
+// --- update_monitoring_status --------------------------------------------------
 
 pub struct UpdateMonitoringHandler;
 

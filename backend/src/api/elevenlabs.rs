@@ -468,7 +468,7 @@ pub struct CreateTaskPayload {
     pub notification_type: Option<String>,
 }
 
-pub async fn handle_create_task_tool_call(
+pub async fn handle_create_item_voice(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<CreateTaskPayload>,

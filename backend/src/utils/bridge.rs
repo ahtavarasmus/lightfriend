@@ -1409,7 +1409,7 @@ pub async fn handle_bridge_message(
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary: format!("System: {} bridge disconnected.", bridge_name),
-                kind: "alert".to_string(),
+                monitor: false,
                 due_at: None,
                 next_check_at: None,
                 priority: 1,
