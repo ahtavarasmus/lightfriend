@@ -252,12 +252,12 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
                     .send()
                     .await
                 {
-                    Ok(response) => {
+                    Ok(response) if response.ok() => {
                         if let Ok(profile) = response.json::<UserProfile>().await {
                             profile_data.set(Some(profile));
                         }
                     }
-                    Err(_) => {}
+                    _ => {}
                 }
             });
 
@@ -406,10 +406,13 @@ pub fn pricing_wrapper() -> Html {
                     .send()
                     .await
                 {
-                    if let Ok(profile) = response.json::<UserProfile>().await {
-                        profile_data.set(Some(profile.clone()));
-                        is_logged_in.set(true);
-                        // Country is determined from IP geolocation (set earlier in this effect)
+                    if response.ok() {
+                        if let Ok(profile) = response.json::<UserProfile>().await {
+                            profile_data.set(Some(profile.clone()));
+                            is_logged_in.set(true);
+                        } else {
+                            is_logged_in.set(false);
+                        }
                     } else {
                         is_logged_in.set(false);
                     }
