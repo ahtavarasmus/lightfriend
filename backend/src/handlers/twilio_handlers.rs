@@ -1,4 +1,5 @@
 use crate::admin_alert;
+use crate::repositories::twilio_status_repository::TwilioStatusRepository;
 use crate::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -96,7 +97,7 @@ pub async fn twilio_status_callback(
     match TwilioCredentials::from_env() {
         Ok(credentials) => {
             let client = Arc::new(RealTwilioClient::new());
-            let service = TwilioStatusService::new(repository, client, credentials);
+            let service = TwilioStatusService::new(repository.clone(), client, credentials);
 
             if let Err(e) = service.process_status_callback(input).await {
                 tracing::error!("Failed to process status callback: {}", e);
@@ -128,11 +129,47 @@ pub async fn twilio_status_callback(
                 delete_on_final: false,
                 price_fetch_delays: vec![],
             };
-            let service =
-                TwilioStatusService::with_config(repository, client, dummy_credentials, config);
+            let service = TwilioStatusService::with_config(
+                repository.clone(),
+                client,
+                dummy_credentials,
+                config,
+            );
 
             if let Err(e) = service.process_status_callback(input).await {
                 tracing::error!("Failed to process status callback: {}", e);
+            }
+        }
+    }
+
+    // Deduct credits on final status with actual Twilio price
+    let is_final = matches!(
+        payload.MessageStatus.as_str(),
+        "delivered" | "sent" | "failed" | "undelivered"
+    );
+    if is_final {
+        if let Some(price) = price_value {
+            if price.abs() > 0.0 {
+                // Look up user_id from message_status_log by message_sid
+                if let Ok(Some(user_info)) = repository.get_message_user_info(&payload.MessageSid) {
+                    match crate::utils::usage::deduct_from_twilio_price(
+                        &state,
+                        user_info.user_id,
+                        price,
+                    ) {
+                        Ok(cost) => tracing::info!(
+                            "Deducted {:.4} credits for user {} (sid: {})",
+                            cost,
+                            user_info.user_id,
+                            payload.MessageSid
+                        ),
+                        Err(e) => tracing::error!(
+                            "Failed to deduct credits for user {}: {}",
+                            user_info.user_id,
+                            e
+                        ),
+                    }
+                }
             }
         }
     }

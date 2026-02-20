@@ -345,24 +345,17 @@ impl MockLlmResponse {
     }
 }
 
-/// Phone number prefixes for testing different country pricing
+/// Phone number prefixes for testing different countries
 /// NOTE: These use valid area codes recognized by phonenumber library
+/// All countries use unified credit budget (25.0) with callback-based SMS deduction.
 pub mod test_phone_numbers {
-    /// US phone number (San Francisco 415 area code) - uses credits_left count-based pricing
     pub const US: &str = "+14155551234";
-    /// Canada phone number (Toronto 647 area code) - uses preferred_number or CAN_PHONE
     pub const CANADA: &str = "+16475551234";
-    /// Finland phone number (+358 prefix) - uses euro segment pricing
     pub const FINLAND: &str = "+358401234567";
-    /// UK phone number (+44 prefix) - uses euro segment pricing
     pub const UK: &str = "+447911123456";
-    /// Netherlands phone number (+31 prefix) - uses euro segment pricing
     pub const NETHERLANDS: &str = "+31612345678";
-    /// Australia phone number (+61 prefix) - uses euro segment pricing
     pub const AUSTRALIA: &str = "+61412345678";
-    /// Germany phone number (+49 prefix) - notification-only pricing
     pub const GERMANY: &str = "+4915123456789";
-    /// France phone number (+33 prefix) - notification-only pricing
     pub const FRANCE: &str = "+33612345678";
 }
 

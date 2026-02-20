@@ -759,18 +759,23 @@ pub async fn get_usage_projection(
     .filter(|&&x| x.is_some())
     .count() as i32;
 
-    // Get plan capacity based on country and plan type
-    // US/CA: always 400 messages (hosted plan)
-    // Plan capacity: autopilot/byot=120, assistant=40, US/CA=400
+    // Get plan capacity: derive message-equivalent from budget / per-message price
     let plan_type = user.plan_type.clone();
     let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
     let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
-    let plan_capacity = if is_us_ca {
-        400 // US/CA hosted plan
-    } else if crate::utils::plan_features::has_auto_features(plan_type.as_deref()) {
-        120 // autopilot/byot
-    } else {
-        40 // assistant or default
+    let plan_capacity = {
+        use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
+        if is_us_ca {
+            // $25 / $0.075 display price = ~333 message equivalents
+            (MONTHLY_CREDIT_BUDGET / 0.075).floor() as i32
+        } else {
+            let country_code = detected_country.as_deref().unwrap_or("FI");
+            if let Ok(pricing) = get_notification_only_pricing(&state, country_code).await {
+                (MONTHLY_CREDIT_BUDGET / pricing.regular_message_price).floor() as i32
+            } else {
+                (MONTHLY_CREDIT_BUDGET / 0.39).floor() as i32 // fallback: ~64
+            }
+        }
     };
 
     // Calculate digests per month

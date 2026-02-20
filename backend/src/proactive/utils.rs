@@ -3508,16 +3508,7 @@ pub async fn send_notification(
                         tracing::error!("Failed to log Call+SMS SMS usage: {}", e);
                     }
 
-                    // Deduct credits for SMS
-                    if let Err(e) =
-                        crate::utils::usage::deduct_user_credits(state, user_id, "noti_msg", None)
-                    {
-                        tracing::error!(
-                            "Failed to deduct SMS credits for Call+SMS user {}: {}",
-                            user_id,
-                            e
-                        );
-                    }
+                    // SMS credits deducted at Twilio status callback
 
                     true
                 }
@@ -3637,16 +3628,7 @@ pub async fn send_notification(
                     }) {
                         tracing::error!("Failed to log SMS notification usage: {}", e);
                     }
-                    // Deduct credits after successful notification
-                    if let Err(e) =
-                        crate::utils::usage::deduct_user_credits(state, user_id, "noti_msg", None)
-                    {
-                        tracing::error!(
-                            "Failed to deduct credits for user {} after SMS notification: {}",
-                            user_id,
-                            e
-                        );
-                    }
+                    // SMS credits deducted at Twilio status callback
                 }
                 Err(e) => {
                     tracing::error!("Failed to send notification: {}", e);

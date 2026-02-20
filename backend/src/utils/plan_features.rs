@@ -14,3 +14,10 @@ pub fn has_auto_features(plan_type: Option<&str>) -> bool {
 pub fn uses_hosted_credits(plan_type: Option<&str>) -> bool {
     matches!(plan_type, Some("assistant") | Some("autopilot"))
 }
+
+/// Monthly credit budget for all hosted plans.
+/// Credits are abstract units - Twilio prices (in USD) are deducted directly with a margin.
+pub const MONTHLY_CREDIT_BUDGET: f32 = 25.0;
+
+/// Margin applied to Twilio's raw cost (covers VAT + operational costs).
+pub const TWILIO_COST_MARGIN: f32 = 1.3;

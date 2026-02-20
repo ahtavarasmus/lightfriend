@@ -32,85 +32,6 @@ pub struct SubscriptionCheckoutBody {
     pub plan_type: Option<String>,
 }
 
-/// Calculate euro credit allocation for Assistant/Autopilot plans based on user's country pricing.
-///
-/// Uses dynamic Twilio pricing when available, falls back to €0.39/message otherwise.
-/// Sends admin email notification when fallback pricing is used.
-///
-/// # Arguments
-/// * `state` - Application state for database/pricing access
-/// * `country_code` - User's phone number country code (e.g., "FI", "DE")
-/// * `message_count` - Number of messages the plan includes
-/// * `plan_name` - Plan name for logging ("Assistant" or "Autopilot")
-///
-/// # Returns
-/// The euro value to allocate as credits_left (message_count × price_per_message)
-async fn calculate_euro_credit_allocation(
-    state: &Arc<AppState>,
-    country_code: &str,
-    message_count: f32,
-    plan_name: &str,
-) -> f32 {
-    use crate::api::twilio_pricing::get_euro_country_pricing;
-
-    // Fallback price: €0.39 per regular message (0.10 × 3 segments × 1.3 margin)
-    const FALLBACK_REGULAR_MSG_PRICE: f32 = 0.39;
-
-    match get_euro_country_pricing(state, country_code).await {
-        Ok(pricing) => {
-            let allocation = message_count * pricing.regular_message_price;
-            tracing::info!(
-                "{} plan credit allocation for {}: {} messages × €{:.3}/msg = €{:.2}",
-                plan_name,
-                country_code,
-                message_count,
-                pricing.regular_message_price,
-                allocation
-            );
-            allocation
-        }
-        Err(e) => {
-            let fallback_allocation = message_count * FALLBACK_REGULAR_MSG_PRICE;
-            tracing::warn!(
-                "Failed to get pricing for {}, using fallback: {} - allocating €{:.2}",
-                country_code,
-                e,
-                fallback_allocation
-            );
-
-            // Send admin notification about fallback usage
-            let subject = format!("Pricing Fallback Used - {} Plan", plan_name);
-            let message = format!(
-                "Dynamic Twilio pricing lookup failed for country '{}' during {} plan subscription.\n\n\
-                Error: {}\n\n\
-                Fallback pricing used: €{:.2}/message\n\
-                Allocated credits: €{:.2} (~{} messages)\n\n\
-                Consider checking:\n\
-                1. Twilio pricing API availability\n\
-                2. Country code validity\n\
-                3. Network connectivity",
-                country_code, plan_name, e, FALLBACK_REGULAR_MSG_PRICE, fallback_allocation, message_count as i32
-            );
-
-            // Spawn email notification (don't block the webhook)
-            let state_clone = state.clone();
-            tokio::spawn(async move {
-                if let Err(e) = crate::utils::notification_utils::send_admin_alert(
-                    &state_clone,
-                    &subject,
-                    &message,
-                )
-                .await
-                {
-                    tracing::error!("Failed to send admin alert about pricing fallback: {}", e);
-                }
-            });
-
-            fallback_allocation
-        }
-    }
-}
-
 /// Idempotent subscription setup. Safe to call multiple times.
 /// Uses billing period end as idempotency key - if already set to current period, skips.
 async fn setup_user_subscription(
@@ -118,7 +39,7 @@ async fn setup_user_subscription(
     user_id: i32,
     price_id: &str,
     current_period_end: i64,
-    phone_country: Option<&str>,
+    _phone_country: Option<&str>,
 ) -> Result<(), String> {
     // Idempotency: skip if billing date already matches this period
     if let Ok(Some(existing)) = state.user_core.get_next_billing_date(user_id) {
@@ -162,28 +83,13 @@ async fn setup_user_subscription(
         tracing::error!("Failed to set plan_type for user {}: {}", user_id, e);
     }
 
-    // Calculate credits based on tier and country
+    // Calculate credits: fixed budget for all hosted plans, all countries
+    use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
     let credits: f32 = if sub_info.tier == "tier 2" {
-        let country = match phone_country {
-            Some(c) => c,
-            None => {
-                tracing::warn!(
-                    "No phone country for user {}, using FI as fallback for credit calculation",
-                    user_id
-                );
-                "FI"
-            }
-        };
-        if country == "US" || country == "CA" {
-            400.0
-        } else if is_byot_plan_price(price_id) {
+        if is_byot_plan_price(price_id) {
             0.0 // BYOT users pay Twilio directly
-        } else if is_assistant_plan_price(price_id) {
-            // Assistant plan: same credits as legacy Monitor (40 messages)
-            calculate_euro_credit_allocation(state, country, 40.0, "Assistant").await
         } else {
-            // Autopilot (and any legacy price IDs): same credits as legacy Digest (120 messages)
-            calculate_euro_credit_allocation(state, country, 120.0, "Autopilot").await
+            MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
         }
     } else {
         0.0
