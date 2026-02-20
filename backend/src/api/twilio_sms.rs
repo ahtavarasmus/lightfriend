@@ -79,7 +79,7 @@ impl SmsResult {
                 headers,
                 axum::Json(TwilioResponse {
                     message: response,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ),
             SmsResult::UserError { message, status } => (
@@ -87,7 +87,7 @@ impl SmsResult {
                 headers,
                 axum::Json(TwilioResponse {
                     message,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ),
             SmsResult::SystemError { log_msg } => {
@@ -97,7 +97,7 @@ impl SmsResult {
                     headers,
                     axum::Json(TwilioResponse {
                         message: tool_error_messages::INTERNAL_ERROR.to_string(),
-                        created_task_id: None,
+                        created_item_id: None,
                     }),
                 )
             }
@@ -106,7 +106,7 @@ impl SmsResult {
                 headers,
                 axum::Json(TwilioResponse {
                     message,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ),
         }
@@ -181,9 +181,9 @@ pub struct TwilioWebhookPayload {
 pub struct TwilioResponse {
     #[serde(rename = "Message")]
     pub message: String,
-    /// ID of task created during this conversation (if any)
+    /// ID of item created during this conversation (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_task_id: Option<i32>,
+    pub created_item_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -615,17 +615,7 @@ pub async fn process_sms(
                                 {
                                     tracing::error!("Failed to log SMS usage for cancel: {}", e);
                                 }
-                                if let Err(e) = crate::utils::usage::deduct_user_credits(
-                                    &state_clone,
-                                    user_clone.id,
-                                    "message",
-                                    None,
-                                ) {
-                                    tracing::error!(
-                                        "Failed to deduct user credits for cancel: {}",
-                                        e
-                                    );
-                                }
+                                // SMS credits deducted at Twilio status callback
                             }
                             Err(e) => {
                                 tracing::error!("Failed to send cancel response message: {}", e);
@@ -1064,7 +1054,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
-    let mut created_task_id: Option<i32> = None; // Track if a task was created during this conversation
+    let mut created_item_id: Option<i32> = None; // Track if an item was created during this conversation
     let final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
             tracing::debug!("Model provided direct response (no tool calls needed)");
@@ -1192,7 +1182,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             answer,
                             task_id,
                         }) => {
-                            created_task_id = Some(task_id);
+                            created_item_id = Some(task_id);
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Ok(crate::tools::registry::ToolResult::EarlyReturn {
@@ -1217,7 +1207,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             [(axum::http::header::CONTENT_TYPE, "application/json")],
                             Json(TwilioResponse {
                                 message: format!("Unknown tool: {}", name),
-                                created_task_id: None,
+                                created_item_id: None,
                             }),
                         );
                     }
@@ -1505,29 +1495,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             tracing::error!("Failed to log test SMS usage: {}", e);
         }
 
-        // Deduct credits unless caller handles credits themselves
-        if !options.skip_credit_deduction {
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user.id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Failed to process credits".to_string(),
-                        created_task_id: None,
-                    }),
-                );
-            }
-        }
+        // SMS credits deducted at Twilio status callback
 
         return (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(TwilioResponse {
                 message: final_response_with_notice,
-                created_task_id,
+                created_item_id,
             }),
         );
     }
@@ -1593,53 +1568,14 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user.id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Failed to process credits points".to_string(),
-                        created_task_id: None,
-                    }),
-                );
-            }
-
-            match state.user_repository.is_credits_under_threshold(user.id) {
-                Ok(is_under) => {
-                    if is_under {
-                        tracing::debug!(
-                            "User {} credits is under threshold, attempting automatic charge",
-                            user.id
-                        );
-                        // Get user information
-                        if user.charge_when_under {
-                            use axum::extract::{Path, State};
-                            let state_clone = Arc::clone(state);
-                            tokio::spawn(async move {
-                                let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                    State(state_clone),
-                                    Path(user.id),
-                                )
-                                .await;
-                                tracing::debug!("Recharged the user successfully back up!");
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to check if user credits is under threshold: {}", e)
-                }
-            }
+            // SMS credits deducted at Twilio status callback
 
             (
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Message sent successfully".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             )
         }
@@ -1666,7 +1602,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to send message".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             )
         }

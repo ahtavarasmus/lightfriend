@@ -147,7 +147,7 @@ impl ToolHandler for SendEmailHandler {
                 Ok(ToolResult::EarlyReturn {
                     response: TwilioResponse {
                         message: "Failed to process email request".to_string(),
-                        created_task_id: None,
+                        created_item_id: None,
                     },
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                 })
@@ -216,7 +216,7 @@ impl ToolHandler for RespondEmailHandler {
                 Ok(ToolResult::EarlyReturn {
                     response: TwilioResponse {
                         message: "Failed to process respond_to_email request".to_string(),
-                        created_task_id: None,
+                        created_item_id: None,
                     },
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                 })

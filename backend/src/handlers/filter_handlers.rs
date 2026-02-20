@@ -1,4 +1,3 @@
-use crate::UserCoreOps;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -8,6 +7,8 @@ use diesel::result::Error as DieselError;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+
+use crate::UserCoreOps;
 
 use crate::{
     handlers::auth_middleware::AuthUser,
@@ -29,22 +30,6 @@ pub struct KeywordRequest {
     service_type: String, // imap, whatsapp, etc.
 }
 
-// Response DTOs
-#[derive(Serialize)]
-pub struct TaskResponse {
-    id: Option<i32>,
-    user_id: i32,
-    trigger: String,
-    condition: Option<String>,
-    action: String,
-    status: Option<String>,
-    created_at: i32,
-    is_permanent: Option<i32>,
-    recurrence_rule: Option<String>,
-    recurrence_time: Option<String>,
-    sources: Option<String>,
-}
-
 #[derive(Serialize)]
 pub struct PrioritySenderResponse {
     user_id: i32,
@@ -52,186 +37,6 @@ pub struct PrioritySenderResponse {
     service_type: String,
     noti_type: Option<String>,
     noti_mode: String,
-}
-
-pub async fn cancel_task(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(task_id): Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!(
-        "Attempting to delete item {} for user {}",
-        task_id,
-        auth_user.user_id
-    );
-
-    match state
-        .item_repository
-        .delete_item(task_id, auth_user.user_id)
-    {
-        Ok(true) => {
-            tracing::debug!(
-                "Successfully deleted item {} for user {}",
-                task_id,
-                auth_user.user_id
-            );
-            Ok(Json(json!({"message": "Task cancelled successfully"})))
-        }
-        Ok(false) => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "Task not found or already completed"})),
-        )),
-        Err(e) => {
-            tracing::error!("Failed to delete item {}: {}", task_id, e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            ))
-        }
-    }
-}
-
-pub async fn get_tasks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<Vec<TaskResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Fetching items for user {}", auth_user.user_id);
-
-    let items = state
-        .item_repository
-        .get_items(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!(
-                "Failed to fetch items for user {}: {}",
-                auth_user.user_id,
-                e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
-
-    let response: Vec<TaskResponse> = items
-        .into_iter()
-        .map(|item| {
-            let trigger = if item.monitor {
-                "recurring_email".to_string()
-            } else if let Some(nca) = item.next_check_at {
-                format!("once_{}", nca)
-            } else {
-                "once_0".to_string()
-            };
-            TaskResponse {
-                id: item.id,
-                user_id: item.user_id,
-                trigger,
-                condition: None,
-                action: item.summary.clone(),
-                status: Some("active".to_string()),
-                created_at: item.created_at,
-                is_permanent: if item.monitor { Some(1) } else { Some(0) },
-                recurrence_rule: None,
-                recurrence_time: None,
-                sources: None,
-            }
-        })
-        .collect();
-
-    Ok(Json(response))
-}
-
-/// Response for single task with display formatting
-#[derive(Serialize)]
-pub struct SingleTaskResponse {
-    pub id: i32,
-    pub trigger_timestamp: i32,
-    pub trigger_type: String,
-    pub time_display: String,
-    pub description: String,
-    pub date_display: String,
-    pub relative_display: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub condition: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources_display: Option<String>,
-}
-
-/// Get a single item by ID - used for auto-showing newly created items
-pub async fn get_task(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(task_id): Path<i32>,
-) -> Result<Json<SingleTaskResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let item = state
-        .item_repository
-        .get_item(task_id, auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Task not found"})),
-            )
-        })?;
-
-    // Determine trigger type and timestamp from item fields
-    let (trigger_type, trigger_timestamp) = if item.monitor {
-        ("recurring_email".to_string(), 0)
-    } else if let Some(nca) = item.next_check_at {
-        ("once".to_string(), nca)
-    } else {
-        ("once".to_string(), 0)
-    };
-
-    // Get user timezone for formatting
-    let user_info = state.user_core.get_user_info(auth_user.user_id).ok();
-    let tz_str = user_info
-        .and_then(|u| u.timezone)
-        .unwrap_or_else(|| "UTC".to_string());
-    let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    use crate::handlers::dashboard_handlers::{
-        format_date_display, format_relative_days, format_time_display,
-    };
-
-    let (time_display, date_display, relative_display) = if item.monitor {
-        (
-            "Ongoing".to_string(),
-            String::new(),
-            "Always active".to_string(),
-        )
-    } else {
-        (
-            format_time_display(trigger_timestamp, &tz),
-            format_date_display(trigger_timestamp, &tz),
-            format_relative_days(trigger_timestamp, now_ts, &tz),
-        )
-    };
-
-    Ok(Json(SingleTaskResponse {
-        id: item.id.unwrap_or(0),
-        trigger_timestamp,
-        trigger_type,
-        time_display,
-        description: item.summary,
-        date_display,
-        relative_display,
-        condition: None,
-        sources: None,
-        sources_display: None,
-    }))
 }
 
 // Priority Senders handlers
@@ -484,14 +289,14 @@ pub async fn delete_keyword(
     }
 }
 
-// Task edit with AI
+// Item edit with AI
 #[derive(Deserialize)]
-pub struct TaskEditRequest {
+pub struct ItemEditRequest {
     pub instruction: String,
 }
 
 #[derive(Serialize)]
-pub struct TaskEditResponse {
+pub struct ItemEditResponse {
     pub message: String,
     pub success: bool,
 }
@@ -504,19 +309,19 @@ struct AiItemEditResult {
     explanation: String,
 }
 
-pub async fn edit_task_with_ai(
+pub async fn edit_item_with_ai(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Path(task_id): Path<i32>,
-    Json(request): Json<TaskEditRequest>,
-) -> Result<Json<TaskEditResponse>, (StatusCode, Json<serde_json::Value>)> {
+    Path(item_id): Path<i32>,
+    Json(request): Json<ItemEditRequest>,
+) -> Result<Json<ItemEditResponse>, (StatusCode, Json<serde_json::Value>)> {
     use openai_api_rs::v1::chat_completion::{
         ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
     };
 
     tracing::info!(
-        "edit_task_with_ai called: item_id={}, user_id={}, instruction={}",
-        task_id,
+        "edit_item_with_ai called: item_id={}, user_id={}, instruction={}",
+        item_id,
         auth_user.user_id,
         request.instruction
     );
@@ -524,7 +329,7 @@ pub async fn edit_task_with_ai(
     // Get the item and verify ownership
     let item = state
         .item_repository
-        .get_item(task_id, auth_user.user_id)
+        .get_item(item_id, auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get item: {}", e);
             (
@@ -683,7 +488,7 @@ TIME RULES:
                 let new_ts = local_dt.timestamp() as i32;
                 state
                     .item_repository
-                    .update_next_check_at(task_id, Some(new_ts))
+                    .update_next_check_at(item_id, Some(new_ts))
                     .map_err(|e| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -699,7 +504,7 @@ TIME RULES:
     if let Some(new_summary) = &edit_result.new_summary {
         state
             .item_repository
-            .update_summary(task_id, new_summary)
+            .update_summary(item_id, new_summary)
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -710,12 +515,12 @@ TIME RULES:
     }
 
     if changes_made {
-        Ok(Json(TaskEditResponse {
+        Ok(Json(ItemEditResponse {
             message: edit_result.explanation,
             success: true,
         }))
     } else {
-        Ok(Json(TaskEditResponse {
+        Ok(Json(ItemEditResponse {
             message: "No changes were made. Please clarify what you'd like to change.".to_string(),
             success: false,
         }))

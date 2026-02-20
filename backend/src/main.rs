@@ -1172,19 +1172,10 @@ async fn main() {
             "/api/auth/matrix/reset",
             delete(bridge_auth_common::reset_matrix_connection),
         )
-        // Task routes (reminders and message monitoring)
-        .route("/api/filters/tasks", get(filter_handlers::get_tasks))
+        // Item edit with AI
         .route(
-            "/api/filters/task/{task_id}",
-            delete(filter_handlers::cancel_task),
-        )
-        .route(
-            "/api/tasks/{task_id}/edit-ai",
-            post(filter_handlers::edit_task_with_ai),
-        )
-        .route(
-            "/api/tasks/{task_id}",
-            get(filter_handlers::get_task).delete(filter_handlers::cancel_task),
+            "/api/items/{id}/edit-ai",
+            post(filter_handlers::edit_item_with_ai),
         )
         .route(
             "/api/filters/monitored-contacts",

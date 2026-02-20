@@ -20,17 +20,17 @@ pub struct DashboardSummaryResponse {
     pub attention_count: i32,
     pub attention_items: Vec<AttentionItem>,
     pub next_scheduled: Option<ScheduledItem>,
-    pub upcoming_tasks: Vec<UpcomingTask>,
+    pub upcoming_items: Vec<UpcomingItem>,
     pub upcoming_digests: Vec<UpcomingDigest>,
     pub watched_contacts: Vec<WatchedContact>,
     pub next_digest: Option<NextDigestInfo>,
     pub quiet_mode: QuietModeInfo,
     pub sunrise_hour: Option<f32>,
     pub sunset_hour: Option<f32>,
-    /// Tasks beyond the current timeline range (for preview in extend button tooltip)
-    pub tasks_beyond: Vec<UpcomingTask>,
-    /// Total count of tasks beyond the current timeline range
-    pub tasks_beyond_count: i32,
+    /// Items beyond the current timeline range (for preview in extend button tooltip)
+    pub items_beyond: Vec<UpcomingItem>,
+    /// Total count of items beyond the current timeline range
+    pub items_beyond_count: i32,
 }
 
 #[derive(Serialize)]
@@ -55,12 +55,12 @@ pub struct AttentionItem {
 pub struct ScheduledItem {
     pub time_display: String, // "2:30pm"
     pub description: String,  // "Check on Mom"
-    pub task_id: Option<i32>,
+    pub item_id: Option<i32>,
 }
 
 #[derive(Serialize, Clone)]
-pub struct UpcomingTask {
-    pub task_id: Option<i32>,
+pub struct UpcomingItem {
+    pub item_id: Option<i32>,
     pub timestamp: i32,           // Unix timestamp for positioning
     pub time_display: String,     // "2:30pm"
     pub description: String,      // "Check on Mom"
@@ -87,7 +87,7 @@ pub struct NextDigestInfo {
 
 #[derive(Serialize, Clone)]
 pub struct UpcomingDigest {
-    pub task_id: Option<i32>,
+    pub item_id: Option<i32>,
     pub timestamp: i32,
     pub time_display: String,
     pub sources: Option<String>, // "email,whatsapp,telegram"
@@ -142,7 +142,7 @@ pub async fn get_dashboard_summary(
     let mut attention_items: Vec<AttentionItem> = Vec::new();
     for item in &items {
         let is_future_scheduled = item.next_check_at.is_some_and(|nca| nca > now_ts);
-        // Items scheduled for the future (non-priority) go to upcoming_tasks/upcoming_digests
+        // Items scheduled for the future (non-priority) go to upcoming_items/upcoming_digests
         if is_future_scheduled && item.priority == 0 {
             continue;
         }
@@ -174,14 +174,14 @@ pub async fn get_dashboard_summary(
     // Find next scheduled item (soonest upcoming non-digest item)
     let next_scheduled = find_next_scheduled_item(&items, now_ts, &tz);
 
-    // Find all upcoming tasks within the timeline range
-    let upcoming_tasks = find_upcoming_items(&items, now_ts, max_ts, &tz);
+    // Find all upcoming items within the timeline range
+    let upcoming_items = find_upcoming_items(&items, now_ts, max_ts, &tz);
 
     // Find all upcoming digests within the timeline range
     let upcoming_digests = find_upcoming_digest_items(&items, now_ts, max_ts, &tz);
 
-    // Find tasks beyond the timeline range (for extend button)
-    let (tasks_beyond, tasks_beyond_count) = find_items_beyond(&items, now_ts, max_ts, &tz);
+    // Find items beyond the timeline range (for extend button)
+    let (items_beyond, items_beyond_count) = find_items_beyond(&items, now_ts, max_ts, &tz);
 
     // Get watched contacts (contact profiles with notification modes)
     let watched_contacts = get_watched_contacts(&state, user_id);
@@ -196,15 +196,15 @@ pub async fn get_dashboard_summary(
         attention_count,
         attention_items,
         next_scheduled,
-        upcoming_tasks,
+        upcoming_items,
         upcoming_digests,
         watched_contacts,
         next_digest,
         quiet_mode,
         sunrise_hour,
         sunset_hour,
-        tasks_beyond,
-        tasks_beyond_count,
+        items_beyond,
+        items_beyond_count,
     }))
 }
 
@@ -225,7 +225,7 @@ fn find_next_scheduled_item(
         .map(|(item, nca)| ScheduledItem {
             time_display: format_time_display(nca, tz),
             description: item.summary.clone(),
-            task_id: item.id,
+            item_id: item.id,
         })
 }
 
@@ -234,15 +234,15 @@ fn find_upcoming_items(
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
-) -> Vec<UpcomingTask> {
-    let mut upcoming: Vec<UpcomingTask> = items
+) -> Vec<UpcomingItem> {
+    let mut upcoming: Vec<UpcomingItem> = items
         .iter()
         .filter(|item| !item.monitor)
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
-                .map(|nca| UpcomingTask {
-                    task_id: item.id,
+                .map(|nca| UpcomingItem {
+                    item_id: item.id,
                     timestamp: nca,
                     time_display: format_time_display(nca, tz),
                     description: item.summary.clone(),
@@ -272,7 +272,7 @@ fn find_upcoming_digest_items(
             item.next_check_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
                 .map(|nca| UpcomingDigest {
-                    task_id: item.id,
+                    item_id: item.id,
                     timestamp: nca,
                     time_display: format_time_display(nca, tz),
                     sources: None,
@@ -291,18 +291,18 @@ fn find_items_beyond(
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
-) -> (Vec<UpcomingTask>, i32) {
+) -> (Vec<UpcomingItem>, i32) {
     let ninety_days = 90 * 24 * 60 * 60;
     let lookahead_ts = max_ts + ninety_days;
 
-    let mut beyond: Vec<UpcomingTask> = items
+    let mut beyond: Vec<UpcomingItem> = items
         .iter()
         .filter(|item| !item.monitor)
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
-                .map(|nca| UpcomingTask {
-                    task_id: item.id,
+                .map(|nca| UpcomingItem {
+                    item_id: item.id,
                     timestamp: nca,
                     time_display: format_time_display(nca, tz),
                     description: item.summary.clone(),

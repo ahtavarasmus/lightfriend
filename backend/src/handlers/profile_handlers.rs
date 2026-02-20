@@ -788,79 +788,24 @@ pub async fn patch_profile_field(
     Ok(Json(json!({"success": true})))
 }
 
-/// Recalculate credits_left when user changes phone country
-/// Uses proportional transfer: preserves the percentage of monthly allowance remaining
+/// Recalculate credits_left when user changes phone country.
+/// With unified credit budget (25.0 for all countries), credits survive country changes unchanged.
 async fn recalculate_credits_for_country_change(
-    state: &Arc<AppState>,
+    _state: &Arc<AppState>,
     user_id: i32,
     old_country: Option<&str>,
     new_country: Option<&str>,
     old_credits_left: f32,
-    plan_type: Option<&str>,
+    _plan_type: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use crate::api::twilio_pricing::get_euro_country_pricing;
-
-    // Determine plan messages (120 for autopilot/byot, 40 for assistant or default)
-    let plan_messages: f32 = if crate::utils::plan_features::has_auto_features(plan_type) {
-        120.0
-    } else {
-        40.0
-    };
-
-    // Check if country is US/CA
-    let is_us_ca = |c: Option<&str>| matches!(c, Some("US") | Some("CA"));
-
-    // Get max credits for a country
-    // US/CA: always 400 messages (hosted plan)
-    // Euro: credits_left is € value = plan_messages × regular_message_price
-    let get_max_credits = async |country: Option<&str>| -> f32 {
-        if is_us_ca(country) {
-            // US/CA: always 400 messages (hosted plan)
-            400.0
-        } else if let Some(c) = country {
-            // Euro: € value based on SMS pricing (regular_message_price already includes segments × margin)
-            if let Ok(pricing) = get_euro_country_pricing(state, c).await {
-                return plan_messages * pricing.regular_message_price;
-            }
-            // Fallback: €0.39 per message (same as stripe_handlers.rs)
-            plan_messages * 0.39
-        } else {
-            // Unknown country fallback
-            plan_messages * 0.39
-        }
-    };
-
-    let old_max = get_max_credits(old_country).await;
-    let new_max = get_max_credits(new_country).await;
-
-    if old_max <= 0.0 || new_max <= 0.0 {
-        tracing::warn!("Invalid max credits: old={}, new={}", old_max, new_max);
-        return Ok(());
-    }
-
-    // Calculate ratio of remaining allowance (capped at 1.0)
-    let ratio = (old_credits_left / old_max).min(1.0);
-
-    // Apply ratio to new country's max
-    let new_credits_left = new_max * ratio;
-
+    // Budget is 25.0 for all countries - no recalculation needed
     tracing::info!(
-        "Credit recalculation: user={}, old_country={:?}, new_country={:?}, \
-         old_credits={:.2}, old_max={:.2}, ratio={:.2}, new_credits={:.2}",
+        "Country change for user {}: {:?} -> {:?}, credits_left={:.2} (unchanged)",
         user_id,
         old_country,
         new_country,
-        old_credits_left,
-        old_max,
-        ratio,
-        new_credits_left
+        old_credits_left
     );
-
-    // Update credits_left
-    state
-        .user_repository
-        .update_user_credits_left(user_id, new_credits_left)?;
-
     Ok(())
 }
 
@@ -1769,9 +1714,9 @@ pub struct WebChatResponse {
     pub credits_charged: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<MediaResult>>,
-    /// ID of task created during this chat (if any) - for auto-showing task preview
+    /// ID of item created during this chat (if any) - for auto-showing item preview
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_task_id: Option<i32>,
+    pub created_item_id: Option<i32>,
 }
 
 pub async fn web_chat(
@@ -1935,7 +1880,7 @@ pub async fn web_chat(
             message,
             credits_charged: charged_amount,
             media,
-            created_task_id: response.created_task_id,
+            created_item_id: response.created_item_id,
         }))
     } else {
         // No refund - credits are consumed on attempt
@@ -2187,7 +2132,7 @@ pub async fn get_instant_digest(
             message: "Nothing new since your last check!".to_string(),
             credits_charged: charged_amount,
             media: None,
-            created_task_id: None,
+            created_item_id: None,
         }));
     }
 
@@ -2254,7 +2199,7 @@ pub async fn get_instant_digest(
         message: digest_message,
         credits_charged: charged_amount,
         media: None,
-        created_task_id: None,
+        created_item_id: None,
     }))
 }
 
@@ -2488,7 +2433,7 @@ pub async fn web_chat_with_image(
             message,
             credits_charged: charged_amount,
             media,
-            created_task_id: response.created_task_id,
+            created_item_id: response.created_item_id,
         }))
     } else {
         // No refund - credits are consumed on attempt

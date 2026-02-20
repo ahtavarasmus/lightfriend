@@ -7,7 +7,7 @@ use crate::profile::billing_models::UserProfile;
 
 use super::chat_box::ChatBox;
 use super::triage_indicator::AttentionItem;
-use super::timeline_view::{UpcomingTask, UpcomingDigest};
+use super::timeline_view::{UpcomingItem, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::activity_panel::ActivityPanel;
@@ -24,7 +24,7 @@ const DASHBOARD_STYLES: &str = r#"
     padding: 0;
     position: relative;
 }
-.task-focus-overlay {
+.item-focus-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -34,7 +34,7 @@ const DASHBOARD_STYLES: &str = r#"
     z-index: 100;
     cursor: pointer;
 }
-.task-edit-container {
+.item-edit-container {
     position: relative;
     z-index: 101;
 }
@@ -44,7 +44,7 @@ const DASHBOARD_STYLES: &str = r#"
     gap: 1.5rem;
     transition: all 0.2s ease;
 }
-.peace-main.task-focused {
+.peace-main.item-focused {
     filter: blur(4px);
     opacity: 0.6;
 }
@@ -53,7 +53,7 @@ const DASHBOARD_STYLES: &str = r#"
     background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.1), transparent);
     margin: 1rem 0;
 }
-.task-detail-bar {
+.item-detail-bar {
     background: rgba(30, 30, 46, 0.95);
     border: 1px solid rgba(126, 178, 255, 0.3);
     border-radius: 12px;
@@ -64,41 +64,41 @@ const DASHBOARD_STYLES: &str = r#"
     justify-content: space-between;
     gap: 1rem;
 }
-.task-detail-info {
+.item-detail-info {
     flex: 1;
     min-width: 0;
 }
-.task-detail-time {
+.item-detail-time {
     font-size: 1rem;
     font-weight: 600;
     color: #7EB2FF;
 }
-.task-detail-desc {
+.item-detail-desc {
     font-size: 0.85rem;
     color: #999;
     white-space: pre-wrap;
     word-wrap: break-word;
     line-height: 1.4;
 }
-.task-detail-source {
+.item-detail-source {
     font-size: 0.75rem;
     color: #7eb2ff;
     margin-top: 0.15rem;
     opacity: 0.8;
 }
-.task-detail-condition {
+.item-detail-condition {
     font-size: 0.75rem;
     color: #e8a838;
     margin-top: 0.15rem;
     font-style: italic;
 }
-.task-detail-note {
+.item-detail-note {
     font-size: 0.7rem;
     color: #666;
     margin-top: 0.25rem;
     font-style: italic;
 }
-.task-btn-delete {
+.item-btn-delete {
     background: rgba(255, 68, 68, 0.15);
     border: 1px solid rgba(255, 68, 68, 0.4);
     color: #ff6b6b;
@@ -108,10 +108,10 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 0.85rem;
     transition: all 0.2s;
 }
-.task-btn-delete:hover {
+.item-btn-delete:hover {
     background: rgba(255, 68, 68, 0.25);
 }
-.task-btn-close {
+.item-btn-close {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: #888;
@@ -120,7 +120,7 @@ const DASHBOARD_STYLES: &str = r#"
     cursor: pointer;
     font-size: 0.85rem;
 }
-.task-btn-close:hover {
+.item-btn-close:hover {
     color: #fff;
     background: rgba(255, 255, 255, 0.1);
 }
@@ -248,7 +248,7 @@ struct DashboardSummaryResponse {
     attention_count: i32,
     attention_items: Vec<AttentionItemResponse>,
     next_scheduled: Option<ScheduledItemResponse>,
-    upcoming_tasks: Vec<UpcomingTaskResponse>,
+    upcoming_items: Vec<UpcomingItemResponse>,
     #[serde(default)]
     upcoming_digests: Vec<UpcomingDigestResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
@@ -256,12 +256,12 @@ struct DashboardSummaryResponse {
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
-    /// Tasks beyond the current timeline range (for extend button preview)
+    /// Items beyond the current timeline range (for extend button preview)
     #[serde(default)]
-    tasks_beyond: Vec<UpcomingTaskResponse>,
-    /// Total count of tasks beyond the timeline range
+    items_beyond: Vec<UpcomingItemResponse>,
+    /// Total count of items beyond the timeline range
     #[serde(default)]
-    tasks_beyond_count: i32,
+    items_beyond_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize, Default)]
@@ -287,12 +287,12 @@ struct AttentionItemResponse {
 struct ScheduledItemResponse {
     time_display: String,
     description: String,
-    task_id: Option<i32>,
+    item_id: Option<i32>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct UpcomingTaskResponse {
-    task_id: Option<i32>,
+struct UpcomingItemResponse {
+    item_id: Option<i32>,
     timestamp: i32,
     time_display: String,
     description: String,
@@ -320,7 +320,7 @@ struct NextDigestResponse {
 #[derive(Clone, PartialEq, Deserialize)]
 struct UpcomingDigestResponse {
     #[serde(default)]
-    task_id: Option<i32>,
+    item_id: Option<i32>,
     timestamp: i32,
     time_display: String,
     sources: Option<String>,
@@ -423,11 +423,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Task detail modal state
-    let selected_task = use_state(|| None::<UpcomingTask>);
+    // Item detail modal state
+    let selected_item = use_state(|| None::<UpcomingItem>);
 
-    // Task preview state (shown below chatbox after creation, before entering edit mode)
-    let preview_task = use_state(|| None::<UpcomingTask>);
+    // Item preview state (shown below chatbox after creation, before entering edit mode)
+    let preview_item = use_state(|| None::<UpcomingItem>);
 
     // Fetch YouTube connection status
     {
@@ -560,13 +560,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         None => (0, vec![]),
     };
 
-    let upcoming_tasks: Vec<UpcomingTask> = (*summary)
+    let upcoming_items: Vec<UpcomingItem> = (*summary)
         .as_ref()
         .map(|s| {
-            s.upcoming_tasks
+            s.upcoming_items
                 .iter()
-                .map(|t| UpcomingTask {
-                    task_id: t.task_id,
+                .map(|t| UpcomingItem {
+                    item_id: t.item_id,
                     timestamp: t.timestamp,
                     time_display: t.time_display.clone(),
                     description: t.description.clone(),
@@ -585,7 +585,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             s.upcoming_digests
                 .iter()
                 .map(|d| UpcomingDigest {
-                    task_id: d.task_id,
+                    item_id: d.item_id,
                     timestamp: d.timestamp,
                     time_display: d.time_display.clone(),
                     sources: d.sources.clone(),
@@ -595,20 +595,20 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .unwrap_or_default();
 
 
-    // Update selected_task with fresh data when summary changes (check both tasks and digests)
+    // Update selected_item with fresh data when summary changes (check both items and digests)
     {
-        let selected_task = selected_task.clone();
-        let upcoming_tasks = upcoming_tasks.clone();
+        let selected_item = selected_item.clone();
+        let upcoming_items_for_effect = upcoming_items.clone();
         let upcoming_digests_for_effect = upcoming_digests.clone();
         use_effect_with_deps(
-            move |(tasks, digests): &(Vec<UpcomingTask>, Vec<UpcomingDigest>)| {
-                if let Some(current) = (*selected_task).as_ref() {
-                    if let Some(task_id) = current.task_id {
-                        if let Some(updated) = tasks.iter().find(|t| t.task_id == Some(task_id)) {
-                            selected_task.set(Some(updated.clone()));
-                        } else if let Some(updated_digest) = digests.iter().find(|d| d.task_id == Some(task_id)) {
-                            let task = UpcomingTask {
-                                task_id: updated_digest.task_id,
+            move |(items, digests): &(Vec<UpcomingItem>, Vec<UpcomingDigest>)| {
+                if let Some(current) = (*selected_item).as_ref() {
+                    if let Some(id) = current.item_id {
+                        if let Some(updated) = items.iter().find(|t| t.item_id == Some(id)) {
+                            selected_item.set(Some(updated.clone()));
+                        } else if let Some(updated_digest) = digests.iter().find(|d| d.item_id == Some(id)) {
+                            let item = UpcomingItem {
+                                item_id: updated_digest.item_id,
                                 timestamp: updated_digest.timestamp,
                                 time_display: updated_digest.time_display.clone(),
                                 description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
@@ -617,13 +617,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 condition: None,
                                 sources_display: None,
                             };
-                            selected_task.set(Some(task));
+                            selected_item.set(Some(item));
                         }
                     }
                 }
                 || ()
             },
-            (upcoming_tasks, upcoming_digests_for_effect),
+            (upcoming_items_for_effect, upcoming_digests_for_effect),
         );
     }
 
@@ -675,23 +675,23 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Task click callback from activity panel - close panel and enter edit mode
-    let on_activity_task_click = {
-        let selected_task = selected_task.clone();
+    // Item click callback from activity panel - close panel and enter edit mode
+    let on_activity_item_click = {
+        let selected_item = selected_item.clone();
         let activity_open = activity_open.clone();
-        Callback::from(move |task: UpcomingTask| {
+        Callback::from(move |item: UpcomingItem| {
             activity_open.set(false);
-            selected_task.set(Some(task));
+            selected_item.set(Some(item));
         })
     };
 
-    // Task delete callback from activity panel
-    let on_activity_task_delete = {
+    // Item delete callback from activity panel
+    let on_activity_item_delete = {
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |task_id: i32| {
+        Callback::from(move |id: i32| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                if let Ok(resp) = Api::delete(&format!("/api/items/{}", task_id)).send().await {
+                if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
                     }
@@ -700,27 +700,27 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Close task modal callback
-    let on_task_modal_close = {
-        let selected_task = selected_task.clone();
+    // Close item modal callback
+    let on_item_modal_close = {
+        let selected_item = selected_item.clone();
         Callback::from(move |_: MouseEvent| {
-            selected_task.set(None);
+            selected_item.set(None);
         })
     };
 
-    // Delete task callback
-    let on_delete_task = {
-        let selected_task = selected_task.clone();
+    // Delete item callback
+    let on_delete_item = {
+        let selected_item = selected_item.clone();
         let fetch_summary = fetch_summary.clone();
         Callback::from(move |_: MouseEvent| {
-            if let Some(task) = (*selected_task).as_ref() {
-                if let Some(task_id) = task.task_id {
-                    let selected_task = selected_task.clone();
+            if let Some(item) = (*selected_item).as_ref() {
+                if let Some(id) = item.item_id {
+                    let selected_item = selected_item.clone();
                     let fetch_summary = fetch_summary.clone();
                     spawn_local(async move {
-                        if let Ok(resp) = Api::delete(&format!("/api/items/{}", task_id)).send().await {
+                        if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
                             if resp.ok() {
-                                selected_task.set(None);
+                                selected_item.set(None);
                                 fetch_summary.emit(());
                             }
                         }
@@ -730,12 +730,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Callback for when task is cleared after editing
-    let on_task_cleared = {
-        let selected_task = selected_task.clone();
+    // Callback for when item is cleared after editing
+    let on_item_cleared = {
+        let selected_item = selected_item.clone();
         let fetch_summary = fetch_summary.clone();
         Callback::from(move |_: ()| {
-            selected_task.set(None);
+            selected_item.set(None);
             fetch_summary.emit(());
         })
     };
@@ -779,33 +779,33 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let on_usage_change = fetch_summary.clone();
 
 
-    // Callback for when a task is created via chat - show preview below chatbox
-    let on_task_created = {
-        let preview_task = preview_task.clone();
+    // Callback for when an item is created via chat - show preview below chatbox
+    let on_item_created = {
+        let preview_item = preview_item.clone();
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |task_id: i32| {
-            // Refresh the dashboard to get the new task
+        Callback::from(move |item_id: i32| {
+            // Refresh the dashboard to get the new item
             fetch_summary.emit(());
 
             // Schedule a check after a short delay to find and show preview
-            let preview_task = preview_task.clone();
+            let preview_item = preview_item.clone();
             gloo_timers::callback::Timeout::new(500, move || {
-                let preview_task = preview_task.clone();
+                let preview_item = preview_item.clone();
                 spawn_local(async move {
-                    if let Ok(response) = Api::get(&format!("/api/items/{}", task_id)).send().await {
+                    if let Ok(response) = Api::get(&format!("/api/items/{}", item_id)).send().await {
                         if response.ok() {
-                            if let Ok(task_data) = response.json::<serde_json::Value>().await {
-                                let task = UpcomingTask {
-                                    task_id: task_data["id"].as_i64().map(|i| i as i32),
-                                    timestamp: task_data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
-                                    time_display: task_data["time_display"].as_str().unwrap_or("").to_string(),
-                                    description: task_data["description"].as_str().unwrap_or("").to_string(),
-                                    date_display: task_data["date_display"].as_str().unwrap_or("").to_string(),
-                                    relative_display: task_data["relative_display"].as_str().unwrap_or("").to_string(),
-                                    condition: task_data["condition"].as_str().map(|s| s.to_string()),
-                                    sources_display: task_data["sources_display"].as_str().map(|s| s.to_string()),
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                let item = UpcomingItem {
+                                    item_id: data["id"].as_i64().map(|i| i as i32),
+                                    timestamp: data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
+                                    time_display: data["time_display"].as_str().unwrap_or("").to_string(),
+                                    description: data["description"].as_str().unwrap_or("").to_string(),
+                                    date_display: data["date_display"].as_str().unwrap_or("").to_string(),
+                                    relative_display: data["relative_display"].as_str().unwrap_or("").to_string(),
+                                    condition: data["condition"].as_str().map(|s| s.to_string()),
+                                    sources_display: data["sources_display"].as_str().map(|s| s.to_string()),
                                 };
-                                preview_task.set(Some(task));
+                                preview_item.set(Some(item));
                             }
                         }
                     }
@@ -814,21 +814,21 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Callback for when user clicks on task preview to edit it
+    // Callback for when user clicks on item preview to edit it
     let on_preview_click = {
-        let selected_task = selected_task.clone();
-        let preview_task = preview_task.clone();
-        Callback::from(move |task: UpcomingTask| {
-            selected_task.set(Some(task));
-            preview_task.set(None);
+        let selected_item = selected_item.clone();
+        let preview_item = preview_item.clone();
+        Callback::from(move |item: UpcomingItem| {
+            selected_item.set(Some(item));
+            preview_item.set(None);
         })
     };
 
-    // Callback to close task preview
+    // Callback to close item preview
     let on_preview_close = {
-        let preview_task = preview_task.clone();
+        let preview_item = preview_item.clone();
         Callback::from(move |_: ()| {
-            preview_task.set(None);
+            preview_item.set(None);
         })
     };
 
@@ -836,65 +836,65 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         <>
             <style>{DASHBOARD_STYLES}</style>
             <div class="peace-dashboard">
-                // Overlay for clicking outside to close task edit mode
-                if selected_task.is_some() {
-                    <div class="task-focus-overlay" onclick={on_task_modal_close.clone()}></div>
+                // Overlay for clicking outside to close item edit mode
+                if selected_item.is_some() {
+                    <div class="item-focus-overlay" onclick={on_item_modal_close.clone()}></div>
                 }
 
-                // Chat box and task bar in a container above the overlay
-                <div class={if selected_task.is_some() { "task-edit-container" } else { "" }}>
+                // Chat box and item bar in a container above the overlay
+                <div class={if selected_item.is_some() { "item-edit-container" } else { "" }}>
                     // Show the user's Lightfriend SMS number above chat
                     if let Some(ref num) = props.user_profile.preferred_number {
                         <div class="lf-number-label">
                             {"SMS: "}{num}
                         </div>
                     }
-                    // Chat box - always at the top, pass focused_task for edit mode
+                    // Chat box - always at the top, pass focused_item for edit mode
                     <ChatBox
                         on_usage_change={on_usage_change}
                         youtube_connected={*youtube_connected}
                         tesla_connected={*tesla_connected}
-                        focused_task={(*selected_task).clone()}
-                        on_task_cleared={on_task_cleared}
-                        on_task_created={on_task_created}
-                        preview_task={(*preview_task).clone()}
+                        focused_item={(*selected_item).clone()}
+                        on_item_cleared={on_item_cleared}
+                        on_item_created={on_item_created}
+                        preview_item={(*preview_item).clone()}
                         on_preview_click={on_preview_click}
                         on_preview_close={on_preview_close}
                         prefill_text={(*prefill_chat).clone()}
                         on_prefill_consumed={Some(on_prefill_consumed)}
                     />
 
-                    // Task detail bar (shown when task selected) - below ChatBox
-                    if let Some(task) = (*selected_task).as_ref() {
-                        <div class="task-detail-bar">
-                            <div class="task-detail-info">
-                                <div class="task-detail-time">{&task.time_display}</div>
-                                if let Some(ref src) = task.sources_display {
-                                    <div class="task-detail-source">{format!("Check: {}", src)}</div>
+                    // Item detail bar (shown when item selected) - below ChatBox
+                    if let Some(item) = (*selected_item).as_ref() {
+                        <div class="item-detail-bar">
+                            <div class="item-detail-info">
+                                <div class="item-detail-time">{&item.time_display}</div>
+                                if let Some(ref src) = item.sources_display {
+                                    <div class="item-detail-source">{format!("Check: {}", src)}</div>
                                     if src.to_lowercase().contains("weather") {
-                                        <div class="task-detail-note">{"Location from Settings > Account"}</div>
+                                        <div class="item-detail-note">{"Location from Settings > Account"}</div>
                                     }
                                 }
-                                if let Some(ref cond) = task.condition {
-                                    <div class="task-detail-condition">{format!("Condition: {}", cond)}</div>
+                                if let Some(ref cond) = item.condition {
+                                    <div class="item-detail-condition">{format!("Condition: {}", cond)}</div>
                                 }
-                                <div class="task-detail-desc">
-                                    {if task.condition.is_some() || task.sources_display.is_some() {
-                                        format!("Then: {}", &task.description)
+                                <div class="item-detail-desc">
+                                    {if item.condition.is_some() || item.sources_display.is_some() {
+                                        format!("Then: {}", &item.description)
                                     } else {
-                                        task.description.clone()
+                                        item.description.clone()
                                     }}
                                 </div>
-                                <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
+                                <div class="item-detail-note">{"You'll be notified when this runs"}</div>
                             </div>
-                            <button class="task-btn-delete" onclick={on_delete_task}>{"Delete"}</button>
-                            <button class="task-btn-close" onclick={on_task_modal_close.clone()}>{"x"}</button>
+                            <button class="item-btn-delete" onclick={on_delete_item}>{"Delete"}</button>
+                            <button class="item-btn-close" onclick={on_item_modal_close.clone()}>{"x"}</button>
                         </div>
                     }
                 </div>
 
-            // Main dashboard content - blurred when task focused
-            <div class={if selected_task.is_some() { "peace-main task-focused" } else { "peace-main" }}>
+            // Main dashboard content - blurred when item focused
+            <div class={if selected_item.is_some() { "peace-main item-focused" } else { "peace-main" }}>
                 // System-level notices (bridge disconnected etc. - items with no source_id)
                 // Admin-only for now
                 { if props.user_profile.id == 1 {
@@ -962,10 +962,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             <ActivityPanel
                 is_open={*activity_open}
                 on_close={on_activity_close}
-                upcoming_tasks={upcoming_tasks}
+                upcoming_items={upcoming_items}
                 upcoming_digests={upcoming_digests}
-                on_task_click={on_activity_task_click}
-                on_task_delete={on_activity_task_delete}
+                on_item_click={on_activity_item_click}
+                on_item_delete={on_activity_item_delete}
                 sunrise_hour={sunrise_hour}
                 sunset_hour={sunset_hour}
             />

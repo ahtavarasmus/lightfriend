@@ -231,7 +231,7 @@ pub async fn handle_send_chat_message(
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             Json(TwilioResponse {
                 message: error_msg.to_string(),
-                created_task_id: None,
+                created_item_id: None,
             }),
         ));
     }
@@ -252,7 +252,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -313,7 +313,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -340,12 +340,7 @@ pub async fn handle_send_chat_message(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -354,7 +349,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -415,7 +410,7 @@ pub async fn handle_send_chat_message(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(TwilioResponse {
             message: "Message queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }

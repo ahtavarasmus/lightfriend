@@ -190,7 +190,7 @@ pub async fn handle_send_email(
                             "Contact '{}' doesn't have an email address in their profile.",
                             args.to
                         ),
-                        created_task_id: None,
+                        created_item_id: None,
                     }),
                 ));
             }
@@ -201,7 +201,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
-                    created_task_id: None,
+                    created_item_id: None,
                 })
             ));
         }
@@ -219,12 +219,7 @@ pub async fn handle_send_email(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -233,7 +228,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -304,7 +299,7 @@ pub async fn handle_send_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }
@@ -452,7 +447,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -476,12 +471,7 @@ pub async fn handle_respond_to_email(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -490,7 +480,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -559,7 +549,7 @@ pub async fn handle_respond_to_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email response queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }

@@ -3,7 +3,7 @@ use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use serde::Deserialize;
 use crate::utils::api::Api;
-use super::timeline_view::{UpcomingTask, UpcomingDigest};
+use super::timeline_view::{UpcomingItem, UpcomingDigest};
 
 const ACTIVITY_STYLES: &str = r#"
 .activity-panel-overlay {
@@ -243,13 +243,13 @@ pub struct ActivityPanelProps {
     pub is_open: bool,
     pub on_close: Callback<()>,
     #[prop_or_default]
-    pub upcoming_tasks: Vec<UpcomingTask>,
+    pub upcoming_items: Vec<UpcomingItem>,
     #[prop_or_default]
     pub upcoming_digests: Vec<UpcomingDigest>,
     #[prop_or_default]
-    pub on_task_click: Option<Callback<UpcomingTask>>,
+    pub on_item_click: Option<Callback<UpcomingItem>>,
     #[prop_or_default]
-    pub on_task_delete: Option<Callback<i32>>,
+    pub on_item_delete: Option<Callback<i32>>,
     #[prop_or_default]
     pub sunrise_hour: Option<f32>,
     #[prop_or_default]
@@ -426,18 +426,18 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
     }
 }
 
-/// Merged item for sorting tasks and digests together
+/// Merged entry for sorting items and digests together
 #[derive(Clone)]
-enum UpcomingItem {
-    Task(UpcomingTask),
+enum UpcomingEntry {
+    Item(UpcomingItem),
     Digest(UpcomingDigest),
 }
 
-impl UpcomingItem {
+impl UpcomingEntry {
     fn timestamp(&self) -> i32 {
         match self {
-            UpcomingItem::Task(t) => t.timestamp,
-            UpcomingItem::Digest(d) => d.timestamp,
+            UpcomingEntry::Item(t) => t.timestamp,
+            UpcomingEntry::Digest(d) => d.timestamp,
         }
     }
 }
@@ -446,21 +446,21 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
     let sunrise = props.sunrise_hour.unwrap_or(7.0);
     let sunset = props.sunset_hour.unwrap_or(19.0);
 
-    // Merge tasks + digests into a single sorted list
-    let mut items: Vec<UpcomingItem> = Vec::new();
-    for t in &props.upcoming_tasks {
-        items.push(UpcomingItem::Task(t.clone()));
+    // Merge items + digests into a single sorted list
+    let mut entries: Vec<UpcomingEntry> = Vec::new();
+    for t in &props.upcoming_items {
+        entries.push(UpcomingEntry::Item(t.clone()));
     }
     for d in &props.upcoming_digests {
-        items.push(UpcomingItem::Digest(d.clone()));
+        entries.push(UpcomingEntry::Digest(d.clone()));
     }
-    items.sort_by_key(|item| item.timestamp());
+    entries.sort_by_key(|e| e.timestamp());
 
-    if items.is_empty() {
+    if entries.is_empty() {
         return html! {
             <div class="activity-empty">
-                <p>{"No upcoming tasks"}</p>
-                <p class="activity-hint">{"Create tasks by describing them in the chat."}</p>
+                <p>{"No upcoming items"}</p>
+                <p class="activity-hint">{"Create items by describing them in the chat."}</p>
             </div>
         };
     }
@@ -479,16 +479,16 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
 
     struct DayGroup {
         label: String,
-        items: Vec<UpcomingItem>,
+        entries: Vec<UpcomingEntry>,
     }
 
     let mut groups: Vec<DayGroup> = Vec::new();
     let mut current_day_start: Option<i64> = None;
 
-    for item in &items {
-        let item_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(item.timestamp() as f64 * 1000.0));
-        let item_day_start = {
-            let d = item_date.clone();
+    for entry in &entries {
+        let entry_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(entry.timestamp() as f64 * 1000.0));
+        let entry_day_start = {
+            let d = entry_date.clone();
             d.set_hours(0);
             d.set_minutes(0);
             d.set_seconds(0);
@@ -497,53 +497,53 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
         };
 
         let needs_new_group = match current_day_start {
-            Some(current) => item_day_start != current,
+            Some(current) => entry_day_start != current,
             None => true,
         };
 
         if needs_new_group {
-            let days_from_today = (item_day_start - today_start) / 86400;
+            let days_from_today = (entry_day_start - today_start) / 86400;
             let label = if days_from_today == 0 {
                 "Today".to_string()
             } else if days_from_today == 1 {
                 "Tomorrow".to_string()
             } else {
-                let day_of_week = item_date.get_day();
+                let day_of_week = entry_date.get_day();
                 let day_str = match day_of_week {
                     0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
                     4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "",
                 };
-                let month = item_date.get_month();
+                let month = entry_date.get_month();
                 let month_str = match month {
                     0 => "Jan", 1 => "Feb", 2 => "Mar", 3 => "Apr",
                     4 => "May", 5 => "Jun", 6 => "Jul", 7 => "Aug",
                     8 => "Sep", 9 => "Oct", 10 => "Nov", 11 => "Dec",
                     _ => "",
                 };
-                format!("{} {} {}", day_str, month_str, item_date.get_date())
+                format!("{} {} {}", day_str, month_str, entry_date.get_date())
             };
-            groups.push(DayGroup { label, items: vec![item.clone()] });
-            current_day_start = Some(item_day_start);
+            groups.push(DayGroup { label, entries: vec![entry.clone()] });
+            current_day_start = Some(entry_day_start);
         } else {
             if let Some(group) = groups.last_mut() {
-                group.items.push(item.clone());
+                group.entries.push(entry.clone());
             }
         }
     }
 
-    let on_task_click = props.on_task_click.clone();
-    let on_task_delete = props.on_task_delete.clone();
+    let on_item_click = props.on_item_click.clone();
+    let on_item_delete = props.on_item_delete.clone();
 
     html! {
         <div class="activity-list">
             { for groups.into_iter().map(|group| {
-                let on_task_click = on_task_click.clone();
-                let on_task_delete = on_task_delete.clone();
+                let on_item_click = on_item_click.clone();
+                let on_item_delete = on_item_delete.clone();
                 html! {
                     <>
                         <div class="upcoming-day-header">{group.label}</div>
-                        { for group.items.into_iter().map(|item| {
-                            render_upcoming_item(&item, sunrise, sunset, now_ts, &on_task_click, &on_task_delete)
+                        { for group.entries.into_iter().map(|entry| {
+                            render_upcoming_entry(&entry, sunrise, sunset, now_ts, &on_item_click, &on_item_delete)
                         })}
                     </>
                 }
@@ -552,31 +552,31 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
     }
 }
 
-fn render_upcoming_item(
-    item: &UpcomingItem,
+fn render_upcoming_entry(
+    entry: &UpcomingEntry,
     sunrise: f32,
     sunset: f32,
     now_ts: i64,
-    on_task_click: &Option<Callback<UpcomingTask>>,
-    on_task_delete: &Option<Callback<i32>>,
+    on_item_click: &Option<Callback<UpcomingItem>>,
+    on_item_delete: &Option<Callback<i32>>,
 ) -> Html {
-    let (is_digest, time_display, description, condition, sources, task_id, timestamp) = match item {
-        UpcomingItem::Task(t) => (
+    let (is_digest, time_display, description, condition, sources, item_id, timestamp) = match entry {
+        UpcomingEntry::Item(t) => (
             false,
             t.time_display.clone(),
             t.description.clone(),
             t.condition.clone(),
             t.sources_display.clone(),
-            t.task_id,
+            t.item_id,
             t.timestamp,
         ),
-        UpcomingItem::Digest(d) => (
+        UpcomingEntry::Digest(d) => (
             true,
             d.time_display.clone(),
             format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
             None,
             None,
-            d.task_id,
+            d.item_id,
             d.timestamp,
         ),
     };
@@ -603,17 +603,17 @@ fn render_upcoming_item(
         classes!("upcoming-item")
     };
 
-    // Click handler - emit the task (convert digest to UpcomingTask if needed)
+    // Click handler - emit the item (convert digest to UpcomingItem if needed)
     let onclick = {
-        let on_task_click = on_task_click.clone();
-        let item = item.clone();
+        let on_item_click = on_item_click.clone();
+        let entry = entry.clone();
         Callback::from(move |_: MouseEvent| {
-            if let Some(cb) = &on_task_click {
-                match &item {
-                    UpcomingItem::Task(t) => cb.emit(t.clone()),
-                    UpcomingItem::Digest(d) => {
-                        let task = UpcomingTask {
-                            task_id: d.task_id,
+            if let Some(cb) = &on_item_click {
+                match &entry {
+                    UpcomingEntry::Item(t) => cb.emit(t.clone()),
+                    UpcomingEntry::Digest(d) => {
+                        let item = UpcomingItem {
+                            item_id: d.item_id,
                             timestamp: d.timestamp,
                             time_display: d.time_display.clone(),
                             description: format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
@@ -622,7 +622,7 @@ fn render_upcoming_item(
                             condition: None,
                             sources_display: None,
                         };
-                        cb.emit(task);
+                        cb.emit(item);
                     }
                 }
             }
@@ -631,11 +631,11 @@ fn render_upcoming_item(
 
     // Delete handler
     let on_delete = {
-        let on_task_delete = on_task_delete.clone();
-        let task_id = task_id;
+        let on_item_delete = on_item_delete.clone();
+        let item_id = item_id;
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
-            if let (Some(cb), Some(id)) = (&on_task_delete, task_id) {
+            if let (Some(cb), Some(id)) = (&on_item_delete, item_id) {
                 cb.emit(id);
             }
         })
@@ -660,8 +660,8 @@ fn render_upcoming_item(
                     <div class="upcoming-item-condition">{format!("If: {}", cond)}</div>
                 }
             </div>
-            if task_id.is_some() {
-                <button class="upcoming-item-delete" onclick={on_delete} title="Delete task">
+            if item_id.is_some() {
+                <button class="upcoming-item-delete" onclick={on_delete} title="Delete item">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             }

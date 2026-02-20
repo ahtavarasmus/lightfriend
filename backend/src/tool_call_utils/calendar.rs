@@ -328,7 +328,7 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: success_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ))
         }
@@ -353,7 +353,7 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ))
         }

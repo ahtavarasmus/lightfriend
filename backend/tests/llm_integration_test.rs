@@ -91,7 +91,7 @@ async fn send_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResp
         let state = create_llm_test_state();
         let user = setup_user_with_location(&state);
         let response = send_message(&state, &user, body).await;
-        if response.created_task_id.is_some() {
+        if response.created_item_id.is_some() {
             return (state, user, response);
         }
         eprintln!(
@@ -117,7 +117,7 @@ async fn test_llm_weather_conditional_task() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -158,7 +158,7 @@ async fn test_llm_calendar_conditional_task() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -191,7 +191,7 @@ async fn test_llm_unconditional_reminder() {
         send_message_with_retry("remind me at 9am tomorrow to call the dentist").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -230,9 +230,9 @@ async fn test_llm_realtime_question() {
     let response = send_message(&state, &user, "what time is it?").await;
 
     assert!(
-        response.created_task_id.is_none(),
+        response.created_item_id.is_none(),
         "Expected NO task for a realtime question. Got task_id: {:?}",
-        response.created_task_id
+        response.created_item_id
     );
     assert!(
         !response.message.is_empty(),
@@ -249,7 +249,7 @@ async fn test_llm_email_conditional_task() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -284,7 +284,7 @@ async fn test_llm_multi_source_task() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -313,7 +313,7 @@ async fn test_llm_mixed_conversation() {
         send_message_with_retry("remind me at 3pm tomorrow to buy groceries").await;
 
     assert!(
-        response1.created_task_id.is_some(),
+        response1.created_item_id.is_some(),
         "First message should create a task after {} retries. Response: {}",
         MAX_RETRIES,
         response1.message
@@ -327,9 +327,9 @@ async fn test_llm_mixed_conversation() {
     let response2 = send_message(&state, &user, "what's the weather like?").await;
 
     assert!(
-        response2.created_task_id.is_none(),
+        response2.created_item_id.is_none(),
         "Second message should NOT create a task. Got task_id: {:?}",
-        response2.created_task_id
+        response2.created_item_id
     );
     assert!(
         !response2.message.is_empty(),
@@ -350,9 +350,9 @@ async fn test_llm_realtime_email_check() {
     let response = send_message(&state, &user, "check my email").await;
 
     assert!(
-        response.created_task_id.is_none(),
+        response.created_item_id.is_none(),
         "Expected NO task for realtime email check. Got task_id: {:?}",
-        response.created_task_id
+        response.created_item_id
     );
     assert!(
         !response.message.is_empty(),
@@ -369,9 +369,9 @@ async fn test_llm_realtime_weather_check() {
     let response = send_message(&state, &user, "what's the weather like right now?").await;
 
     assert!(
-        response.created_task_id.is_none(),
+        response.created_item_id.is_none(),
         "Expected NO task for realtime weather question. Got task_id: {:?}",
-        response.created_task_id
+        response.created_item_id
     );
     assert!(
         !response.message.is_empty(),
@@ -393,9 +393,9 @@ async fn test_llm_tricky_realtime_looks_like_task() {
     .await;
 
     assert!(
-        response.created_task_id.is_none(),
+        response.created_item_id.is_none(),
         "Expected NO task - user is asking a question, not creating a reminder. Got task_id: {:?}",
-        response.created_task_id
+        response.created_item_id
     );
     assert!(
         !response.message.is_empty(),
@@ -417,9 +417,9 @@ async fn test_llm_tricky_realtime_check_calendar() {
     .await;
 
     assert!(
-        response.created_task_id.is_none(),
+        response.created_item_id.is_none(),
         "Expected NO task - user wants to know NOW, not set up a future check. Got task_id: {:?}",
-        response.created_task_id
+        response.created_item_id
     );
     assert!(!response.message.is_empty(), "Expected non-empty response");
 }
@@ -435,7 +435,7 @@ async fn test_llm_vague_time_afternoon() {
         send_message_with_retry("remind me tomorrow afternoon to stretch").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -462,7 +462,7 @@ async fn test_llm_relative_time() {
         send_message_with_retry("in 3 hours remind me to check the oven").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -506,7 +506,7 @@ async fn test_llm_implicit_date() {
     let (state, user, response) = send_message_with_retry("remind me at 9pm to take my meds").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -527,7 +527,7 @@ async fn test_llm_notification_call_me() {
     let (state, user, response) = send_message_with_retry("call me at 6am tomorrow").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -556,7 +556,7 @@ async fn test_llm_remind_vs_do_remind() {
         send_message_with_retry("remind me to turn on my Tesla climate at 8am tomorrow").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -579,7 +579,7 @@ async fn test_llm_remind_vs_do_action() {
         send_message_with_retry("turn on my Tesla climate at 8am tomorrow").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -602,7 +602,7 @@ async fn test_llm_whatsapp_task() {
         send_message_with_retry("at 5pm text my wife on WhatsApp that I'm running late").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -633,7 +633,7 @@ async fn test_llm_recurring_email_watch() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -659,7 +659,7 @@ async fn test_llm_recurring_messaging_watch() {
     let (state, user, response) = send_message_with_retry("let me know if mom texts me").await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
@@ -688,7 +688,7 @@ async fn test_llm_weather_source_with_action() {
     .await;
 
     assert!(
-        response.created_task_id.is_some(),
+        response.created_item_id.is_some(),
         "Expected a task to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message

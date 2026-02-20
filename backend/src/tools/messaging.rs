@@ -144,7 +144,7 @@ impl ToolHandler for SendMessageHandler {
                 Ok(ToolResult::EarlyReturn {
                     response: TwilioResponse {
                         message: "Failed to process chat message request".to_string(),
-                        created_task_id: None,
+                        created_item_id: None,
                     },
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                 })
