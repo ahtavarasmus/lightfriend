@@ -67,7 +67,7 @@ pub struct DashboardFooterProps {
     #[prop_or_default]
     pub on_quiet_mode_change: Option<Callback<()>>,
     #[prop_or_default]
-    pub on_enable_digest: Option<Callback<()>>,
+    pub on_digest_suggestion: Option<Callback<()>>,
 }
 
 #[function_component(DashboardFooter)]
@@ -77,14 +77,14 @@ pub fn dashboard_footer(props: &DashboardFooterProps) -> Html {
             html! { <div class="footer-digest">{format!("Next digest: {}", info.time_display)}</div> }
         }
         None => {
-            if let Some(ref cb) = props.on_enable_digest {
+            if let Some(ref cb) = props.on_digest_suggestion {
                 let cb = cb.clone();
                 html! {
                     <button
                         class="footer-btn-digest"
                         onclick={Callback::from(move |_| cb.emit(()))}
                     >
-                        {"Enable daily digest"}
+                        {"Set up a daily digest"}
                     </button>
                 }
             } else {

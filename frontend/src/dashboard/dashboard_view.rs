@@ -756,27 +756,22 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Enable daily digest callback
-    let on_enable_digest = {
-        let fetch_summary = fetch_summary.clone();
+    // Chat prefill state (for digest suggestion hint)
+    let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
+
+    // Digest suggestion callback - pre-fills chatbox with suggestion text
+    let on_digest_suggestion = {
+        let prefill_chat = prefill_chat.clone();
         Callback::from(move |_: ()| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                let body = serde_json::json!({
-                    "action": "generate_digest",
-                    "recurrence_rule": "daily",
-                    "recurrence_time": "08:00",
-                    "sources": "email,whatsapp,telegram,signal,calendar",
-                    "notification_type": "sms"
-                });
-                if let Ok(req) = Api::post("/api/filters/tasks").json(&body) {
-                    if let Ok(resp) = req.send().await {
-                        if resp.ok() {
-                            fetch_summary.emit(());
-                        }
-                    }
-                }
-            });
+            prefill_chat.set(Some("Set up a daily digest for my emails and messages at 8am".to_string()));
+        })
+    };
+
+    // Callback to clear prefill after it's consumed
+    let on_prefill_consumed = {
+        let prefill_chat = prefill_chat.clone();
+        Callback::from(move |_: ()| {
+            prefill_chat.set(None);
         })
     };
 
@@ -865,6 +860,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         preview_task={(*preview_task).clone()}
                         on_preview_click={on_preview_click}
                         on_preview_close={on_preview_close}
+                        prefill_text={(*prefill_chat).clone()}
+                        on_prefill_consumed={Some(on_prefill_consumed)}
                     />
 
                     // Task detail bar (shown when task selected) - below ChatBox
@@ -948,7 +945,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     quiet_mode={quiet_mode}
                     on_activity_click={on_activity_click}
                     on_quiet_mode_change={Some(on_quiet_mode_change)}
-                    on_enable_digest={Some(on_enable_digest)}
+                    on_digest_suggestion={Some(on_digest_suggestion)}
                 />
             </div>
 

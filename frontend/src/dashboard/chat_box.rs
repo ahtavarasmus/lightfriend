@@ -321,6 +321,12 @@ pub struct ChatBoxProps {
     /// Callback to close task preview
     #[prop_or_default]
     pub on_preview_close: Callback<()>,
+    /// Pre-fill text for the chat input (e.g. from digest suggestion)
+    #[prop_or_default]
+    pub prefill_text: Option<String>,
+    /// Called after prefill text is consumed so parent can clear it
+    #[prop_or_default]
+    pub on_prefill_consumed: Option<Callback<()>>,
 }
 
 #[function_component(ChatBox)]
@@ -391,6 +397,31 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 || ()
             },
             (),
+        );
+    }
+
+    // Pre-fill chat input when prefill_text prop changes
+    {
+        let chat_input = chat_input.clone();
+        let chat_input_ref = chat_input_ref.clone();
+        let on_prefill_consumed = props.on_prefill_consumed.clone();
+        use_effect_with_deps(
+            move |text: &Option<String>| {
+                if let Some(text) = text {
+                    chat_input.set(text.clone());
+                    let chat_input_ref = chat_input_ref.clone();
+                    gloo_timers::callback::Timeout::new(50, move || {
+                        if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                            let _ = input.focus();
+                        }
+                    }).forget();
+                    if let Some(cb) = &on_prefill_consumed {
+                        cb.emit(());
+                    }
+                }
+                || ()
+            },
+            props.prefill_text.clone(),
         );
     }
 
