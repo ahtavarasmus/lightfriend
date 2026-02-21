@@ -97,6 +97,9 @@ COPY --from=builder /usr/local/cargo/bin/diesel ./diesel
 COPY backend/migrations ./migrations
 COPY backend/diesel.toml ./
 
+# Copy static files (robots.txt, sitemap.xml, llms.txt)
+COPY backend/static ./static
+
 # Create directories for runtime data
 RUN mkdir -p data uploads matrix_store
 

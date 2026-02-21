@@ -1335,7 +1335,23 @@ async fn main() {
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
-        // Serve static files (robots.txt, sitemap.xml) at the root
+        // Serve static SEO files at root
+        .nest_service(
+            "/robots.txt",
+            tower_http::services::ServeFile::new("static/robots.txt"),
+        )
+        .nest_service(
+            "/sitemap.xml",
+            tower_http::services::ServeFile::new("static/sitemap.xml"),
+        )
+        .nest_service(
+            "/llms.txt",
+            tower_http::services::ServeFile::new("static/llms.txt"),
+        )
+        .nest_service(
+            "/llms-full.txt",
+            tower_http::services::ServeFile::new("static/llms-full.txt"),
+        )
         .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()
