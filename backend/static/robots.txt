@@ -1,4 +1,17 @@
+# Lightfriend - AI Assistant for Dumbphones
+# https://lightfriend.ai
+
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /admin
+Disallow: /billing
+Disallow: /set-password
+Disallow: /subscription-success
+
+# Sitemap
 Sitemap: https://lightfriend.ai/sitemap.xml
+
+# AI Search Engines
+# See https://lightfriend.ai/llms.txt for AI-readable content
+# See https://lightfriend.ai/llms-full.txt for comprehensive AI-readable content

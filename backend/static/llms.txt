@@ -1,0 +1,43 @@
+# Lightfriend
+
+> AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls.
+
+Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It works with any phone that can make calls and send texts — no apps, no smartphone required.
+
+## How It Works
+
+Users interact with Lightfriend by sending SMS messages or making voice calls to their assigned phone number. The AI assistant processes requests and responds via the same channel.
+
+## Key Features
+
+- **Messaging**: Send and receive WhatsApp, Telegram, Signal messages via SMS
+- **Email**: Read and send Gmail/Outlook emails
+- **Calendar**: View, create, and get reminders from Google Calendar
+- **Web Search**: AI-powered search via Perplexity
+- **Directions**: Turn-by-turn navigation via Google Maps
+- **Weather**: Forecasts up to 7 days
+- **Photo Analysis**: Send photos for translation, QR scanning (MMS countries)
+- **Tesla Control**: Lock, unlock, climate control via text
+- **Proactive Monitoring**: 24/7 critical message alerts, scheduled digests, priority sender notifications
+
+## Availability
+
+Available in 40+ countries including US, Canada, UK, Finland, Netherlands, Australia, and most of Europe and Asia-Pacific.
+
+## Pricing
+
+Plans start at $9/month (Digest plan) and $29/month (Monitor plan). Pricing varies by country.
+
+## Links
+
+- Homepage: https://lightfriend.ai
+- Pricing: https://lightfriend.ai/pricing
+- FAQ: https://lightfriend.ai/faq
+- Blog: https://lightfriend.ai/blog
+- Supported Countries: https://lightfriend.ai/supported-countries
+- Light Phone 3 WhatsApp Guide: https://lightfriend.ai/light-phone-3-whatsapp-guide
+- How to Switch to a Dumbphone: https://lightfriend.ai/how-to-switch-to-dumbphone
+- How to Read More Accidentally: https://lightfriend.ai/how-to-read-more-accidentally
+- Privacy Policy: https://lightfriend.ai/privacy
+- Terms: https://lightfriend.ai/terms
+- Changelog: https://lightfriend.ai/updates

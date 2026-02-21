@@ -1,0 +1,150 @@
+# Lightfriend - Complete Information
+
+> AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls.
+
+Lightfriend is a SaaS AI assistant that makes dumbphones (minimalist phones, flip phones, feature phones) functionally equivalent to smartphones for essential communication and productivity tasks. Users interact entirely through SMS text messages and voice calls — no apps, no internet browser, no smartphone required.
+
+## The Problem Lightfriend Solves
+
+Smartphones with app stores offer messaging, email, and calendars but come with highly addictive algorithms, mental health impacts, constant distractions, and sleep disruption. Dumbphones eliminate addiction but lose access to messaging apps, email, QR codes, and calendars. Lightfriend gives dumbphone users the benefits of both: essential digital services without addictive apps.
+
+## How It Works
+
+1. User signs up at lightfriend.ai and gets a dedicated phone number
+2. User texts or calls that number from any phone
+3. Lightfriend AI processes the request and responds via SMS or voice
+4. Users can also connect messaging apps (WhatsApp, Telegram, Signal), email, and calendar for proactive monitoring
+
+## Complete Feature List
+
+### Communication
+- **WhatsApp Integration**: Send, receive, and monitor WhatsApp messages via SMS. Get notifications for important messages.
+- **Telegram Integration**: Full send/receive/monitor support for Telegram chats and groups.
+- **Signal Integration**: Send, receive, and monitor Signal messages securely.
+- **Email (Gmail, Outlook)**: Read incoming emails, compose and send replies, get alerts for important messages.
+
+### Productivity
+- **Google Calendar**: View upcoming events, create new events, receive reminders before meetings.
+- **Web Search**: AI-powered internet search using Perplexity AI, delivered as concise SMS responses.
+- **Weather**: Get current conditions and forecasts up to 7 days for any location.
+- **Directions**: Turn-by-turn navigation instructions via Google Maps, sent as text messages.
+
+### Media & Analysis
+- **Photo Analysis & Translation**: Send a photo via MMS and get AI analysis — translate foreign text, describe scenes, identify objects. Available in US, Canada, and Australia.
+- **QR Code Scanning**: Send a photo of a QR code and receive the decoded URL or content. Available in US, Canada, and Australia.
+
+### Smart Home & Vehicle
+- **Tesla Vehicle Control**: Lock/unlock doors, start/stop climate control, check battery level — all via text message.
+
+### Proactive Monitoring
+- **24/7 Critical Message Monitoring**: AI continuously monitors connected messaging apps and email for urgent messages, alerting users immediately via SMS.
+- **Scheduled Digests**: Morning, daytime, and evening summaries of messages received across all platforms.
+- **Priority Sender Notifications**: Set specific contacts as priority — get instant SMS alerts when they message you on any platform.
+- **Temporary Event Monitoring**: Set up one-time monitors for specific events (e.g., "alert me when John replies about the meeting").
+
+### Voice Interface
+- **Voice Calls**: Call the Lightfriend number to interact by voice instead of text. Also available as browser-based web calls from the dashboard.
+
+## Pricing
+
+### Digest Plan - $9/month
+- SMS chat interface with AI assistant
+- Voice calling interface
+- Web search, weather, directions
+- Connected app access (WhatsApp, Telegram, Signal, email, calendar)
+- Scheduled daily digests (morning, day, evening summaries)
+- 50 message credits per month (US pricing)
+
+### Monitor Plan - $29/month
+- Everything in Digest plan
+- 24/7 critical message monitoring with instant SMS alerts
+- Priority sender notifications
+- Temporary event monitoring
+- 150 message credits per month (US pricing)
+- Priority support
+
+### BYOT (Bring Your Own Twilio)
+- Users in unsupported countries can bring their own Twilio phone number
+- Pay Twilio directly for SMS costs at local rates
+- Lightfriend subscription still required
+
+## Supported Countries
+
+### Full Service (Local Phone Number Provided)
+- United States, Canada, United Kingdom, Finland, Netherlands, Australia
+
+### Notification-Only (Receive SMS from US/UK Number)
+- Germany, France, Spain, Italy, Portugal, Belgium, Austria, Switzerland
+- Poland, Czech Republic, Sweden, Denmark, Norway, Ireland
+- New Zealand, Greece, Hungary, Romania, Slovakia, Bulgaria
+- Croatia, Slovenia, Lithuania, Latvia, Estonia
+- Luxembourg, Malta, Cyprus, Iceland
+- Japan, South Korea, Singapore, Hong Kong, Taiwan, Israel
+
+### Other Countries
+- Can use BYOT (Bring Your Own Twilio number) or Android phone SMS bridge
+
+## Compatible Phones
+
+Lightfriend works with ANY phone that can send SMS and make calls:
+- Light Phone 2 and Light Phone 3 (popular choice among users)
+- Nokia flip phones (2780, 2760, etc.)
+- Any basic/feature phone
+- Any flip phone or candy bar phone
+- Even old smartphones used as dumbphones
+
+## Technical Details
+
+- Open source: https://github.com/ahtavarasmus/lightfriend
+- Built with Rust (Axum backend, Yew WebAssembly frontend)
+- AES-256-GCM encryption for all stored data
+- Self-hostable for privacy-conscious users
+- Licensed under GNU AGPLv3
+
+## Blog Articles
+
+### Light Phone 3 WhatsApp Guide
+How to add WhatsApp functionality to a Light Phone 3 using Lightfriend. Send and receive WhatsApp messages via SMS without installing any apps on the phone.
+URL: https://lightfriend.ai/light-phone-3-whatsapp-guide
+
+### How to Switch to a Dumbphone
+Complete guide covering 2FA authentication, messaging app alternatives, navigation solutions, and computer setup for the dumbphone lifestyle.
+URL: https://lightfriend.ai/how-to-switch-to-dumbphone
+
+### How to Read More Accidentally
+How removing smartphone distractions naturally leads to reading more books. Tips for blocking digital escapism on computers while keeping productivity tools.
+URL: https://lightfriend.ai/how-to-read-more-accidentally
+
+## Frequently Asked Questions
+
+**Q: What problem does Lightfriend solve?**
+A: Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It gives you access to WhatsApp, Telegram, Signal, email, calendar, web search, GPS directions, and more via simple SMS and voice calls.
+
+**Q: Which countries are supported?**
+A: Full service in US, Canada, UK, Finland, Netherlands, Australia. Notification-only in 30+ European and Asia-Pacific countries. Other countries can use Bring Your Own Twilio number.
+
+**Q: Can I try the service before signing up?**
+A: Yes! The FAQ page at lightfriend.ai/faq includes an interactive demo chat.
+
+**Q: How does Lightfriend protect my data?**
+A: No call recordings. Optional encrypted message storage (up to 10 recent exchanges). All credentials encrypted with AES-256. Data never sold or shared. Open source code available for self-hosting.
+
+**Q: Do I need a specific phone?**
+A: No. Any phone that can send texts and make calls works with Lightfriend.
+
+## Contact
+
+- Email: rasmus@ahtava.com
+- Twitter/X: @ahtavarasm_us
+- GitHub: https://github.com/ahtavarasmus/lightfriend
+
+## Links
+
+- Homepage: https://lightfriend.ai
+- Pricing: https://lightfriend.ai/pricing
+- FAQ: https://lightfriend.ai/faq
+- Blog: https://lightfriend.ai/blog
+- Supported Countries: https://lightfriend.ai/supported-countries
+- Privacy Policy: https://lightfriend.ai/privacy
+- Terms: https://lightfriend.ai/terms
+- Changelog: https://lightfriend.ai/updates

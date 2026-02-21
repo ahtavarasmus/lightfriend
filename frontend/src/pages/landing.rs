@@ -1,6 +1,7 @@
 use crate::components::notification::AnimationComponent;
 use crate::Route;
 use crate::utils::api::Api;
+use crate::utils::seo::{use_seo, SeoMeta};
 use serde::Deserialize;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
@@ -15,6 +16,13 @@ struct SmartphoneFreeDaysResponse {
 }
 #[function_component(Landing)]
 pub fn landing() -> Html {
+    use_seo(SeoMeta {
+        title: "Lightfriend: The Best AI Assistant for Dumbphones \u{2013} WhatsApp, Telegram, Signal, Email & More",
+        description: "AI assistant for dumbphones like Light Phone 3, Nokia flip phones, and other minimalist phones. Access WhatsApp, Telegram, Signal, email, calendar, AI search, and GPS via SMS/voice.",
+        canonical: "https://lightfriend.ai",
+        og_type: "website",
+    });
+
     let dim_opacity = use_state(|| 0.0);
 
     // Waitlist form state

@@ -16,6 +16,7 @@ mod utils {
     pub mod api;
     pub mod webauthn;
     pub mod elevenlabs_web;
+    pub mod seo;
 }
 mod profile {
     pub mod stripe;
@@ -294,9 +295,16 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
 }
 use serde_json::Value;
 use std::collections::HashMap;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
+    use_seo(SeoMeta {
+        title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
+        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, calendar, and more. Available in 40+ countries.",
+        canonical: "https://lightfriend.ai/pricing",
+        og_type: "website",
+    });
     let profile_data = use_state(|| None::<UserProfile>);
     let selected_country = use_state(|| "US".to_string());
     let country_name = use_state(|| String::new());

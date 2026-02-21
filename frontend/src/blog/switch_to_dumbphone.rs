@@ -1,9 +1,16 @@
 use yew::prelude::*;
 use yew_router::components::Link;
 use crate::Route;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(SwitchToDumbphoneGuide)]
 pub fn switch_to_dumbphone_guide() -> Html {
+    use_seo(SeoMeta {
+        title: "How to Switch to a Dumbphone \u{2013} Complete Guide",
+        description: "Everything you need to know about switching to a dumbphone. Handle 2FA, messaging apps, navigation, and stay productive with a minimalist phone.",
+        canonical: "https://lightfriend.ai/how-to-switch-to-dumbphone",
+        og_type: "article",
+    });
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(

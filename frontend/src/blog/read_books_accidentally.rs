@@ -1,9 +1,16 @@
 use yew::prelude::*;
 use yew_router::components::Link;
 use crate::Route;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(ReadMoreAccidentallyGuide)]
 pub fn read_more_accidentally_guide() -> Html {
+    use_seo(SeoMeta {
+        title: "How to Read More Accidentally \u{2013} Ditch Brainrot, Read Books",
+        description: "How switching to a dumbphone makes you read more without willpower. Replace doomscrolling with books by removing easy digital escapes.",
+        canonical: "https://lightfriend.ai/how-to-read-more-accidentally",
+        og_type: "article",
+    });
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(

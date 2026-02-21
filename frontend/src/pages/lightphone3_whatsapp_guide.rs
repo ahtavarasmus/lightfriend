@@ -1,9 +1,16 @@
 use yew::prelude::*;
 use yew_router::components::Link;
 use crate::Route;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(LightPhone3WhatsappGuide)]
 pub fn light_phone_3_whatsapp_guide() -> Html {
+    use_seo(SeoMeta {
+        title: "Light Phone 3 WhatsApp Guide \u{2013} How to Get WhatsApp on Light Phone",
+        description: "How to add WhatsApp to your Light Phone 3 without apps. Send and receive WhatsApp messages via SMS and voice calls using Lightfriend AI assistant.",
+        canonical: "https://lightfriend.ai/light-phone-3-whatsapp-guide",
+        og_type: "article",
+    });
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(

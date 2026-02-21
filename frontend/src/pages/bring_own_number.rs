@@ -6,6 +6,7 @@ use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::json;
 use crate::utils::api::Api;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
@@ -719,6 +720,13 @@ fn modal_component(props: &ModalProps) -> Html {
 }
 #[function_component(TwilioHostedInstructions)]
 pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html {
+    use_seo(SeoMeta {
+        title: "Bring Your Own Number \u{2013} Lightfriend BYOT Setup Guide",
+        description: "Set up Lightfriend with your own Twilio number. Step-by-step guide for BYOT (Bring Your Own Twilio) setup to use Lightfriend in any supported country.",
+        canonical: "https://lightfriend.ai/bring-own-number",
+        og_type: "website",
+    });
+
     let modal_visible = use_state(|| false);
     let selected_image = use_state(|| String::new());
     let selected_country = use_state(|| "".to_string());
