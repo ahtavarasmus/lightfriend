@@ -229,11 +229,11 @@ async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
     }
 }
 
-/// Migrate existing digest settings to tasks (one-time migration)
-/// This converts morning_digest, day_digest, evening_digest from user_settings
-/// into recurring tasks with sources.
-async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
-    tracing::info!("Starting digest migration to tasks...");
+/// Migrate existing digest settings to items (one-time migration).
+/// Converts morning_digest, day_digest, evening_digest from user_settings
+/// into recurring items with self-rescheduling summaries.
+async fn migrate_digests_to_items(state: &Arc<AppState>) {
+    tracing::info!("Starting digest migration to items...");
 
     let users = match state.user_core.get_all_users() {
         Ok(u) => u,
@@ -251,15 +251,26 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
         // Get digest settings
         let (morning, day, evening) = match state.user_core.get_digests(user_id) {
             Ok(d) => d,
-            Err(_) => continue, // Skip users without settings
+            Err(_) => continue,
         };
 
-        // Skip if no digests configured
         if morning.is_none() && day.is_none() && evening.is_none() {
             continue;
         }
 
-        // Get user timezone for trigger calculation
+        // Idempotency: skip users who already have digest items
+        let existing_items = state.item_repository.get_items(user_id).unwrap_or_default();
+        let has_digest_items = existing_items
+            .iter()
+            .any(|i| i.summary.contains("digest") && i.summary.contains("Reschedule"));
+        if has_digest_items {
+            tracing::debug!(
+                "User {} already has digest items, skipping migration",
+                user_id
+            );
+            continue;
+        }
+
         let user_tz = state
             .user_core
             .get_user_info(user_id)
@@ -276,120 +287,94 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
         let now_local = now.with_timezone(&tz);
         let current_ts = now.timestamp() as i32;
 
-        // Helper to create digest task - returns Option to handle DST/invalid time gracefully
-        let create_digest_task = |digest_time: &str,
-                                  _digest_name: &str|
-         -> Option<crate::models::user_models::NewTask> {
-            // Parse hour from "HH:00" format
-            let hour: u32 = digest_time
-                .split(':')
-                .next()
-                .and_then(|h| h.parse().ok())
-                .unwrap_or(8);
+        let create_digest_item =
+            |digest_time: &str, digest_name: &str| -> Option<crate::models::user_models::NewItem> {
+                let hour: u32 = digest_time
+                    .split(':')
+                    .next()
+                    .and_then(|h| h.parse().ok())
+                    .unwrap_or(8);
 
-            // Calculate next occurrence - use ? to handle DST transitions gracefully
-            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
-            let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
-            if now_local.time() >= check_time {
-                // Already past this time today, schedule for tomorrow
-                next_time += chrono::Duration::days(1);
-            }
-            let next_dt = tz.from_local_datetime(&next_time).single()?;
-            let trigger_ts = next_dt.timestamp() as i32;
+                let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
+                let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
+                if now_local.time() >= check_time {
+                    next_time += chrono::Duration::days(1);
+                }
+                let next_dt = tz.from_local_datetime(&next_time).single()?;
+                let trigger_ts = next_dt.timestamp() as i32;
 
-            Some(crate::models::user_models::NewTask {
-                user_id,
-                trigger: format!("once_{}", trigger_ts),
-                condition: None,
-                action: "generate_digest".to_string(),
-                notification_type: Some("sms".to_string()),
-                status: "active".to_string(),
-                created_at: current_ts,
-                is_permanent: Some(1), // Permanent recurring task
-                recurrence_rule: Some("daily".to_string()),
-                recurrence_time: Some(digest_time.to_string()), // "HH:00" format
-                sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
-                end_time: None,
-            })
-        };
+                let friendly_time = format!("{}:00", hour);
+                let summary = format!(
+                    "Daily {} digest: check unread messages from all messaging apps and email. \
+                 Summarize highlights and send to user. Reschedule for tomorrow at {}.",
+                    digest_name, friendly_time
+                );
 
-        // Idempotency check: skip if user already has digest tasks
-        let existing_tasks = state
-            .user_repository
-            .get_user_tasks(user_id)
-            .unwrap_or_default();
-        let has_digest_tasks = existing_tasks
-            .iter()
-            .any(|t| t.action == "generate_digest" && t.is_permanent == Some(1));
+                Some(crate::models::user_models::NewItem {
+                    user_id,
+                    summary,
+                    monitor: false,
+                    next_check_at: Some(trigger_ts),
+                    priority: 1,
+                    due_at: None,
+                    source_id: None,
+                    created_at: current_ts,
+                })
+            };
 
-        if has_digest_tasks {
-            tracing::debug!(
-                "User {} already has digest tasks, skipping migration",
-                user_id
-            );
-            continue;
-        }
-
-        // Create tasks for each enabled digest
-        let mut created_tasks = Vec::new();
-        let mut failed_tasks = Vec::new();
+        let mut created = Vec::new();
+        let mut failed = Vec::new();
 
         if let Some(ref time) = morning {
-            if let Some(task) = create_digest_task(time, "morning") {
-                match state.user_repository.create_task(&task) {
-                    Ok(_) => created_tasks.push("morning"),
+            if let Some(item) = create_digest_item(time, "morning") {
+                match state.item_repository.create_item(&item) {
+                    Ok(_) => created.push("morning"),
                     Err(e) => {
                         tracing::error!(
-                            "Failed to create morning digest task for user {}: {}",
+                            "Failed to create morning digest item for user {}: {}",
                             user_id,
                             e
                         );
-                        failed_tasks.push("morning");
+                        failed.push("morning");
                     }
                 }
-            } else {
-                tracing::warn!("Invalid time format for morning digest: {}", time);
             }
         }
 
         if let Some(ref time) = day {
-            if let Some(task) = create_digest_task(time, "day") {
-                match state.user_repository.create_task(&task) {
-                    Ok(_) => created_tasks.push("day"),
+            if let Some(item) = create_digest_item(time, "midday") {
+                match state.item_repository.create_item(&item) {
+                    Ok(_) => created.push("midday"),
                     Err(e) => {
                         tracing::error!(
-                            "Failed to create day digest task for user {}: {}",
+                            "Failed to create midday digest item for user {}: {}",
                             user_id,
                             e
                         );
-                        failed_tasks.push("day");
+                        failed.push("midday");
                     }
                 }
-            } else {
-                tracing::warn!("Invalid time format for day digest: {}", time);
             }
         }
 
         if let Some(ref time) = evening {
-            if let Some(task) = create_digest_task(time, "evening") {
-                match state.user_repository.create_task(&task) {
-                    Ok(_) => created_tasks.push("evening"),
+            if let Some(item) = create_digest_item(time, "evening") {
+                match state.item_repository.create_item(&item) {
+                    Ok(_) => created.push("evening"),
                     Err(e) => {
                         tracing::error!(
-                            "Failed to create evening digest task for user {}: {}",
+                            "Failed to create evening digest item for user {}: {}",
                             user_id,
                             e
                         );
-                        failed_tasks.push("evening");
+                        failed.push("evening");
                     }
                 }
-            } else {
-                tracing::warn!("Invalid time format for evening digest: {}", time);
             }
         }
 
-        // Only clear old settings if we created at least one task AND had no failures
-        if !created_tasks.is_empty() && failed_tasks.is_empty() {
+        // Clear old digest settings (legacy tasks table will become unused)
+        if !created.is_empty() && failed.is_empty() {
             if let Err(e) = state.user_core.update_digests(user_id, None, None, None) {
                 tracing::warn!(
                     "Failed to clear digest settings for user {}: {}",
@@ -399,18 +384,12 @@ async fn migrate_digests_to_tasks(state: &Arc<AppState>) {
             } else {
                 migrated_count += 1;
                 tracing::info!(
-                    "Migrated {} digest(s) to tasks for user {}: {:?}",
-                    created_tasks.len(),
+                    "Migrated {} digest(s) to items for user {}: {:?}",
+                    created.len(),
                     user_id,
-                    created_tasks
+                    created
                 );
             }
-        } else if !failed_tasks.is_empty() {
-            tracing::warn!(
-                "Skipping digest settings clear for user {} due to failures: {:?}",
-                user_id,
-                failed_tasks
-            );
         }
     }
 
@@ -616,7 +595,7 @@ async fn initialize_smartphone_free_days_metric(state: Arc<AppState>) {
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     // One-time migrations
-    migrate_digests_to_tasks(&state).await;
+    migrate_digests_to_items(&state).await;
     migrate_tasks_to_items(&state).await;
 
     // Initialize matrix clients and sync tasks once on startup
@@ -1180,65 +1159,50 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             );
 
                             if item_clone.monitor {
-                                    // Monitor path: call LLM to evaluate lifecycle
-                                    let due_str = item_clone
-                                        .due_at
-                                        .and_then(|ts| {
-                                            chrono::DateTime::from_timestamp(ts as i64, 0)
-                                                .map(|dt| dt.to_rfc3339())
-                                        })
-                                        .unwrap_or_else(|| "none".to_string());
+                                // Monitor path: use check_item_monitor_match for scheduled checks
+                                let due_str = item_clone
+                                    .due_at
+                                    .and_then(|ts| {
+                                        chrono::DateTime::from_timestamp(ts as i64, 0)
+                                            .map(|dt| dt.to_rfc3339())
+                                    })
+                                    .unwrap_or_else(|| "none".to_string());
 
-                                    let now_str = chrono::Utc::now().to_rfc3339();
-                                    let synthetic_message = format!(
-                                        "SYSTEM: Scheduled check triggered for this item. \
-                                        Current time: {}. Due date: {}. \
-                                        Evaluate if this item needs attention, escalation, or resolution.",
-                                        now_str, due_str
-                                    );
+                                let now_str = chrono::Utc::now().to_rfc3339();
+                                let synthetic_message = format!(
+                                    "SYSTEM: Scheduled check triggered for this item. \
+                                    Current time: {}. Due date: {}. \
+                                    Evaluate if this item needs attention, escalation, or resolution.",
+                                    now_str, due_str
+                                );
 
-                                    // Re-fetch monitor items for this user to get the full list
-                                    let monitor_items = match state.item_repository.get_monitor_items(user_id) {
-                                        Ok(items) => items,
-                                        Err(e) => {
-                                            error!("Failed to get monitor items for user {}: {}", user_id, e);
-                                            // Reschedule +24h on failure
-                                            let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
-                                            return;
-                                        }
-                                    };
-
-                                    // Find this specific item in the list
-                                    let this_item: Vec<_> = monitor_items.iter().filter(|i| i.id == Some(item_id)).cloned().collect();
-                                    if this_item.is_empty() {
-                                        debug!("Monitor item {} no longer exists, skipping", item_id);
+                                let monitor_items = match state.item_repository.get_monitor_items(user_id) {
+                                    Ok(items) => items,
+                                    Err(e) => {
+                                        error!("Failed to get monitor items for user {}: {}", user_id, e);
+                                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
                                         return;
                                     }
+                                };
 
-                                    // Map error to String immediately to make the Result Send-safe
-                                    let llm_result: Result<Option<crate::proactive::utils::ItemMatchResponse>, String> =
-                                        crate::proactive::utils::check_item_monitor_match(
-                                            &state,
-                                            user_id,
-                                            &synthetic_message,
-                                            &this_item,
-                                        ).await.map_err(|e| e.to_string());
-                                    let (is_ok, maybe_response) = match llm_result {
-                                        Ok(resp) => (true, resp),
-                                        Err(e) => {
-                                            error!("LLM check failed for monitor item {}: {}", item_id, e);
-                                            (false, None)
-                                        }
-                                    };
+                                let this_item: Vec<_> = monitor_items.iter().filter(|i| i.id == Some(item_id)).cloned().collect();
+                                if this_item.is_empty() {
+                                    debug!("Monitor item {} no longer exists, skipping", item_id);
+                                    return;
+                                }
 
-                                    if let Some(match_response) = maybe_response {
+                                let llm_result: Result<Option<crate::proactive::utils::ItemMatchResponse>, String> =
+                                    crate::proactive::utils::check_item_monitor_match(
+                                        &state, user_id, &synthetic_message, &this_item,
+                                    ).await.map_err(|e| e.to_string());
+
+                                match llm_result {
+                                    Ok(Some(match_response)) => {
                                         crate::proactive::utils::apply_monitor_lifecycle(
-                                            &state,
-                                            &this_item[0],
-                                            &match_response,
+                                            &state, &this_item[0], &match_response,
                                         ).await;
-                                    } else if is_ok {
-                                        // Ok(None) - No match from LLM, reschedule based on heuristic
+                                    }
+                                    Ok(None) => {
                                         let next = if let Some(due) = item_clone.due_at {
                                             let days_until = (due - now) / 86400;
                                             if days_until <= 2 { now + 86400 }
@@ -1249,50 +1213,66 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         };
                                         let _ = state.item_repository.update_next_check_at(item_id, Some(next));
                                         debug!("Monitor item {} rescheduled (no LLM match)", item_id);
-                                    } else {
-                                        // Err case - reschedule +24h
+                                    }
+                                    Err(e) => {
+                                        error!("LLM check failed for monitor item {}: {}", item_id, e);
                                         let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
                                     }
+                                }
                             } else {
-                                    // One-shot path (reminder/digest/alert): fire and delete
-                                    let summary = item_clone.summary.clone();
+                                // Unified path for non-monitor items (reminders, digests, alerts)
+                                let summary = item_clone.summary.clone();
 
-                                    let notification_result =
-                                        crate::proactive::utils::generate_item_notification(
-                                            &state, user_id, &summary,
-                                        )
-                                        .await
-                                        .map_err(|e| e.to_string());
+                                let result = crate::proactive::utils::process_triggered_item(
+                                    &state, user_id, &item_clone,
+                                ).await.map_err(|e| e.to_string());
 
-                                    match notification_result {
-                                        Ok((sms_message, first_message, notification_type)) => {
-                                            crate::proactive::utils::send_notification(
-                                                &state,
-                                                user_id,
-                                                &sms_message,
-                                                format!("item_{}", notification_type),
-                                                Some(first_message),
-                                            )
-                                            .await;
+                                match result {
+                                    Ok(response) => {
+                                        let new_priority = response.priority.unwrap_or(item_clone.priority);
+
+                                        // Send notification if sms_message present and priority >= 1
+                                        if let Some(ref sms) = response.sms_message {
+                                            if new_priority >= 1 {
+                                                let noti_type = if new_priority >= 2 { "call" } else { "sms" };
+                                                crate::proactive::utils::send_notification(
+                                                    &state,
+                                                    user_id,
+                                                    sms,
+                                                    format!("item_{}", noti_type),
+                                                    Some("Hey, you have a notification!".to_string()),
+                                                ).await;
+                                            }
                                         }
-                                        Err(e) => {
-                                            error!(
-                                                "Failed to generate notification for item {}: {}",
-                                                item_id, e
+
+                                        // Reschedule or delete
+                                        if let Some(ref next) = response.next_check_at {
+                                            let next_ts = crate::proactive::utils::parse_iso_to_timestamp(next)
+                                                .map(|ts| ts.max(now + 60).min(now + 30 * 86400))
+                                                .unwrap_or(now + 86400);
+                                            let _ = state.item_repository.update_item(
+                                                item_id, user_id, &response.summary,
+                                                Some(next_ts), new_priority,
                                             );
-                                            crate::proactive::utils::send_notification(
-                                                &state,
-                                                user_id,
-                                                &summary,
-                                                "item_sms".to_string(),
-                                                Some("Hey, you have a reminder!".to_string()),
-                                            )
-                                            .await;
+                                            debug!("Item {} rescheduled to {}", item_id, next_ts);
+                                        } else {
+                                            let _ = state.item_repository.delete_item(item_id, user_id);
+                                            debug!("Item {} completed and deleted", item_id);
                                         }
                                     }
-
-                                    let _ = state.item_repository.delete_item(item_id, user_id);
-                                    debug!("Item {} (one-shot) completed and deleted", item_id);
+                                    Err(e) => {
+                                        error!("Failed to process triggered item {}: {}", item_id, e);
+                                        // Fallback: send summary as SMS, delete item
+                                        crate::proactive::utils::send_notification(
+                                            &state,
+                                            user_id,
+                                            &summary,
+                                            "item_sms".to_string(),
+                                            Some("Hey, you have a reminder!".to_string()),
+                                        ).await;
+                                        let _ = state.item_repository.delete_item(item_id, user_id);
+                                    }
+                                }
                             }
                         });
                     }

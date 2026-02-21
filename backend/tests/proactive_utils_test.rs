@@ -85,7 +85,6 @@ fn test_task_match_response_parses_matched_task() {
         "should_notify": true,
         "updated_summary": "Package delivered at office",
         "sms_message": "Your package has arrived at the office",
-        "first_message": "Hey, your package is here!",
         "match_explanation": "Message mentions package delivery"
     }"#;
 
@@ -101,10 +100,6 @@ fn test_task_match_response_parses_matched_task() {
         response.sms_message,
         Some("Your package has arrived at the office".to_string())
     );
-    assert_eq!(
-        response.first_message,
-        Some("Hey, your package is here!".to_string())
-    );
 }
 
 #[test]
@@ -113,7 +108,6 @@ fn test_task_match_response_parses_no_match() {
         "task_id": null,
         "should_notify": false,
         "sms_message": "",
-        "first_message": "",
         "match_explanation": ""
     }"#;
 
@@ -134,7 +128,6 @@ fn test_task_match_response_parses_minimal_response() {
     assert!(response.task_id.is_none());
     assert!(!response.should_notify);
     assert!(response.sms_message.is_none());
-    assert!(response.first_message.is_none());
     assert!(response.updated_summary.is_none());
 }
 

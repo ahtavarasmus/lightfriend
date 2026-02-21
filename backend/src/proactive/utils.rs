@@ -96,9 +96,8 @@ const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an i
     Keep it concise (max 120 chars). Include key details from the match.
     Example: "Watch for emails from mom" -> "Mom replied: 'Sure, dinner at 7 works!'"
 
-    If a match is found AND should_notify=true, craft two short notifications:
-    1. `sms_message` (<=160 chars) - concise SMS describing the event.
-    2. `first_message` (<=100 chars) - voice assistant opening line.
+    If a match is found AND should_notify=true, craft a short notification:
+    `sms_message` (<=160 chars) - concise SMS describing the event.
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
@@ -166,9 +165,6 @@ pub struct ItemMatchResponse {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sms_message: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_message: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_explanation: Option<String>,
@@ -264,17 +260,6 @@ pub async fn check_item_monitor_match(
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
                 "Concise SMS (max 160 chars) when matched AND should_notify=true, else empty"
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "first_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Voice-assistant opening line (max 100 chars) when matched AND should_notify=true, else empty"
                     .to_string(),
             ),
             ..Default::default()
@@ -418,10 +403,7 @@ pub async fn apply_monitor_lifecycle(
                 .sms_message
                 .clone()
                 .unwrap_or_else(|| format!("Resolved: {}", item.summary));
-            let opener = response
-                .first_message
-                .clone()
-                .unwrap_or_else(|| "Hey, one of your monitors was resolved!".to_string());
+            let opener = "Hey, you have a notification!".to_string();
 
             let state_clone = state.clone();
             tokio::spawn(async move {
@@ -492,10 +474,7 @@ pub async fn apply_monitor_lifecycle(
             .sms_message
             .clone()
             .unwrap_or_else(|| format!("Monitor matched: {}", item.summary));
-        let opener = response
-            .first_message
-            .clone()
-            .unwrap_or_else(|| "Hey, one of your monitors matched!".to_string());
+        let opener = "Hey, you have a notification!".to_string();
 
         let state_clone = state.clone();
         tokio::spawn(async move {
@@ -517,128 +496,258 @@ pub async fn apply_monitor_lifecycle(
     }
 }
 
-/// Generate a notification message from a triggered item's summary.
-/// The LLM reads the summary and produces an SMS and voice opener.
-pub async fn generate_item_notification(
+/// Result from processing a triggered item via LLM.
+#[derive(Debug, Deserialize)]
+pub struct TriggeredItemResult {
+    /// Updated summary for the item (return unchanged for recurring items)
+    pub summary: String,
+    /// If present, notify the user with this message (max 480 chars for digest, 160 for simple)
+    #[serde(default)]
+    pub sms_message: Option<String>,
+    /// ISO datetime for next trigger; omit if item is done (will be deleted)
+    #[serde(default)]
+    pub next_check_at: Option<String>,
+    /// 0 = background/digest-only, 1 = SMS notification, 2 = phone call
+    #[serde(default)]
+    pub priority: Option<i32>,
+}
+
+const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that processes triggered items for a user. An item just fired at its scheduled time. Your job:
+
+1. Read the item summary carefully. It describes what to do.
+2. If the summary mentions fetching data (emails, messages, calendar, weather), use the available fetch tools to gather that information first.
+3. Once you have all needed information, call `process_item_result` with your result.
+
+RULES:
+- `summary`: Return the item summary unchanged for recurring items (so instructions persist for next firing). For one-shot items, you can update it.
+- `sms_message`: Craft a concise notification for the user. Max 480 chars. Use second person ('you'). Be direct and informative. Omit if no notification needed.
+- `next_check_at`: If the summary contains rescheduling instructions (e.g. "Reschedule for tomorrow 9am"), follow them - set next_check_at to the appropriate ISO datetime. If there are no rescheduling instructions, this is a one-time item - omit next_check_at (the item will be deleted).
+- `priority`: 0 = background only (no notification sent), 1 = SMS, 2 = phone call. Default to 1 unless the summary says [VIA CALL] (use 2) or explicitly says no notification needed (use 0).
+
+For digest items: gather data from the relevant sources, then summarize highlights in sms_message. Keep the summary unchanged so it fires again next time."#;
+
+/// Process a triggered item using LLM with optional tool-calling loop.
+/// Replaces the old `generate_item_notification` with a unified approach
+/// that supports both simple reminders and digest/recurring items.
+pub async fn process_triggered_item(
     state: &Arc<AppState>,
     user_id: i32,
-    summary: &str,
-) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+    item: &crate::models::user_models::Item,
+) -> Result<TriggeredItemResult, Box<dyn std::error::Error>> {
     let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
-    let messages = vec![
+    let now_str = chrono::Utc::now().to_rfc3339();
+
+    let mut messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You generate notification messages from item descriptions. \
-                The user has a scheduled item that just triggered. \
-                Craft two short notifications from the item summary:\n\
-                1. sms_message (max 160 chars) - concise SMS notification\n\
-                2. first_message (max 100 chars) - voice assistant opening line\n\
-                3. notification_type - delivery method: 'sms' or 'call'\n\
-                Be direct and informative. Use second person ('you')."
-                    .to_string(),
-            ),
+            content: chat_completion::Content::Text(PROCESS_TRIGGERED_ITEM_PROMPT.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!("Item summary: {}", summary)),
+            content: chat_completion::Content::Text(format!(
+                "Current time: {}\nItem summary: {}",
+                now_str, item.summary
+            )),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
     ];
 
-    let mut properties = std::collections::HashMap::new();
-    properties.insert(
-        "sms_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Concise SMS notification (max 160 chars)".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "first_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Voice assistant opening line (max 100 chars)".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "notification_type".to_string(),
+    // Build the final result tool
+    let mut result_properties = std::collections::HashMap::new();
+    result_properties.insert(
+        "summary".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Delivery method: 'sms' for text, 'call' for voice call. \
-                Infer from the summary - if it mentions calling someone or says [VIA CALL], \
-                use 'call'. Default to 'sms'."
+                "Updated item summary. Return unchanged for recurring items so instructions persist."
                     .to_string(),
             ),
-            enum_values: Some(vec!["sms".to_string(), "call".to_string()]),
+            ..Default::default()
+        }),
+    );
+    result_properties.insert(
+        "sms_message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Notification text for the user (max 480 chars). Omit if no notification needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    result_properties.insert(
+        "next_check_at".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "ISO datetime for next trigger (e.g. '2026-03-01T09:00'). Omit if item is done."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    result_properties.insert(
+        "priority".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some(
+                "0 = background (no notification), 1 = SMS notification, 2 = phone call"
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
 
-    let tools = vec![chat_completion::Tool {
+    let result_tool = chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: "generate_notification".to_string(),
-            description: Some("Generate notification messages from item summary".to_string()),
+            name: "process_item_result".to_string(),
+            description: Some("Return the processing result for this triggered item.".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
-                properties: Some(properties),
-                required: Some(vec![
-                    "sms_message".to_string(),
-                    "first_message".to_string(),
-                    "notification_type".to_string(),
-                ]),
+                properties: Some(result_properties),
+                required: Some(vec!["summary".to_string()]),
             },
         },
-    }];
+    };
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
-        .tools(tools)
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.0)
-        .max_tokens(200);
+    // Assemble fetch tools + result tool
+    let tools = vec![
+        crate::tool_call_utils::email::get_fetch_emails_tool(),
+        crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
+        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
+        crate::tool_call_utils::internet::get_weather_tool(),
+        result_tool,
+    ];
 
-    let result = ctx.client.chat_completion(request).await?;
-    let tool_call = result.choices[0]
-        .message
-        .tool_calls
-        .as_ref()
-        .and_then(|tc| tc.first())
-        .ok_or("No tool call in notification generation response")?;
+    // Tool-calling loop (max 5 iterations)
+    for iteration in 0..5 {
+        let request =
+            chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages.clone())
+                .tools(tools.clone())
+                .tool_choice(chat_completion::ToolChoiceType::Required)
+                .temperature(0.0)
+                .max_tokens(800);
 
-    let args = tool_call
-        .function
-        .arguments
-        .as_ref()
-        .ok_or("No arguments in notification tool call")?;
+        let result = ctx.client.chat_completion(request).await?;
+        let choice = result.choices.first().ok_or("No choices in LLM response")?;
 
-    #[derive(Deserialize)]
-    struct NotificationResponse {
-        sms_message: String,
-        first_message: String,
-        #[serde(default = "default_notification_type")]
-        notification_type: String,
+        let tool_calls = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .ok_or("No tool calls in response")?;
+
+        // Process each tool call
+        let mut found_result = None;
+        let assistant_content = choice.message.content.clone().unwrap_or_default();
+
+        // Add assistant message with tool calls
+        messages.push(chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::assistant,
+            content: chat_completion::Content::Text(assistant_content),
+            name: None,
+            tool_calls: Some(tool_calls.clone()),
+            tool_call_id: None,
+        });
+
+        for tc in tool_calls {
+            let fn_name = tc.function.name.as_deref().unwrap_or("");
+            let fn_args = tc.function.arguments.as_deref().unwrap_or("{}");
+            let tc_id = tc.id.clone();
+
+            if fn_name == "process_item_result" {
+                // Parse and return
+                let parsed: TriggeredItemResult = serde_json::from_str(fn_args)?;
+                found_result = Some(parsed);
+                // Add tool response to keep message structure valid
+                messages.push(chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::tool,
+                    content: chat_completion::Content::Text("OK".to_string()),
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: Some(tc_id),
+                });
+                break;
+            }
+
+            // Execute fetch tool
+            let tool_output = match fn_name {
+                "fetch_emails" => {
+                    crate::tool_call_utils::email::handle_fetch_emails(state, user_id).await
+                }
+                "fetch_recent_messages" => {
+                    crate::tool_call_utils::bridge::handle_fetch_recent_messages(
+                        state, user_id, fn_args,
+                    )
+                    .await
+                }
+                "fetch_calendar_events" => {
+                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
+                        state, user_id, fn_args,
+                    )
+                    .await
+                }
+                "get_weather" => {
+                    let weather_args: serde_json::Value =
+                        serde_json::from_str(fn_args).unwrap_or_default();
+                    let location = weather_args
+                        .get("location")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("current location");
+                    let units = weather_args
+                        .get("units")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("metric");
+                    let forecast_type = weather_args
+                        .get("forecast_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("current");
+                    match crate::utils::tool_exec::get_weather(
+                        state,
+                        location,
+                        units,
+                        forecast_type,
+                        user_id,
+                    )
+                    .await
+                    {
+                        Ok(answer) => answer,
+                        Err(e) => format!("Weather fetch failed: {}", e),
+                    }
+                }
+                _ => format!("Unknown tool: {}", fn_name),
+            };
+
+            tracing::debug!(
+                "process_triggered_item iteration {}: tool={} output_len={}",
+                iteration,
+                fn_name,
+                tool_output.len()
+            );
+
+            messages.push(chat_completion::ChatCompletionMessage {
+                role: chat_completion::MessageRole::tool,
+                content: chat_completion::Content::Text(tool_output),
+                name: None,
+                tool_calls: None,
+                tool_call_id: Some(tc_id),
+            });
+        }
+
+        if let Some(result) = found_result {
+            return Ok(result);
+        }
     }
 
-    fn default_notification_type() -> String {
-        "sms".to_string()
-    }
-
-    let response: NotificationResponse = serde_json::from_str(args)?;
-    Ok((
-        response.sms_message,
-        response.first_message,
-        response.notification_type,
-    ))
+    Err("process_triggered_item: LLM did not call process_item_result after 5 iterations".into())
 }
 
 #[derive(Debug, Serialize)]
@@ -3726,7 +3835,6 @@ mod tests {
         // Verify the waiting check prompt has required elements
         assert!(WAITING_CHECK_PROMPT.contains("monitor"));
         assert!(WAITING_CHECK_PROMPT.contains("sms_message"));
-        assert!(WAITING_CHECK_PROMPT.contains("first_message"));
         assert!(WAITING_CHECK_PROMPT.contains("match"));
         assert!(WAITING_CHECK_PROMPT.contains("should_notify"));
         assert!(WAITING_CHECK_PROMPT.contains("updated_summary"));

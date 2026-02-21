@@ -102,9 +102,14 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone.\n\
-                For reminders (monitor=false): when to fire. Required.\n\
-                For monitors (monitor=true): optional safety-net deadline.\n\n\
+                "ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. ALWAYS REQUIRED.\n\
+                For reminders (monitor=false): when to fire.\n\
+                For monitors (monitor=true): review/expiration date. If user doesn't specify one,\n\
+                infer a reasonable default:\n\
+                - General 'notify me when X messages': 2 weeks\n\
+                - Time-bounded events (flights, deliveries, payments): match the event timeframe\n\
+                - Ongoing watches (price drops, job postings): 1 month\n\
+                At this date, the item fires as a check-in: 'still want to watch for X?'\n\n\
                 SMART TIMING for reminders (monitor=false):\n\
                 - Virtual/same-location events (meeting, call): 5 minutes before\n\
                 - Appointments (doctor, interview): 45 minutes before\n\
@@ -144,6 +149,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
                 required: Some(vec![
                     String::from("summary"),
                     String::from("monitor"),
+                    String::from("next_check_at"),
                 ]),
             },
         },
@@ -160,7 +166,7 @@ use std::sync::Arc;
 pub struct CreateItemArgs {
     pub summary: String,
     pub monitor: bool,
-    pub next_check_at: Option<String>,
+    pub next_check_at: String,
 }
 
 /// Result from handle_create_item containing the confirmation message and item ID
@@ -189,35 +195,17 @@ pub async fn handle_create_item(
         .unwrap()
         .as_secs() as i32;
 
-    // Parse next_check_at if provided
-    let (due_at, next_check_at_ts) = if let Some(ref nca_str) = args.next_check_at {
-        let user_info = state
-            .user_core
-            .get_user_info(user_id)
-            .map_err(|e| format!("Failed to get user info: {:?}", e))?;
-        let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-        let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-        let ts = parse_datetime_to_timestamp(nca_str, &tz)?;
-        (Some(ts), Some(ts))
-    } else {
-        (None, None)
-    };
+    // Parse next_check_at (always required)
+    let user_info = state
+        .user_core
+        .get_user_info(user_id)
+        .map_err(|e| format!("Failed to get user info: {:?}", e))?;
+    let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
+    let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+    let ts = parse_datetime_to_timestamp(&args.next_check_at, &tz)?;
+    let (due_at, next_check_at_ts) = (Some(ts), Some(ts));
 
-    // For reminders, format summary as structured reminder with time/tz prefix
-    let summary = if !args.monitor {
-        if let Some(ref nca_str) = args.next_check_at {
-            let user_info = state
-                .user_core
-                .get_user_info(user_id)
-                .map_err(|e| format!("Failed to get user info: {:?}", e))?;
-            let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-            format!("REMINDER {} {}: {}", nca_str, tz_str, args.summary)
-        } else {
-            args.summary.clone()
-        }
-    } else {
-        args.summary.clone()
-    };
+    let summary = args.summary.clone();
 
     let new_item = crate::models::user_models::NewItem {
         user_id,
