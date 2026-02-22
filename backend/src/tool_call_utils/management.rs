@@ -20,7 +20,7 @@ pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion
         function: types::Function {
             name: String::from("update_notifications_status"),
             description: Some(String::from(
-                "Turns the notifications system on or off globally for the user's incoming messages. Use this tool when the user explicitly requests to enable or disable all monitoring or notifications entirely, such as 'turn on notifications' or 'turn off notifications'. Do not use this for setting up notifications/monitoring for specific content; instead, use the create_waiting_check tool for targeted notifications of particular events or content in incoming messages or emails.",
+                "Turns the notifications system on or off globally for the user's incoming messages. Use this tool when the user explicitly requests to enable or disable all monitoring or notifications entirely, such as 'turn on notifications' or 'turn off notifications'. Do not use this for setting up notifications/monitoring for specific content; instead, use the create_item tool for targeted notifications of particular events or content in incoming messages or emails.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -66,13 +66,16 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
                 "A concise description of what to remind or watch for.\n\
-                At notification time, a separate LLM reads ONLY this summary to craft an SMS (max 160 chars)\n\
-                and a voice opener (max 100 chars), and to decide delivery method (SMS or voice call).\n\n\
+                At trigger time, a processing LLM reads this summary AND can fetch real data\n\
+                (emails, messages, calendar, weather) to produce an informed notification (max 480 chars).\n\
+                Priority determines delivery: 1 = SMS, 2 = phone call.\n\n\
                 RULES:\n\
                 - Use third person: 'the user', never 'you' or 'me'\n\
                 - Include all relevant context: names, times, locations, what to watch for\n\
                 - If the user wants a PHONE CALL (e.g. 'call me', 'give me a call'), append ' [VIA CALL]'\n\
-                  at the end. Otherwise omit it - SMS is the default.\n\n\
+                  at the end. Otherwise omit it - SMS is the default.\n\
+                - For recurring items, include rescheduling instructions in the summary\n\
+                  (e.g. 'Reschedule for tomorrow at 9am') so the processing LLM knows to reschedule\n\n\
                 EXAMPLES:\n\
                 - 'remind me to call mom at 10pm' -> \"Remind the user to call mom\"\n\
                 - 'call me at midnight' -> \"Scheduled check-in for the user [VIA CALL]\"\n\

@@ -78,10 +78,8 @@ const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an i
     **Lifecycle rules**
     - `next_check_at`: Set an ISO datetime for the next scheduled check if the item needs follow-up.
       Example: package shipped today, set next_check_at to 2 days from now. Leave null if no follow-up needed.
-    - `priority`: Escalate importance. 0 = background (digest only), 1 = important (standalone notification), 2 = urgent.
-      Only change if the situation warrants it (e.g. approaching deadline, overdue payment).
-    - `notification_type`: Override notification method. "sms" (default), "call" for urgent items, "call_sms" for both.
-      Only change if urgency warrants escalation.
+    - `priority`: 0 = background (digest only, no standalone notification), 1 = SMS, 2 = phone call.
+      Only escalate if the situation warrants it (e.g. approaching deadline, overdue payment).
 
     **Notification decision**
     When a match is found, decide whether to **notify** the user or just **silently update** the item:
@@ -166,9 +164,6 @@ pub struct ItemMatchResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sms_message: Option<String>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub match_explanation: Option<String>,
-
     // Lifecycle fields - LLM-controlled monitor management
     #[serde(default)]
     pub is_resolved: bool,
@@ -178,9 +173,6 @@ pub struct ItemMatchResponse {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i32>, // 0/1/2 escalation
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notification_type: Option<String>, // "sms" or "call" escalation
 }
 
 /// Determine whether `message` matches **one** of the supplied monitor items.
@@ -212,8 +204,8 @@ pub async fn check_item_monitor_match(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Incoming message:\n\n{}\n\nMonitor items:\n\n{}\n\nReturn the best match or null.",
-                message, items_str
+                "Current time: {}\n\nIncoming message:\n\n{}\n\nMonitor items:\n\n{}\n\nReturn the best match or null.",
+                chrono::Utc::now().to_rfc3339(), message, items_str
             )),
             name: None,
             tool_calls: None,
@@ -301,19 +293,6 @@ pub async fn check_item_monitor_match(
             ..Default::default()
         }),
     );
-    properties.insert(
-        "notification_type".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Override notification method: 'sms', 'call', or 'call_sms'. \
-                Only change if urgency warrants escalation."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -353,10 +332,6 @@ pub async fn check_item_monitor_match(
 
     let response: ItemMatchResponse = serde_json::from_str(args)?;
 
-    if let Some(explanation) = &response.match_explanation {
-        tracing::debug!("Item monitor match explanation: {}", explanation);
-    }
-
     if response.task_id.is_some() {
         Ok(Some(response))
     } else {
@@ -368,7 +343,7 @@ pub async fn check_item_monitor_match(
 ///
 /// Handles:
 /// - Resolution: deletes the item, optionally notifies
-/// - Update: applies summary, next_check_at, priority, notification_type changes
+/// - Update: applies summary, next_check_at, priority changes
 /// - Priority gate: only sends standalone notification if effective priority >= 1
 ///
 /// Safety guards on next_check_at:
@@ -395,10 +370,11 @@ pub async fn apply_monitor_lifecycle(
         // Notify about resolution if should_notify is true and priority >= 1
         let effective_priority = response.priority.unwrap_or(item.priority);
         if response.should_notify && effective_priority >= 1 {
-            let notification_type = response
-                .notification_type
-                .clone()
-                .unwrap_or_else(|| "sms".to_string());
+            let notification_type = if effective_priority >= 2 {
+                "call"
+            } else {
+                "sms"
+            };
             let message = response
                 .sms_message
                 .clone()
@@ -466,10 +442,11 @@ pub async fn apply_monitor_lifecycle(
 
     // Notification: only send standalone if effective priority >= 1
     if response.should_notify && effective_priority >= 1 {
-        let notification_type = response
-            .notification_type
-            .clone()
-            .unwrap_or_else(|| "sms".to_string());
+        let notification_type = if effective_priority >= 2 {
+            "call"
+        } else {
+            "sms"
+        };
         let message = response
             .sms_message
             .clone()
@@ -518,13 +495,25 @@ const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that proc
 2. If the summary mentions fetching data (emails, messages, calendar, weather), use the available fetch tools to gather that information first.
 3. Once you have all needed information, call `process_item_result` with your result.
 
-RULES:
-- `summary`: Return the item summary unchanged for recurring items (so instructions persist for next firing). For one-shot items, you can update it.
-- `sms_message`: Craft a concise notification for the user. Max 480 chars. Use second person ('you'). Be direct and informative. Omit if no notification needed.
-- `next_check_at`: If the summary contains rescheduling instructions (e.g. "Reschedule for tomorrow 9am"), follow them - set next_check_at to the appropriate ISO datetime. If there are no rescheduling instructions, this is a one-time item - omit next_check_at (the item will be deleted).
-- `priority`: 0 = background only (no notification sent), 1 = SMS, 2 = phone call. Default to 1 unless the summary says [VIA CALL] (use 2) or explicitly says no notification needed (use 0).
+**Available fetch tools:**
+- `fetch_emails` - Fetch the user's recent emails. No parameters needed.
+- `fetch_recent_messages` - Fetch recent chat messages. Parameters: `hours_back` (int, default 8), `room_id` (optional string to filter by room).
+- `fetch_calendar_events` - Fetch upcoming calendar events. Parameters: `days_ahead` (int, default 1).
+- `get_weather` - Fetch weather data. Parameters: `location` (string), `units` ("metric"/"imperial"), `forecast_type` ("current"/"forecast").
 
-For digest items: gather data from the relevant sources, then summarize highlights in sms_message. Keep the summary unchanged so it fires again next time."#;
+**Timezone:** The user message includes their local time and timezone. Produce any `next_check_at` datetimes in the user's timezone as ISO format (e.g. "2026-03-01T09:00").
+
+**RULES:**
+- `summary`: For recurring items with rescheduling instructions, keep the original instructions intact but you may append useful updates. For one-shot items, update freely.
+- `sms_message`: Craft a concise notification for the user. Max 480 chars. Use second person ('you'). Be direct and informative. Omit if no notification needed.
+- `next_check_at`: If the summary contains rescheduling instructions (e.g. "Reschedule for tomorrow 9am"), follow them - set next_check_at to the appropriate ISO datetime in the user's timezone. If there are no rescheduling instructions, this is a one-time item - omit next_check_at (the item will be deleted).
+- `priority`: 0 = background only (no notification sent), 1 = SMS, 2 = phone call. Default to the item's current priority unless the summary says [VIA CALL] (use 2) or explicitly says no notification needed (use 0).
+
+**EXAMPLES:**
+- Simple reminder: summary="Remind the user to call mom" -> sms_message="Time to call mom!", no next_check_at (one-shot).
+- Call reminder: summary="Scheduled check-in [VIA CALL]" -> sms_message="Your scheduled check-in.", priority=2, no next_check_at.
+- Recurring digest: summary="Daily email digest. Reschedule for tomorrow at 9am" -> fetch_emails, sms_message="You got 3 emails: ...", next_check_at="2026-03-02T09:00", summary keeps rescheduling instructions.
+- Data-fetching item: summary="Check weather in Helsinki and notify the user" -> get_weather, sms_message="Helsinki: 5C, light rain.", no next_check_at."#;
 
 /// Process a triggered item using LLM with optional tool-calling loop.
 /// Replaces the old `generate_item_notification` with a unified approach
@@ -534,9 +523,16 @@ pub async fn process_triggered_item(
     user_id: i32,
     item: &crate::models::user_models::Item,
 ) -> Result<TriggeredItemResult, Box<dyn std::error::Error>> {
-    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await?;
 
-    let now_str = chrono::Utc::now().to_rfc3339();
+    let (time_str, tz_label) = if let Some(ref tz) = ctx.timezone {
+        (tz.formatted_now.clone(), tz.tz_str.clone())
+    } else {
+        (chrono::Utc::now().to_rfc3339(), "UTC".to_string())
+    };
 
     let mut messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -549,8 +545,8 @@ pub async fn process_triggered_item(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Current time: {}\nItem summary: {}",
-                now_str, item.summary
+                "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}",
+                time_str, tz_label, item.summary, item.priority
             )),
             name: None,
             tool_calls: None,
@@ -565,7 +561,7 @@ pub async fn process_triggered_item(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Updated item summary. Return unchanged for recurring items so instructions persist."
+                "Updated item summary. For recurring items, keep rescheduling instructions but may append updates."
                     .to_string(),
             ),
             ..Default::default()

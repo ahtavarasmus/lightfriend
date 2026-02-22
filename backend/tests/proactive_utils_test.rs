@@ -84,8 +84,7 @@ fn test_task_match_response_parses_matched_task() {
         "task_id": 42,
         "should_notify": true,
         "updated_summary": "Package delivered at office",
-        "sms_message": "Your package has arrived at the office",
-        "match_explanation": "Message mentions package delivery"
+        "sms_message": "Your package has arrived at the office"
     }"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
@@ -107,8 +106,7 @@ fn test_task_match_response_parses_no_match() {
     let json = r#"{
         "task_id": null,
         "should_notify": false,
-        "sms_message": "",
-        "match_explanation": ""
+        "sms_message": ""
     }"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
@@ -137,8 +135,7 @@ fn test_task_match_response_silent_update() {
     let json = r#"{
         "task_id": 5,
         "should_notify": false,
-        "updated_summary": "Package in transit - arrived at sorting facility",
-        "match_explanation": "Routine shipping status update"
+        "updated_summary": "Package in transit - arrived at sorting facility"
     }"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
