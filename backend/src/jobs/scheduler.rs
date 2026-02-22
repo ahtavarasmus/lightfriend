@@ -133,7 +133,6 @@ pub async fn check_all_bridges_health(
                     user_id,
                     summary: format!("System: {} bridge disconnected.", bridge_name),
                     monitor: false,
-                    due_at: None,
                     next_check_at: None,
                     priority: 1,
                     source_id: None,
@@ -287,40 +286,40 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
         let now_local = now.with_timezone(&tz);
         let current_ts = now.timestamp() as i32;
 
-        let create_digest_item =
-            |digest_time: &str, digest_name: &str| -> Option<crate::models::user_models::NewItem> {
-                let hour: u32 = digest_time
-                    .split(':')
-                    .next()
-                    .and_then(|h| h.parse().ok())
-                    .unwrap_or(8);
+        let create_digest_item = |digest_time: &str,
+                                  digest_name: &str|
+         -> Option<crate::models::user_models::NewItem> {
+            let hour: u32 = digest_time
+                .split(':')
+                .next()
+                .and_then(|h| h.parse().ok())
+                .unwrap_or(8);
 
-                let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
-                let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
-                if now_local.time() >= check_time {
-                    next_time += chrono::Duration::days(1);
-                }
-                let next_dt = tz.from_local_datetime(&next_time).single()?;
-                let trigger_ts = next_dt.timestamp() as i32;
+            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
+            let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
+            if now_local.time() >= check_time {
+                next_time += chrono::Duration::days(1);
+            }
+            let next_dt = tz.from_local_datetime(&next_time).single()?;
+            let trigger_ts = next_dt.timestamp() as i32;
 
-                let friendly_time = format!("{}:00", hour);
-                let summary = format!(
-                    "Daily {} digest: check unread messages from all messaging apps and email. \
-                 Summarize highlights and send to user. Reschedule for tomorrow at {}.",
+            let friendly_time = format!("{}:00", hour);
+            let summary = format!(
+                    "Daily {} digest: fetch emails, messages from all messaging apps, upcoming calendar events, \
+                 and tracked items. Summarize as a glanceable digest for the user. Reschedule for tomorrow at {}.",
                     digest_name, friendly_time
                 );
 
-                Some(crate::models::user_models::NewItem {
-                    user_id,
-                    summary,
-                    monitor: false,
-                    next_check_at: Some(trigger_ts),
-                    priority: 1,
-                    due_at: None,
-                    source_id: None,
-                    created_at: current_ts,
-                })
-            };
+            Some(crate::models::user_models::NewItem {
+                user_id,
+                summary,
+                monitor: false,
+                next_check_at: Some(trigger_ts),
+                priority: 1,
+                source_id: None,
+                created_at: current_ts,
+            })
+        };
 
         let mut created = Vec::new();
         let mut failed = Vec::new();
@@ -449,7 +448,7 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                 .and_then(|s| s.parse().ok());
 
             // Determine item fields based on task type
-            let (summary, is_monitor, due_at, next_check_at) = if task.action == "generate_digest" {
+            let (summary, is_monitor, next_check_at) = if task.action == "generate_digest" {
                 // Digest task: recurring, has sources
                 let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
                 let time = task.recurrence_time.as_deref().unwrap_or("08:00");
@@ -458,7 +457,8 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                     .as_deref()
                     .unwrap_or("email,whatsapp,telegram,signal,calendar");
                 let summary = format!(
-                    "Daily digest. Sources: {}. Repeats {} at {}.",
+                    "Daily digest: fetch emails, messages, calendar events, and tracked items. \
+                 Sources: {}. Repeats {} at {}.",
                     sources, rule, time
                 );
                 // Calculate next trigger for recurring
@@ -466,19 +466,19 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                     .user_repository
                     .calculate_next_trigger_public(task, &user_tz)
                     .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, false, None, next_ts)
+                (summary, false, next_ts)
             } else if task.action.contains("quiet_mode") {
                 // Quiet mode task
                 let end = task.end_time.unwrap_or(now + 3600);
                 let summary = format!("Quiet mode until {}.", format_ts_short(end));
-                (summary, false, Some(end), Some(end))
+                (summary, false, Some(end))
             } else if task.trigger.starts_with("recurring_email")
                 || task.trigger.starts_with("recurring_messaging")
             {
                 // Monitor task: has condition
                 let condition_text = task.condition.as_deref().unwrap_or("any matching content");
                 let summary = format!("Monitor: {}. Alert when match arrives.", condition_text);
-                (summary, true, None, None)
+                (summary, true, None)
             } else if task.is_permanent == Some(1) {
                 // Recurring non-digest task
                 let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
@@ -488,11 +488,11 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                     .user_repository
                     .calculate_next_trigger_public(task, &user_tz)
                     .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, false, None, next_ts)
+                (summary, false, next_ts)
             } else {
                 // One-shot reminder
                 let summary = format!("Reminder: {}", task.action);
-                (summary, false, trigger_ts, trigger_ts)
+                (summary, false, trigger_ts)
             };
 
             // Create the item
@@ -500,7 +500,6 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                 user_id,
                 summary,
                 monitor: is_monitor,
-                due_at,
                 next_check_at,
                 priority: 0,
                 source_id: None,
@@ -1160,20 +1159,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                             if item_clone.monitor {
                                 // Monitor path: use check_item_monitor_match for scheduled checks
-                                let due_str = item_clone
-                                    .due_at
-                                    .and_then(|ts| {
-                                        chrono::DateTime::from_timestamp(ts as i64, 0)
-                                            .map(|dt| dt.to_rfc3339())
-                                    })
-                                    .unwrap_or_else(|| "none".to_string());
-
                                 let now_str = chrono::Utc::now().to_rfc3339();
                                 let synthetic_message = format!(
                                     "SYSTEM: Scheduled check triggered for this item. \
-                                    Current time: {}. Due date: {}. \
+                                    Current time: {}. \
                                     Evaluate if this item needs attention, escalation, or resolution.",
-                                    now_str, due_str
+                                    now_str
                                 );
 
                                 let monitor_items = match state.item_repository.get_monitor_items(user_id) {
@@ -1203,14 +1194,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         ).await;
                                     }
                                     Ok(None) => {
-                                        let next = if let Some(due) = item_clone.due_at {
-                                            let days_until = (due - now) / 86400;
-                                            if days_until <= 2 { now + 86400 }
-                                            else if days_until <= 7 { now + 2 * 86400 }
-                                            else { now + 3 * 86400 }
-                                        } else {
-                                            now + 86400
-                                        };
+                                        let next = now + 86400;
                                         let _ = state.item_repository.update_next_check_at(item_id, Some(next));
                                         debug!("Monitor item {} rescheduled (no LLM match)", item_id);
                                     }

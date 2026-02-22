@@ -415,20 +415,13 @@ pub async fn apply_monitor_lifecycle(
         Some(ts) if ts > max_future => Some(max_future), // >30 days: cap
         Some(ts) => Some(ts),
         None => {
-            // LLM returned null: if item has due_at, fall back to heuristic
-            if let Some(due) = item.due_at {
-                let days_until = (due - now) / 86400;
-                let check_in = if days_until <= 2 {
-                    86400 // 1 day
-                } else if days_until <= 7 {
-                    2 * 86400 // 2 days
-                } else {
-                    3 * 86400 // 3 days
-                };
-                Some(now + check_in)
-            } else {
-                item.next_check_at // Keep existing (likely None for match-only monitors)
-            }
+            // LLM returned null next_check_at: delete the item
+            tracing::debug!(
+                "LLM returned null next_check_at for item {}, deleting",
+                item_id
+            );
+            let _ = state.item_repository.delete_item(item_id, user_id);
+            return;
         }
     };
 
@@ -500,19 +493,32 @@ const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that proc
 - `fetch_recent_messages` - Fetch recent chat messages. Parameters: `hours_back` (int, default 8), `room_id` (optional string to filter by room).
 - `fetch_calendar_events` - Fetch upcoming calendar events. Parameters: `days_ahead` (int, default 1).
 - `get_weather` - Fetch weather data. Parameters: `location` (string), `units` ("metric"/"imperial"), `forecast_type` ("current"/"forecast").
+- `fetch_tracked_items` - Fetch the user's tracked items (monitors, reminders, deadlines). No parameters needed.
 
 **Timezone:** The user message includes their local time and timezone. Produce any `next_check_at` datetimes in the user's timezone as ISO format (e.g. "2026-03-01T09:00").
 
 **RULES:**
 - `summary`: For recurring items with rescheduling instructions, keep the original instructions intact but you may append useful updates. For one-shot items, update freely.
-- `sms_message`: Craft a concise notification for the user. Max 480 chars. Use second person ('you'). Be direct and informative. Omit if no notification needed.
+- `sms_message`: Max 480 chars. Plain text only (no markdown, no emojis). Use second person.
+  For simple reminders, write a direct one-liner.
+  When you have fetched data from multiple sources (messages, emails, calendar, tracked items),
+  format as a glanceable digest:
+  - Group by platform (WHATSAPP:, EMAIL:, CALENDAR:, TRACKING:), each on a new line
+  - Put important/actionable items first in each group
+  - Use teasers only: sender + topic hint + relative time in parentheses, e.g. "Mom suggested dinner (today 8pm)"
+  - Do NOT include full message content - just enough for the user to decide if they need to open the app
+  - Summarize less urgent grouped items with '+', e.g. '+ 3 other messages from...'
+  - For calendar, include upcoming events with start time and brief hint
+  - Adapt detail to volume: few items = more detail per item, many items = compact teasers
+  - Critical messages are already notified in real-time, so digests focus on non-critical items
+  Omit sms_message if no notification needed.
 - `next_check_at`: If the summary contains rescheduling instructions (e.g. "Reschedule for tomorrow 9am"), follow them - set next_check_at to the appropriate ISO datetime in the user's timezone. If there are no rescheduling instructions, this is a one-time item - omit next_check_at (the item will be deleted).
 - `priority`: 0 = background only (no notification sent), 1 = SMS, 2 = phone call. Default to the item's current priority unless the summary says [VIA CALL] (use 2) or explicitly says no notification needed (use 0).
 
 **EXAMPLES:**
 - Simple reminder: summary="Remind the user to call mom" -> sms_message="Time to call mom!", no next_check_at (one-shot).
 - Call reminder: summary="Scheduled check-in [VIA CALL]" -> sms_message="Your scheduled check-in.", priority=2, no next_check_at.
-- Recurring digest: summary="Daily email digest. Reschedule for tomorrow at 9am" -> fetch_emails, sms_message="You got 3 emails: ...", next_check_at="2026-03-02T09:00", summary keeps rescheduling instructions.
+- Recurring digest: summary="Daily digest: fetch emails, messages, calendar, tracked items. Reschedule for tomorrow at 9am" -> fetch_emails, fetch_recent_messages, fetch_calendar_events, fetch_tracked_items, sms_message with grouped format, next_check_at="2026-03-02T09:00", summary keeps rescheduling instructions.
 - Data-fetching item: summary="Check weather in Helsinki and notify the user" -> get_weather, sms_message="Helsinki: 5C, light rain.", no next_check_at."#;
 
 /// Process a triggered item using LLM with optional tool-calling loop.
@@ -614,12 +620,32 @@ pub async fn process_triggered_item(
         },
     };
 
+    // Build fetch_tracked_items tool inline
+    let fetch_tracked_items_tool = {
+        use openai_api_rs::v1::{chat_completion as cc, types as t};
+        cc::Tool {
+            r#type: cc::ToolType::Function,
+            function: t::Function {
+                name: "fetch_tracked_items".to_string(),
+                description: Some(
+                    "Fetch the user's tracked items (monitors, reminders, deadlines). Returns a list of items Lightfriend is watching.".to_string(),
+                ),
+                parameters: t::FunctionParameters {
+                    schema_type: t::JSONSchemaType::Object,
+                    properties: Some(std::collections::HashMap::new()),
+                    required: None,
+                },
+            },
+        }
+    };
+
     // Assemble fetch tools + result tool
     let tools = vec![
         crate::tool_call_utils::email::get_fetch_emails_tool(),
         crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
         crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
         crate::tool_call_utils::internet::get_weather_tool(),
+        fetch_tracked_items_tool,
         result_tool,
     ];
 
@@ -719,6 +745,31 @@ pub async fn process_triggered_item(
                         Err(e) => format!("Weather fetch failed: {}", e),
                     }
                 }
+                "fetch_tracked_items" => match state.item_repository.get_items(user_id) {
+                    Ok(items) => {
+                        let current_item_id = item.id;
+                        let filtered: Vec<_> = items
+                            .into_iter()
+                            .filter(|i| i.id != current_item_id)
+                            .collect();
+                        if filtered.is_empty() {
+                            "No tracked items.".to_string()
+                        } else {
+                            filtered
+                                .iter()
+                                .map(|i| {
+                                    let next = i
+                                        .next_check_at
+                                        .map(|ts| format!(" (next check: {})", ts))
+                                        .unwrap_or_default();
+                                    format!("- [P{}] {}{}", i.priority, i.summary, next)
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    }
+                    Err(e) => format!("Failed to fetch tracked items: {}", e),
+                },
                 _ => format!("Unknown tool: {}", fn_name),
             };
 
@@ -1239,8 +1290,11 @@ Use common sense. Only flag things with concrete actionable details. Skip:
 Return JSON with:
 - `is_trackable` (boolean): whether this email contains something worth tracking
 - `summary` (string, max 80 chars): concise description e.g. "AWS invoice $45.20 due Feb 20" or "" if not trackable
-- `due_date` (string): ISO date if a due/delivery date is mentioned, or "" if none
+- `next_check_at` (string): ISO datetime for when this item should first be checked. Set sooner for urgent items (e.g. 1 day for overdue invoices), later for non-urgent (e.g. 3 days). Empty string if no scheduled check needed.
+- `priority` (integer): 0 = digest-only, 1 = standalone notification, 2 = urgent
 - `needs_monitoring` (boolean): true if the item should be actively watched for resolution (e.g. invoice awaiting payment, package in transit, pending approval). false for one-time info items.
+
+Include any deadline or due date directly in the summary text (e.g. "AWS invoice $45.20 due Feb 20").
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -1250,14 +1304,16 @@ struct TrackableResponse {
     #[serde(default)]
     summary: String,
     #[serde(default)]
-    due_date: String,
+    next_check_at: String,
     #[serde(default)]
-    needs_monitoring: bool, // Included in LLM schema for future use
+    priority: i32,
+    #[serde(default)]
+    needs_monitoring: bool,
 }
 
 /// Checks whether an email contains a trackable item and silently creates
 /// a monitor item if detected. All trackable items become monitors.
-/// Uses source_id for dedup. Priority is based on due_at urgency.
+/// Uses source_id for dedup. Priority is set by the LLM.
 pub async fn check_trackable_items(
     state: &Arc<AppState>,
     user_id: i32,
@@ -1313,10 +1369,23 @@ pub async fn check_trackable_items(
         }),
     );
     properties.insert(
-        "due_date".to_string(),
+        "next_check_at".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("ISO date if a due/delivery date is mentioned".to_string()),
+            description: Some(
+                "ISO datetime for when to first check this item. Sooner for urgent items."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "priority".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some(
+                "0 = digest-only, 1 = standalone notification, 2 = urgent".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -1343,7 +1412,8 @@ pub async fn check_trackable_items(
                 required: Some(vec![
                     "is_trackable".to_string(),
                     "summary".to_string(),
-                    "due_date".to_string(),
+                    "next_check_at".to_string(),
+                    "priority".to_string(),
                     "needs_monitoring".to_string(),
                 ]),
             },
@@ -1373,48 +1443,21 @@ pub async fn check_trackable_items(
                 .unwrap()
                 .as_secs() as i32;
 
-            // Parse due_date to unix timestamp
-            let due_at = parse_iso_to_timestamp(&resp.due_date);
-
-            // All trackable items become monitors.
-            // Priority based on due_at urgency:
-            // - No due_at or >7 days away: priority 0 (digest-only)
-            // - 2-7 days away: priority 1 (standalone notifications)
-            // - <2 days or overdue: priority 2 (urgent)
-            let priority = match due_at {
-                Some(due) => {
-                    let days_until = (due - now) / 86400;
-                    if days_until < 2 {
-                        2
-                    } else if days_until <= 7 {
-                        1
-                    } else {
-                        0
-                    }
-                }
-                None => 0,
+            let max_future = now + 30 * 86400; // 30 days cap
+            let parsed_next_check = parse_iso_to_timestamp(&resp.next_check_at);
+            let next_check_at = match parsed_next_check {
+                Some(ts) if ts <= now => Some(now + 3600), // Past: clamp to now + 1 hour
+                Some(ts) if ts > max_future => Some(max_future), // >30 days: cap
+                Some(ts) => Some(ts),
+                None => None, // No scheduled checks
             };
 
-            // Initial next_check_at based on due_at proximity
-            let next_check_at = match due_at {
-                Some(due) => {
-                    let days_until = (due - now) / 86400;
-                    if days_until <= 2 {
-                        Some(now + 86400) // Check in 1 day
-                    } else if days_until <= 7 {
-                        Some(now + 2 * 86400) // Check in 2 days
-                    } else {
-                        Some(now + 3 * 86400) // Check in 3 days
-                    }
-                }
-                None => None, // No due_at: match-only, no scheduled checks
-            };
+            let priority = resp.priority.clamp(0, 2);
 
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary: resp.summary,
                 monitor: true,
-                due_at,
                 next_check_at,
                 priority,
                 source_id: Some(source_id),
