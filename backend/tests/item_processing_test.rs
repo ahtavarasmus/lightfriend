@@ -74,7 +74,6 @@ fn make_item(user_id: i32, summary: &str, priority: i32) -> Item {
         user_id,
         summary: summary.to_string(),
         monitor: false,
-        due_at: None,
         next_check_at: Some(now),
         priority,
         source_id: None,
@@ -728,23 +727,19 @@ async fn test_monitor_scheduled_check_with_deadline() {
         &state,
         &TestItemParams::monitor(
             user.id,
-            "Watch for invoice payment from client. Remind user if still unpaid.",
+            "Watch for invoice payment from client due tomorrow. Remind user if still unpaid.",
         )
-        .with_due_at(now + 86400)
         .with_next_check_at(now),
     );
     let item_id = item.id.unwrap();
 
-    let due_str = chrono::DateTime::from_timestamp(item.due_at.unwrap() as i64, 0)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|| "none".to_string());
     let now_str = chrono::Utc::now().to_rfc3339();
 
     let synthetic_message = format!(
         "SYSTEM: Scheduled check triggered for this item. \
-        Current time: {}. Due date: {}. \
+        Current time: {}. \
         Evaluate if this item needs attention, escalation, or resolution.",
-        now_str, due_str
+        now_str
     );
 
     let result = check_item_monitor_match(&state, user.id, &synthetic_message, &[item]).await;

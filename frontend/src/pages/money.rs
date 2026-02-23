@@ -442,8 +442,6 @@ pub struct PricingProps {
     #[prop_or_default]
     pub phone_number: Option<String>,
     #[prop_or_default]
-    pub verified: bool,
-    #[prop_or_default]
     pub selected_country: String,
     #[prop_or_default]
     pub country_name: String,
@@ -809,7 +807,6 @@ pub struct PricingCardProps {
     pub user_id: i32,
     pub user_email: String,
     pub is_logged_in: bool,
-    pub verified: bool,
     pub sub_tier: Option<String>,
     #[prop_or_default]
     pub user_plan_type: Option<String>,
@@ -834,15 +831,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
     let button = if props.coming_soon {
         html! { <button class="iq-button coming-soon" disabled=true><b>{"Coming Soon"}</b></button> }
     } else if props.is_logged_in {
-        if !props.verified {
-            let onclick = Callback::from(|e: MouseEvent| {
-                e.prevent_default();
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().set_href("/verify");
-                }
-            });
-            html! { <button class="iq-button verify-required" onclick={onclick}><b>{"Verify Account to Subscribe"}</b></button> }
-        } else if props.sub_tier.as_ref() == Some(&effective_tier)
+        if props.sub_tier.as_ref() == Some(&effective_tier)
             && (props.plan_type == props.user_plan_type
                 || (props.user_plan_type.is_none() && props.selected_country != "Other")) {
             // Show "Current Plan" if tier matches AND either:
@@ -1426,6 +1415,26 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("NO".to_string(), 29.00),
         ("IE".to_string(), 29.00),
         ("NZ".to_string(), 29.00),
+        ("GR".to_string(), 29.00),
+        ("HU".to_string(), 29.00),
+        ("RO".to_string(), 29.00),
+        ("SK".to_string(), 29.00),
+        ("BG".to_string(), 29.00),
+        ("HR".to_string(), 29.00),
+        ("SI".to_string(), 29.00),
+        ("LT".to_string(), 29.00),
+        ("LV".to_string(), 29.00),
+        ("EE".to_string(), 29.00),
+        ("LU".to_string(), 29.00),
+        ("MT".to_string(), 29.00),
+        ("CY".to_string(), 29.00),
+        ("IS".to_string(), 29.00),
+        ("JP".to_string(), 29.00),
+        ("KR".to_string(), 29.00),
+        ("SG".to_string(), 29.00),
+        ("HK".to_string(), 29.00),
+        ("TW".to_string(), 29.00),
+        ("IL".to_string(), 29.00),
         ("Other".to_string(), 19.00),  // BYOT plan stays at 19 EUR
     ]);
     let _hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
@@ -1978,7 +1987,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-                                    verified={props.verified}
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -1999,7 +2007,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-                                    verified={props.verified}
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -2031,7 +2038,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 user_id={props.user_id}
                                 user_email={props.user_email.clone()}
                                 is_logged_in={props.is_logged_in}
-                                verified={props.verified}
+
                                 sub_tier={props.sub_tier.clone()}
                                 user_plan_type={props.user_plan_type.clone()}
                                 selected_country={props.selected_country.clone()}
@@ -2085,7 +2092,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-                                    verified={props.verified}
+    
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -2106,7 +2113,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-                                    verified={props.verified}
+    
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -2129,7 +2136,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         user_id={props.user_id}
                                         user_email={props.user_email.clone()}
                                         is_logged_in={props.is_logged_in}
-                                        verified={props.verified}
+        
                                         sub_tier={props.sub_tier.clone()}
                                         user_plan_type={props.user_plan_type.clone()}
                                         selected_country={props.selected_country.clone()}

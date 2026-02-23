@@ -1410,7 +1410,6 @@ pub async fn handle_bridge_message(
                 user_id,
                 summary: format!("System: {} bridge disconnected.", bridge_name),
                 monitor: false,
-                due_at: None,
                 next_check_at: None,
                 priority: 1,
                 source_id: None,

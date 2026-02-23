@@ -81,15 +81,13 @@ fn test_germany_user_params_has_correct_phone_format() {
 fn test_process_sms_options_default_is_production() {
     let options = ProcessSmsOptions::default();
     assert!(!options.skip_twilio_send);
-    assert!(!options.skip_credit_deduction);
     assert!(options.mock_llm_response.is_none());
 }
 
 #[test]
-fn test_process_sms_options_web_chat_skips_twilio_and_credits() {
+fn test_process_sms_options_web_chat_skips_twilio() {
     let options = ProcessSmsOptions::web_chat();
     assert!(options.skip_twilio_send);
-    assert!(options.skip_credit_deduction);
     assert!(options.mock_llm_response.is_none());
 }
 
@@ -98,7 +96,6 @@ fn test_process_sms_options_test_with_mock() {
     let mock = MockLlmResponse::with_direct_response("Test");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
     assert!(options.skip_twilio_send);
-    assert!(!options.skip_credit_deduction); // SMS deduction happens at Twilio callback, not send time
     assert!(options.mock_llm_response.is_some());
 }
 

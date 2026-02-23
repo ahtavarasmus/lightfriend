@@ -1121,7 +1121,6 @@ impl UserCoreOps for UserCore {
                 user_id,
                 summary: "Quiet mode.".to_string(),
                 monitor: false,
-                due_at: end_time,
                 next_check_at: end_time,
                 priority: 0,
                 source_id: Some("quiet_mode".to_string()),
@@ -1151,7 +1150,7 @@ impl UserCoreOps for UserCore {
             .load::<crate::models::user_models::Item>(&mut conn)?;
 
         for item in &quiet_items {
-            match item.due_at {
+            match item.next_check_at {
                 None => {
                     // Indefinite quiet mode
                     return Ok(Some(0));

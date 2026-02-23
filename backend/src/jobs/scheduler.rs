@@ -1151,6 +1151,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         let state = state.clone();
                         let item_clone = item.clone();
 
+                        // Mark as running BEFORE spawning to prevent duplicate execution
+                        // on the next cron tick (set next_check_at far in the future temporarily)
+                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
+
                         tokio::spawn(async move {
                             debug!(
                                 "Processing triggered item {} (monitor={}) for user {}: {}",

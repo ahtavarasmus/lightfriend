@@ -50,14 +50,6 @@ impl ToolHandler for ListTrackedItemsHandler {
 
         let mut result = format!("{} item(s):\n", items.len());
         for item in &items {
-            let due_info = item
-                .due_at
-                .map(|ts| {
-                    let dt = chrono::DateTime::from_timestamp(ts as i64, 0).unwrap_or_default();
-                    format!(" (due {})", dt.format("%b %d"))
-                })
-                .unwrap_or_default();
-
             let kind_tag = if item.monitor {
                 " [monitor]".to_string()
             } else {
@@ -65,10 +57,9 @@ impl ToolHandler for ListTrackedItemsHandler {
             };
 
             result.push_str(&format!(
-                "- [{}] {}{}{}\n",
+                "- [{}] {}{}\n",
                 item.id.unwrap_or(0),
                 item.summary,
-                due_info,
                 kind_tag,
             ));
         }

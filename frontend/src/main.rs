@@ -251,12 +251,12 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
                     .send()
                     .await
                 {
-                    Ok(response) => {
+                    Ok(response) if response.ok() => {
                         if let Ok(profile) = response.json::<UserProfile>().await {
                             profile_data.set(Some(profile));
                         }
                     }
-                    Err(_) => {}
+                    _ => {}
                 }
             });
 
@@ -308,7 +308,7 @@ pub fn pricing_wrapper() -> Html {
         ("CA".to_string(), "Canada".to_string()),
         ("FI".to_string(), "Finland".to_string()),
         ("NL".to_string(), "Netherlands".to_string()),
-        ("UK".to_string(), "United Kingdom".to_string()),
+        ("GB".to_string(), "United Kingdom".to_string()),
         ("AU".to_string(), "Australia".to_string()),
         // Notification-only countries
         ("DE".to_string(), "Germany".to_string()),
@@ -326,6 +326,26 @@ pub fn pricing_wrapper() -> Html {
         ("NO".to_string(), "Norway".to_string()),
         ("IE".to_string(), "Ireland".to_string()),
         ("NZ".to_string(), "New Zealand".to_string()),
+        ("GR".to_string(), "Greece".to_string()),
+        ("HU".to_string(), "Hungary".to_string()),
+        ("RO".to_string(), "Romania".to_string()),
+        ("SK".to_string(), "Slovakia".to_string()),
+        ("BG".to_string(), "Bulgaria".to_string()),
+        ("HR".to_string(), "Croatia".to_string()),
+        ("SI".to_string(), "Slovenia".to_string()),
+        ("LT".to_string(), "Lithuania".to_string()),
+        ("LV".to_string(), "Latvia".to_string()),
+        ("EE".to_string(), "Estonia".to_string()),
+        ("LU".to_string(), "Luxembourg".to_string()),
+        ("MT".to_string(), "Malta".to_string()),
+        ("CY".to_string(), "Cyprus".to_string()),
+        ("IS".to_string(), "Iceland".to_string()),
+        ("JP".to_string(), "Japan".to_string()),
+        ("KR".to_string(), "South Korea".to_string()),
+        ("SG".to_string(), "Singapore".to_string()),
+        ("HK".to_string(), "Hong Kong".to_string()),
+        ("TW".to_string(), "Taiwan".to_string()),
+        ("IL".to_string(), "Israel".to_string()),
         // Other
         ("Other".to_string(), "Other".to_string()),
     ].iter().cloned().collect();
@@ -363,9 +383,15 @@ pub fn pricing_wrapper() -> Html {
                 // Local number countries + notification-only countries
                 let known_countries = [
                     // Local number countries
-                    "US", "CA", "FI", "NL", "UK", "AU",
+                    "US", "CA", "FI", "NL", "GB", "AU",
                     // Notification-only countries (receive SMS from US number)
-                    "DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ", "SE", "DK", "NO", "IE", "NZ"
+                    "DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ",
+                    "SE", "DK", "NO", "IE", "NZ", "GR", "HU", "RO", "SK", "BG",
+                    "HR", "SI", "LT", "LV", "EE", "LU", "MT", "CY", "IS",
+                    // Asia-Pacific
+                    "JP", "KR", "SG", "HK", "TW",
+                    // Middle East
+                    "IL",
                 ];
                 if !known_countries.contains(&ip_code.as_str()) {
                     ip_code = "Other".to_string();
@@ -379,10 +405,13 @@ pub fn pricing_wrapper() -> Html {
                     .send()
                     .await
                 {
-                    if let Ok(profile) = response.json::<UserProfile>().await {
-                        profile_data.set(Some(profile.clone()));
-                        is_logged_in.set(true);
-                        // Country is determined from IP geolocation (set earlier in this effect)
+                    if response.ok() {
+                        if let Ok(profile) = response.json::<UserProfile>().await {
+                            profile_data.set(Some(profile.clone()));
+                            is_logged_in.set(true);
+                        } else {
+                            is_logged_in.set(false);
+                        }
                     } else {
                         is_logged_in.set(false);
                     }
@@ -424,7 +453,6 @@ pub fn pricing_wrapper() -> Html {
             user_plan_type={profile_data.as_ref().and_then(|p| p.plan_type.clone())}
             is_logged_in={*is_logged_in}
             phone_number={profile_data.as_ref().and_then(|p| Some(p.phone_number.clone()))}
-            verified={profile_data.as_ref().map(|p| p.verified).unwrap_or(false)}
             selected_country={(*selected_country).clone()}
             country_name={(*country_name).clone()}
             on_country_change={on_country_change}

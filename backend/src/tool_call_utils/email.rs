@@ -623,7 +623,8 @@ pub async fn handle_fetch_specific_email(
 
             // Use LLM to select the most relevant email
             match crate::tool_call_utils::utils::select_most_relevant_email(
-                &ctx.client,
+                state,
+                ctx.provider,
                 ctx.model.clone(),
                 &enhanced_query,
                 &formatted_emails,

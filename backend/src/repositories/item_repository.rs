@@ -201,17 +201,16 @@ impl ItemRepository {
         Ok(count)
     }
 
-    /// Auto-expire stale monitors: monitors with due_at >7 days in the past
-    /// and no next_check_at scheduled. They are stale and should be cleaned up.
+    /// Auto-expire stale monitors: monitors with next_check_at >7 days in the past.
+    /// They are stale and should be cleaned up.
     pub fn delete_stale_monitors(&self, now: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let cutoff = now - (7 * 86400); // 7 days ago
         let count = diesel::delete(
             items::table
                 .filter(items::monitor.eq(true))
-                .filter(items::due_at.is_not_null())
-                .filter(items::due_at.lt(cutoff))
-                .filter(items::next_check_at.is_null()),
+                .filter(items::next_check_at.is_not_null())
+                .filter(items::next_check_at.lt(cutoff)),
         )
         .execute(&mut conn)?;
         Ok(count)

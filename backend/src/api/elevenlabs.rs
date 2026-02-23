@@ -550,7 +550,6 @@ pub async fn handle_create_item_voice(
         user_id,
         summary: payload.summary.clone(),
         monitor: payload.monitor,
-        due_at: next_check_at,
         next_check_at,
         priority: 0,
         source_id: None,

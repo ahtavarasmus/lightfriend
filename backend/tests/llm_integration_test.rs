@@ -1,16 +1,16 @@
-//! LLM Integration Tests for Conditional Tasks
+//! LLM Integration Tests for Item Creation
 //!
-//! These tests call the real LLM (via OpenRouter) to verify end-to-end behavior:
-//! user sends natural language -> AI creates task with correct sources/condition/action -> DB state is correct.
+//! These tests call the real LLM (via Tinfoil) to verify end-to-end behavior:
+//! user sends natural language -> AI creates item with correct fields -> DB state is correct.
 //!
 //! All tests are gated with `#[ignore]` because they cost real API tokens.
 //! Run explicitly with: `cargo test --test llm_integration_test -- --ignored`
 //!
 //! Requirements:
-//! - OPENROUTER_API_KEY set in backend/.env
-//! - Network access to OpenRouter API
+//! - TINFOIL_API_KEY set in backend/.env
+//! - Network access to Tinfoil API
 //!
-//! LLM calls are non-deterministic. Tests that expect task creation retry up to
+//! LLM calls are non-deterministic. Tests that expect item creation retry up to
 //! MAX_RETRIES times with a fresh state each attempt to handle transient failures
 //! (e.g. LLM produces malformed tool arguments on first try).
 
@@ -18,7 +18,7 @@ use backend::api::twilio_sms::{
     process_sms, ProcessSmsOptions, TwilioResponse, TwilioWebhookPayload,
 };
 use backend::models::user_models::User;
-use backend::test_utils::{create_test_state, create_test_user, get_user_tasks, TestUserParams};
+use backend::test_utils::{create_test_state, create_test_user, get_user_items, TestUserParams};
 use backend::{AiConfig, AppState, UserCoreOps};
 use std::sync::Arc;
 
@@ -95,7 +95,7 @@ async fn send_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResp
             return (state, user, response);
         }
         eprintln!(
-            "  Attempt {}/{} did not create task. LLM response: {}",
+            "  Attempt {}/{} did not create item. LLM response: {}",
             attempt, MAX_RETRIES, response.message
         );
         last_response = Some((state, user, response));
@@ -105,7 +105,7 @@ async fn send_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResp
 }
 
 // =============================================================================
-// Task creation tests - LLM should create tasks with correct fields
+// Item creation tests - LLM should create items with correct fields
 // =============================================================================
 
 #[tokio::test]
@@ -118,30 +118,31 @@ async fn test_llm_weather_conditional_task() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    assert!(!tasks.is_empty(), "Expected at least one task in DB");
+    let items = get_user_items(&state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
 
-    let task = &tasks[0];
-    let sources = task.sources.as_deref().unwrap_or("");
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.contains("weather"),
-        "Expected sources to contain 'weather', got: {:?}",
-        task.sources
+        summary_lower.contains("freezing")
+            || summary_lower.contains("weather")
+            || summary_lower.contains("car")
+            || summary_lower.contains("warm"),
+        "Expected summary to mention weather/freezing/car context, got: {}",
+        item.summary
     );
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition, got: {:?}",
-        task.condition
+        !item.monitor,
+        "Expected monitor=false for a one-time check, got: true"
     );
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected trigger starting with 'once_', got: {}",
-        task.trigger
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set, got: None"
     );
     assert!(
         !response.message.is_empty(),
@@ -159,28 +160,28 @@ async fn test_llm_calendar_conditional_task() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    let sources = task.sources.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.contains("calendar"),
-        "Expected sources to contain 'calendar', got: {:?}",
-        task.sources
+        summary_lower.contains("meeting")
+            || summary_lower.contains("calendar")
+            || summary_lower.contains("notes"),
+        "Expected summary to mention calendar/meetings/notes, got: {}",
+        item.summary
     );
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition, got: {:?}",
-        task.condition
+        !item.monitor,
+        "Expected monitor=false for a one-time check, got: true"
     );
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger, got: {}",
-        task.trigger
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set, got: None"
     );
 }
 
@@ -192,32 +193,26 @@ async fn test_llm_unconditional_reminder() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-
-    // No source needed for a simple reminder
-    let sources = task.sources.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.is_empty(),
-        "Expected empty sources for unconditional reminder, got: {:?}",
-        task.sources
-    );
-    // No condition needed
-    let condition = task.condition.as_deref().unwrap_or("");
-    assert!(
-        condition.is_empty(),
-        "Expected empty condition for unconditional reminder, got: {:?}",
-        task.condition
+        summary_lower.contains("dentist"),
+        "Expected summary to mention dentist, got: {}",
+        item.summary
     );
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger, got: {}",
-        task.trigger
+        !item.monitor,
+        "Expected monitor=false for a simple reminder, got: true"
+    );
+    assert!(
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set for a timed reminder, got: None"
     );
 }
 
@@ -231,7 +226,7 @@ async fn test_llm_realtime_question() {
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO task for a realtime question. Got task_id: {:?}",
+        "Expected NO item for a realtime question. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(
@@ -250,28 +245,22 @@ async fn test_llm_email_conditional_task() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    let sources = task.sources.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.contains("email"),
-        "Expected sources to contain 'email', got: {:?}",
-        task.sources
+        summary_lower.contains("email") || summary_lower.contains("boss"),
+        "Expected summary to mention email/boss, got: {}",
+        item.summary
     );
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition, got: {:?}",
-        task.condition
-    );
-    assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger (not recurring), got: {}",
-        task.trigger
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set, got: None"
     );
 }
 
@@ -285,50 +274,46 @@ async fn test_llm_multi_source_task() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    let sources = task.sources.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.contains("calendar") && sources.contains("weather"),
-        "Expected sources to contain both 'calendar' and 'weather', got: {:?}",
-        task.sources
-    );
-    assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition, got: {:?}",
-        task.condition
+        (summary_lower.contains("calendar") || summary_lower.contains("meeting"))
+            && (summary_lower.contains("weather") || summary_lower.contains("rain")),
+        "Expected summary to mention both calendar and weather context, got: {}",
+        item.summary
     );
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_llm_mixed_conversation() {
-    // First message: should create a task (with retry)
+    // First message: should create an item (with retry)
     let (state, user, response1) =
         send_message_with_retry("remind me at 3pm tomorrow to buy groceries").await;
 
     assert!(
         response1.created_item_id.is_some(),
-        "First message should create a task after {} retries. Response: {}",
+        "First message should create an item after {} retries. Response: {}",
         MAX_RETRIES,
         response1.message
     );
 
-    let tasks_after_first = get_user_tasks(&state, user.id);
-    assert!(!tasks_after_first.is_empty(), "Should have at least 1 task");
+    let items_after_first = get_user_items(&state, user.id);
+    assert!(!items_after_first.is_empty(), "Should have at least 1 item");
 
-    // Second message: should NOT create a task (realtime question)
+    // Second message: should NOT create an item (realtime question)
     // Use the same state/user so conversation context carries over
     let response2 = send_message(&state, &user, "what's the weather like?").await;
 
     assert!(
         response2.created_item_id.is_none(),
-        "Second message should NOT create a task. Got task_id: {:?}",
+        "Second message should NOT create an item. Got item_id: {:?}",
         response2.created_item_id
     );
     assert!(
@@ -338,7 +323,7 @@ async fn test_llm_mixed_conversation() {
 }
 
 // =============================================================================
-// Realtime vs task disambiguation tests
+// Realtime vs item disambiguation tests
 // =============================================================================
 
 #[tokio::test]
@@ -351,7 +336,7 @@ async fn test_llm_realtime_email_check() {
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO task for realtime email check. Got task_id: {:?}",
+        "Expected NO item for realtime email check. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(
@@ -370,7 +355,7 @@ async fn test_llm_realtime_weather_check() {
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO task for realtime weather question. Got task_id: {:?}",
+        "Expected NO item for realtime weather question. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(
@@ -394,7 +379,7 @@ async fn test_llm_tricky_realtime_looks_like_task() {
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO task - user is asking a question, not creating a reminder. Got task_id: {:?}",
+        "Expected NO item - user is asking a question, not creating a reminder. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(
@@ -418,7 +403,7 @@ async fn test_llm_tricky_realtime_check_calendar() {
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO task - user wants to know NOW, not set up a future check. Got task_id: {:?}",
+        "Expected NO item - user wants to know NOW, not set up a future check. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(!response.message.is_empty(), "Expected non-empty response");
@@ -436,22 +421,20 @@ async fn test_llm_vague_time_afternoon() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger for 'tomorrow afternoon', got: {}",
-        task.trigger
+        !item.monitor,
+        "Expected monitor=false for a one-time reminder, got: true"
     );
     assert!(
-        task.action.contains("send_reminder"),
-        "Expected action to contain 'send_reminder', got: {}",
-        task.action
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set for 'tomorrow afternoon', got: None"
     );
 }
 
@@ -463,38 +446,35 @@ async fn test_llm_relative_time() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger for relative time, got: {}",
-        task.trigger
+        !item.monitor,
+        "Expected monitor=false for relative time reminder, got: true"
+    );
+    assert!(
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set, got: None"
     );
 
-    // Parse the trigger timestamp (Unix epoch) and verify it's roughly 3 hours from now (within 1h tolerance)
-    let trigger_ts_str = task.trigger.strip_prefix("once_").unwrap();
-    let trigger_ts: i64 = trigger_ts_str.parse().unwrap_or_else(|_| {
-        panic!(
-            "Failed to parse trigger timestamp as unix epoch: {}",
-            trigger_ts_str
-        )
-    });
+    // Verify next_check_at is roughly 3 hours from now (within 1h tolerance)
+    let check_at = item.next_check_at.unwrap() as i64;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     let three_hours = 3 * 3600;
     let one_hour = 3600;
-    let diff = (trigger_ts - now - three_hours).abs();
+    let diff = (check_at - now - three_hours).abs();
     assert!(
         diff < one_hour,
-        "Expected trigger ~3h from now (tolerance 1h). Trigger: {}, now: {}, diff_from_3h: {}s",
-        trigger_ts_str,
+        "Expected next_check_at ~3h from now (tolerance 1h). check_at: {}, now: {}, diff_from_3h: {}s",
+        check_at,
         now,
         diff
     );
@@ -507,17 +487,20 @@ async fn test_llm_implicit_date() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger for implicit date, got: {}",
-        task.trigger
+        !item.monitor,
+        "Expected monitor=false for implicit date reminder, got: true"
+    );
+    assert!(
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set for implicit date, got: None"
     );
 }
 
@@ -528,24 +511,17 @@ async fn test_llm_notification_call_me() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    let notif = task.notification_type.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        notif.contains("call"),
-        "Expected notification_type to contain 'call', got: {:?}",
-        task.notification_type
-    );
-    // "call me" should map to send_reminder with call notification, not a nonexistent tool
-    assert!(
-        task.action.contains("send_reminder"),
-        "Expected action to contain 'send_reminder' (not a fabricated tool), got: {}",
-        task.action
+        item.summary.contains("[VIA CALL]"),
+        "Expected summary to contain '[VIA CALL]' for call request, got: {}",
+        item.summary
     );
 }
 
@@ -557,18 +533,21 @@ async fn test_llm_remind_vs_do_remind() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    // User said "remind me" - should be a reminder, NOT the actual Tesla action
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
+    // User said "remind me" - summary should describe reminding, not the action itself
     assert!(
-        task.action.contains("send_reminder"),
-        "Expected action to contain 'send_reminder' (user wants a REMINDER), got: {}",
-        task.action
+        summary_lower.contains("remind")
+            || summary_lower.contains("tesla")
+            || summary_lower.contains("climate"),
+        "Expected summary to describe the reminder about Tesla climate, got: {}",
+        item.summary
     );
 }
 
@@ -580,18 +559,19 @@ async fn test_llm_remind_vs_do_action() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    // User said "turn on" - should be the actual Tesla action, NOT just a reminder
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
+    // User said "turn on" - summary should describe the Tesla action intent
     assert!(
-        task.action.contains("control_tesla"),
-        "Expected action to contain 'control_tesla' (user wants the ACTION), got: {}",
-        task.action
+        summary_lower.contains("tesla") || summary_lower.contains("climate"),
+        "Expected summary to describe the Tesla action, got: {}",
+        item.summary
     );
 }
 
@@ -603,24 +583,20 @@ async fn test_llm_whatsapp_task() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        task.action.contains("send_chat_message"),
-        "Expected action to contain 'send_chat_message', got: {}",
-        task.action
-    );
-    // Should target WhatsApp specifically
-    let action_lower = task.action.to_lowercase();
-    assert!(
-        action_lower.contains("whatsapp"),
-        "Expected action to mention 'whatsapp', got: {}",
-        task.action
+        summary_lower.contains("whatsapp")
+            || summary_lower.contains("wife")
+            || summary_lower.contains("running late"),
+        "Expected summary to mention WhatsApp/wife/running late, got: {}",
+        item.summary
     );
 }
 
@@ -634,22 +610,22 @@ async fn test_llm_recurring_email_watch() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        task.trigger == "recurring_email",
-        "Expected trigger 'recurring_email', got: {}",
-        task.trigger
+        item.monitor,
+        "Expected monitor=true for recurring email watch, got: false"
     );
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition mentioning HR/job, got: {:?}",
-        task.condition
+        summary_lower.contains("hr") || summary_lower.contains("job"),
+        "Expected summary to mention HR/job, got: {}",
+        item.summary
     );
 }
 
@@ -660,22 +636,22 @@ async fn test_llm_recurring_messaging_watch() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
     assert!(
-        task.trigger == "recurring_messaging",
-        "Expected trigger 'recurring_messaging', got: {}",
-        task.trigger
+        item.monitor,
+        "Expected monitor=true for recurring messaging watch, got: false"
     );
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition mentioning mom, got: {:?}",
-        task.condition
+        summary_lower.contains("mom") || summary_lower.contains("mother"),
+        "Expected summary to mention mom, got: {}",
+        item.summary
     );
 }
 
@@ -689,32 +665,28 @@ async fn test_llm_weather_source_with_action() {
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected a task to be created after {} retries. Response: {}",
+        "Expected an item to be created after {} retries. Response: {}",
         MAX_RETRIES,
         response.message
     );
 
-    let tasks = get_user_tasks(&state, user.id);
-    let task = &tasks[0];
-    let sources = task.sources.as_deref().unwrap_or("");
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    let summary_lower = item.summary.to_lowercase();
     assert!(
-        sources.contains("weather"),
-        "Expected sources to contain 'weather', got: {:?}",
-        task.sources
+        summary_lower.contains("weather")
+            || summary_lower.contains("degrees")
+            || summary_lower.contains("plant")
+            || summary_lower.contains("water"),
+        "Expected summary to mention weather/plants context, got: {}",
+        item.summary
     );
     assert!(
-        task.condition.is_some() && !task.condition.as_ref().unwrap().is_empty(),
-        "Expected non-empty condition about temperature, got: {:?}",
-        task.condition
+        !item.monitor,
+        "Expected monitor=false for one-time check, got: true"
     );
     assert!(
-        task.action.contains("send_reminder"),
-        "Expected action to contain 'send_reminder', got: {}",
-        task.action
-    );
-    assert!(
-        task.trigger.starts_with("once_"),
-        "Expected once_ trigger, got: {}",
-        task.trigger
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set, got: None"
     );
 }

@@ -206,7 +206,6 @@ pub async fn handle_create_item(
     let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
     let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
     let ts = parse_datetime_to_timestamp(&args.next_check_at, &tz)?;
-    let (due_at, next_check_at_ts) = (Some(ts), Some(ts));
 
     let summary = args.summary.clone();
 
@@ -214,8 +213,7 @@ pub async fn handle_create_item(
         user_id,
         summary,
         monitor: args.monitor,
-        due_at,
-        next_check_at: next_check_at_ts,
+        next_check_at: Some(ts),
         priority: 1,
         source_id: None,
         created_at: now,

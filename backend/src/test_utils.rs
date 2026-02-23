@@ -623,6 +623,7 @@ pub mod mock_user_core {
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
+        pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
         pub find_by_id_error: Mutex<Option<DieselError>>,
@@ -647,6 +648,7 @@ pub mod mock_user_core {
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
                 quiet_mode: Mutex::new(HashMap::new()),
+                llm_provider: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
             }
@@ -878,12 +880,16 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn update_llm_provider(&self, _user_id: i32, _provider: &str) -> Result<(), DieselError> {
+        fn update_llm_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
+            self.llm_provider
+                .lock()
+                .unwrap()
+                .insert(user_id, provider.to_string());
             Ok(())
         }
 
-        fn get_llm_provider(&self, _user_id: i32) -> Result<Option<String>, DieselError> {
-            Ok(None)
+        fn get_llm_provider(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+            Ok(self.llm_provider.lock().unwrap().get(&user_id).cloned())
         }
 
         fn update_phone_service_active(
@@ -1426,7 +1432,6 @@ pub struct TestItemParams {
     pub user_id: i32,
     pub summary: String,
     pub monitor: bool,
-    pub due_at: Option<i32>,
     pub next_check_at: Option<i32>,
     pub priority: i32,
     pub source_id: Option<String>,
@@ -1439,7 +1444,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: false,
-            due_at: None,
             next_check_at: None,
             priority: 0,
             source_id: None,
@@ -1452,7 +1456,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: false,
-            due_at: Some(trigger_at),
             next_check_at: Some(trigger_at),
             priority: 0,
             source_id: None,
@@ -1465,7 +1468,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: false,
-            due_at: None,
             next_check_at: Some(trigger_at),
             priority: 0,
             source_id: None,
@@ -1478,7 +1480,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: true,
-            due_at: None,
             next_check_at: None,
             priority: 0,
             source_id: None,
@@ -1491,7 +1492,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: false,
-            due_at: None,
             next_check_at: None,
             priority: 1,
             source_id: None,
@@ -1504,7 +1504,6 @@ impl TestItemParams {
             user_id,
             summary: summary.to_string(),
             monitor: false,
-            due_at: None,
             next_check_at: None,
             priority: 0,
             source_id: Some(source_id.to_string()),
@@ -1523,11 +1522,6 @@ impl TestItemParams {
 
     pub fn with_source_id(mut self, source_id: &str) -> Self {
         self.source_id = Some(source_id.to_string());
-        self
-    }
-
-    pub fn with_due_at(mut self, ts: i32) -> Self {
-        self.due_at = Some(ts);
         self
     }
 
@@ -1553,7 +1547,6 @@ pub fn create_test_item(
         user_id: params.user_id,
         summary: params.summary.clone(),
         monitor: params.monitor,
-        due_at: params.due_at,
         next_check_at: params.next_check_at,
         priority: params.priority,
         source_id: params.source_id.clone(),

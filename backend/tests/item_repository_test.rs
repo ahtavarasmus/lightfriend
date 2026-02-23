@@ -338,7 +338,6 @@ fn test_delete_old_items() {
         user_id: user.id,
         summary: "Old item".to_string(),
         monitor: false,
-        due_at: None,
         next_check_at: None,
         priority: 0,
         source_id: None,
@@ -462,7 +461,6 @@ fn test_item_limit_enforcement() {
         user_id: user.id,
         summary: "Item 101".to_string(),
         monitor: false,
-        due_at: None,
         next_check_at: None,
         priority: 0,
         source_id: None,
@@ -711,36 +709,34 @@ fn test_stale_monitor_cleanup() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Stale monitor: due_at >7 days ago, no next_check_at
+    // Stale monitor: next_check_at >7 days ago
     let stale = NewItem {
         user_id: user.id,
         summary: "Old invoice".to_string(),
         monitor: true,
-        due_at: Some(T - 8 * 86400), // 8 days ago
-        next_check_at: None,
+        next_check_at: Some(T - 8 * 86400), // 8 days ago
         priority: 0,
         source_id: None,
         created_at: T - 10 * 86400,
     };
     state.item_repository.create_item(&stale).unwrap();
 
-    // Active monitor: due_at in the past but has next_check_at (being actively checked)
+    // Active monitor: next_check_at in the future (being actively checked)
     let active = NewItem {
         user_id: user.id,
         summary: "Active tracking".to_string(),
         monitor: true,
-        due_at: Some(T - 8 * 86400),
-        next_check_at: Some(T + 86400), // Still has a scheduled check
+        next_check_at: Some(T + 86400), // Future check scheduled
         priority: 1,
         source_id: None,
         created_at: T - 10 * 86400,
     };
     state.item_repository.create_item(&active).unwrap();
 
-    // Fresh monitor: due_at in the future
+    // Match-only monitor: no next_check_at (should not be cleaned up)
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Future invoice").with_due_at(T + 5 * 86400),
+        &TestItemParams::monitor(user.id, "Match-only monitor"),
     );
 
     assert_eq!(get_user_items(&state, user.id).len(), 3);
@@ -753,5 +749,5 @@ fn test_stale_monitor_cleanup() {
     assert_eq!(remaining.len(), 2);
     let summaries: Vec<&str> = remaining.iter().map(|i| i.summary.as_str()).collect();
     assert!(summaries.contains(&"Active tracking"));
-    assert!(summaries.contains(&"Future invoice"));
+    assert!(summaries.contains(&"Match-only monitor"));
 }

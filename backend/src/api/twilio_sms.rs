@@ -250,12 +250,13 @@ impl SmsResponse {
     /// Use this for normal responses where we want intelligent condensing.
     pub async fn new(
         raw: String,
-        client: &openai_api_rs::v1::api::OpenAIClient,
+        state: &Arc<AppState>,
+        provider: crate::AiProvider,
         model: &str,
     ) -> Self {
         let content = if raw.chars().count() > Self::MAX_LENGTH {
             // Try to condense with LLM first, fall back to truncation
-            condense_response(client, &raw, Self::MAX_LENGTH, model)
+            condense_response(state, provider, &raw, Self::MAX_LENGTH, model)
                 .await
                 .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
         } else {
@@ -343,7 +344,8 @@ fn truncate_nicely(text: &str, max_chars: usize) -> String {
 
 /// Ask LLM to condense a response to fit within max_chars
 async fn condense_response(
-    client: &openai_api_rs::v1::api::OpenAIClient,
+    state: &Arc<AppState>,
+    provider: crate::AiProvider,
     original: &str,
     max_chars: usize,
     model: &str,
@@ -371,7 +373,7 @@ async fn condense_response(
     )
     .max_tokens(300);
 
-    match client.chat_completion(req).await {
+    match state.ai_config.chat_completion(provider, &req).await {
         Ok(response) => {
             if let Some(choice) = response.choices.first() {
                 if let Some(content) = &choice.message.content {
@@ -1018,9 +1020,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     break;
                 }
                 Err(e) => {
-                    last_error = format!("{}", e);
+                    last_error = format!("{:?}", e);
                     tracing::warn!(
-                        "Chat completion attempt {}/{} failed: {}",
+                        "Chat completion attempt {}/{} failed: {:?}",
                         attempt,
                         MAX_RETRIES,
                         e
@@ -1418,7 +1420,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, &ctx.client, &model)
+        SmsResponse::new(final_response, state, provider, &model)
             .await
             .into_inner()
     } else {
