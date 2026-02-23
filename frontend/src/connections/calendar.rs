@@ -2,6 +2,7 @@ use yew::prelude::*;
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{MouseEvent, Event, HtmlInputElement};
+use crate::config;
 use crate::utils::api::Api;
 #[derive(Properties, PartialEq)]
 pub struct CalendarProps {
@@ -76,7 +77,11 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                 if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
                                                     web_sys::console::log_1(&format!("Redirecting to auth_url: {}", auth_url).into());
                                                     if let Some(window) = web_sys::window() {
-                                                        let _ = window.location().set_href(auth_url);
+                                                        if config::is_tauri() {
+                                                            let _ = window.open_with_url(auth_url);
+                                                        } else {
+                                                            let _ = window.location().set_href(auth_url);
+                                                        }
                                                     }
                                                 } else {
                                                     web_sys::console::log_1(&"Missing auth_url in response".into());

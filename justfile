@@ -205,6 +205,30 @@ dev-frontend:
 test-backend:
     cd backend && cargo test
 
-# Development: Run tests for frontend  
+# Development: Run tests for frontend
 test-frontend:
     cd frontend && cargo test
+
+# Tauri: Run desktop app in dev mode
+tauri-dev:
+    cd tauri && cargo tauri dev
+
+# Tauri: Build desktop app for release
+tauri-build:
+    cd tauri && cargo tauri build
+
+# Tauri: Run Android app in dev mode
+tauri-android-dev:
+    cd tauri && cargo tauri android dev
+
+# Tauri: Build Android app for release
+tauri-android-build:
+    cd tauri && cargo tauri android build
+
+# Tauri: Run iOS app in dev mode
+tauri-ios-dev:
+    cd tauri && cargo tauri ios dev
+
+# Tauri: Build iOS app for release
+tauri-ios-build:
+    cd tauri && cargo tauri ios build

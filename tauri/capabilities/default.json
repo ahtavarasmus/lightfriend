@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui-tauri/main/nicegui-tauri/.schema/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://lightfriend.ai/**" },
+        { "url": "https://api.stripe.com/**" },
+        { "url": "https://js.stripe.com/**" },
+        { "url": "https://cdn.jsdelivr.net/**" },
+        { "url": "https://kit.fontawesome.com/**" },
+        { "url": "https://ka-f.fontawesome.com/**" },
+        { "url": "https://fonts.googleapis.com/**" },
+        { "url": "https://fonts.gstatic.com/**" },
+        { "url": "https://www.googletagmanager.com/**" },
+        { "url": "https://www.google-analytics.com/**" },
+        { "url": "https://scripts.simpleanalyticscdn.com/**" },
+        { "url": "https://datafa.st/**" }
+      ]
+    }
+  ]
+}

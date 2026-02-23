@@ -3,6 +3,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
+use crate::config;
 use crate::utils::api::Api;
 use serde::Deserialize;
 
@@ -318,7 +319,11 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
                                 if let Some(auth_url) = data["auth_url"].as_str() {
                                     if let Some(window) = window() {
-                                        let _ = window.location().set_href(auth_url);
+                                        if config::is_tauri() {
+                                            let _ = window.open_with_url(auth_url);
+                                        } else {
+                                            let _ = window.location().set_href(auth_url);
+                                        }
                                     }
                                 }
                             }

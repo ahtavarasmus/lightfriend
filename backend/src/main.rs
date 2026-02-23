@@ -1360,32 +1360,40 @@ async fn main() {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(
-            CorsLayer::new()
-                .allow_methods([
-                    axum::http::Method::GET,
-                    axum::http::Method::POST,
-                    axum::http::Method::OPTIONS,
-                    axum::http::Method::DELETE,
-                    axum::http::Method::PATCH,
-                    axum::http::Method::PUT,
-                ])
-                .allow_origin(AllowOrigin::exact(
-                    std::env::var("FRONTEND_URL")
-                        .unwrap_or_else(|_| "http://localhost:8080".to_string())
-                        .parse()
-                        .expect("Invalid FRONTEND_URL"),
-                )) // Restrict in production
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::AUTHORIZATION,
-                    axum::http::header::ACCEPT,
-                    axum::http::header::ORIGIN,
-                ])
-                .expose_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::CONTENT_LENGTH,
-                ])
-                .allow_credentials(true),
+            {
+                let frontend_url: HeaderValue = std::env::var("FRONTEND_URL")
+                    .unwrap_or_else(|_| "http://localhost:8080".to_string())
+                    .parse()
+                    .expect("Invalid FRONTEND_URL");
+                let tauri_origins: Vec<HeaderValue> = vec![
+                    "tauri://localhost".parse().unwrap(),
+                    "https://tauri.localhost".parse().unwrap(),
+                ];
+                CorsLayer::new()
+                    .allow_methods([
+                        axum::http::Method::GET,
+                        axum::http::Method::POST,
+                        axum::http::Method::OPTIONS,
+                        axum::http::Method::DELETE,
+                        axum::http::Method::PATCH,
+                        axum::http::Method::PUT,
+                    ])
+                    .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                        origin == frontend_url
+                            || tauri_origins.iter().any(|t| origin == t)
+                    }))
+                    .allow_headers([
+                        axum::http::header::CONTENT_TYPE,
+                        axum::http::header::AUTHORIZATION,
+                        axum::http::header::ACCEPT,
+                        axum::http::header::ORIGIN,
+                    ])
+                    .expose_headers([
+                        axum::http::header::CONTENT_TYPE,
+                        axum::http::header::CONTENT_LENGTH,
+                    ])
+                    .allow_credentials(true)
+            },
         )
         // Security headers to prevent clickjacking, XSS, and other attacks
         .layer(SetResponseHeaderLayer::overriding(
