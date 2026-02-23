@@ -17,6 +17,15 @@ use crate::{
     AppState,
 };
 
+/// Check if the request Origin header indicates a Tauri app
+pub fn is_tauri_origin(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+        .map(|origin| origin == "tauri://localhost" || origin == "https://tauri.localhost")
+        .unwrap_or(false)
+}
+
 #[derive(Deserialize)]
 pub struct CompletePasswordResetRequest {
     pub token: String,
@@ -82,6 +91,7 @@ pub async fn get_users(
 
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(login_req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Login attempt for email: {}", login_req.email);
@@ -188,7 +198,7 @@ pub async fn login(
         return Ok(response);
     }
 
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(user.id, is_tauri_origin(&headers))
 }
 
 #[derive(serde::Deserialize)]
@@ -391,6 +401,7 @@ pub async fn verify_phone_verify(
 
 pub async fn register(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Registration attempt for email: {}", reg_req.email);
@@ -517,12 +528,12 @@ pub async fn register(
             .user_core
             .set_preferred_number_for_country(user.id, &country);
     }
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(user.id, is_tauri_origin(&headers))
 }
 
 pub async fn refresh_token(
     State(_state): State<Arc<AppState>>,
-    headers: reqwest::header::HeaderMap,
+    headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let refresh_token = match headers.get("cookie") {
         Some(cookie_header) => {
@@ -572,11 +583,12 @@ pub async fn refresh_token(
     }
 
     // Optional: Rotate refresh token by generating a new one
-    generate_tokens_and_response(user_id)
+    generate_tokens_and_response(user_id, is_tauri_origin(&headers))
 }
 
 pub fn generate_tokens_and_response(
     user_id: i32,
+    is_tauri: bool,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Generate access token (1 hour)
     let access_token = encode(
@@ -625,11 +637,13 @@ pub fn generate_tokens_and_response(
         Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string(),
     ));
     // Don't use Secure flag in development (HTTP), only in production (HTTPS)
-    // Use SameSite=Lax to allow cookies on redirects (Strict blocks them)
+    // Use SameSite=None for Tauri cross-origin requests, SameSite=Lax for web
     let is_development =
         std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
     let cookie_options = if is_development {
         "; HttpOnly; SameSite=Lax; Path=/"
+    } else if is_tauri {
+        "; HttpOnly; Secure; SameSite=None; Path=/"
     } else {
         "; HttpOnly; Secure; SameSite=Lax; Path=/"
     };
@@ -668,7 +682,7 @@ pub async fn auth_status(
     })))
 }
 
-pub async fn logout() -> Result<Response, StatusCode> {
+pub async fn logout(headers: axum::http::HeaderMap) -> Result<Response, StatusCode> {
     // Create response that clears both authentication cookies
     let mut response = Response::new(axum::body::Body::from(
         Json(json!({"message": "Logged out successfully"})).to_string(),
@@ -676,8 +690,11 @@ pub async fn logout() -> Result<Response, StatusCode> {
 
     let is_development =
         std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
+    let is_tauri = is_tauri_origin(&headers);
     let cookie_clear_options = if is_development {
         "; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
+    } else if is_tauri {
+        "; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0"
     } else {
         "; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
     };
@@ -719,6 +736,7 @@ pub struct SetPasswordRequest {
 /// GET /api/auth/magic/:token
 pub async fn validate_magic_link(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(token): Path<String>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Find user by magic_token
@@ -755,7 +773,7 @@ pub async fn validate_magic_link(
             .unwrap())
     } else {
         // User already has password - auto-login and return JWT
-        generate_tokens_and_response(user.id)
+        generate_tokens_and_response(user.id, is_tauri_origin(&headers))
     }
 }
 
@@ -763,6 +781,7 @@ pub async fn validate_magic_link(
 /// POST /api/auth/set-password
 pub async fn set_password_from_magic_link(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<SetPasswordRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Validate password length
@@ -814,7 +833,7 @@ pub async fn set_password_from_magic_link(
     tracing::info!("User {} set their password via magic link", user.id);
 
     // Generate JWT tokens and return
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(user.id, is_tauri_origin(&headers))
 }
 
 /// Get magic token from Stripe session ID (for redirect flow)

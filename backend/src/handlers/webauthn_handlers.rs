@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webauthn_rs::prelude::*;
 
-use crate::handlers::auth_handlers::generate_tokens_and_response;
+use crate::handlers::auth_handlers::{generate_tokens_and_response, is_tauri_origin};
 use crate::handlers::auth_middleware::AuthUser;
 use crate::repositories::webauthn_repository::CreateCredentialParams;
 use crate::utils::webauthn_config::get_webauthn;
@@ -557,6 +557,7 @@ pub async fn rename_passkey(
 /// POST /api/webauthn/verify-login - Verify WebAuthn during login
 pub async fn verify_login(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<VerifyLoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     use governor::{Quota, RateLimiter};
@@ -696,7 +697,7 @@ pub async fn verify_login(
     state.pending_totp_logins.remove(&req.login_token);
 
     // Generate tokens and return response
-    generate_tokens_and_response(user_id).map_err(|_| {
+    generate_tokens_and_response(user_id, is_tauri_origin(&headers)).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to generate tokens"})),
