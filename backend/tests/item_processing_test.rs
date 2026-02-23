@@ -4,8 +4,8 @@
 //! triggered item fires, `process_triggered_item` returns correct results:
 //! - sms_message is concise and actionable
 //! - priority maps to the right delivery method (1=SMS, 2=call)
-//! - next_check_at is present for recurring items, absent for one-shots
-//! - summary is returned unchanged for recurring items
+//! - next_check_at is always required at creation; set to null on trigger to delete the item
+//! - summary may be updated on trigger (e.g. monitored items append tracking context)
 //!
 //! All tests are gated with `#[ignore]` because they cost real API tokens.
 //! Run explicitly with: `cargo test --test item_processing_test -- --ignored --test-threads=1`
@@ -89,7 +89,7 @@ async fn process_item_with_retry(
 ) -> TriggeredItemResult {
     let mut last_err = None;
     for attempt in 1..=MAX_RETRIES {
-        match process_triggered_item(state, user_id, item).await {
+        match process_triggered_item(state, user_id, item, None).await {
             Ok(result) => return result,
             Err(e) => {
                 eprintln!(
@@ -121,7 +121,7 @@ fn assert_sms_contains_any(sms_message: &str, keywords: &[&str]) {
 }
 
 // =============================================================================
-// 1. Simple reminders - one-shot, should delete (no next_check_at)
+// 1. Simple reminders - one-shot, LLM returns null next_check_at to signal deletion
 // =============================================================================
 
 #[tokio::test]
@@ -481,18 +481,8 @@ async fn test_monitor_match_email_from_hr() {
         Some(item_id),
         "Should match the correct item"
     );
-    assert!(
-        response.should_notify,
-        "HR job offer email should trigger notification"
-    );
 
-    if let Some(ref sms) = response.sms_message {
-        assert!(sms.len() <= 160, "SMS too long: {} chars", sms.len());
-        eprintln!("  SMS: {}", sms);
-    }
-    eprintln!("  should_notify: {}", response.should_notify);
-    eprintln!("  is_resolved: {}", response.is_resolved);
-    eprintln!("  updated_summary: {:?}", response.updated_summary);
+    eprintln!("  task_id: {:?}", response.task_id);
 }
 
 #[tokio::test]
@@ -520,15 +510,8 @@ async fn test_monitor_match_mom_texts() {
         .expect("Should match the mom monitor");
 
     assert_eq!(response.task_id, Some(item_id));
-    assert!(
-        response.should_notify,
-        "Mom texting should trigger notification"
-    );
 
-    eprintln!("  should_notify: {}", response.should_notify);
-    eprintln!("  is_resolved: {}", response.is_resolved);
-    eprintln!("  updated_summary: {:?}", response.updated_summary);
-    eprintln!("  sms_message: {:?}", response.sms_message);
+    eprintln!("  task_id: {:?}", response.task_id);
 }
 
 #[tokio::test]
@@ -556,19 +539,8 @@ async fn test_monitor_match_package_delivered() {
         .expect("Should match the package monitor");
 
     assert_eq!(response.task_id, Some(item_id));
-    assert!(
-        response.is_resolved,
-        "Package delivered should resolve the monitor"
-    );
-    assert!(
-        response.should_notify,
-        "Package delivery should notify the user"
-    );
 
-    eprintln!("  is_resolved: {}", response.is_resolved);
-    eprintln!("  should_notify: {}", response.should_notify);
-    eprintln!("  updated_summary: {:?}", response.updated_summary);
-    eprintln!("  sms_message: {:?}", response.sms_message);
+    eprintln!("  task_id: {:?}", response.task_id);
 }
 
 // =============================================================================
@@ -703,12 +675,10 @@ async fn test_monitor_match_correct_item_among_multiple() {
     );
 
     eprintln!("  Matched item_id: {:?}", response.task_id);
-    eprintln!("  should_notify: {}", response.should_notify);
-    eprintln!("  updated_summary: {:?}", response.updated_summary);
 }
 
 // =============================================================================
-// 11. Scheduled check for monitors (synthetic SYSTEM message)
+// 11. Scheduled check for monitors (via process_triggered_item with None)
 // =============================================================================
 
 #[tokio::test]
@@ -731,32 +701,18 @@ async fn test_monitor_scheduled_check_with_deadline() {
         )
         .with_next_check_at(now),
     );
-    let item_id = item.id.unwrap();
 
-    let now_str = chrono::Utc::now().to_rfc3339();
-
-    let synthetic_message = format!(
-        "SYSTEM: Scheduled check triggered for this item. \
-        Current time: {}. \
-        Evaluate if this item needs attention, escalation, or resolution.",
-        now_str
-    );
-
-    let result = check_item_monitor_match(&state, user.id, &synthetic_message, &[item]).await;
+    // Scheduled monitor checks now go through process_triggered_item with None
+    let result = process_triggered_item(&state, user.id, &item, None).await;
     let response = result.expect("LLM call should succeed");
 
-    if let Some(ref resp) = response {
-        assert_eq!(resp.task_id, Some(item_id));
-        eprintln!("  task_id: {:?}", resp.task_id);
-        eprintln!("  should_notify: {}", resp.should_notify);
-        eprintln!("  is_resolved: {}", resp.is_resolved);
-        eprintln!("  priority: {:?}", resp.priority);
-        eprintln!("  next_check_at: {:?}", resp.next_check_at);
-        eprintln!("  updated_summary: {:?}", resp.updated_summary);
-        eprintln!("  sms_message: {:?}", resp.sms_message);
-    } else {
-        eprintln!("  LLM returned no match for scheduled check (may reschedule via heuristic)");
-    }
+    // Should produce a notification about the upcoming deadline
+    assert!(!response.summary.is_empty(), "Summary should be present");
+
+    eprintln!("  summary: {}", response.summary);
+    eprintln!("  sms_message: {:?}", response.sms_message);
+    eprintln!("  next_check_at: {:?}", response.next_check_at);
+    eprintln!("  priority: {:?}", response.priority);
 }
 
 #[tokio::test]
@@ -775,29 +731,15 @@ async fn test_monitor_scheduled_check_no_deadline() {
         &state,
         &TestItemParams::monitor(user.id, "Watch for messages from mom").with_next_check_at(now),
     );
-    let item_id = item.id.unwrap();
 
-    let now_str = chrono::Utc::now().to_rfc3339();
-    let synthetic_message = format!(
-        "SYSTEM: Scheduled check triggered for this item. \
-        Current time: {}. Due date: none. \
-        Evaluate if this item needs attention, escalation, or resolution.",
-        now_str
-    );
-
-    let result = check_item_monitor_match(&state, user.id, &synthetic_message, &[item]).await;
+    // Scheduled monitor checks now go through process_triggered_item with None
+    let result = process_triggered_item(&state, user.id, &item, None).await;
     let response = result.expect("LLM call should succeed");
 
-    if let Some(ref resp) = response {
-        assert_eq!(resp.task_id, Some(item_id));
-        assert!(
-            !resp.is_resolved,
-            "Open-ended monitor with no new info should NOT be resolved"
-        );
-        eprintln!("  should_notify: {}", resp.should_notify);
-        eprintln!("  next_check_at: {:?}", resp.next_check_at);
-        eprintln!("  updated_summary: {:?}", resp.updated_summary);
-    } else {
-        eprintln!("  No match (expected - no new info, will reschedule via heuristic)");
-    }
+    assert!(!response.summary.is_empty(), "Summary should be present");
+
+    eprintln!("  summary: {}", response.summary);
+    eprintln!("  sms_message: {:?}", response.sms_message);
+    eprintln!("  next_check_at: {:?}", response.next_check_at);
+    eprintln!("  priority: {:?}", response.priority);
 }
