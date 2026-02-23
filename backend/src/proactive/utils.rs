@@ -62,40 +62,6 @@ const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an i
     - If the content is short (<=5 words), require the message to contain *all* those words (case-insensitive).
     - A match must be *unambiguous*. Ambiguous, partial, or sender-only matches DO NOT count.
     - If multiple items could match, choose the single *best* match. Return `null` if none match.
-
-    **Resolution rules**
-    Set `is_resolved=true` when the tracked thing is clearly complete:
-    - Payment confirmed, invoice paid
-    - Package delivered (not just shipped or in transit)
-    - Question answered definitively
-    - Appointment completed
-    - Document signed/approved
-    Use common sense for `should_notify` on resolution: only notify if the user would actually
-    want to hear about it. A routine invoice being paid (user probably paid it themselves) does
-    NOT need a notification. A package delivered after delays, or an important question answered,
-    might warrant one. When in doubt on resolution, do NOT notify - just silently resolve.
-
-    **Lifecycle rules**
-    - `next_check_at`: Set an ISO datetime for the next scheduled check if the item needs follow-up.
-      Example: package shipped today, set next_check_at to 2 days from now. Leave null if no follow-up needed.
-    - `priority`: 0 = background (digest only, no standalone notification), 1 = SMS, 2 = phone call.
-      Only escalate if the situation warrants it (e.g. approaching deadline, overdue payment).
-
-    **Notification decision**
-    When a match is found, decide whether to **notify** the user or just **silently update** the item:
-    - Set `should_notify=true` if the match represents something the user would want to know RIGHT NOW
-      (e.g., "mom replied", "package delivered", "flight delayed", "job application response").
-    - Set `should_notify=false` if this is just a background tracking update that doesn't need immediate attention
-      (e.g., routine shipping status "in transit", background price tracking, periodic status update).
-    - When in doubt, notify.
-
-    **Updated summary**
-    Provide an `updated_summary` that incorporates what was matched. This replaces the item's current summary.
-    Keep it concise (max 120 chars). Include key details from the match.
-    Example: "Watch for emails from mom" -> "Mom replied: 'Sure, dinner at 7 works!'"
-
-    If a match is found AND should_notify=true, craft a short notification:
-    `sms_message` (<=160 chars) - concise SMS describing the event.
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
@@ -154,25 +120,6 @@ If `is_critical` is false, leave the other two fields empty strings.
 pub struct ItemMatchResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<i32>, // actually item_id - kept as task_id for LLM schema compat
-
-    #[serde(default)]
-    pub should_notify: bool,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updated_summary: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sms_message: Option<String>,
-
-    // Lifecycle fields - LLM-controlled monitor management
-    #[serde(default)]
-    pub is_resolved: bool,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_check_at: Option<String>, // ISO datetime string, parsed at call site
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<i32>, // 0/1/2 escalation
 }
 
 /// Determine whether `message` matches **one** of the supplied monitor items.
@@ -222,90 +169,18 @@ pub async fn check_item_monitor_match(
             ..Default::default()
         }),
     );
-    properties.insert(
-        "should_notify".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some(
-                "Whether to notify the user now. true for actionable/important matches, \
-                false for background tracking updates that don't need immediate attention."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "updated_summary".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Updated summary incorporating match details (max 120 chars). \
-                Replaces the item's current summary."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "sms_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Concise SMS (max 160 chars) when matched AND should_notify=true, else empty"
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "is_resolved".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some(
-                "Set true when the tracked thing is clearly complete (delivered, paid, answered). \
-                Item will be deleted. Default false."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "next_check_at".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "ISO datetime for next scheduled check, e.g. '2026-03-01T09:00:00Z'. \
-                Set if the item needs follow-up later. Null if no follow-up needed."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "priority".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some(
-                "Escalate importance: 0 = background/digest-only, 1 = standalone notification, \
-                2 = urgent. Only change if situation warrants."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: "analyze_item_match".to_string(),
             description: Some(
-                "Determines whether the message matches a monitor item, evaluates lifecycle \
-                (resolution, next check, priority escalation), and provides an updated summary."
+                "Returns the ID of the best-matching monitor item, or null if none match."
                     .to_string(),
             ),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["task_id".to_string(), "should_notify".to_string()]),
+                required: Some(vec!["task_id".to_string()]),
             },
         },
     }];
@@ -339,133 +214,6 @@ pub async fn check_item_monitor_match(
     }
 }
 
-/// Apply monitor lifecycle changes from an `ItemMatchResponse` to an item.
-///
-/// Handles:
-/// - Resolution: deletes the item, optionally notifies
-/// - Update: applies summary, next_check_at, priority changes
-/// - Priority gate: only sends standalone notification if effective priority >= 1
-///
-/// Safety guards on next_check_at:
-/// - LLM returns null + item has due_at: fall back to heuristic (check in 1-3 days)
-/// - LLM returns date >30 days out: cap at 30 days
-/// - LLM returns date in the past: clamp to now + 3600
-pub async fn apply_monitor_lifecycle(
-    state: &Arc<AppState>,
-    item: &crate::models::user_models::Item,
-    response: &ItemMatchResponse,
-) {
-    let item_id = item.id.unwrap_or(0);
-    let user_id = item.user_id;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    // Resolution: delete item
-    if response.is_resolved {
-        let _ = state.item_repository.delete_item(item_id, user_id);
-        tracing::debug!("Monitor item {} resolved and deleted", item_id);
-
-        // Notify about resolution if should_notify is true and priority >= 1
-        let effective_priority = response.priority.unwrap_or(item.priority);
-        if response.should_notify && effective_priority >= 1 {
-            let notification_type = if effective_priority >= 2 {
-                "call"
-            } else {
-                "sms"
-            };
-            let message = response
-                .sms_message
-                .clone()
-                .unwrap_or_else(|| format!("Resolved: {}", item.summary));
-            let opener = "Hey, you have a notification!".to_string();
-
-            let state_clone = state.clone();
-            tokio::spawn(async move {
-                send_notification(
-                    &state_clone,
-                    user_id,
-                    &message,
-                    format!("monitor_{}", notification_type),
-                    Some(opener),
-                )
-                .await;
-            });
-        }
-        return;
-    }
-
-    // Update item fields
-    let updated_summary = response
-        .updated_summary
-        .clone()
-        .unwrap_or_else(|| item.summary.clone());
-    let effective_priority = response.priority.unwrap_or(item.priority);
-
-    // Parse and apply safety guards to next_check_at
-    let max_future = now + 30 * 86400; // 30 days cap
-    let parsed_next_check = response
-        .next_check_at
-        .as_deref()
-        .and_then(parse_iso_to_timestamp);
-
-    let safe_next_check = match parsed_next_check {
-        Some(ts) if ts <= now => Some(now + 3600), // Past: clamp to now + 1 hour
-        Some(ts) if ts > max_future => Some(max_future), // >30 days: cap
-        Some(ts) => Some(ts),
-        None => {
-            // LLM returned null next_check_at: delete the item
-            tracing::debug!(
-                "LLM returned null next_check_at for item {}, deleting",
-                item_id
-            );
-            let _ = state.item_repository.delete_item(item_id, user_id);
-            return;
-        }
-    };
-
-    let _ = state.item_repository.update_item(
-        item_id,
-        user_id,
-        &updated_summary,
-        safe_next_check,
-        effective_priority,
-    );
-
-    // Notification: only send standalone if effective priority >= 1
-    if response.should_notify && effective_priority >= 1 {
-        let notification_type = if effective_priority >= 2 {
-            "call"
-        } else {
-            "sms"
-        };
-        let message = response
-            .sms_message
-            .clone()
-            .unwrap_or_else(|| format!("Monitor matched: {}", item.summary));
-        let opener = "Hey, you have a notification!".to_string();
-
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            send_notification(
-                &state_clone,
-                user_id,
-                &message,
-                format!("monitor_{}", notification_type),
-                Some(opener),
-            )
-            .await;
-        });
-    } else if response.should_notify {
-        tracing::debug!(
-            "Monitor item {} matched with should_notify but priority {} < 1, digest only",
-            item_id,
-            effective_priority
-        );
-    }
-}
-
 /// Result from processing a triggered item via LLM.
 #[derive(Debug, Deserialize)]
 pub struct TriggeredItemResult {
@@ -482,11 +230,65 @@ pub struct TriggeredItemResult {
     pub priority: Option<i32>,
 }
 
-const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that processes triggered items for a user. An item just fired at its scheduled time. Your job:
+/// Handle the result of processing a triggered item.
+///
+/// Sends notification (if sms_message present and priority >= 1),
+/// reschedules (if next_check_at present, with safety clamps),
+/// or deletes the item (if next_check_at absent).
+pub async fn handle_triggered_item_result(
+    state: &Arc<AppState>,
+    user_id: i32,
+    item_id: i32,
+    current_priority: i32,
+    response: &TriggeredItemResult,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_priority = response.priority.unwrap_or(current_priority);
+
+    // Send notification if sms_message present and priority >= 1
+    if let Some(ref sms) = response.sms_message {
+        if new_priority >= 1 {
+            let noti_type = if new_priority >= 2 { "call" } else { "sms" };
+            send_notification(
+                state,
+                user_id,
+                sms,
+                format!("item_{}", noti_type),
+                Some("Hey, you have a notification!".to_string()),
+            )
+            .await;
+        }
+    }
+
+    // Reschedule or delete
+    if let Some(ref next) = response.next_check_at {
+        let next_ts = parse_iso_to_timestamp(next)
+            .map(|ts| ts.max(now + 60).min(now + 30 * 86400))
+            .unwrap_or(now + 86400);
+        let _ = state.item_repository.update_item(
+            item_id,
+            user_id,
+            &response.summary,
+            Some(next_ts),
+            new_priority,
+        );
+        tracing::debug!("Item {} rescheduled to {}", item_id, next_ts);
+    } else {
+        let _ = state.item_repository.delete_item(item_id, user_id);
+        tracing::debug!("Item {} completed and deleted", item_id);
+    }
+}
+
+const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that processes triggered items for a user. An item was triggered and needs processing. Your job:
 
 1. Read the item summary carefully. It describes what to do.
-2. If the summary mentions fetching data (emails, messages, calendar, weather), use the available fetch tools to gather that information first.
-3. Once you have all needed information, call `process_item_result` with your result.
+2. If there is a matched message, consider it as context for what triggered this item.
+3. If the summary mentions fetching data (emails, messages, calendar, weather), use the available fetch tools to gather that information first.
+4. Once you have all needed information, call `process_item_result` with your result.
 
 **Available fetch tools:**
 - `fetch_emails` - Fetch the user's recent emails. No parameters needed.
@@ -522,12 +324,16 @@ const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that proc
 - Data-fetching item: summary="Check weather in Helsinki and notify the user" -> get_weather, sms_message="Helsinki: 5C, light rain.", no next_check_at."#;
 
 /// Process a triggered item using LLM with optional tool-calling loop.
-/// Replaces the old `generate_item_notification` with a unified approach
-/// that supports both simple reminders and digest/recurring items.
+/// Supports simple reminders, digest/recurring items, and monitor items
+/// that matched an incoming message.
+///
+/// `matched_message`: `None` = time-fired trigger, `Some(msg)` = an incoming
+/// message matched this item (monitor match from bridge/email).
 pub async fn process_triggered_item(
     state: &Arc<AppState>,
     user_id: i32,
     item: &crate::models::user_models::Item,
+    matched_message: Option<&str>,
 ) -> Result<TriggeredItemResult, Box<dyn std::error::Error>> {
     let ctx = ContextBuilder::for_user(state, user_id)
         .with_user_context()
@@ -540,6 +346,18 @@ pub async fn process_triggered_item(
         (chrono::Utc::now().to_rfc3339(), "UTC".to_string())
     };
 
+    let user_msg = if let Some(msg) = matched_message {
+        format!(
+            "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}\n\nMatched message:\n{}",
+            time_str, tz_label, item.summary, item.priority, msg
+        )
+    } else {
+        format!(
+            "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}",
+            time_str, tz_label, item.summary, item.priority
+        )
+    };
+
     let mut messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -550,10 +368,7 @@ pub async fn process_triggered_item(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}",
-                time_str, tz_label, item.summary, item.priority
-            )),
+            content: chat_completion::Content::Text(user_msg),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -3468,12 +3283,9 @@ pub async fn send_notification(
     };
 
     // Check user's notification preference from settings
-    // Note: Order matters - check "_call_sms" before "_call" to avoid false match
     // Digests are always SMS-only (not affected by user's default notification type)
     let notification_type = if content_type.contains("digest") {
         "sms"
-    } else if content_type.contains("_call_sms") {
-        "call_sms"
     } else if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
     } else if content_type.contains("_call") {
@@ -3486,116 +3298,7 @@ pub async fn send_notification(
 
     match notification_type {
         "call" => {
-            if let Err(e) =
-                crate::utils::usage::check_user_credits(state, &user, "noti_call", None).await
-            {
-                tracing::warn!("User {} has insufficient credits: {}", user.id, e);
-                return;
-            }
-
-            // Create dynamic variables (optional, can be customized based on needs)
-            let dynamic_vars = std::collections::HashMap::new();
-
-            match crate::api::elevenlabs::make_notification_call(
-                &state.clone(),
-                content_type.clone(), // Notification type
-                first_message.clone().unwrap_or(
-                    "Hello, I have a critical notification to tell you about".to_string(),
-                ),
-                notification.to_string(),
-                user.id.to_string(),
-                user_info.timezone,
-            )
-            .await
-            {
-                Ok(mut response) => {
-                    // Add dynamic variables to the client data
-                    if let Some(client_data) = response.get_mut("client_data") {
-                        if let Some(obj) = client_data.as_object_mut() {
-                            obj.extend(
-                                dynamic_vars
-                                    .into_iter()
-                                    .map(|(k, v)| (k, serde_json::Value::String(v))),
-                            );
-                        }
-                    }
-                    tracing::debug!(
-                        "Successfully initiated call notification for user {}",
-                        user.id
-                    );
-
-                    // Store notification in message history
-                    let assistant_notification = crate::models::user_models::NewMessageHistory {
-                        user_id: user.id,
-                        role: "assistant".to_string(),
-                        encrypted_content: notification.to_string(),
-                        tool_name: None,
-                        tool_call_id: None,
-                        tool_calls_json: None,
-                        created_at: current_time,
-                        conversation_id: "".to_string(),
-                    };
-
-                    if let Err(e) = state
-                        .user_repository
-                        .create_message_history(&assistant_notification)
-                    {
-                        tracing::error!("Failed to store notification in history: {}", e);
-                    }
-
-                    // Log successful call notification
-                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                        user_id,
-                        sid: response
-                            .get("sid")
-                            .and_then(|v| v.as_str())
-                            .map(String::from),
-                        activity_type: content_type,
-                        credits: None,
-                        time_consumed: None,
-                        success: Some(true),
-                        reason: None,
-                        status: Some("completed".to_string()),
-                        recharge_threshold_timestamp: None,
-                        zero_credits_timestamp: None,
-                    }) {
-                        tracing::error!("Failed to log call notification usage: {}", e);
-                    }
-
-                    // Deduct credits after successful notification
-                    if let Err(e) =
-                        crate::utils::usage::deduct_user_credits(state, user_id, "noti_call", None)
-                    {
-                        tracing::error!(
-                            "Failed to deduct credits for user {} after call notification: {}",
-                            user_id,
-                            e
-                        );
-                    }
-                }
-                Err((_, json_err)) => {
-                    tracing::error!("Failed to initiate call notification: {:?}", json_err);
-
-                    // Log failed call notification
-                    if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                        user_id,
-                        sid: None,
-                        activity_type: content_type,
-                        credits: None,
-                        time_consumed: None,
-                        success: Some(false),
-                        reason: Some(format!("Failed to initiate call: {:?}", json_err)),
-                        status: Some("failed".to_string()),
-                        recharge_threshold_timestamp: None,
-                        zero_credits_timestamp: None,
-                    }) {
-                        tracing::error!("Failed to log failed call notification: {}", e);
-                    }
-                }
-            }
-        }
-        "call_sms" => {
-            // Call + SMS: Send SMS first (always charged), then initiate call (conditionally charged)
+            // Call notification: Send SMS first (always charged), then initiate call (conditionally charged)
             // The call acts as a loud alert; SMS contains the actual message content.
             // If the user doesn't answer the call (call_initiation_failure webhook),
             // we don't charge for the call - only for the SMS.
@@ -3605,7 +3308,7 @@ pub async fn send_notification(
                 crate::utils::usage::check_user_credits(state, &user, "noti_msg", None).await
             {
                 tracing::warn!(
-                    "User {} has insufficient credits for Call+SMS notification: {}",
+                    "User {} has insufficient credits for call notification: {}",
                     user.id,
                     e
                 );
@@ -3619,7 +3322,7 @@ pub async fn send_notification(
                 .await
             {
                 Ok(response_sid) => {
-                    tracing::info!("Call+SMS: SMS sent successfully for user {}", user_id);
+                    tracing::info!("Call: SMS sent successfully for user {}", user_id);
 
                     // Store notification in message history
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
@@ -3637,7 +3340,7 @@ pub async fn send_notification(
                         .user_repository
                         .create_message_history(&assistant_notification)
                     {
-                        tracing::error!("Failed to store Call+SMS notification in history: {}", e);
+                        tracing::error!("Failed to store call notification in history: {}", e);
                     }
 
                     // Log SMS usage
@@ -3653,7 +3356,7 @@ pub async fn send_notification(
                         recharge_threshold_timestamp: None,
                         zero_credits_timestamp: None,
                     }) {
-                        tracing::error!("Failed to log Call+SMS SMS usage: {}", e);
+                        tracing::error!("Failed to log call notification SMS usage: {}", e);
                     }
 
                     // SMS credits deducted at Twilio status callback
@@ -3661,7 +3364,7 @@ pub async fn send_notification(
                     true
                 }
                 Err(e) => {
-                    tracing::error!("Call+SMS: Failed to send SMS for user {}: {}", user_id, e);
+                    tracing::error!("Call: Failed to send SMS for user {}: {}", user_id, e);
                     false
                 }
             };
@@ -3689,7 +3392,10 @@ pub async fn send_notification(
                     .await
                     {
                         Ok(response) => {
-                            tracing::info!("Call+SMS: Call initiated for user {} (will be charged if answered)", user_id);
+                            tracing::info!(
+                                "Call: Call initiated for user {} (will be charged if answered)",
+                                user_id
+                            );
 
                             // Log call usage as "ongoing" - it will be updated by webhook
                             // Don't deduct credits here - the webhook will handle it based on answer status
@@ -3708,12 +3414,15 @@ pub async fn send_notification(
                                 recharge_threshold_timestamp: None,
                                 zero_credits_timestamp: None,
                             }) {
-                                tracing::error!("Failed to log Call+SMS call usage: {}", e);
+                                tracing::error!(
+                                    "Failed to log call notification call usage: {}",
+                                    e
+                                );
                             }
                         }
                         Err((_, json_err)) => {
                             tracing::error!(
-                                "Call+SMS: Failed to initiate call for user {}: {:?}",
+                                "Call: Failed to initiate call for user {}: {:?}",
                                 user_id,
                                 json_err
                             );
@@ -3721,7 +3430,10 @@ pub async fn send_notification(
                         }
                     }
                 } else {
-                    tracing::info!("Call+SMS: Skipping call for user {} (insufficient credits), SMS already sent", user_id);
+                    tracing::info!(
+                        "Call: Skipping call for user {} (insufficient credits), SMS already sent",
+                        user_id
+                    );
                 }
             }
         }
@@ -3873,9 +3585,7 @@ mod tests {
     fn test_waiting_check_prompt_contains_key_elements() {
         // Verify the waiting check prompt has required elements
         assert!(WAITING_CHECK_PROMPT.contains("monitor"));
-        assert!(WAITING_CHECK_PROMPT.contains("sms_message"));
         assert!(WAITING_CHECK_PROMPT.contains("match"));
-        assert!(WAITING_CHECK_PROMPT.contains("should_notify"));
-        assert!(WAITING_CHECK_PROMPT.contains("updated_summary"));
+        assert!(WAITING_CHECK_PROMPT.contains("item"));
     }
 }

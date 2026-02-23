@@ -723,7 +723,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             // Determine suffix based on noti_type
                                             let suffix = match matched_sender.noti_type.as_deref() {
                                                 Some("call") => "_call",
-                                                Some("call_sms") => "_call_sms",
                                                 _ => "_sms",
                                             };
                                             let notification_type = format!("email_priority{}", suffix);
@@ -772,24 +771,38 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         };
                                         if !monitor_items.is_empty() {
                                             // Extract data from Result immediately to drop non-Send Box<dyn Error>
-                                            let maybe_match: Option<(
-                                                crate::proactive::utils::ItemMatchResponse,
-                                                crate::models::user_models::Item,
-                                            )> = crate::proactive::utils::check_item_monitor_match(
-                                                &state,
-                                                user.id,
-                                                &email_content,
-                                                &monitor_items,
-                                            ).await.ok().flatten().and_then(|resp| {
-                                                let item_id = resp.task_id.unwrap_or(0);
-                                                monitor_items.iter().find(|i| i.id == Some(item_id)).cloned().map(|item| (resp, item))
-                                            });
-                                            if let Some((match_response, matched_item)) = maybe_match {
-                                                crate::proactive::utils::apply_monitor_lifecycle(
+                                            let maybe_match: Option<crate::models::user_models::Item> =
+                                                crate::proactive::utils::check_item_monitor_match(
                                                     &state,
-                                                    &matched_item,
-                                                    &match_response,
-                                                ).await;
+                                                    user.id,
+                                                    &email_content,
+                                                    &monitor_items,
+                                                ).await.ok().flatten().and_then(|resp| {
+                                                    let item_id = resp.task_id.unwrap_or(0);
+                                                    monitor_items.iter().find(|i| i.id == Some(item_id)).cloned()
+                                                });
+                                            if let Some(matched_item) = maybe_match {
+                                                let item_id = matched_item.id.unwrap_or(0);
+                                                let priority = matched_item.priority;
+                                                let result: Result<crate::proactive::utils::TriggeredItemResult, String> =
+                                                    crate::proactive::utils::process_triggered_item(
+                                                        &state, user.id, &matched_item, Some(&email_content),
+                                                    ).await.map_err(|e| e.to_string());
+                                                match result {
+                                                    Ok(response) => {
+                                                        crate::proactive::utils::handle_triggered_item_result(
+                                                            &state, user.id, item_id, priority, &response,
+                                                        ).await;
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!("Failed to process monitor match for item {}: {}", item_id, e);
+                                                        crate::proactive::utils::send_notification(
+                                                            &state, user.id, &matched_item.summary,
+                                                            "item_sms".to_string(),
+                                                            Some("Hey, you have a notification!".to_string()),
+                                                        ).await;
+                                                    }
+                                                }
                                                 continue;
                                             }
                                         }
@@ -1153,7 +1166,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                         // Mark as running BEFORE spawning to prevent duplicate execution
                         // on the next cron tick (set next_check_at far in the future temporarily)
-                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
+                        let _ = state
+                            .item_repository
+                            .update_next_check_at(item_id, Some(now + 86400));
 
                         tokio::spawn(async move {
                             debug!(
@@ -1161,105 +1176,38 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 item_id, item_clone.monitor, user_id, item_clone.summary
                             );
 
-                            if item_clone.monitor {
-                                // Monitor path: use check_item_monitor_match for scheduled checks
-                                let now_str = chrono::Utc::now().to_rfc3339();
-                                let synthetic_message = format!(
-                                    "SYSTEM: Scheduled check triggered for this item. \
-                                    Current time: {}. \
-                                    Evaluate if this item needs attention, escalation, or resolution.",
-                                    now_str
-                                );
+                            // Unified path for all items: time fired, no matched message
+                            let summary = item_clone.summary.clone();
+                            let priority = item_clone.priority;
 
-                                let monitor_items = match state.item_repository.get_monitor_items(user_id) {
-                                    Ok(items) => items,
-                                    Err(e) => {
-                                        error!("Failed to get monitor items for user {}: {}", user_id, e);
-                                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
-                                        return;
-                                    }
-                                };
+                            let result = crate::proactive::utils::process_triggered_item(
+                                &state,
+                                user_id,
+                                &item_clone,
+                                None,
+                            )
+                            .await
+                            .map_err(|e| e.to_string());
 
-                                let this_item: Vec<_> = monitor_items.iter().filter(|i| i.id == Some(item_id)).cloned().collect();
-                                if this_item.is_empty() {
-                                    debug!("Monitor item {} no longer exists, skipping", item_id);
-                                    return;
+                            match result {
+                                Ok(response) => {
+                                    crate::proactive::utils::handle_triggered_item_result(
+                                        &state, user_id, item_id, priority, &response,
+                                    )
+                                    .await;
                                 }
-
-                                let llm_result: Result<Option<crate::proactive::utils::ItemMatchResponse>, String> =
-                                    crate::proactive::utils::check_item_monitor_match(
-                                        &state, user_id, &synthetic_message, &this_item,
-                                    ).await.map_err(|e| e.to_string());
-
-                                match llm_result {
-                                    Ok(Some(match_response)) => {
-                                        crate::proactive::utils::apply_monitor_lifecycle(
-                                            &state, &this_item[0], &match_response,
-                                        ).await;
-                                    }
-                                    Ok(None) => {
-                                        let next = now + 86400;
-                                        let _ = state.item_repository.update_next_check_at(item_id, Some(next));
-                                        debug!("Monitor item {} rescheduled (no LLM match)", item_id);
-                                    }
-                                    Err(e) => {
-                                        error!("LLM check failed for monitor item {}: {}", item_id, e);
-                                        let _ = state.item_repository.update_next_check_at(item_id, Some(now + 86400));
-                                    }
-                                }
-                            } else {
-                                // Unified path for non-monitor items (reminders, digests, alerts)
-                                let summary = item_clone.summary.clone();
-
-                                let result = crate::proactive::utils::process_triggered_item(
-                                    &state, user_id, &item_clone,
-                                ).await.map_err(|e| e.to_string());
-
-                                match result {
-                                    Ok(response) => {
-                                        let new_priority = response.priority.unwrap_or(item_clone.priority);
-
-                                        // Send notification if sms_message present and priority >= 1
-                                        if let Some(ref sms) = response.sms_message {
-                                            if new_priority >= 1 {
-                                                let noti_type = if new_priority >= 2 { "call" } else { "sms" };
-                                                crate::proactive::utils::send_notification(
-                                                    &state,
-                                                    user_id,
-                                                    sms,
-                                                    format!("item_{}", noti_type),
-                                                    Some("Hey, you have a notification!".to_string()),
-                                                ).await;
-                                            }
-                                        }
-
-                                        // Reschedule or delete
-                                        if let Some(ref next) = response.next_check_at {
-                                            let next_ts = crate::proactive::utils::parse_iso_to_timestamp(next)
-                                                .map(|ts| ts.max(now + 60).min(now + 30 * 86400))
-                                                .unwrap_or(now + 86400);
-                                            let _ = state.item_repository.update_item(
-                                                item_id, user_id, &response.summary,
-                                                Some(next_ts), new_priority,
-                                            );
-                                            debug!("Item {} rescheduled to {}", item_id, next_ts);
-                                        } else {
-                                            let _ = state.item_repository.delete_item(item_id, user_id);
-                                            debug!("Item {} completed and deleted", item_id);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to process triggered item {}: {}", item_id, e);
-                                        // Fallback: send summary as SMS, delete item
-                                        crate::proactive::utils::send_notification(
-                                            &state,
-                                            user_id,
-                                            &summary,
-                                            "item_sms".to_string(),
-                                            Some("Hey, you have a reminder!".to_string()),
-                                        ).await;
-                                        let _ = state.item_repository.delete_item(item_id, user_id);
-                                    }
+                                Err(e) => {
+                                    error!("Failed to process triggered item {}: {}", item_id, e);
+                                    // Fallback: send summary as SMS, delete item
+                                    crate::proactive::utils::send_notification(
+                                        &state,
+                                        user_id,
+                                        &summary,
+                                        "item_sms".to_string(),
+                                        Some("Hey, you have a reminder!".to_string()),
+                                    )
+                                    .await;
+                                    let _ = state.item_repository.delete_item(item_id, user_id);
                                 }
                             }
                         });

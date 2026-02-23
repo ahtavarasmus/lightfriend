@@ -21,7 +21,7 @@ use crate::{
 pub struct ExceptionRequest {
     pub platform: String,          // "whatsapp", "telegram", "signal", "email"
     pub notification_mode: String, // "all", "critical", "digest"
-    pub notification_type: String, // "sms", "call", "call_sms"
+    pub notification_type: String, // "sms", "call"
     pub notify_on_call: bool,
 }
 
@@ -33,7 +33,7 @@ pub struct CreateContactProfileRequest {
     pub signal_chat: Option<String>,
     pub email_addresses: Option<String>,
     pub notification_mode: String, // "all", "critical", "digest"
-    pub notification_type: String, // "sms", "call", "call_sms"
+    pub notification_type: String, // "sms", "call"
     pub notify_on_call: bool,
     pub exceptions: Option<Vec<ExceptionRequest>>,
     pub whatsapp_room_id: Option<String>,
@@ -62,14 +62,14 @@ pub struct UpdateContactProfileRequest {
 #[derive(Deserialize)]
 pub struct UpdateDefaultModeRequest {
     pub mode: Option<String>,      // "critical", "digest", "ignore"
-    pub noti_type: Option<String>, // "sms", "call", "call_sms"
+    pub noti_type: Option<String>, // "sms", "call"
     pub notify_on_call: Option<bool>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdatePhoneContactModeRequest {
     pub mode: Option<String>,      // "critical", "digest", "ignore"
-    pub noti_type: Option<String>, // "sms", "call", "call_sms"
+    pub noti_type: Option<String>, // "sms", "call"
     pub notify_on_call: Option<bool>,
 }
 
@@ -263,12 +263,10 @@ pub async fn create_contact_profile(
     }
 
     // Validate notification_type
-    if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
+    if !["sms", "call"].contains(&request.notification_type.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "Invalid notification_type. Must be 'sms', 'call', or 'call_sms'" }),
-            ),
+            Json(json!({ "error": "Invalid notification_type. Must be 'sms' or 'call'" })),
         ));
     }
 
@@ -342,7 +340,7 @@ pub async fn create_contact_profile(
                     {
                         continue;
                     }
-                    if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {
+                    if !["sms", "call"].contains(&exc.notification_type.as_str()) {
                         continue;
                     }
 
@@ -422,7 +420,7 @@ pub async fn update_contact_profile(
     }
 
     // Validate notification_type
-    if !["sms", "call", "call_sms"].contains(&request.notification_type.as_str()) {
+    if !["sms", "call"].contains(&request.notification_type.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "Invalid notification_type" })),
@@ -485,7 +483,7 @@ pub async fn update_contact_profile(
                     {
                         continue;
                     }
-                    if !["sms", "call", "call_sms"].contains(&exc.notification_type.as_str()) {
+                    if !["sms", "call"].contains(&exc.notification_type.as_str()) {
                         continue;
                     }
 
@@ -578,10 +576,10 @@ pub async fn update_default_mode(
 
     // Update notification type if provided
     if let Some(ref noti_type) = request.noti_type {
-        if !["sms", "call", "call_sms"].contains(&noti_type.as_str()) {
+        if !["sms", "call"].contains(&noti_type.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" })),
+                Json(json!({ "error": "Invalid noti_type. Must be 'sms' or 'call'" })),
             ));
         }
         if let Err(e) = state
@@ -655,10 +653,10 @@ pub async fn update_phone_contact_mode(
     }
 
     if let Some(ref noti_type) = request.noti_type {
-        if !["sms", "call", "call_sms"].contains(&noti_type.as_str()) {
+        if !["sms", "call"].contains(&noti_type.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid noti_type. Must be 'sms', 'call', or 'call_sms'" })),
+                Json(json!({ "error": "Invalid noti_type. Must be 'sms' or 'call'" })),
             ));
         }
         if let Err(e) = state

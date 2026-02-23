@@ -1691,33 +1691,61 @@ pub async fn handle_bridge_message(
     };
     if !monitor_items.is_empty() {
         // Extract data from Result immediately to drop non-Send Box<dyn Error> before any .await
-        let maybe_match: Option<(
-            crate::proactive::utils::ItemMatchResponse,
-            crate::models::user_models::Item,
-        )> = crate::proactive::utils::check_item_monitor_match(
-            &state,
-            user_id,
-            &message_context,
-            &monitor_items,
-        )
-        .await
-        .ok()
-        .flatten()
-        .and_then(|resp| {
-            let item_id = resp.task_id.unwrap_or(0);
-            monitor_items
-                .iter()
-                .find(|i| i.id == Some(item_id))
-                .cloned()
-                .map(|item| (resp, item))
-        });
-        if let Some((match_response, matched_item)) = maybe_match {
-            crate::proactive::utils::apply_monitor_lifecycle(
+        let maybe_match: Option<crate::models::user_models::Item> =
+            crate::proactive::utils::check_item_monitor_match(
                 &state,
-                &matched_item,
-                &match_response,
+                user_id,
+                &message_context,
+                &monitor_items,
             )
-            .await;
+            .await
+            .ok()
+            .flatten()
+            .and_then(|resp| {
+                let item_id = resp.task_id.unwrap_or(0);
+                monitor_items
+                    .iter()
+                    .find(|i| i.id == Some(item_id))
+                    .cloned()
+            });
+        if let Some(matched_item) = maybe_match {
+            let item_id = matched_item.id.unwrap_or(0);
+            let priority = matched_item.priority;
+            // Process through unified path with matched message context
+            // Convert Result to drop non-Send Box<dyn Error> before any .await
+            let result: Result<crate::proactive::utils::TriggeredItemResult, String> =
+                crate::proactive::utils::process_triggered_item(
+                    &state,
+                    user_id,
+                    &matched_item,
+                    Some(&message_context),
+                )
+                .await
+                .map_err(|e| e.to_string());
+            match result {
+                Ok(response) => {
+                    crate::proactive::utils::handle_triggered_item_result(
+                        &state, user_id, item_id, priority, &response,
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to process monitor match for item {}: {}",
+                        item_id,
+                        e
+                    );
+                    // Fallback: send item summary as notification
+                    crate::proactive::utils::send_notification(
+                        &state,
+                        user_id,
+                        &matched_item.summary,
+                        "item_sms".to_string(),
+                        Some("Hey, you have a notification!".to_string()),
+                    )
+                    .await;
+                }
+            }
             return;
         }
     }
@@ -2047,7 +2075,6 @@ pub async fn handle_bridge_message(
         if notify_on_call {
             let suffix = match notification_type_str.as_str() {
                 "call" => "_call",
-                "call_sms" => "_call_sms",
                 _ => "_sms",
             };
             let notification_type = format!("{}_incoming_call{}", service, suffix);
@@ -2086,7 +2113,6 @@ pub async fn handle_bridge_message(
             // Send immediate notification for ALL messages from this contact/group
             let suffix = match notification_type_str.as_str() {
                 "call" => "_call",
-                "call_sms" => "_call_sms",
                 _ => "_sms",
             };
             let notification_type = format!("{}_profile{}", service, suffix);
@@ -2155,7 +2181,6 @@ pub async fn handle_bridge_message(
                     // Check if we recently sent a critical notification to avoid duplicates
                     let suffix = match notification_type_str.as_str() {
                         "call" => "_call",
-                        "call_sms" => "_call_sms",
                         _ => "_sms",
                     };
                     let notification_type = format!("{}_critical{}", service, suffix);
@@ -2201,7 +2226,6 @@ pub async fn handle_bridge_message(
             if member_count > 3 {
                 let suffix = match notification_type_str.as_str() {
                     "call" => "_call",
-                    "call_sms" => "_call_sms",
                     _ => "_sms",
                 };
                 let notification_type = format!("{}_mention{}", service, suffix);

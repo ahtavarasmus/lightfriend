@@ -2068,9 +2068,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         <option value="call" selected={(*notification_type).as_deref() == Some("call")}>
                             {"Call me"}
                         </option>
-                        <option value="call_sms" selected={(*notification_type).as_deref() == Some("call_sms")}>
-                            {"Call + SMS (loud alert)"}
-                        </option>
                     </select>
                     {render_save_indicator(&*notification_type_save_state)}
                 </div>
