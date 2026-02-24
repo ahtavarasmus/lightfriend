@@ -1892,6 +1892,254 @@ pub async fn web_chat(
     }
 }
 
+/// SSE streaming web chat endpoint.
+/// Streams status updates (thinking, tool calls, retries) then the final response.
+pub async fn web_chat_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    axum::extract::Query(request): axum::extract::Query<WebChatRequest>,
+) -> axum::response::sse::Sse<
+    impl futures::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use crate::api::twilio_sms::{ChatStatus, ProcessSmsOptions};
+
+    let stream = async_stream::stream! {
+        // --- Auth & credit checks (same as web_chat) ---
+        let user = match state.user_core.find_by_id(auth_user.user_id) {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": "User not found"}).to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Database error: {}", e)}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        if user.sub_tier.is_none() {
+            yield Ok(axum::response::sse::Event::default().data(
+                serde_json::json!({"step": "error", "message": "Please subscribe to use the web chat feature"}).to_string(),
+            ));
+            return;
+        }
+
+        let is_us_or_ca = user.phone_number.starts_with("+1");
+        let (credits_left_cost, credits_cost) = if is_us_or_ca {
+            (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+        } else {
+            (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
+        };
+
+        let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+        if !has_credits {
+            yield Ok(axum::response::sse::Event::default().data(
+                serde_json::json!({"step": "error", "message": "Insufficient credits. Please add more credits to continue."}).to_string(),
+            ));
+            return;
+        }
+
+        // Deduct credits
+        let charged_amount = if user.credits_left >= credits_left_cost {
+            let new_credits_left = user.credits_left - credits_left_cost;
+            if let Err(e) = state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left) {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            credits_left_cost
+        } else {
+            let new_credits = user.credits - credits_cost;
+            if let Err(e) = state.user_repository.update_user_credits(auth_user.user_id, new_credits) {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            credits_cost
+        };
+
+        let _ = state.user_repository.log_usage(crate::repositories::user_repository::LogUsageParams {
+            user_id: auth_user.user_id,
+            sid: None,
+            activity_type: "web_chat".to_string(),
+            credits: Some(charged_amount),
+            time_consumed: None,
+            success: Some(true),
+            reason: None,
+            status: None,
+            recharge_threshold_timestamp: None,
+            zero_credits_timestamp: None,
+        });
+
+        // Send initial thinking status
+        yield Ok(axum::response::sse::Event::default().data(
+            serde_json::json!({"step": "thinking", "message": "Thinking..."}).to_string(),
+        ));
+
+        // Create status channel
+        let (status_tx, mut status_rx) = tokio::sync::mpsc::channel::<ChatStatus>(32);
+
+        // Create mock Twilio payload
+        let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+            from: user.phone_number.clone(),
+            to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+            body: request.message.clone(),
+            num_media: None,
+            media_url0: None,
+            media_content_type0: None,
+            message_sid: "".to_string(),
+        };
+
+        // Spawn process_sms as a task
+        let state_clone = state.clone();
+        let mut process_handle = tokio::spawn(async move {
+            crate::api::twilio_sms::process_sms(
+                &state_clone,
+                mock_payload,
+                ProcessSmsOptions::web_chat_streaming(status_tx),
+            )
+            .await
+        });
+
+        // Stream status updates from the channel until process_sms completes
+        #[allow(unused_assignments)]
+        let mut task_result = None;
+        loop {
+            tokio::select! {
+                status = status_rx.recv() => {
+                    match status {
+                        Some(ChatStatus::Thinking) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "thinking", "message": "Thinking..."}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::ToolCall { name }) => {
+                            let display = match name.as_str() {
+                                "get_calendar_events" | "create_calendar_event" => "Checking calendar...".to_string(),
+                                "ask_perplexity" => "Searching the web...".to_string(),
+                                "create_task" => "Creating item...".to_string(),
+                                "send_sms" | "send_email" => "Preparing message...".to_string(),
+                                "fetch_tracked_items" => "Checking items...".to_string(),
+                                "direct_response" => "Responding...".to_string(),
+                                other => format!("Using {}...", other.replace('_', " ")),
+                            };
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "tool_call", "message": display}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::Retrying { attempt, max }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::RetryingFollowup { attempt, max }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                            ));
+                        }
+                        None => {
+                            // Channel closed - process_sms dropped the sender, task is finishing
+                            task_result = Some(process_handle.await);
+                            break;
+                        }
+                    }
+                }
+                result = &mut process_handle => {
+                    // process_sms task completed before channel drained - drain remaining
+                    while let Ok(status) = status_rx.try_recv() {
+                        let msg = match status {
+                            ChatStatus::Thinking => serde_json::json!({"step": "thinking", "message": "Thinking..."}),
+                            ChatStatus::ToolCall { name } => serde_json::json!({"step": "tool_call", "message": format!("Using {}...", name.replace('_', " "))}),
+                            ChatStatus::Retrying { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
+                            ChatStatus::RetryingFollowup { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
+                        };
+                        yield Ok(axum::response::sse::Event::default().data(msg.to_string()));
+                    }
+                    task_result = Some(result);
+                    break;
+                }
+            }
+        }
+
+        // Send the final complete/error event
+        let final_result = match task_result {
+            Some(Ok(r)) => Ok(r),
+            Some(Err(e)) => Err(format!("Task panicked: {}", e)),
+            None => Err("Task did not produce a result".to_string()),
+        };
+        match final_result {
+            Ok((status, _, response)) => {
+                if status == StatusCode::OK {
+                    // Extract media results (same as web_chat)
+                    let mut message = response.message.clone();
+                    let mut media: Option<Vec<MediaResult>> = None;
+
+                    if let Some(start_idx) = message.find("[MEDIA_RESULTS]") {
+                        if let Some(end_idx) = message.find("[/MEDIA_RESULTS]") {
+                            let json_str = &message[start_idx + 15..end_idx];
+                            if let Ok(youtube_result) = serde_json::from_str::<
+                                crate::tool_call_utils::youtube::YouTubeToolResult,
+                            >(json_str) {
+                                let video_count = youtube_result.videos.len();
+                                media = Some(
+                                    youtube_result.videos.into_iter().map(|v| MediaResult {
+                                        platform: "youtube".to_string(),
+                                        video_id: v.video_id,
+                                        title: v.title,
+                                        thumbnail: v.thumbnail,
+                                        duration: v.duration,
+                                        channel: Some(v.channel),
+                                    }).collect(),
+                                );
+                                message = format!(
+                                    "Here are {} video{} I found:",
+                                    video_count,
+                                    if video_count == 1 { "" } else { "s" }
+                                );
+                            }
+                        }
+                    }
+
+                    let mut event_data = serde_json::json!({
+                        "step": "complete",
+                        "message": message,
+                        "credits_charged": charged_amount,
+                    });
+                    if let Some(media) = media {
+                        event_data["media"] = serde_json::to_value(media).unwrap_or_default();
+                    }
+                    if let Some(item_id) = response.created_item_id {
+                        event_data["created_item_id"] = serde_json::json!(item_id);
+                    }
+
+                    yield Ok(axum::response::sse::Event::default().data(event_data.to_string()));
+                } else {
+                    yield Ok(axum::response::sse::Event::default().data(
+                        serde_json::json!({"step": "error", "message": "Failed to process message"}).to_string(),
+                    ));
+                }
+            }
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Processing error: {}", e)}).to_string(),
+                ));
+            }
+        }
+    };
+
+    axum::response::sse::Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
+
 // On-demand "What's new?" digest endpoint
 pub async fn get_instant_digest(
     State(state): State<Arc<AppState>>,

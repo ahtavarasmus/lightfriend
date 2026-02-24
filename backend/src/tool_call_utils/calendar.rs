@@ -17,7 +17,7 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+                "Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T00:00')".to_string(),
             ),
             ..Default::default()
         }),
@@ -27,7 +27,8 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+                "End time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T23:59')"
+                    .to_string(),
             ),
             ..Default::default()
         }),
@@ -67,7 +68,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string(),
+                "Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-23T14:30')".to_string(),
             ),
             ..Default::default()
         }),
@@ -136,8 +137,34 @@ pub async fn handle_fetch_calendar_events(
         }
     };
 
+    // Look up user timezone and convert to RFC3339 for the calendar API
+    let user_tz = match state.user_core.get_user_info(user_id) {
+        Ok(info) => {
+            let tz_str = info.timezone.unwrap_or_else(|| "UTC".to_string());
+            tz_str.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC)
+        }
+        Err(_) => chrono_tz::UTC,
+    };
+
+    let start_utc =
+        match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&c.start, &user_tz) {
+            Ok(dt) => dt.to_rfc3339(),
+            Err(e) => {
+                eprintln!("Failed to parse start time: {}", e);
+                return "Invalid start time format.".to_string();
+            }
+        };
+    let end_utc = match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&c.end, &user_tz)
+    {
+        Ok(dt) => dt.to_rfc3339(),
+        Err(e) => {
+            eprintln!("Failed to parse end time: {}", e);
+            return "Invalid end time format.".to_string();
+        }
+    };
+
     match crate::handlers::google_calendar::handle_calendar_fetching(
-        state, user_id, &c.start, &c.end,
+        state, user_id, &start_utc, &end_utc,
     )
     .await
     {
@@ -282,20 +309,20 @@ pub async fn handle_create_calendar_event(
 
     let user_info = state.user_core.get_user_info(user_id)?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
-
-    // Parse the start time
-    let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-    // Convert to user's timezone
     let user_tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
-    let local_time = start_time.with_timezone(&user_tz);
+
+    // Parse the start time (accepts user-timezone naive or RFC3339)
+    let start_time_utc =
+        crate::tool_call_utils::utils::parse_user_datetime_to_utc(&args.start_time, &user_tz)?;
+
+    // Convert to user's timezone for display
+    let local_time = start_time_utc.with_timezone(&user_tz);
 
     // Format the date and time
     let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
     // Create the event directly
     let event_request = crate::handlers::google_calendar::CreateEventRequest {
-        start_time: start_time.with_timezone(&chrono::Utc),
+        start_time: start_time_utc,
         duration_minutes,
         summary: args.summary.clone(),
         description: args.description.clone(),

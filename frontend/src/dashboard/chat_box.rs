@@ -259,11 +259,24 @@ const CHAT_STYLES: &str = r#"
     margin-top: 0.15rem;
     opacity: 0.8;
 }
-.item-preview-condition {
-    color: #e8a838;
-    font-size: 0.75rem;
+.item-preview-meta {
+    display: flex;
+    gap: 0.4rem;
     margin-top: 0.15rem;
-    font-style: italic;
+    flex-wrap: wrap;
+}
+.item-preview-meta span {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgba(255,255,255,0.08);
+    color: #aaa;
+}
+.item-preview-monitor {
+    color: #7eb2ff !important;
+}
+.item-preview-notify {
+    color: #e8a838 !important;
 }
 .item-preview-hint {
     color: #666;
@@ -336,6 +349,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let chat_bot_reply = use_state(|| None::<String>);
     let chat_input = use_state(|| String::new());
     let chat_loading = use_state(|| false);
+    let chat_status = use_state(|| "...".to_string()); // Status text shown during loading
     let chat_error = use_state(|| None::<String>);
     let chat_input_ref = use_node_ref();
 
@@ -450,6 +464,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let chat_user_msg = chat_user_msg.clone();
         let chat_bot_reply = chat_bot_reply.clone();
         let chat_loading = chat_loading.clone();
+        let chat_status = chat_status.clone();
         let chat_error = chat_error.clone();
         let refetch_usage = props.on_usage_change.clone();
         let chat_image = chat_image.clone();
@@ -474,6 +489,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let chat_user_msg = chat_user_msg.clone();
             let chat_bot_reply = chat_bot_reply.clone();
             let chat_loading = chat_loading.clone();
+            let chat_status = chat_status.clone();
             let chat_error = chat_error.clone();
             let refetch_usage = refetch_usage.clone();
             let chat_image = chat_image.clone();
@@ -502,140 +518,280 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 chat_bot_reply.set(None);
             }
             chat_loading.set(true);
+            chat_status.set("Thinking...".to_string());
             chat_error.set(None);
             chat_input.set(String::new());
 
-            spawn_local(async move {
-                // Check if we're in item edit mode
-                let result = if let Some(item) = &focused_item {
-                    // Item edit mode - call edit endpoint
-                    if let Some(id) = item.item_id {
-                        Api::post(&format!("/api/items/{}/edit-ai", id))
-                            .json(&json!({ "instruction": message }))
-                            .unwrap()
-                            .send()
-                            .await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Item has no ID".to_string()))
-                    }
-                } else if let Some(file) = image_file {
-                    // Send with image
-                    let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
-                    if let Ok(buffer) = array_buffer {
-                        let uint8_array = js_sys::Uint8Array::new(&buffer);
-                        let bytes: Vec<u8> = uint8_array.to_vec();
-                        let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                        let content_type = file.type_();
+            // Use SSE streaming for text-only messages (no image, not item edit)
+            let use_sse = !is_item_edit && image_file.is_none();
 
-                        Api::post("/api/chat/web")
-                            .json(&json!({
-                                "message": message,
-                                "image": base64_image,
-                                "image_type": content_type
-                            }))
-                            .unwrap()
-                            .send()
-                            .await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Failed to read image".to_string()))
-                    }
-                } else {
-                    // Send text only
-                    Api::post("/api/chat/web")
-                        .json(&json!({ "message": message }))
-                        .unwrap()
-                        .send()
-                        .await
-                };
+            if use_sse {
+                // SSE streaming path
+                use wasm_bindgen::JsCast;
+                use wasm_bindgen::closure::Closure;
 
-                // Clear image after sending
-                chat_image.set(None);
-                chat_image_preview.set(None);
+                let encoded_msg = js_sys::encode_uri_component(&message).as_string().unwrap_or_default();
+                let url = format!("{}/api/chat/web-stream?message={}", crate::config::get_backend_url(), encoded_msg);
 
-                match result {
-                    Ok(response) => {
-                        if response.ok() {
-                            match response.json::<Value>().await {
-                                Ok(data) => {
-                                    let reply = data["message"].as_str().unwrap_or("No response").to_string();
-
-                                    // For item edits, show the response and refresh
-                                    if focused_item.is_some() {
-                                        // Show the AI's response/explanation
-                                        chat_bot_reply.set(Some(reply));
-
-                                        // Dispatch event to refresh dashboard (updates item details)
-                                        if let Some(window) = web_sys::window() {
-                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                            let _ = window.dispatch_event(&event);
-                                        }
-                                        // Refocus the input for continued editing (with delay to ensure re-render completes)
-                                        let chat_input_ref = chat_input_ref.clone();
-                                        gloo_timers::callback::Timeout::new(100, move || {
-                                            if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
-                                                let _ = input.focus();
-                                            }
-                                        }).forget();
-                                        // Stay in item edit mode - don't call on_item_cleared
-                                    } else {
-                                        // Regular chat - show in message history
+                let mut init = web_sys::EventSourceInit::new();
+                init.set_with_credentials(true);
+                let es = match web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
+                    Ok(es) => es,
+                    Err(_) => {
+                        // Fall back to POST if EventSource creation fails
+                        chat_status.set("...".to_string());
+                        let chat_bot_reply = chat_bot_reply.clone();
+                        let chat_loading = chat_loading.clone();
+                        let chat_error = chat_error.clone();
+                        let refetch_usage = refetch_usage.clone();
+                        let detected_media = detected_media.clone();
+                        let media_playing = media_playing.clone();
+                        let on_item_created = on_item_created.clone();
+                        spawn_local(async move {
+                            match Api::post("/api/chat/web")
+                                .json(&json!({ "message": message })).unwrap()
+                                .send().await
+                            {
+                                Ok(response) if response.ok() => {
+                                    if let Ok(data) = response.json::<Value>().await {
+                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
                                         chat_bot_reply.set(Some(reply));
                                         refetch_usage.emit(());
-
-                                        // Check for media results from AI tool calls
-                                        if let Some(media_arr) = data["media"].as_array() {
-                                            let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
-                                                Some(MediaItem {
-                                                    platform: m["platform"].as_str()?.to_string(),
-                                                    video_id: m["video_id"].as_str()?.to_string(),
-                                                    title: m["title"].as_str().unwrap_or("").to_string(),
-                                                    thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
-                                                    duration: m["duration"].as_str().map(|s| s.to_string()),
-                                                    channel: m["channel"].as_str().map(|s| s.to_string()),
-                                                    original_url: None, // AI search results don't have original URLs
-                                                })
-                                            }).collect();
-                                            if !media_items.is_empty() {
-                                                detected_media.set(media_items);
-                                                media_playing.set(false);
-                                            }
-                                        }
-
-                                        // Check if an item was created - trigger preview
                                         if let Some(item_id) = data["created_item_id"].as_i64() {
                                             on_item_created.emit(item_id as i32);
                                         }
-
-                                        // Dispatch event for other components
-                                        if let Some(window) = web_sys::window() {
-                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                            let _ = window.dispatch_event(&event);
-                                        }
+                                    }
+                                }
+                                Ok(response) => {
+                                    if let Ok(data) = response.json::<Value>().await {
+                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                        chat_error.set(Some(err));
                                     }
                                 }
                                 Err(_) => {
-                                    chat_error.set(Some("Failed to parse response".to_string()));
+                                    chat_error.set(Some("Network error".to_string()));
                                 }
                             }
-                        } else {
-                            let status = response.status();
-                            match response.json::<Value>().await {
-                                Ok(data) => {
-                                    let err = data["error"].as_str().unwrap_or("Request failed").to_string();
-                                    chat_error.set(Some(err));
+                            chat_loading.set(false);
+                        });
+                        return;
+                    }
+                };
+
+                // onmessage handler for SSE events
+                let chat_status_msg = chat_status.clone();
+                let chat_bot_reply_msg = chat_bot_reply.clone();
+                let chat_loading_msg = chat_loading.clone();
+                let chat_error_msg = chat_error.clone();
+                let refetch_usage_msg = refetch_usage.clone();
+                let detected_media_msg = detected_media.clone();
+                let media_playing_msg = media_playing.clone();
+                let on_item_created_msg = on_item_created.clone();
+                let es_ref = es.clone();
+
+                let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+                    if let Some(data_str) = event.data().as_string() {
+                        if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
+                            let step = data["step"].as_str().unwrap_or("");
+                            match step {
+                                "thinking" | "tool_call" | "retry" => {
+                                    if let Some(msg) = data["message"].as_str() {
+                                        chat_status_msg.set(msg.to_string());
+                                    }
                                 }
-                                Err(e) => {
-                                    chat_error.set(Some(format!("Request failed ({}): {}", status, e)));
+                                "complete" => {
+                                    let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                    chat_bot_reply_msg.set(Some(reply));
+                                    refetch_usage_msg.emit(());
+
+                                    // Check for media results
+                                    if let Some(media_arr) = data["media"].as_array() {
+                                        let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
+                                            Some(MediaItem {
+                                                platform: m["platform"].as_str()?.to_string(),
+                                                video_id: m["video_id"].as_str()?.to_string(),
+                                                title: m["title"].as_str().unwrap_or("").to_string(),
+                                                thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
+                                                duration: m["duration"].as_str().map(|s| s.to_string()),
+                                                channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                original_url: None,
+                                            })
+                                        }).collect();
+                                        if !media_items.is_empty() {
+                                            detected_media_msg.set(media_items);
+                                            media_playing_msg.set(false);
+                                        }
+                                    }
+
+                                    // Check if an item was created
+                                    if let Some(item_id) = data["created_item_id"].as_i64() {
+                                        on_item_created_msg.emit(item_id as i32);
+                                    }
+
+                                    // Dispatch event for other components
+                                    if let Some(window) = web_sys::window() {
+                                        let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                        let _ = window.dispatch_event(&event);
+                                    }
+
+                                    chat_loading_msg.set(false);
+                                    es_ref.close();
                                 }
+                                "error" => {
+                                    let msg = data["message"].as_str().unwrap_or("An error occurred").to_string();
+                                    chat_error_msg.set(Some(msg));
+                                    chat_loading_msg.set(false);
+                                    es_ref.close();
+                                }
+                                _ => {}
                             }
                         }
                     }
-                    Err(_) => {
-                        chat_error.set(Some("Network error".to_string()));
+                }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+
+                es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                onmessage.forget();
+
+                // onerror handler
+                let chat_error_err = chat_error.clone();
+                let chat_loading_err = chat_loading.clone();
+                let es_err = es.clone();
+                let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                    // Only set error if we haven't received a complete/error event yet
+                    if *chat_loading_err {
+                        chat_error_err.set(Some("Connection lost. Please try again.".to_string()));
+                        chat_loading_err.set(false);
                     }
-                }
-                chat_loading.set(false);
-            });
+                    es_err.close();
+                }) as Box<dyn FnMut(web_sys::Event)>);
+
+                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                onerror.forget();
+            } else {
+                // POST path for image uploads and item edits
+                spawn_local(async move {
+                    let result = if let Some(item) = &focused_item {
+                        // Item edit mode - call edit endpoint
+                        if let Some(id) = item.item_id {
+                            Api::post(&format!("/api/items/{}/edit-ai", id))
+                                .json(&json!({ "instruction": message }))
+                                .unwrap()
+                                .send()
+                                .await
+                        } else {
+                            Err(gloo_net::Error::GlooError("Item has no ID".to_string()))
+                        }
+                    } else if let Some(file) = image_file {
+                        // Send with image
+                        let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
+                        if let Ok(buffer) = array_buffer {
+                            let uint8_array = js_sys::Uint8Array::new(&buffer);
+                            let bytes: Vec<u8> = uint8_array.to_vec();
+                            let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                            let content_type = file.type_();
+
+                            Api::post("/api/chat/web")
+                                .json(&json!({
+                                    "message": message,
+                                    "image": base64_image,
+                                    "image_type": content_type
+                                }))
+                                .unwrap()
+                                .send()
+                                .await
+                        } else {
+                            Err(gloo_net::Error::GlooError("Failed to read image".to_string()))
+                        }
+                    } else {
+                        // Shouldn't happen (SSE path handles text-only), but fallback
+                        Api::post("/api/chat/web")
+                            .json(&json!({ "message": message }))
+                            .unwrap()
+                            .send()
+                            .await
+                    };
+
+                    // Clear image after sending
+                    chat_image.set(None);
+                    chat_image_preview.set(None);
+
+                    match result {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<Value>().await {
+                                    Ok(data) => {
+                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
+
+                                        // For item edits, show the response and refresh
+                                        if focused_item.is_some() {
+                                            chat_bot_reply.set(Some(reply));
+
+                                            if let Some(window) = web_sys::window() {
+                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                                let _ = window.dispatch_event(&event);
+                                            }
+                                            let chat_input_ref = chat_input_ref.clone();
+                                            gloo_timers::callback::Timeout::new(100, move || {
+                                                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                                                    let _ = input.focus();
+                                                }
+                                            }).forget();
+                                        } else {
+                                            chat_bot_reply.set(Some(reply));
+                                            refetch_usage.emit(());
+
+                                            if let Some(media_arr) = data["media"].as_array() {
+                                                let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
+                                                    Some(MediaItem {
+                                                        platform: m["platform"].as_str()?.to_string(),
+                                                        video_id: m["video_id"].as_str()?.to_string(),
+                                                        title: m["title"].as_str().unwrap_or("").to_string(),
+                                                        thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
+                                                        duration: m["duration"].as_str().map(|s| s.to_string()),
+                                                        channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                        original_url: None,
+                                                    })
+                                                }).collect();
+                                                if !media_items.is_empty() {
+                                                    detected_media.set(media_items);
+                                                    media_playing.set(false);
+                                                }
+                                            }
+
+                                            if let Some(item_id) = data["created_item_id"].as_i64() {
+                                                on_item_created.emit(item_id as i32);
+                                            }
+
+                                            if let Some(window) = web_sys::window() {
+                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                                let _ = window.dispatch_event(&event);
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        chat_error.set(Some("Failed to parse response".to_string()));
+                                    }
+                                }
+                            } else {
+                                let status = response.status();
+                                match response.json::<Value>().await {
+                                    Ok(data) => {
+                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                        chat_error.set(Some(err));
+                                    }
+                                    Err(e) => {
+                                        chat_error.set(Some(format!("Request failed ({}): {}", status, e)));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            chat_error.set(Some("Network error".to_string()));
+                        }
+                    }
+                    chat_loading.set(false);
+                });
+            }
         })
     };
 
@@ -760,6 +916,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         })
     };
 
+    let status_text = (*chat_status).clone();
+
     html! {
         <>
             <style>{CHAT_STYLES}</style>
@@ -773,7 +931,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Loading state in task edit mode (no user message shown)
                             (None, None, true) => html! {
-                                <div class="chat-msg assistant loading">{"..."}</div>
+                                <div class="chat-msg assistant loading">{&status_text}</div>
                             },
                             // No messages, not loading - show nothing
                             (None, None, false) => html! {},
@@ -781,7 +939,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             (Some(user_msg), None, true) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
-                                    <div class="chat-msg assistant loading">{"..."}</div>
+                                    <div class="chat-msg assistant loading">{&status_text}</div>
                                 </>
                             },
                             // Regular chat: both messages
@@ -797,7 +955,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Task edit mode: loading with existing reply
                             (None, Some(_), true) => html! {
-                                <div class="chat-msg assistant loading">{"..."}</div>
+                                <div class="chat-msg assistant loading">{&status_text}</div>
                             },
                         }
                     }
@@ -1206,18 +1364,28 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             html! {}
                                         }}
                                     </div>
+                                    <div class="item-preview-meta">
+                                        {if let Some(ref t) = item.item_type {
+                                            html! { <span class="item-preview-type">{t}</span> }
+                                        } else {
+                                            html! {}
+                                        }}
+                                        {if item.monitor {
+                                            html! { <span class="item-preview-monitor">{"monitoring"}</span> }
+                                        } else {
+                                            html! {}
+                                        }}
+                                        {if let Some(ref n) = item.notify {
+                                            html! { <span class="item-preview-notify">{n}</span> }
+                                        } else {
+                                            html! {}
+                                        }}
+                                    </div>
                                     if let Some(ref src) = item.sources_display {
-                                        <div class="item-preview-source">{format!("Check: {}", src)}</div>
-                                    }
-                                    if let Some(ref cond) = item.condition {
-                                        <div class="item-preview-condition">{format!("Condition: {}", cond)}</div>
+                                        <div class="item-preview-source">{format!("Sources: {}", src)}</div>
                                     }
                                     <div class="item-preview-desc">
-                                        {if item.condition.is_some() || item.sources_display.is_some() {
-                                            format!("Then: {}", &item.description)
-                                        } else {
-                                            item.description.clone()
-                                        }}
+                                        {item.description.clone()}
                                     </div>
                                     <div class="item-preview-hint">{"Click to edit"}</div>
                                 </div>

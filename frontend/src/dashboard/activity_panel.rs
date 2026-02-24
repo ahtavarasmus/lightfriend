@@ -199,11 +199,24 @@ const ACTIVITY_STYLES: &str = r#"
     color: #888;
     margin-top: 0.15rem;
 }
-.upcoming-item-condition {
-    font-size: 0.7rem;
-    color: #e8a838;
-    margin-top: 0.1rem;
-    font-style: italic;
+.upcoming-item-tags {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.15rem;
+    flex-wrap: wrap;
+}
+.upcoming-item-tags span {
+    font-size: 0.65rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.2rem;
+    background: rgba(255,255,255,0.06);
+    color: #888;
+}
+.upcoming-item-monitor {
+    color: #7eb2ff !important;
+}
+.upcoming-item-notify {
+    color: #e8a838 !important;
 }
 .upcoming-item-delete {
     background: transparent;
@@ -560,12 +573,14 @@ fn render_upcoming_entry(
     on_item_click: &Option<Callback<UpcomingItem>>,
     on_item_delete: &Option<Callback<i32>>,
 ) -> Html {
-    let (is_digest, time_display, description, condition, sources, item_id, timestamp) = match entry {
+    let (is_digest, time_display, description, item_type, monitor, notify, sources, item_id, timestamp) = match entry {
         UpcomingEntry::Item(t) => (
             false,
             t.time_display.clone(),
             t.description.clone(),
-            t.condition.clone(),
+            t.item_type.clone(),
+            t.monitor,
+            t.notify.clone(),
             t.sources_display.clone(),
             t.item_id,
             t.timestamp,
@@ -574,6 +589,8 @@ fn render_upcoming_entry(
             true,
             d.time_display.clone(),
             format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
+            Some("recurring".to_string()),
+            false,
             None,
             None,
             d.item_id,
@@ -619,7 +636,9 @@ fn render_upcoming_entry(
                             description: format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
                             date_display: String::new(),
                             relative_display: String::new(),
-                            condition: None,
+                            item_type: Some("recurring".to_string()),
+                            monitor: false,
+                            notify: None,
                             sources_display: None,
                         };
                         cb.emit(item);
@@ -653,11 +672,25 @@ fn render_upcoming_entry(
                     <span class="relative">{&relative}</span>
                 </div>
                 <div class="upcoming-item-desc">{&description}</div>
+                <div class="upcoming-item-tags">
+                    {if let Some(ref t) = item_type {
+                        html! { <span class="upcoming-item-type">{t}</span> }
+                    } else {
+                        html! {}
+                    }}
+                    {if monitor {
+                        html! { <span class="upcoming-item-monitor">{"monitoring"}</span> }
+                    } else {
+                        html! {}
+                    }}
+                    {if let Some(ref n) = notify {
+                        html! { <span class="upcoming-item-notify">{n}</span> }
+                    } else {
+                        html! {}
+                    }}
+                </div>
                 if let Some(ref src) = sources {
-                    <div class="upcoming-item-meta">{format!("Check: {}", src)}</div>
-                }
-                if let Some(ref cond) = condition {
-                    <div class="upcoming-item-condition">{format!("If: {}", cond)}</div>
+                    <div class="upcoming-item-meta">{format!("Sources: {}", src)}</div>
                 }
             </div>
             if item_id.is_some() {

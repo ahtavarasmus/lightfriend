@@ -31,6 +31,8 @@ pub struct DashboardSummaryResponse {
     pub items_beyond: Vec<UpcomingItem>,
     /// Total count of items beyond the current timeline range
     pub items_beyond_count: i32,
+    /// Total number of tracked items (for status line display)
+    pub total_tracked_count: i32,
 }
 
 #[derive(Serialize)]
@@ -45,10 +47,23 @@ pub struct AttentionItem {
     pub id: i32,
     pub item_type: String, // "monitor", "tracked_item"
     pub summary: String,
+    pub description: String,
+    pub priority: i32,
+    pub monitor: bool,
     pub next_check_at: Option<i32>,
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notify: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relative_display: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -67,9 +82,10 @@ pub struct UpcomingItem {
     pub date_display: String,     // "Feb 10"
     pub relative_display: String, // "in 5 days"
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub condition: Option<String>, // "if it's below freezing"
+    pub item_type: Option<String>, // "oneshot", "tracking", "recurring"
+    pub monitor: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources: Option<String>, // raw source types: "weather,email"
+    pub notify: Option<String>, // "call", "sms"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sources_display: Option<String>, // formatted: "Weather (Helsinki) + Email"
 }
@@ -139,6 +155,7 @@ pub async fn get_dashboard_summary(
         .unwrap_or_default();
 
     // Split items into categories for display
+    let total_tracked_count = items.len() as i32;
     let mut attention_items: Vec<AttentionItem> = Vec::new();
     for item in &items {
         let is_future_scheduled = item.next_check_at.is_some_and(|nca| nca > now_ts);
@@ -152,13 +169,41 @@ pub async fn get_dashboard_summary(
         } else {
             "tracked_item"
         };
+
+        // Parse tags and strip tag line from description
+        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+        let description = item
+            .summary
+            .lines()
+            .skip(if tags.has_tags { 1 } else { 0 })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Format time/relative display from next_check_at
+        let time_display = item.next_check_at.map(|nca| format_time_display(nca, &tz));
+        let relative_display = item.next_check_at.map(|nca| {
+            if nca <= now_ts {
+                "overdue".to_string()
+            } else {
+                format_relative_days(nca, now_ts, &tz)
+            }
+        });
+
         attention_items.push(AttentionItem {
             id: item.id.unwrap_or(0),
             item_type: item_type.to_string(),
             summary: item.summary.clone(),
+            description,
+            priority: item.priority,
+            monitor: item.monitor,
             next_check_at: item.next_check_at,
             source: item.source_id.clone(),
             source_id: item.source_id.clone(),
+            notify: tags.notify,
+            sender: tags.sender,
+            platform: tags.platform,
+            time_display,
+            relative_display,
         });
     }
 
@@ -205,6 +250,7 @@ pub async fn get_dashboard_summary(
         sunset_hour,
         items_beyond,
         items_beyond_count,
+        total_tracked_count,
     }))
 }
 
@@ -241,16 +287,31 @@ fn find_upcoming_items(
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
-                .map(|nca| UpcomingItem {
-                    item_id: item.id,
-                    timestamp: nca,
-                    time_display: format_time_display(nca, tz),
-                    description: item.summary.clone(),
-                    date_display: format_date_display(nca, tz),
-                    relative_display: format_relative_days(nca, now_ts, tz),
-                    condition: None,
-                    sources: None,
-                    sources_display: None,
+                .map(|nca| {
+                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                    let description = item
+                        .summary
+                        .lines()
+                        .skip(if tags.has_tags { 1 } else { 0 })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let sources_display = if !tags.fetch.is_empty() {
+                        Some(tags.fetch.join(", "))
+                    } else {
+                        None
+                    };
+                    UpcomingItem {
+                        item_id: item.id,
+                        timestamp: nca,
+                        time_display: format_time_display(nca, tz),
+                        description,
+                        date_display: format_date_display(nca, tz),
+                        relative_display: format_relative_days(nca, now_ts, tz),
+                        item_type: tags.item_type,
+                        monitor: item.monitor,
+                        notify: tags.notify,
+                        sources_display,
+                    }
                 })
         })
         .collect();
@@ -301,16 +362,31 @@ fn find_items_beyond(
         .filter_map(|item| {
             item.next_check_at
                 .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
-                .map(|nca| UpcomingItem {
-                    item_id: item.id,
-                    timestamp: nca,
-                    time_display: format_time_display(nca, tz),
-                    description: item.summary.clone(),
-                    date_display: format_date_display(nca, tz),
-                    relative_display: format_relative_days(nca, now_ts, tz),
-                    condition: None,
-                    sources: None,
-                    sources_display: None,
+                .map(|nca| {
+                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                    let description = item
+                        .summary
+                        .lines()
+                        .skip(if tags.has_tags { 1 } else { 0 })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let sources_display = if !tags.fetch.is_empty() {
+                        Some(tags.fetch.join(", "))
+                    } else {
+                        None
+                    };
+                    UpcomingItem {
+                        item_id: item.id,
+                        timestamp: nca,
+                        time_display: format_time_display(nca, tz),
+                        description,
+                        date_display: format_date_display(nca, tz),
+                        relative_display: format_relative_days(nca, now_ts, tz),
+                        item_type: tags.item_type,
+                        monitor: item.monitor,
+                        notify: tags.notify,
+                        sources_display,
+                    }
                 })
         })
         .collect();
@@ -615,6 +691,70 @@ pub async fn get_items(
         items: responses,
         count,
     }))
+}
+
+/// GET /api/items/{id}
+/// Returns a single item with formatted display fields for preview.
+pub async fn get_item_detail(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let item = state
+        .item_repository
+        .get_item(id, auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("DB error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Item not found"})),
+            )
+        })?;
+
+    let user_info = state.user_core.get_user_info(auth_user.user_id).ok();
+    let tz: chrono_tz::Tz = user_info
+        .as_ref()
+        .and_then(|info| info.timezone.clone())
+        .unwrap_or_else(|| "UTC".to_string())
+        .parse()
+        .unwrap_or(chrono_tz::UTC);
+    let now_ts = chrono::Utc::now().timestamp() as i32;
+
+    let trigger_ts = item.next_check_at.unwrap_or(item.created_at);
+
+    // Parse structured tags from summary and extract clean description
+    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+    let description = item
+        .summary
+        .lines()
+        .skip(if tags.has_tags { 1 } else { 0 })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Build sources_display from [fetch:...] tags (e.g. "email, calendar")
+    let sources_display = if !tags.fetch.is_empty() {
+        Some(tags.fetch.join(", "))
+    } else {
+        None
+    };
+
+    Ok(Json(serde_json::json!({
+        "id": item.id.unwrap_or(0),
+        "trigger_timestamp": trigger_ts,
+        "time_display": format_time_display(trigger_ts, &tz),
+        "date_display": format_date_display(trigger_ts, &tz),
+        "relative_display": format_relative_days(trigger_ts, now_ts, &tz),
+        "description": description,
+        "item_type": tags.item_type,
+        "monitor": item.monitor,
+        "notify": tags.notify,
+        "sources_display": sources_display,
+    })))
 }
 
 /// POST /api/items/{id}/snooze

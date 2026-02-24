@@ -80,73 +80,33 @@ fn test_match_response_parses_null_optional_fields() {
 
 #[test]
 fn test_task_match_response_parses_matched_task() {
-    let json = r#"{
-        "task_id": 42,
-        "should_notify": true,
-        "updated_summary": "Package delivered at office",
-        "sms_message": "Your package has arrived at the office"
-    }"#;
+    let json = r#"{"is_match": true, "task_id": 42}"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(response.is_match);
     assert_eq!(response.task_id, Some(42));
-    assert!(response.should_notify);
-    assert_eq!(
-        response.updated_summary,
-        Some("Package delivered at office".to_string())
-    );
-    assert_eq!(
-        response.sms_message,
-        Some("Your package has arrived at the office".to_string())
-    );
 }
 
 #[test]
 fn test_task_match_response_parses_no_match() {
-    let json = r#"{
-        "task_id": null,
-        "should_notify": false,
-        "sms_message": ""
-    }"#;
+    let json = r#"{"is_match": false, "task_id": null}"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(!response.is_match);
     assert!(response.task_id.is_none());
-    assert!(!response.should_notify);
-    assert_eq!(response.sms_message, Some("".to_string()));
 }
 
 #[test]
 fn test_task_match_response_parses_minimal_response() {
-    // LLM might return just task_id and should_notify
-    let json = r#"{"task_id": null, "should_notify": false}"#;
+    // LLM might return empty object
+    let json = r#"{}"#;
 
     let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(!response.is_match);
     assert!(response.task_id.is_none());
-    assert!(!response.should_notify);
-    assert!(response.sms_message.is_none());
-    assert!(response.updated_summary.is_none());
-}
-
-#[test]
-fn test_task_match_response_silent_update() {
-    // Match found but no notification needed - just update summary
-    let json = r#"{
-        "task_id": 5,
-        "should_notify": false,
-        "updated_summary": "Package in transit - arrived at sorting facility"
-    }"#;
-
-    let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
-
-    assert_eq!(response.task_id, Some(5));
-    assert!(!response.should_notify);
-    assert_eq!(
-        response.updated_summary,
-        Some("Package in transit - arrived at sorting facility".to_string())
-    );
-    assert!(response.sms_message.is_none());
 }
 
 // =========================================================================

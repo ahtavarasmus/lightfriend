@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::context::ContextBuilder;
-use chrono::Timelike;
+use chrono::{Datelike, Timelike};
 use chrono::{Duration, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -48,20 +48,251 @@ pub fn parse_iso_to_timestamp(s: &str) -> Option<i32> {
     None
 }
 
+/// Parsed structured tags from an item summary's first line.
+#[derive(Debug, Default)]
+pub struct ParsedTags {
+    /// Item type: "oneshot", "recurring", or "tracking"
+    pub item_type: Option<String>,
+    /// Notification type: "sms", "call", or "silent"
+    pub notify: Option<String>,
+    /// Repeat pattern: "daily HH:MM", "weekdays HH:MM", "weekly DAY HH:MM", "none"
+    pub repeat: Option<String>,
+    /// Fetch tools to call: list of "email", "chat", "calendar", "weather", "items"
+    pub fetch: Vec<String>,
+    /// Sender name from [sender:X] tag (for monitor grouping)
+    pub sender: Option<String>,
+    /// Platform from [platform:X] tag
+    pub platform: Option<String>,
+    /// Topic from [topic:X] tag
+    pub topic: Option<String>,
+    /// Whether any structured tags were found
+    pub has_tags: bool,
+}
+
+/// Parse structured [key:value] tags from the first line of a summary.
+/// Returns parsed tags and whether the summary has structured tags.
+pub fn parse_summary_tags(summary: &str) -> ParsedTags {
+    let first_line = summary.lines().next().unwrap_or("");
+    let mut tags = ParsedTags::default();
+
+    // Check if first line contains any [key:value] patterns
+    if !first_line.contains('[') {
+        return tags;
+    }
+
+    for cap in regex::Regex::new(r"\[(\w+):([^\]]+)\]")
+        .unwrap()
+        .captures_iter(first_line)
+    {
+        let key = cap.get(1).unwrap().as_str();
+        let value = cap.get(2).unwrap().as_str();
+        match key {
+            "type" => {
+                tags.item_type = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "notify" => {
+                tags.notify = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "repeat" => {
+                tags.repeat = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "fetch" => {
+                tags.fetch = value.split(',').map(|s| s.trim().to_string()).collect();
+                tags.has_tags = true;
+            }
+            "sender" => {
+                tags.sender = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "platform" => {
+                tags.platform = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "topic" => {
+                tags.topic = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "scope" => {
+                tags.has_tags = true;
+            }
+            _ => {}
+        }
+    }
+
+    tags
+}
+
+/// Compute priority from parsed tags, falling back to legacy heuristics.
+/// Returns the determined priority, or None if the LLM should decide (legacy items).
+pub fn compute_priority_from_tags(
+    tags: &ParsedTags,
+    summary: &str,
+    current_priority: i32,
+) -> Option<i32> {
+    if let Some(ref notify) = tags.notify {
+        return match notify.as_str() {
+            "call" => Some(2),
+            "silent" => Some(0),
+            "sms" => Some(1),
+            _ => Some(current_priority),
+        };
+    }
+    // Legacy fallback: check for [VIA CALL] in text
+    if summary.contains("[VIA CALL]") {
+        return Some(2);
+    }
+    // No tag, no legacy marker - let current priority stand
+    if tags.has_tags {
+        // Has other tags but no [notify] - default to sms
+        Some(1)
+    } else {
+        // Fully legacy item - let LLM decide (but default to current)
+        None
+    }
+}
+
+/// Compute next_check_at from a [repeat:PATTERN] tag.
+/// Returns ISO datetime string in the user's timezone, or None for one-shot items.
+pub fn compute_next_check_at(tags: &ParsedTags, tz_str: &str) -> Option<String> {
+    let pattern = tags.repeat.as_deref()?;
+    if pattern == "none" {
+        return None;
+    }
+
+    let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+    let now = chrono::Utc::now().with_timezone(&tz);
+
+    // Parse patterns like "daily 09:00", "weekdays 09:00", "weekly Monday 09:00"
+    let parts: Vec<&str> = pattern.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let frequency = parts[0];
+    let rest = parts[1];
+
+    match frequency {
+        "daily" => {
+            let time_parts: Vec<&str> = rest.split(':').collect();
+            if time_parts.len() >= 2 {
+                let hour: u32 = time_parts[0].parse().ok()?;
+                let minute: u32 = time_parts[1].parse().ok()?;
+                let mut next = now.date_naive().succ_opt()?.and_hms_opt(hour, minute, 0)?;
+                // If still today and time hasn't passed, use today
+                if let Some(today) = now.date_naive().and_hms_opt(hour, minute, 0) {
+                    if today > now.naive_local() {
+                        next = today;
+                    }
+                }
+                Some(next.format("%Y-%m-%dT%H:%M").to_string())
+            } else {
+                None
+            }
+        }
+        "weekdays" => {
+            let time_parts: Vec<&str> = rest.split(':').collect();
+            if time_parts.len() >= 2 {
+                let hour: u32 = time_parts[0].parse().ok()?;
+                let minute: u32 = time_parts[1].parse().ok()?;
+                // Find next weekday
+                let mut candidate = now.date_naive();
+                // Check if we can still do today
+                if let Some(today_time) = candidate.and_hms_opt(hour, minute, 0) {
+                    if today_time > now.naive_local()
+                        && candidate.weekday().num_days_from_monday() < 5
+                    {
+                        return Some(today_time.format("%Y-%m-%dT%H:%M").to_string());
+                    }
+                }
+                // Otherwise find next weekday
+                for _ in 0..7 {
+                    candidate = candidate.succ_opt()?;
+                    if candidate.weekday().num_days_from_monday() < 5 {
+                        let next = candidate.and_hms_opt(hour, minute, 0)?;
+                        return Some(next.format("%Y-%m-%dT%H:%M").to_string());
+                    }
+                }
+                None
+            } else {
+                None
+            }
+        }
+        "weekly" => {
+            // "weekly Monday 09:00"
+            let sub_parts: Vec<&str> = rest.splitn(2, ' ').collect();
+            if sub_parts.len() >= 2 {
+                let day_name = sub_parts[0].to_lowercase();
+                let time_str = sub_parts[1];
+                let time_parts: Vec<&str> = time_str.split(':').collect();
+                if time_parts.len() >= 2 {
+                    let hour: u32 = time_parts[0].parse().ok()?;
+                    let minute: u32 = time_parts[1].parse().ok()?;
+
+                    let target_weekday = match day_name.as_str() {
+                        "monday" | "mon" => chrono::Weekday::Mon,
+                        "tuesday" | "tue" => chrono::Weekday::Tue,
+                        "wednesday" | "wed" => chrono::Weekday::Wed,
+                        "thursday" | "thu" => chrono::Weekday::Thu,
+                        "friday" | "fri" => chrono::Weekday::Fri,
+                        "saturday" | "sat" => chrono::Weekday::Sat,
+                        "sunday" | "sun" => chrono::Weekday::Sun,
+                        _ => return None,
+                    };
+
+                    let mut candidate = now.date_naive();
+                    for _ in 0..8 {
+                        if candidate.weekday() == target_weekday {
+                            let next = candidate.and_hms_opt(hour, minute, 0)?;
+                            if next > now.naive_local() {
+                                return Some(next.format("%Y-%m-%dT%H:%M").to_string());
+                            }
+                        }
+                        candidate = candidate.succ_opt()?;
+                    }
+                    None
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Definition of a **critical** message: something that will cause human‑safety risk,
 /// major financial/data loss, legal breach, or production outage if it waits >2 h.
 /// The model must default to *non‑critical* when uncertain.
 /// Prompt for matching incoming messages against the user’s *waiting checks*.
 /// A waiting check represents something the user explicitly asked to be notified
 /// about (e.g. \"Tell me when the shipment arrives\").
-const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message matches **one** of the user's monitor items listed below. Each item's 'Content' describes what the user wants to track.
+const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message matches one of the user's monitor items.
 
-    **Match rules**
-    - Interpret the item 'Content' as the user's condition or instruction for matching.
-    - If the content is descriptive (>5 words), use semantic reasoning. Translate non-English text internally.
-    - If the content is short (<=5 words), require the message to contain *all* those words (case-insensitive).
-    - A match must be *unambiguous*. Ambiguous, partial, or sender-only matches DO NOT count.
-    - If multiple items could match, choose the single *best* match. Return `null` if none match.
+Each monitor item may have structured header tags on its first line: [platform:X] [sender:Y] [topic:Z] or [scope:any], followed by a natural language description. Items without tags are legacy - use pure semantic reasoning on those.
+
+**Matching heuristics:**
+
+1. **Sender**: Does the message From field plausibly refer to the same person/entity as [sender:X]? Name matching is fuzzy: "mom", "Mom", "Mama" are the same; "hr@company.com" matches [sender:HR]. [sender:any] skips sender check.
+
+2. **Platform**: [platform:any] matches everything. [platform:chat] matches whatsapp/telegram/signal. Exact platform match is a strong signal. Cross-platform match is allowed when sender AND topic clearly align.
+
+3. **Topic**: Does the message content relate to [topic:X]? Use semantic reasoning. Translate non-English internally. If [scope:any] is present, skip topic check - any message from the sender matches. If no topic tag and no [scope:any], infer topic from the natural language description.
+
+4. **Decision**:
+   - Same platform + sender match + topic match = MATCH
+   - Same platform + sender match + [scope:any] = MATCH
+   - Cross-platform + sender + strong topic alignment = MATCH
+   - Sender match alone (no topic match, no [scope:any]) = NO MATCH
+   - Topic match alone (sender specified but wrong) = NO MATCH
+   - Very short messages ("ok", "thanks") = NO MATCH unless [scope:any] from the right sender
+
+5. If NO item matches, return is_match=false and task_id=null. Most messages will NOT match.
+
+6. If multiple items could match, pick the single best by specificity.
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
@@ -120,6 +351,9 @@ If `is_critical` is false, leave the other two fields empty strings.
 pub struct ItemMatchResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<i32>, // actually item_id - kept as task_id for LLM schema compat
+
+    #[serde(default)]
+    pub is_match: bool,
 }
 
 /// Determine whether `message` matches **one** of the supplied monitor items.
@@ -162,10 +396,23 @@ pub async fn check_item_monitor_match(
 
     let mut properties = std::collections::HashMap::new();
     properties.insert(
+        "is_match".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "true if a monitor item matches the message, false if no item matches.".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
         "task_id".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("ID of the matched item, or null if no match".to_string()),
+            description: Some(
+                "ID of the matched item when is_match is true. Null when is_match is false."
+                    .to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -173,14 +420,11 @@ pub async fn check_item_monitor_match(
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: "analyze_item_match".to_string(),
-            description: Some(
-                "Returns the ID of the best-matching monitor item, or null if none match."
-                    .to_string(),
-            ),
+            description: Some("Determines whether the message matches a monitor item.".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["task_id".to_string()]),
+                required: Some(vec!["is_match".to_string(), "task_id".to_string()]),
             },
         },
     }];
@@ -207,17 +451,43 @@ pub async fn check_item_monitor_match(
 
     let response: ItemMatchResponse = serde_json::from_str(args)?;
 
-    if response.task_id.is_some() {
+    if response.is_match && response.task_id.is_some() {
         Ok(Some(response))
     } else {
         Ok(None)
     }
 }
 
+/// Deserialize a number that may be integer or float into Option<i32>.
+/// LLMs sometimes return `1.0` instead of `1`.
+fn deserialize_optional_int_from_float<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    use serde_json::Value;
+    let v = Option::<Value>::deserialize(deserializer)?;
+    match v {
+        None => Ok(None),
+        Some(Value::Number(n)) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Some(i as i32))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Some(f as i32))
+            } else {
+                Err(de::Error::custom("invalid number for priority"))
+            }
+        }
+        Some(Value::Null) => Ok(None),
+        _ => Err(de::Error::custom("expected number or null for priority")),
+    }
+}
+
 /// Result from processing a triggered item via LLM.
 #[derive(Debug, Deserialize)]
 pub struct TriggeredItemResult {
-    /// Updated summary for the item (return unchanged for recurring items)
+    /// Updated summary for the item. Defaults to empty for oneshot/recurring (overridden in Rust).
+    #[serde(default)]
     pub summary: String,
     /// If present, notify the user with this message (max 480 chars for digest, 160 for simple)
     #[serde(default)]
@@ -226,7 +496,7 @@ pub struct TriggeredItemResult {
     #[serde(default)]
     pub next_check_at: Option<String>,
     /// 0 = background/digest-only, 1 = SMS notification, 2 = phone call
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_int_from_float")]
     pub priority: Option<i32>,
 }
 
@@ -283,49 +553,39 @@ pub async fn handle_triggered_item_result(
     }
 }
 
-const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI assistant that processes triggered items for a user. An item was triggered and needs processing. Your job:
+const PROCESS_TRIGGERED_ITEM_PROMPT: &str = r#"You are an AI that processes a triggered item for a user. Read the item summary and any provided context, then call process_item_result.
 
-1. Read the item summary carefully. It describes what to do.
-2. If there is a matched message, consider it as context for what triggered this item.
-3. If the summary mentions fetching data (emails, messages, calendar, weather), use the available fetch tools to gather that information first.
-4. Once you have all needed information, call `process_item_result` with your result.
+Scheduling and priority are handled by the system. Your primary job is to generate the notification text (sms_message).
 
-**Available fetch tools:**
-- `fetch_emails` - Fetch the user's recent emails. No parameters needed.
-- `fetch_recent_messages` - Fetch recent chat messages. Parameters: `hours_back` (int, default 8), `room_id` (optional string to filter by room).
-- `fetch_calendar_events` - Fetch upcoming calendar events. Parameters: `days_ahead` (int, default 1).
-- `get_weather` - Fetch weather data. Parameters: `location` (string), `units` ("metric"/"imperial"), `forecast_type` ("current"/"forecast").
-- `fetch_tracked_items` - Fetch the user's tracked items (monitors, reminders, deadlines). No parameters needed.
+**If fetch tools are available**, call them first to gather data before generating the notification.
+**If pre-fetched data is provided** in the user message, use it directly - no need to call fetch tools.
 
-**Timezone:** The user message includes their local time and timezone. Produce any `next_check_at` datetimes in the user's timezone as ISO format (e.g. "2026-03-01T09:00").
+**sms_message rules** (max 480 chars, plain text, second person):
+- Simple reminders: a direct one-liner (e.g. "Time to call the dentist!")
+- Fetched data: group by platform, use teasers (sender + topic hint)
+- Monitor matches (matched message present): tell the user what arrived, who sent it, what it's about
+- Scheduled monitor checks (no matched message, monitor item): only send sms_message if the description mentions a deadline or action needed. Otherwise omit sms_message - the item will silently continue.
+- Conditional checks (e.g. weather): only send sms_message when the condition IS met. Omit if not.
 
-**RULES:**
-- `summary`: For recurring items with rescheduling instructions, keep the original instructions intact but you may append useful updates. For one-shot items, update freely.
-- `sms_message`: Max 480 chars. Plain text only (no markdown, no emojis). Use second person.
-  For simple reminders, write a direct one-liner.
-  When you have fetched data from multiple sources (messages, emails, calendar, tracked items),
-  format as a glanceable digest:
-  - Group by platform (WHATSAPP:, EMAIL:, CALENDAR:, TRACKING:), each on a new line
-  - Put important/actionable items first in each group
-  - Use teasers only: sender + topic hint + relative time in parentheses, e.g. "Mom suggested dinner (today 8pm)"
-  - Do NOT include full message content - just enough for the user to decide if they need to open the app
-  - Summarize less urgent grouped items with '+', e.g. '+ 3 other messages from...'
-  - For calendar, include upcoming events with start time and brief hint
-  - Adapt detail to volume: few items = more detail per item, many items = compact teasers
-  - Critical messages are already notified in real-time, so digests focus on non-critical items
-  Omit sms_message if no notification needed.
-- `next_check_at`: If the summary contains rescheduling instructions (e.g. "Reschedule for tomorrow 9am"), follow them - set next_check_at to the appropriate ISO datetime in the user's timezone. If there are no rescheduling instructions, this is a one-time item - omit next_check_at (the item will be deleted).
-- `priority`: 0 = background only (no notification sent), 1 = SMS, 2 = phone call. Default to the item's current priority unless the summary says [VIA CALL] (use 2) or explicitly says no notification needed (use 0).
+**Item types:**
+- oneshot/recurring: just return sms_message. Everything else is handled by the system.
+- tracking: return updated summary (keep first-line tags), next_check_at (omit to delete), priority (can escalate). Only include sms_message if the user should know about this RIGHT NOW (e.g. package delivered, deadline approaching, price target hit). Omit sms_message for routine updates.
 
-**EXAMPLES:**
-- Simple reminder: summary="Remind the user to call mom" -> sms_message="Time to call mom!", no next_check_at (one-shot).
-- Call reminder: summary="Scheduled check-in [VIA CALL]" -> sms_message="Your scheduled check-in.", priority=2, no next_check_at.
-- Recurring digest: summary="Daily digest: fetch emails, messages, calendar, tracked items. Reschedule for tomorrow at 9am" -> fetch_emails, fetch_recent_messages, fetch_calendar_events, fetch_tracked_items, sms_message with grouped format, next_check_at="2026-03-02T09:00", summary keeps rescheduling instructions.
-- Data-fetching item: summary="Check weather in Helsinki and notify the user" -> get_weather, sms_message="Helsinki: 5C, light rain.", no next_check_at."#;
+**Legacy items (no [type:X] tag):**
+If the summary has no [type:X] tag, you may also see next_check_at and priority fields. For these:
+- next_check_at: set if the summary contains rescheduling instructions, omit for one-shot items
+- priority: default to item's current priority; use 2 if summary contains [VIA CALL]"#;
 
 /// Process a triggered item using LLM with optional tool-calling loop.
 /// Supports simple reminders, digest/recurring items, and monitor items
 /// that matched an incoming message.
+///
+/// Tags on the summary's first line are parsed **before** the LLM call:
+/// - `[notify:X]`  -> priority is locked (not an LLM decision)
+/// - `[repeat:X]`  -> next_check_at is computed deterministically
+/// - `[fetch:X]`   -> only matching fetch tools are provided to the LLM
+///
+/// For legacy items (no tags), the LLM decides priority and next_check_at.
 ///
 /// `matched_message`: `None` = time-fired trigger, `Some(msg)` = an incoming
 /// message matched this item (monitor match from bridge/email).
@@ -346,17 +606,118 @@ pub async fn process_triggered_item(
         (chrono::Utc::now().to_rfc3339(), "UTC".to_string())
     };
 
-    let user_msg = if let Some(msg) = matched_message {
+    // ── Pre-compute from tags ──────────────────────────────────────────
+    let tags = parse_summary_tags(&item.summary);
+    let item_type = tags.item_type.as_deref().unwrap_or(""); // empty = legacy
+    let pre_priority = compute_priority_from_tags(&tags, &item.summary, item.priority);
+    // [repeat:X] -> deterministic next_check_at; no tag -> None (LLM may decide for legacy/tracking)
+    let pre_next_check_at = compute_next_check_at(&tags, &tz_label);
+
+    // Scheduling is locked for oneshot (always None) and recurring (always computed).
+    // Tracking and legacy items let the LLM decide.
+    let next_check_locked = match item_type {
+        "oneshot" => true,
+        "recurring" => true,
+        "tracking" => false,
+        _ => {
+            // Legacy: locked if has_tags (old-style tagged without [type]),
+            // unlocked if no tags at all
+            tags.has_tags || pre_next_check_at.is_some()
+        }
+    };
+
+    // ── Pre-call fetch tools for tagged items ────────────────────────
+    // For items with [fetch:X] tags (non-tracking), pre-call tools in Rust
+    // and inject results as context. This eliminates the tool-call loop.
+    // Legacy items and tracking items keep the tool-call loop.
+    let is_legacy = !tags.has_tags;
+    let is_tracking = item_type == "tracking";
+    let mut prefetched_context = String::new();
+
+    if !is_legacy && !is_tracking && !tags.fetch.is_empty() {
+        let mut fetch_results = Vec::new();
+        for f in &tags.fetch {
+            let result_text = match f.as_str() {
+                "email" => crate::tool_call_utils::email::handle_fetch_emails(state, user_id).await,
+                "chat" => {
+                    crate::tool_call_utils::bridge::handle_fetch_recent_messages(
+                        state, user_id, "{}",
+                    )
+                    .await
+                }
+                "calendar" => {
+                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
+                        state, user_id, "{}",
+                    )
+                    .await
+                }
+                "weather" => {
+                    // Use user's location for weather
+                    let location = ctx
+                        .user_info
+                        .as_ref()
+                        .and_then(|i| i.location.as_deref())
+                        .unwrap_or("current location");
+                    match crate::utils::tool_exec::get_weather(
+                        state, location, "metric", "current", user_id,
+                    )
+                    .await
+                    {
+                        Ok(answer) => answer,
+                        Err(e) => format!("Weather fetch failed: {}", e),
+                    }
+                }
+                "items" => match state.item_repository.get_items(user_id) {
+                    Ok(items) => {
+                        let current_item_id = item.id;
+                        let filtered: Vec<_> = items
+                            .into_iter()
+                            .filter(|i| i.id != current_item_id)
+                            .collect();
+                        if filtered.is_empty() {
+                            "No tracked items.".to_string()
+                        } else {
+                            filtered
+                                .iter()
+                                .map(|i| {
+                                    let next = i
+                                        .next_check_at
+                                        .map(|ts| format!(" (next check: {})", ts))
+                                        .unwrap_or_default();
+                                    format!("- [P{}] {}{}", i.priority, i.summary, next)
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    }
+                    Err(e) => format!("Failed to fetch tracked items: {}", e),
+                },
+                _ => continue,
+            };
+            fetch_results.push(format!("[{}]:\n{}", f, result_text));
+        }
+        if !fetch_results.is_empty() {
+            prefetched_context = format!("\n\nPre-fetched data:\n{}", fetch_results.join("\n\n"));
+        }
+    }
+
+    // ── Build user message ─────────────────────────────────────────────
+    let mut user_msg = if let Some(msg) = matched_message {
         format!(
-            "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}\n\nMatched message:\n{}",
-            time_str, tz_label, item.summary, item.priority, msg
+            "Current time: {} (timezone: {})\nItem priority: {}\n\nItem summary:\n{}\n\nMatched message:\n{}",
+            time_str, tz_label, item.priority, item.summary, msg
         )
     } else {
         format!(
-            "Current time: {} (timezone: {})\nItem summary: {}\nItem priority: {}",
-            time_str, tz_label, item.summary, item.priority
+            "Current time: {} (timezone: {})\nItem priority: {}\n\nItem summary:\n{}",
+            time_str, tz_label, item.priority, item.summary
         )
     };
+
+    // Append pre-fetched context if available
+    if !prefetched_context.is_empty() {
+        user_msg.push_str(&prefetched_context);
+    }
 
     let mut messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -375,52 +736,144 @@ pub async fn process_triggered_item(
         },
     ];
 
-    // Build the final result tool
+    // ── Build result tool based on item type ─────────────────────────
     let mut result_properties = std::collections::HashMap::new();
-    result_properties.insert(
-        "summary".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Updated item summary. For recurring items, keep rescheduling instructions but may append updates."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    result_properties.insert(
-        "sms_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Notification text for the user (max 480 chars). Omit if no notification needed."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    result_properties.insert(
-        "next_check_at".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "ISO datetime for next trigger (e.g. '2026-03-01T09:00'). Omit if item is done."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    result_properties.insert(
-        "priority".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some(
-                "0 = background (no notification), 1 = SMS notification, 2 = phone call"
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
+    let mut required_fields = Vec::new();
+
+    match item_type {
+        "oneshot" => {
+            // Oneshot: LLM only returns sms_message
+            result_properties.insert(
+                "sms_message".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Notification text for the user (max 480 chars, plain text, second person). ALWAYS provide this unless the summary is a conditional check whose condition is not met."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            required_fields.push("sms_message".to_string());
+        }
+        "recurring" => {
+            // Recurring: LLM only returns sms_message. Summary frozen, next_check_at computed in Rust.
+            result_properties.insert(
+                "sms_message".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Notification text for the user (max 480 chars, plain text, second person). ALWAYS provide this unless the summary is a conditional check whose condition is not met."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            required_fields.push("sms_message".to_string());
+        }
+        "tracking" => {
+            // Tracking: LLM can update summary, decide next_check_at, and escalate priority
+            result_properties.insert(
+                "summary".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Updated item summary. Update with new information gathered. Keep the first-line tags intact."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            result_properties.insert(
+                "sms_message".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Notification text for the user (max 480 chars, plain text, second person). Only include if the user should know about this RIGHT NOW - e.g. package delivered, deadline approaching, price target hit. Omit for routine updates that don't need immediate attention."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            result_properties.insert(
+                "next_check_at".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "ISO datetime for next check in the user's timezone (e.g. '2026-03-01T09:00'). Omit to delete the item (tracking complete)."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            result_properties.insert(
+                "priority".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::Number),
+                    description: Some(
+                        "0 = background (no notification), 1 = SMS, 2 = phone call. Can escalate from silent to sms/call when something important happens."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            required_fields.push("summary".to_string());
+        }
+        _ => {
+            // Legacy items (no [type:X] tag): full LLM control
+            result_properties.insert(
+                "summary".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Updated item summary. For recurring items (with [repeat] tag), copy the ENTIRE original summary verbatim. For one-shot items, update freely."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            result_properties.insert(
+                "sms_message".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::String),
+                    description: Some(
+                        "Notification text for the user (max 480 chars, plain text, second person). ALWAYS provide this unless the summary is a conditional check whose condition is not met."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+            required_fields.push("summary".to_string());
+            required_fields.push("sms_message".to_string());
+
+            if !next_check_locked {
+                result_properties.insert(
+                    "next_check_at".to_string(),
+                    Box::new(types::JSONSchemaDefine {
+                        schema_type: Some(types::JSONSchemaType::String),
+                        description: Some(
+                            "ISO datetime for next trigger in the user's timezone (e.g. '2026-03-01T09:00'). Set this if the summary contains rescheduling instructions. Omit if item is done (one-shot)."
+                                .to_string(),
+                        ),
+                        ..Default::default()
+                    }),
+                );
+            }
+            if pre_priority.is_none() {
+                result_properties.insert(
+                    "priority".to_string(),
+                    Box::new(types::JSONSchemaDefine {
+                        schema_type: Some(types::JSONSchemaType::Number),
+                        description: Some(
+                            "0 = background (no notification), 1 = SMS, 2 = phone call. Default to item's current priority. Use 2 if summary contains [VIA CALL]."
+                                .to_string(),
+                        ),
+                        ..Default::default()
+                    }),
+                );
+            }
+        }
+    }
 
     let result_tool = chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
@@ -430,12 +883,12 @@ pub async fn process_triggered_item(
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(result_properties),
-                required: Some(vec!["summary".to_string()]),
+                required: Some(required_fields),
             },
         },
     };
 
-    // Build fetch_tracked_items tool inline
+    // ── Build fetch tools ────────────────────────────────────────────
     let fetch_tracked_items_tool = {
         use openai_api_rs::v1::{chat_completion as cc, types as t};
         cc::Tool {
@@ -454,17 +907,37 @@ pub async fn process_triggered_item(
         }
     };
 
-    // Assemble fetch tools + result tool
-    let tools = vec![
-        crate::tool_call_utils::email::get_fetch_emails_tool(),
-        crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
-        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
-        crate::tool_call_utils::internet::get_weather_tool(),
-        fetch_tracked_items_tool,
-        result_tool,
-    ];
+    let mut tools = Vec::new();
 
-    // Tool-calling loop (max 5 iterations)
+    if is_legacy {
+        // Legacy item: provide all fetch tools (LLM decides what to call)
+        tools.push(crate::tool_call_utils::email::get_fetch_emails_tool());
+        tools.push(crate::tool_call_utils::bridge::get_fetch_recent_messages_tool());
+        tools.push(crate::tool_call_utils::calendar::get_fetch_calendar_event_tool());
+        tools.push(crate::tool_call_utils::internet::get_weather_tool());
+        tools.push(fetch_tracked_items_tool);
+    } else if is_tracking {
+        // Tracking items keep the tool-call loop for dynamic tool selection
+        for f in &tags.fetch {
+            match f.as_str() {
+                "email" => tools.push(crate::tool_call_utils::email::get_fetch_emails_tool()),
+                "chat" => {
+                    tools.push(crate::tool_call_utils::bridge::get_fetch_recent_messages_tool())
+                }
+                "calendar" => {
+                    tools.push(crate::tool_call_utils::calendar::get_fetch_calendar_event_tool())
+                }
+                "weather" => tools.push(crate::tool_call_utils::internet::get_weather_tool()),
+                "items" => tools.push(fetch_tracked_items_tool.clone()),
+                _ => {}
+            }
+        }
+    }
+    // For oneshot/recurring with [fetch:X], data was pre-fetched above - no fetch tools needed
+
+    tools.push(result_tool);
+
+    // ── Tool-calling loop (max 5 iterations) ───────────────────────────
     for iteration in 0..5 {
         let request =
             chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages.clone())
@@ -482,11 +955,9 @@ pub async fn process_triggered_item(
             .as_ref()
             .ok_or("No tool calls in response")?;
 
-        // Process each tool call
         let mut found_result = None;
         let assistant_content = choice.message.content.clone().unwrap_or_default();
 
-        // Add assistant message with tool calls
         messages.push(chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::assistant,
             content: chat_completion::Content::Text(assistant_content),
@@ -501,10 +972,50 @@ pub async fn process_triggered_item(
             let tc_id = tc.id.clone();
 
             if fn_name == "process_item_result" {
-                // Parse and return
-                let parsed: TriggeredItemResult = serde_json::from_str(fn_args)?;
+                let mut parsed: TriggeredItemResult = serde_json::from_str(fn_args)?;
+
+                // ── Override with pre-computed values ───────────────
+                match item_type {
+                    "oneshot" => {
+                        // Summary preserved as-is (item is deleted anyway)
+                        parsed.summary = item.summary.clone();
+                        parsed.next_check_at = None;
+                        if let Some(p) = pre_priority {
+                            parsed.priority = Some(p);
+                        }
+                    }
+                    "recurring" => {
+                        // Summary frozen, next_check_at computed, priority locked
+                        parsed.summary = item.summary.clone();
+                        parsed.next_check_at = pre_next_check_at.clone();
+                        if let Some(p) = pre_priority {
+                            parsed.priority = Some(p);
+                        }
+                    }
+                    "tracking" => {
+                        // LLM decides summary, next_check_at, and can escalate priority
+                        // Only override priority if the LLM didn't set one
+                        if parsed.priority.is_none() {
+                            if let Some(p) = pre_priority {
+                                parsed.priority = Some(p);
+                            }
+                        }
+                    }
+                    _ => {
+                        // Legacy behavior
+                        if let Some(p) = pre_priority {
+                            parsed.priority = Some(p);
+                        }
+                        if next_check_locked {
+                            parsed.next_check_at = pre_next_check_at.clone();
+                        }
+                        if tags.repeat.is_some() {
+                            parsed.summary = item.summary.clone();
+                        }
+                    }
+                }
+
                 found_result = Some(parsed);
-                // Add tool response to keep message structure valid
                 messages.push(chat_completion::ChatCompletionMessage {
                     role: chat_completion::MessageRole::tool,
                     content: chat_completion::Content::Text("OK".to_string()),

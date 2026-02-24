@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::Json;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -109,7 +110,7 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z'). Default to 24 hours before now if unspecified.".to_string()),
+            description: Some("Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T00:00'). Default to 24 hours before now if unspecified.".to_string()),
             ..Default::default()
         }),
     );
@@ -660,8 +661,6 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
     }
 }
 
-use chrono::DateTime;
-
 #[derive(Deserialize)]
 struct FetchRecentMessagesArgs {
     platform: String,
@@ -687,14 +686,22 @@ pub async fn handle_fetch_recent_messages(
         .map(|c| c.to_uppercase().collect::<String>())
         .unwrap_or_default()
         + &args.platform[1..];
-    // Parse the RFC3339 timestamps into Unix timestamps
-    let start_time = match DateTime::parse_from_rfc3339(&args.start) {
-        Ok(dt) => dt.timestamp(),
-        Err(e) => {
-            eprintln!("Failed to parse start time: {}", e);
-            return "Invalid start time format. Please use RFC3339 format.".to_string();
+    // Look up user timezone and parse datetime to UTC timestamp
+    let user_tz = match state.user_core.get_user_info(user_id) {
+        Ok(info) => {
+            let tz_str = info.timezone.unwrap_or_else(|| "UTC".to_string());
+            tz_str.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC)
         }
+        Err(_) => chrono_tz::UTC,
     };
+    let start_time =
+        match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&args.start, &user_tz) {
+            Ok(dt) => dt.timestamp(),
+            Err(e) => {
+                eprintln!("Failed to parse start time: {}", e);
+                return "Invalid start time format.".to_string();
+            }
+        };
     match crate::utils::bridge::fetch_bridge_messages(
         &args.platform,
         state,

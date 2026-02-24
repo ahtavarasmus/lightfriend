@@ -786,6 +786,10 @@ async fn main() {
         )
         .route("/api/chat/web", post(profile_handlers::web_chat))
         .route(
+            "/api/chat/web-stream",
+            get(profile_handlers::web_chat_stream),
+        )
+        .route(
             "/api/chat/web-with-image",
             post(profile_handlers::web_chat_with_image),
         )
@@ -1220,7 +1224,10 @@ async fn main() {
             "/api/items/{id}/snooze",
             post(dashboard_handlers::snooze_item),
         )
-        .route("/api/items/{id}", delete(dashboard_handlers::dismiss_item))
+        .route(
+            "/api/items/{id}",
+            get(dashboard_handlers::get_item_detail).delete(dashboard_handlers::dismiss_item),
+        )
         // Contact Profiles routes
         .route(
             "/api/contact-profiles",

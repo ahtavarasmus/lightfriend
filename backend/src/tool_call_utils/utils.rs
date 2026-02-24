@@ -1,8 +1,11 @@
 use crate::AppState;
 use crate::UserCoreOps;
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use chrono_tz::Tz;
 use openai_api_rs::v1::{api::OpenAIClient, chat_completion, types};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::Arc;
 
 /// Available runtime tools for scheduled tasks.
@@ -168,6 +171,45 @@ pub fn create_email_select_properties() -> HashMap<String, Box<types::JSONSchema
 pub struct EmailSelectResponse {
     pub email_id: String,
     pub reason: Option<String>,
+}
+
+/// Parse a datetime string in the user's timezone to UTC.
+/// Tries RFC3339 first (backward compat if LLM sends offset), then falls back
+/// to naive `YYYY-MM-DDTHH:MM` parsed in the user's timezone.
+pub fn parse_user_datetime_to_utc(
+    time_str: &str,
+    tz: &Tz,
+) -> Result<DateTime<Utc>, Box<dyn Error>> {
+    // Try parsing as full RFC3339 with timezone offset (e.g. "2026-02-08T07:00:00+02:00" or "...Z")
+    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(time_str) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    // Also try common offset format without seconds (e.g. "2026-02-08T07:00+02:00")
+    if time_str.len() > 16 {
+        if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(&format!(
+            "{}:00{}",
+            &time_str[..16],
+            &time_str[16..]
+        )) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+    }
+
+    // Fall back to naive datetime parsing (no timezone offset in string)
+    let naive = if time_str.len() == 16 {
+        // YYYY-MM-DDTHH:MM format
+        NaiveDateTime::parse_from_str(&format!("{}:00", time_str), "%Y-%m-%dT%H:%M:%S")?
+    } else {
+        NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")?
+    };
+
+    // Interpret naive datetime in user's timezone, then convert to UTC
+    let local_dt = tz
+        .from_local_datetime(&naive)
+        .single()
+        .ok_or("Ambiguous or invalid local time")?;
+
+    Ok(local_dt.with_timezone(&Utc))
 }
 
 pub async fn select_most_relevant_email(

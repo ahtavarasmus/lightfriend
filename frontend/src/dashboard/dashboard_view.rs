@@ -13,6 +13,7 @@ use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::activity_panel::ActivityPanel;
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
+use super::items_status::ItemsStatusSection;
 
 const DASHBOARD_STYLES: &str = r#"
 .peace-dashboard {
@@ -86,11 +87,24 @@ const DASHBOARD_STYLES: &str = r#"
     margin-top: 0.15rem;
     opacity: 0.8;
 }
-.item-detail-condition {
-    font-size: 0.75rem;
-    color: #e8a838;
+.item-detail-meta {
+    display: flex;
+    gap: 0.4rem;
     margin-top: 0.15rem;
-    font-style: italic;
+    flex-wrap: wrap;
+}
+.item-detail-meta span {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgba(255,255,255,0.08);
+    color: #aaa;
+}
+.item-detail-monitor {
+    color: #7eb2ff !important;
+}
+.item-detail-notify {
+    color: #e8a838 !important;
 }
 .item-detail-note {
     font-size: 0.7rem;
@@ -262,6 +276,9 @@ struct DashboardSummaryResponse {
     /// Total count of items beyond the timeline range
     #[serde(default)]
     items_beyond_count: i32,
+    /// Total number of tracked items
+    #[serde(default)]
+    total_tracked_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize, Default)]
@@ -277,10 +294,26 @@ struct AttentionItemResponse {
     item_type: String,
     summary: String,
     #[serde(default)]
+    description: String,
+    #[serde(default)]
+    priority: i32,
+    #[serde(default)]
+    monitor: bool,
+    #[serde(default)]
     next_check_at: Option<i32>,
     source: Option<String>,
     #[serde(default)]
     source_id: Option<String>,
+    #[serde(default)]
+    notify: Option<String>,
+    #[serde(default)]
+    sender: Option<String>,
+    #[serde(default)]
+    platform: Option<String>,
+    #[serde(default)]
+    time_display: Option<String>,
+    #[serde(default)]
+    relative_display: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -301,7 +334,11 @@ struct UpcomingItemResponse {
     #[serde(default)]
     relative_display: String,
     #[serde(default)]
-    condition: Option<String>,
+    item_type: Option<String>,
+    #[serde(default)]
+    monitor: bool,
+    #[serde(default)]
+    notify: Option<String>,
     #[serde(default)]
     sources_display: Option<String>,
 }
@@ -542,7 +579,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     }
 
     // Convert API response to component props
-    let (_attention_count, attention_items) = match (*summary).as_ref() {
+    let (_attention_count, attention_items, total_tracked_count) = match (*summary).as_ref() {
         Some(s) => (
             s.attention_count,
             s.attention_items
@@ -551,13 +588,22 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     id: item.id,
                     item_type: item.item_type.clone(),
                     summary: item.summary.clone(),
+                    description: item.description.clone(),
+                    priority: item.priority,
+                    monitor: item.monitor,
                     next_check_at: item.next_check_at,
                     source: item.source.clone(),
                     source_id: item.source_id.clone(),
+                    notify: item.notify.clone(),
+                    sender: item.sender.clone(),
+                    platform: item.platform.clone(),
+                    time_display: item.time_display.clone(),
+                    relative_display: item.relative_display.clone(),
                 })
                 .collect(),
+            s.total_tracked_count,
         ),
-        None => (0, vec![]),
+        None => (0, vec![], 0),
     };
 
     let upcoming_items: Vec<UpcomingItem> = (*summary)
@@ -572,7 +618,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     description: t.description.clone(),
                     date_display: t.date_display.clone(),
                     relative_display: t.relative_display.clone(),
-                    condition: t.condition.clone(),
+                    item_type: t.item_type.clone(),
+                    monitor: t.monitor,
+                    notify: t.notify.clone(),
                     sources_display: t.sources_display.clone(),
                 })
                 .collect()
@@ -614,7 +662,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
                                 date_display: String::new(),
                                 relative_display: String::new(),
-                                condition: None,
+                                item_type: Some("recurring".to_string()),
+                                monitor: false,
+                                notify: None,
                                 sources_display: None,
                             };
                             selected_item.set(Some(item));
@@ -802,7 +852,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                     description: data["description"].as_str().unwrap_or("").to_string(),
                                     date_display: data["date_display"].as_str().unwrap_or("").to_string(),
                                     relative_display: data["relative_display"].as_str().unwrap_or("").to_string(),
-                                    condition: data["condition"].as_str().map(|s| s.to_string()),
+                                    item_type: data["item_type"].as_str().map(|s| s.to_string()),
+                                    monitor: data["monitor"].as_bool().unwrap_or(false),
+                                    notify: data["notify"].as_str().map(|s| s.to_string()),
                                     sources_display: data["sources_display"].as_str().map(|s| s.to_string()),
                                 };
                                 preview_item.set(Some(item));
@@ -875,15 +927,25 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         <div class="item-detail-note">{"Location from Settings > Account"}</div>
                                     }
                                 }
-                                if let Some(ref cond) = item.condition {
-                                    <div class="item-detail-condition">{format!("Condition: {}", cond)}</div>
-                                }
-                                <div class="item-detail-desc">
-                                    {if item.condition.is_some() || item.sources_display.is_some() {
-                                        format!("Then: {}", &item.description)
+                                <div class="item-detail-meta">
+                                    {if let Some(ref t) = item.item_type {
+                                        html! { <span class="item-detail-type">{t}</span> }
                                     } else {
-                                        item.description.clone()
+                                        html! {}
                                     }}
+                                    {if item.monitor {
+                                        html! { <span class="item-detail-monitor">{"monitoring"}</span> }
+                                    } else {
+                                        html! {}
+                                    }}
+                                    {if let Some(ref n) = item.notify {
+                                        html! { <span class="item-detail-notify">{n}</span> }
+                                    } else {
+                                        html! {}
+                                    }}
+                                </div>
+                                <div class="item-detail-desc">
+                                    {item.description.clone()}
                                 </div>
                                 <div class="item-detail-note">{"You'll be notified when this runs"}</div>
                             </div>
@@ -895,41 +957,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
             // Main dashboard content - blurred when item focused
             <div class={if selected_item.is_some() { "peace-main item-focused" } else { "peace-main" }}>
-                // System-level notices (bridge disconnected etc. - items with no source_id)
-                // Admin-only for now
-                { if props.user_profile.id == 1 {
-                    let system_items: Vec<_> = attention_items.iter()
-                        .filter(|item| item.source_id.is_none())
-                        .collect();
-                    if system_items.is_empty() {
-                        html! {}
-                    } else {
-                        html! {
-                            <div>
-                                { for system_items.iter().map(|item| {
-                                    let dismiss_item = (*item).clone();
-                                    let on_dismiss = on_dismiss_item.clone();
-                                    html! {
-                                        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.2);border-radius:8px;margin-bottom:0.5rem;">
-                                            <span style="color:#f59e0b;font-size:0.8rem;font-weight:600;">{"!"}</span>
-                                            <span style="flex:1;color:#ccc;font-size:0.85rem;">{&item.summary}</span>
-                                            <button
-                                                style="background:none;border:none;color:#666;font-size:0.9rem;cursor:pointer;padding:0.2rem 0.4rem;"
-                                                onclick={Callback::from(move |e: MouseEvent| {
-                                                    e.stop_propagation();
-                                                    on_dismiss.emit(dismiss_item.clone());
-                                                })}
-                                                title="Dismiss"
-                                            >{"x"}</button>
-                                        </div>
-                                    }
-                                })}
-                            </div>
-                        }
-                    }
-                } else {
-                    html! {}
-                }}
+                // Items status: urgent cards, monitor group, and status line
+                <ItemsStatusSection
+                    items={attention_items.clone()}
+                    total_tracked_count={total_tracked_count}
+                    on_dismiss={on_dismiss_item.clone()}
+                />
 
                 // People section with contact avatars
                 <div class="section-label">

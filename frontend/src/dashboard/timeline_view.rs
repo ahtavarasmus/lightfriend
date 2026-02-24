@@ -6,7 +6,9 @@ pub struct UpcomingItem {
     pub description: String,
     pub date_display: String,
     pub relative_display: String,
-    pub condition: Option<String>,
+    pub item_type: Option<String>,
+    pub monitor: bool,
+    pub notify: Option<String>,
     pub sources_display: Option<String>,
 }
 

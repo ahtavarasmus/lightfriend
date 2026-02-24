@@ -54,6 +54,7 @@ pub async fn handle_set_proactive_agent(
 }
 
 /// Unified item creation tool for scheduled reminders and message monitoring.
+/// Uses structured params (enums, not freeform) so behavioral decisions are deterministic.
 pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
@@ -61,27 +62,90 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
     let mut properties = HashMap::new();
 
     properties.insert(
-        "summary".to_string(),
+        "item_type".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "A concise description of what to remind or watch for.\n\
-                At trigger time, a processing LLM reads this summary AND can fetch real data\n\
-                (emails, messages, calendar, weather) to produce an informed notification (max 480 chars).\n\
-                Priority determines delivery: 1 = SMS, 2 = phone call.\n\n\
+                "Item lifecycle type:\n\
+                - 'oneshot': fire once, notify, delete. For simple reminders, one-shot monitors.\n\
+                - 'recurring': fire, notify, auto-reschedule via repeat pattern. Summary never changes.\n\
+                - 'tracking': AI-managed background item. AI decides when to surface, reschedule, or update summary.\n\
+                  Example: 'track this package delivery', 'watch Bitcoin price and tell me when it hits 100k'."
+                    .to_string(),
+            ),
+            enum_values: Some(vec![
+                "oneshot".to_string(),
+                "recurring".to_string(),
+                "tracking".to_string(),
+            ]),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "notify".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "How to notify the user when this item fires:\n\
+                - 'sms': send an SMS (default for most items)\n\
+                - 'call': phone call (for wake-up alarms, urgent alerts)\n\
+                - 'silent': no notification (background tracking only)"
+                    .to_string(),
+            ),
+            enum_values: Some(vec![
+                "sms".to_string(),
+                "call".to_string(),
+                "silent".to_string(),
+            ]),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "repeat".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Repeat pattern for recurring items. Required when item_type='recurring'.\n\
+                Formats: 'daily HH:MM', 'weekdays HH:MM', 'weekly DAY HH:MM'\n\
+                Examples: 'daily 09:00', 'weekdays 08:30', 'weekly Monday 09:00'"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "fetch".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Comma-separated list of data sources to fetch at trigger time.\n\
+                Available: email, chat, calendar, weather, items\n\
+                Example: 'email,chat,calendar,items'\n\
+                Omit if no data fetching needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "description".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Natural language description of what to remind or watch for.\n\
                 RULES:\n\
                 - Use third person: 'the user', never 'you' or 'me'\n\
-                - Include all relevant context: names, times, locations, what to watch for\n\
-                - If the user wants a PHONE CALL (e.g. 'call me', 'give me a call'), append ' [VIA CALL]'\n\
-                  at the end. Otherwise omit it - SMS is the default.\n\
-                - For recurring items, include rescheduling instructions in the summary\n\
-                  (e.g. 'Reschedule for tomorrow at 9am') so the processing LLM knows to reschedule\n\n\
+                - Include all relevant context: names, times, locations, what to watch for\n\n\
                 EXAMPLES:\n\
-                - 'remind me to call mom at 10pm' -> \"Remind the user to call mom\"\n\
-                - 'call me at midnight' -> \"Scheduled check-in for the user [VIA CALL]\"\n\
-                - 'let me know if mom emails' -> \"Watch for emails from mom. Notify the user when one arrives.\"\n\
-                - 'tell me when John messages about the project' -> \"Watch for messages from John about the project. Remind the user when a match arrives.\"\n\
-                - 'remind me about my 2pm dentist appointment' -> \"Dentist appointment at 2pm\""
+                - 'Remind the user to call mom.'\n\
+                - 'Summarize recent emails, messages, calendar events, and tracked items for the user.'\n\
+                - 'Check weather in Tampere. If below freezing, remind the user to warm up the car. If not, no notification needed.'\n\
+                - 'Watch for emails from mom.'\n\
+                - 'Watch for messages from John about the project.'"
                     .to_string(),
             ),
             ..Default::default()
@@ -93,7 +157,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
             description: Some(
-                "true to watch incoming emails/messages for matches, false if item only fires at next_check_at (can be rescheduled)."
+                "true to watch incoming emails/messages for matches, false if item only fires at next_check_at."
                     .to_string(),
             ),
             ..Default::default()
@@ -107,17 +171,59 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
             description: Some(
                 "ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. ALWAYS REQUIRED.\n\
                 For reminders (monitor=false): when to fire.\n\
-                For monitors (monitor=true): review/expiration date. If user doesn't specify one,\n\
+                For monitors (monitor=true): safety-net review/expiration date. If user doesn't specify one,\n\
                 infer a reasonable default:\n\
                 - General 'notify me when X messages': 2 weeks\n\
                 - Time-bounded events (flights, deliveries, payments): match the event timeframe\n\
                 - Ongoing watches (price drops, job postings): 1 month\n\
-                At this date, the item fires as a check-in: 'still want to watch for X?'\n\n\
-                SMART TIMING for reminders (monitor=false):\n\
-                - Virtual/same-location events (meeting, call): 5 minutes before\n\
-                - Appointments (doctor, interview): 45 minutes before\n\
-                - Travel needed (restaurant, airport): 60 minutes before\n\
-                - OVERRIDE: If user specifies exact time ('remind me at 1pm'), use that time exactly"
+                At this date, the item fires as a check-in: 'still want to watch for X?'"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    // Monitor-specific tag params (optional, for monitor=true items)
+    properties.insert(
+        "platform".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "For monitors: which platform to watch. Options: email, whatsapp, telegram, signal, chat (any chat), any"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "sender".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "For monitors: person/entity name to watch for, or 'any'.".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "topic".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "For monitors: key topic words to match. Omit if using scope='any'.".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    properties.insert(
+        "scope".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "For monitors: set to 'any' to match ANY message from the sender (skips topic check)."
                     .to_string(),
             ),
             ..Default::default()
@@ -129,28 +235,32 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("create_item"),
             description: Some(String::from(
-                "Creates a tracked item: a scheduled reminder or a monitor for incoming emails/messages.\n\
-                - monitor=false: fires at next_check_at. Can be rescheduled with a new next_check_at.\n\
-                  Provide next_check_at as ISO datetime in the user's timezone.\n\
-                - monitor=true: watches every incoming email/message for matches.\n\
-                  Optionally set next_check_at as a safety-net deadline to follow up if nothing is caught.\n\n\
+                "Creates a tracked item: a scheduled reminder, recurring digest, background tracker, or a monitor for incoming messages.\n\n\
+                ITEM TYPES:\n\
+                - oneshot: fire once, notify, delete (simple reminders, one-shot monitors)\n\
+                - recurring: fire, notify, auto-reschedule (daily digests, recurring reminders). Requires 'repeat' param.\n\
+                - tracking: AI-managed. AI decides when to surface, reschedule, or update (package tracking, price watches)\n\n\
                 EXAMPLES:\n\
                 - 'remind me to call mom at 10pm' ->\n\
-                    summary=\"Remind the user to call mom\", monitor=false, next_check_at=\"2026-02-28T22:00\"\n\
+                    item_type='oneshot', notify='sms', description='Remind the user to call mom.', monitor=false, next_check_at='2026-02-28T22:00'\n\
                 - 'call me at midnight' ->\n\
-                    summary=\"Scheduled check-in [VIA CALL]\", monitor=false, next_check_at=\"2026-02-29T00:00\"\n\
+                    item_type='oneshot', notify='call', description='Scheduled check-in for the user.', monitor=false, next_check_at='2026-02-29T00:00'\n\
+                - 'every morning at 9am summarize my messages and email' ->\n\
+                    item_type='recurring', notify='sms', repeat='daily 09:00', fetch='email,chat,calendar,items', description='Summarize recent emails, messages, calendar events, and tracked items.', monitor=false, next_check_at='2026-02-25T09:00'\n\
                 - 'let me know if mom emails' ->\n\
-                    summary=\"Watch for emails from mom. Notify the user when one arrives.\", monitor=true\n\
-                - 'watch for invoice payment, check March 1 if unpaid' ->\n\
-                    summary=\"Watch for invoice payment confirmation. Remind user if still unpaid.\", monitor=true, next_check_at=\"2026-03-01T09:00\"\n\
-                - 'tell me when John messages' ->\n\
-                    summary=\"Watch for messages from John. Notify the user when a match arrives.\", monitor=true",
+                    item_type='oneshot', notify='sms', description='Watch for emails from mom.', monitor=true, platform='email', sender='mom', scope='any', next_check_at='2026-03-09T09:00'\n\
+                - 'call me when John messages about the project' ->\n\
+                    item_type='oneshot', notify='call', description='Watch for messages from John about the project.', monitor=true, platform='chat', sender='John', topic='project', next_check_at='2026-03-09T09:00'\n\
+                - 'track my Amazon package delivery' ->\n\
+                    item_type='tracking', notify='sms', description='Track Amazon package delivery. Notify user when shipped or delivered.', monitor=true, platform='email', sender='Amazon', topic='shipping delivery', next_check_at='2026-03-07T09:00'",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
                 required: Some(vec![
-                    String::from("summary"),
+                    String::from("item_type"),
+                    String::from("notify"),
+                    String::from("description"),
                     String::from("monitor"),
                     String::from("next_check_at"),
                 ]),
@@ -167,9 +277,24 @@ use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct CreateItemArgs {
-    pub summary: String,
+    pub item_type: String,
+    pub notify: String,
+    pub description: String,
     pub monitor: bool,
     pub next_check_at: String,
+    #[serde(default)]
+    pub repeat: Option<String>,
+    #[serde(default)]
+    pub fetch: Option<String>,
+    // Monitor tag params
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub topic: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// Result from handle_create_item containing the confirmation message and item ID
@@ -207,14 +332,22 @@ pub async fn handle_create_item(
     let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
     let ts = parse_datetime_to_timestamp(&args.next_check_at, &tz)?;
 
-    let summary = args.summary.clone();
+    // Build summary from structured params: tags line + "\n" + description
+    let summary = build_summary_from_params(&args);
+
+    // Derive priority from notify param
+    let priority = match args.notify.as_str() {
+        "call" => 2,
+        "silent" => 0,
+        _ => 1, // sms or unknown defaults to 1
+    };
 
     let new_item = crate::models::user_models::NewItem {
         user_id,
-        summary,
+        summary: summary.clone(),
         monitor: args.monitor,
         next_check_at: Some(ts),
-        priority: 1,
+        priority,
         source_id: None,
         created_at: now,
     };
@@ -225,15 +358,47 @@ pub async fn handle_create_item(
         .map_err(|e| format!("Failed to create item: {:?}", e))?;
 
     let confirmation = if !args.monitor {
-        format!("Got it! I'll remind you: {}", args.summary)
+        format!("Got it! I'll remind you: {}", args.description)
     } else {
-        format!("Got it! I'll watch for: {}", args.summary)
+        format!("Got it! I'll watch for: {}", args.description)
     };
 
     Ok(CreateItemResult {
         message: confirmation,
         task_id: item_id,
     })
+}
+
+/// Build summary string from structured CreateItemArgs.
+/// Format: "[type:X] [notify:Y] [optional tags...]\nDescription text"
+fn build_summary_from_params(args: &CreateItemArgs) -> String {
+    let mut tags = Vec::new();
+
+    tags.push(format!("[type:{}]", args.item_type));
+    tags.push(format!("[notify:{}]", args.notify));
+
+    if let Some(ref repeat) = args.repeat {
+        tags.push(format!("[repeat:{}]", repeat));
+    }
+    if let Some(ref fetch) = args.fetch {
+        tags.push(format!("[fetch:{}]", fetch));
+    }
+
+    // Monitor tags
+    if let Some(ref platform) = args.platform {
+        tags.push(format!("[platform:{}]", platform));
+    }
+    if let Some(ref sender) = args.sender {
+        tags.push(format!("[sender:{}]", sender));
+    }
+    if let Some(ref topic) = args.topic {
+        tags.push(format!("[topic:{}]", topic));
+    }
+    if let Some(ref scope) = args.scope {
+        tags.push(format!("[scope:{}]", scope));
+    }
+
+    format!("{}\n{}", tags.join(" "), args.description)
 }
 
 /// Wrapper around handle_create_item that retries once via LLM if the first attempt fails.
@@ -326,37 +491,9 @@ pub async fn handle_create_item_with_retry(
     }
 }
 
-/// Parse ISO datetime string (in user's timezone) to UTC unix timestamp
+/// Parse ISO datetime string (in user's timezone) to UTC unix timestamp.
+/// Delegates to the shared `parse_user_datetime_to_utc` and converts to i32 timestamp.
 fn parse_datetime_to_timestamp(time_str: &str, tz: &Tz) -> Result<i32, Box<dyn Error>> {
-    use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
-
-    // Try parsing as full ISO datetime with timezone offset first (e.g. "2026-02-08T07:00:00+02:00")
-    // AI often includes timezone offsets - use the offset directly for accurate conversion
-    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(time_str) {
-        return Ok(dt.timestamp() as i32);
-    }
-    // Also try common offset format without seconds (e.g. "2026-02-08T07:00+02:00")
-    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_rfc3339(&format!(
-        "{}:00{}",
-        &time_str[..16],
-        &time_str[16..]
-    )) {
-        return Ok(dt.timestamp() as i32);
-    }
-
-    // Fall back to naive datetime parsing (no timezone offset in string)
-    let naive = if time_str.len() == 16 {
-        // YYYY-MM-DDTHH:MM format
-        NaiveDateTime::parse_from_str(&format!("{}:00", time_str), "%Y-%m-%dT%H:%M:%S")?
-    } else {
-        NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")?
-    };
-
-    // Interpret naive datetime in user's timezone, then get UTC timestamp
-    let local_dt = tz
-        .from_local_datetime(&naive)
-        .single()
-        .ok_or("Ambiguous or invalid local time")?;
-
-    Ok(local_dt.timestamp() as i32)
+    let utc_dt = crate::tool_call_utils::utils::parse_user_datetime_to_utc(time_str, tz)?;
+    Ok(utc_dt.timestamp() as i32)
 }

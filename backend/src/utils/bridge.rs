@@ -1676,9 +1676,9 @@ pub async fn handle_bridge_message(
 
     // Check monitor items for messaging matches
     let message_context = format!(
-        "From: {}\nService: {}\nRoom: {}\nContent: {}",
-        sender_localpart,
+        "Platform: {}\nFrom: {}\nChat: {}\nContent: {}",
         service,
+        sender_localpart,
         room_name.as_str(),
         content
     );

@@ -754,10 +754,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         }
                                         // Format email content for checking
                                         let email_content = format!(
-                                            "From: {}\nSubject: {}\nDate: {}\nBody: {}\n---\n",
+                                            "Platform: email\nFrom: {}\nChat: inbox\nSubject: {}\nContent: {}",
                                             email.from.as_deref().unwrap_or("Unknown"),
                                             email.subject.as_deref().unwrap_or("No subject"),
-                                            email.date_formatted.as_deref().unwrap_or("Unknown date"),
                                             email.body.as_deref().unwrap_or("No content")
                                         );
 

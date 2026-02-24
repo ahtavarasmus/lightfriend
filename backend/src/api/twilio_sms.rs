@@ -194,15 +194,24 @@ pub struct TextBeeWebhookPayload {
     pub body: String,
 }
 
+/// Status updates emitted during process_sms for streaming to clients.
+#[derive(Debug, Clone)]
+pub enum ChatStatus {
+    Thinking,
+    ToolCall { name: String },
+    Retrying { attempt: u32, max: u32 },
+    RetryingFollowup { attempt: u32, max: u32 },
+}
+
 /// Options for process_sms to control test behavior
 #[derive(Default)]
 pub struct ProcessSmsOptions {
     /// Skip actual Twilio SMS sending
     pub skip_twilio_send: bool,
-    /// Skip credit deduction (for callers that handle credits themselves)
-    pub skip_credit_deduction: bool,
     /// Mock LLM response to use instead of calling real LLM API
     pub mock_llm_response: Option<openai_api_rs::v1::chat_completion::ChatCompletionResponse>,
+    /// Optional channel for streaming status updates to callers (e.g. SSE endpoint)
+    pub status_tx: Option<tokio::sync::mpsc::Sender<ChatStatus>>,
 }
 
 impl ProcessSmsOptions {
@@ -211,23 +220,39 @@ impl ProcessSmsOptions {
         Self::default()
     }
 
-    /// Create options for web chat (skip Twilio, skip credits - caller handles credits)
+    /// Create options for web chat (skip Twilio sending)
     pub fn web_chat() -> Self {
         Self {
             skip_twilio_send: true,
-            skip_credit_deduction: true,
             mock_llm_response: None,
+            status_tx: None,
         }
     }
 
-    /// Create options for testing with mock LLM response (deducts credits for testing)
+    /// Create options for web chat with status streaming
+    pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>) -> Self {
+        Self {
+            skip_twilio_send: true,
+            mock_llm_response: None,
+            status_tx: Some(tx),
+        }
+    }
+
+    /// Create options for testing with mock LLM response
     pub fn test_with_mock(
         mock_response: openai_api_rs::v1::chat_completion::ChatCompletionResponse,
     ) -> Self {
         Self {
             skip_twilio_send: true,
-            skip_credit_deduction: false, // Still deduct credits so we can test credit deduction
             mock_llm_response: Some(mock_response),
+            status_tx: None,
+        }
+    }
+
+    /// Send a status update (no-op if no channel configured)
+    fn emit_status(&self, status: ChatStatus) {
+        if let Some(tx) = &self.status_tx {
+            let _ = tx.try_send(status);
         }
     }
 }
@@ -531,7 +556,7 @@ pub async fn handle_regular_sms(
 pub async fn process_sms(
     state: &Arc<AppState>,
     payload: TwilioWebhookPayload,
-    options: ProcessSmsOptions,
+    mut options: ProcessSmsOptions,
 ) -> (
     StatusCode,
     [(axum::http::HeaderName, &'static str); 1],
@@ -736,19 +761,10 @@ pub async fn process_sms(
 - Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
 - When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
 - CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
-- FUTURE ACTIONS MUST BE SCHEDULED: If the user asks to do something at a future time (e.g. 'at 5pm text my wife', 'in 2 hours send an email'), you MUST use create_item to schedule it. NEVER call send_chat_message, send_email, create_calendar_event, or control_tesla directly for future-time requests - those tools execute immediately and cannot be delayed.
-  Example: 'at 5pm text my wife on WhatsApp that I am running late' -> create_item(summary='Remind the user to text wife on WhatsApp: running late', monitor=false, next_check_at='...T17:00')
-  WRONG: calling send_chat_message directly when the user said 'at 5pm' - that sends it NOW, not at 5pm.
-- When users request monitoring for incoming emails/messages (e.g. 'let me know if mom emails', 'tell me when John messages'), use create_item with monitor=true. When users want a scheduled check at a specific time, use create_item with monitor=false and next_check_at set to the desired time.
 
-### Questions vs Tasks:
-- If the user is ASKING A QUESTION about an event or topic (e.g. 'I have a dentist appointment tomorrow, what should I bring?', 'what's the weather like this weekend?'), answer the question directly using tools like ask_perplexity. Do NOT create a task.
-- Only create a task when the user explicitly requests a reminder, scheduled action, or monitoring (e.g. 'remind me', 'text me at', 'notify me when', 'at 5pm do X').
-
-### Task vs Calendar Event:
-- 'add task', 'remind me', 'set a reminder', 'schedule a task' -> use create_item (Lightfriend's built-in item system)
-- 'add to my calendar', 'create a calendar event', 'put this on my calendar' -> use create_calendar_event (Google Calendar)
-- When in doubt, use create_item. Only use create_calendar_event when the user explicitly mentions their calendar or Google Calendar.
+### Questions vs Items:
+- If the user is ASKING A QUESTION about an event or topic (e.g. 'I have a dentist appointment tomorrow, what should I bring?', 'what's the weather like this weekend?'), answer the question directly using tools like ask_perplexity. Do NOT create an item.
+- Only create an item when the user explicitly requests a reminder, scheduled action, or monitoring (e.g. 'remind me', 'text me at', 'notify me when', 'at 5pm do X').
 
 ### Event Reminder Timing:
 - When the user mentions an event at a specific time, set next_check_at BEFORE the event so the reminder is useful:
@@ -762,14 +778,11 @@ pub async fn process_sms(
 - Always work with times in the user's timezone: {} with offset {}.
 - When user mentions times without dates, assume they mean the nearest future occurrence.
 - RELATIVE TIMES: For 'in X hours/minutes', compute the exact next_check_at by adding X to the current time. Example: if current time is 14:30 and user says 'in 3 hours', next_check_at must be 17:30 (not an approximation).
-- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').
 - For displaying times to users:
   - Use 12-hour format with AM/PM (e.g., '2:30 PM')
   - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')
   - Show full date only when it's not today/tomorrow
-- If no specific time is mentioned:
-  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)
-  - For other time ranges: Use current time to 24 hours ahead
+- If no specific time is mentioned, use current time to 24 hours ahead.
 - For queries about:
   - 'Today': Use 00:00 to 23:59 of the current day in user's timezone
   - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone
@@ -997,10 +1010,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         .collect();
 
     // Use mock response if provided (for testing), otherwise call real LLM with retry
-    let result = if let Some(mock_response) = options.mock_llm_response {
+    let result = if let Some(mock_response) = options.mock_llm_response.take() {
         tracing::debug!("Using mock LLM response for testing");
         mock_response
     } else {
+        options.emit_status(ChatStatus::Thinking);
         const MAX_RETRIES: u32 = 3;
         let mut last_error = String::new();
         let mut attempt_result = None;
@@ -1028,6 +1042,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         e
                     );
                     if attempt < MAX_RETRIES {
+                        options.emit_status(ChatStatus::Retrying {
+                            attempt: attempt + 1,
+                            max: MAX_RETRIES,
+                        });
                         // Wait before retry: 500ms, 1000ms
                         tokio::time::sleep(tokio::time::Duration::from_millis(
                             500 * attempt as u64,
@@ -1098,6 +1116,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 let name = match &tool_call.function.name {
                     Some(n) => {
                         tracing::debug!("Tool call function name: {}", n);
+                        options.emit_status(ChatStatus::ToolCall { name: n.clone() });
                         n
                     }
                     None => {
@@ -1273,6 +1292,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             }
 
             tracing::debug!("Making follow-up request to model with tool call answers");
+            options.emit_status(ChatStatus::Thinking);
 
             // Retry logic for follow-up call
             const FOLLOWUP_MAX_RETRIES: u32 = 3;
@@ -1300,6 +1320,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             e
                         );
                         if attempt < FOLLOWUP_MAX_RETRIES {
+                            options.emit_status(ChatStatus::RetryingFollowup {
+                                attempt: attempt + 1,
+                                max: FOLLOWUP_MAX_RETRIES,
+                            });
                             tokio::time::sleep(tokio::time::Duration::from_millis(
                                 500 * attempt as u64,
                             ))

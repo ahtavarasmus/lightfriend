@@ -110,6 +110,29 @@ impl AiConfig {
             .build()
     }
 
+    /// Sanitize message content for Tinfoil API.
+    /// Replaces characters known to cause 500 errors (e.g. `@` in email addresses).
+    fn sanitize_content(s: &str) -> String {
+        s.replace('@', "(at)")
+    }
+
+    /// Apply sanitization to all message content in a serialized request body.
+    /// Only used for Tinfoil provider.
+    fn sanitize_request_body(body: &mut serde_json::Value) {
+        if let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) {
+            for msg in messages {
+                if let Some(content) = msg
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string())
+                {
+                    let sanitized = Self::sanitize_content(&content);
+                    msg["content"] = serde_json::Value::String(sanitized);
+                }
+            }
+        }
+    }
+
     /// Make a chat completion request directly via reqwest.
     /// For Tinfoil: uses streaming (SSE) to avoid a bug where non-streaming + tools + long
     /// content fails. SSE chunks are collected and reassembled into a normal response.
@@ -150,6 +173,8 @@ impl AiConfig {
                     // actual tool call is produced
                     obj.remove("max_tokens");
                 }
+                // Sanitize message content for Tinfoil
+                Self::sanitize_request_body(&mut body);
                 client
                     .post(&url)
                     .header("Authorization", format!("Bearer {}", api_key))

@@ -1,13 +1,13 @@
-//! LLM Integration Tests for Item Creation
+//! LLM Integration Tests for Item Creation via Chat
 //!
 //! These tests call the real LLM (via Tinfoil) to verify end-to-end behavior:
-//! user sends natural language -> AI creates item with correct fields -> DB state is correct.
+//! user sends natural language -> AI calls create_item tool -> items table has correct fields.
 //!
 //! All tests are gated with `#[ignore]` because they cost real API tokens.
-//! Run explicitly with: `cargo test --test llm_integration_test -- --ignored`
+//! Run explicitly with: `cargo test --test llm_integration_test -- --ignored --test-threads=1`
 //!
 //! Requirements:
-//! - TINFOIL_API_KEY set in backend/.env
+//! - TINFOIL_API_KEY and OPENROUTER_API_KEY set in backend/.env
 //! - Network access to Tinfoil API
 //!
 //! LLM calls are non-deterministic. Tests that expect item creation retry up to
@@ -18,7 +18,9 @@ use backend::api::twilio_sms::{
     process_sms, ProcessSmsOptions, TwilioResponse, TwilioWebhookPayload,
 };
 use backend::models::user_models::User;
-use backend::test_utils::{create_test_state, create_test_user, get_user_items, TestUserParams};
+use backend::test_utils::{
+    create_test_state, create_test_user, get_user_items, set_plan_type, TestUserParams,
+};
 use backend::{AiConfig, AppState, UserCoreOps};
 use std::sync::Arc;
 
@@ -39,7 +41,8 @@ fn create_llm_test_state() -> Arc<AppState> {
     Arc::new(inner)
 }
 
-/// Create a test user with location and timezone set (needed for weather/calendar tasks)
+/// Create a test user with location, timezone, and autopilot plan set.
+/// Autopilot is needed so monitor items pass the plan gate.
 fn setup_user_with_location(state: &Arc<AppState>) -> User {
     let params = TestUserParams::finland_user(100.0, 100.0);
     let user = create_test_user(state, &params);
@@ -56,6 +59,9 @@ fn setup_user_with_location(state: &Arc<AppState>) -> User {
         .user_core
         .update_timezone(user.id, "Europe/Helsinki")
         .expect("Failed to update timezone");
+
+    // Set autopilot plan so monitor items are allowed
+    set_plan_type(state, user.id, "autopilot");
 
     user
 }
@@ -74,8 +80,8 @@ async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioR
 
     let options = ProcessSmsOptions {
         skip_twilio_send: true,
-        skip_credit_deduction: true,
         mock_llm_response: None,
+        status_tx: None,
     };
 
     let (_status, _headers, axum::Json(response)) = process_sms(state, payload, options).await;
@@ -104,17 +110,189 @@ async fn send_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResp
     last_response.unwrap()
 }
 
+/// Assert that an item was created with monitor=false and next_check_at set
+fn assert_reminder_item(
+    state: &Arc<AppState>,
+    user: &User,
+    response: &TwilioResponse,
+    expected_summary_words: &[&str],
+) {
+    assert!(
+        response.created_item_id.is_some(),
+        "Expected an item to be created after {} retries. Response: {}",
+        MAX_RETRIES,
+        response.message
+    );
+
+    let items = get_user_items(state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
+
+    let item = &items[0];
+    assert!(
+        !item.monitor,
+        "Expected monitor=false for a reminder, got monitor=true"
+    );
+    assert!(
+        item.next_check_at.is_some(),
+        "Expected next_check_at to be set for a reminder, got None"
+    );
+
+    let summary_lower = item.summary.to_lowercase();
+    for word in expected_summary_words {
+        assert!(
+            summary_lower.contains(&word.to_lowercase()),
+            "Expected summary to contain '{}', got: {}",
+            word,
+            item.summary
+        );
+    }
+}
+
+/// Assert that an item was created with monitor=true.
+/// `expect_next_check_at`: whether next_check_at should be set (time-bounded monitors)
+/// or absent (open-ended monitors).
+fn assert_monitor_item(
+    state: &Arc<AppState>,
+    user: &User,
+    response: &TwilioResponse,
+    expected_summary_words: &[&str],
+    expect_next_check_at: bool,
+) {
+    assert!(
+        response.created_item_id.is_some(),
+        "Expected an item to be created after {} retries. Response: {}",
+        MAX_RETRIES,
+        response.message
+    );
+
+    let items = get_user_items(state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
+
+    let item = &items[0];
+    assert!(
+        item.monitor,
+        "Expected monitor=true for a monitor item, got monitor=false"
+    );
+
+    if expect_next_check_at {
+        assert!(
+            item.next_check_at.is_some(),
+            "Expected next_check_at to be set for a time-bounded monitor, got None. Summary: {}",
+            item.summary
+        );
+    } else {
+        assert!(
+            item.next_check_at.is_none(),
+            "Expected next_check_at to be None for an open-ended monitor, got {:?}. Summary: {}",
+            item.next_check_at,
+            item.summary
+        );
+    }
+
+    let summary_lower = item.summary.to_lowercase();
+    for word in expected_summary_words {
+        assert!(
+            summary_lower.contains(&word.to_lowercase()),
+            "Expected summary to contain '{}', got: {}",
+            word,
+            item.summary
+        );
+    }
+}
+
+/// Assert that NO item was created (question/realtime request)
+fn assert_no_item(response: &TwilioResponse) {
+    assert!(
+        response.created_item_id.is_none(),
+        "Expected NO item to be created. Got item_id: {:?}. Response: {}",
+        response.created_item_id,
+        response.message
+    );
+    assert!(
+        !response.message.is_empty(),
+        "Expected non-empty response message"
+    );
+}
+
+/// Assert next_check_at is approximately `expected_offset_secs` from now.
+/// Uses asymmetric tolerance: early_tolerance allows the LLM to round down slightly,
+/// late_tolerance is tighter because being late is usually worse than being early.
+fn assert_next_check_at_approx(
+    state: &Arc<AppState>,
+    user: &User,
+    expected_offset_secs: i64,
+    early_tolerance_secs: i64,
+    late_tolerance_secs: i64,
+) {
+    let items = get_user_items(state, user.id);
+    let item = &items[0];
+    let check_at = item.next_check_at.expect("next_check_at should be set") as i64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let expected = now + expected_offset_secs;
+    let diff = check_at - expected;
+    // diff < 0 means early, diff > 0 means late
+    assert!(
+        diff > -early_tolerance_secs && diff < late_tolerance_secs,
+        "next_check_at is off by {}s (negative=early, positive=late). \
+         check_at={}, expected={}, tolerance: -{}/+{}s",
+        diff,
+        check_at,
+        expected,
+        early_tolerance_secs,
+        late_tolerance_secs,
+    );
+}
+
 // =============================================================================
-// Item creation tests - LLM should create items with correct fields
+// 1. Scheduled reminders (monitor=false)
 // =============================================================================
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_weather_conditional_task() {
-    let (state, user, response) = send_message_with_retry(
-        "if it's below freezing at 7am tomorrow, remind me to warm up the car",
-    )
-    .await;
+async fn test_llm_simple_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("remind me at 9am tomorrow to call the dentist").await;
+
+    assert_reminder_item(&state, &user, &response, &["dentist"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_relative_time_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("in 3 hours remind me to check the oven").await;
+
+    assert_reminder_item(&state, &user, &response, &["oven"]);
+
+    // "in 3 hours" for an oven check: LLM might round to the nearest 15 min,
+    // but being late on an oven is bad. Allow 15 min early, 10 min late.
+    assert_next_check_at_approx(&state, &user, 3 * 3600, 15 * 60, 10 * 60);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_implicit_date_reminder() {
+    let (state, user, response) = send_message_with_retry("remind me at 9pm to take my meds").await;
+
+    assert_reminder_item(&state, &user, &response, &["med"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_vague_time_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("remind me tomorrow afternoon to stretch").await;
+
+    assert_reminder_item(&state, &user, &response, &["stretch"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_call_me_reminder() {
+    let (state, user, response) = send_message_with_retry("call me at 6am tomorrow").await;
 
     assert!(
         response.created_item_id.is_some(),
@@ -127,175 +305,196 @@ async fn test_llm_weather_conditional_task() {
     assert!(!items.is_empty(), "Expected at least one item in DB");
 
     let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
+    // New structured format uses [notify:call], legacy used [VIA CALL]
     assert!(
-        summary_lower.contains("freezing")
-            || summary_lower.contains("weather")
-            || summary_lower.contains("car")
-            || summary_lower.contains("warm"),
-        "Expected summary to mention weather/freezing/car context, got: {}",
+        item.summary.contains("[notify:call]")
+            || item.summary.to_uppercase().contains("[VIA CALL]"),
+        "Expected summary to contain '[notify:call]' or '[VIA CALL]', got: {}",
         item.summary
     );
     assert!(
-        !item.monitor,
-        "Expected monitor=false for a one-time check, got: true"
+        item.priority == 2,
+        "Call item should have priority 2, got: {}",
+        item.priority
     );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got: None"
-    );
-    assert!(
-        !response.message.is_empty(),
-        "Expected non-empty response message"
-    );
+}
+
+// =============================================================================
+// 2. Monitors (monitor=true)
+// =============================================================================
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_email_monitor() {
+    // Open-ended: LLM infers a reasonable safety-net check-in date
+    let (state, user, response) =
+        send_message_with_retry("let me know if I get an email from HR about the job offer").await;
+
+    assert_monitor_item(&state, &user, &response, &["HR"], true);
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_calendar_conditional_task() {
+async fn test_llm_messaging_monitor() {
+    // Open-ended: LLM infers a reasonable safety-net check-in date
+    let (state, user, response) = send_message_with_retry("tell me when mom texts me").await;
+
+    assert_monitor_item(&state, &user, &response, &["mom"], true);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_time_bounded_monitor() {
+    // Has a deadline: "by Friday" - should have next_check_at set
     let (state, user, response) = send_message_with_retry(
-        "if I have any meetings before noon tomorrow, remind me at 7am to prepare my notes",
+        "watch my email for a shipping confirmation from Amazon, I need it by Friday",
     )
     .await;
 
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("meeting")
-            || summary_lower.contains("calendar")
-            || summary_lower.contains("notes"),
-        "Expected summary to mention calendar/meetings/notes, got: {}",
-        item.summary
-    );
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for a one-time check, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got: None"
-    );
+    assert_monitor_item(&state, &user, &response, &["Amazon"], true);
 }
+
+// =============================================================================
+// 3. Questions - should NOT create items
+// =============================================================================
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_unconditional_reminder() {
-    let (state, user, response) =
-        send_message_with_retry("remind me at 9am tomorrow to call the dentist").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("dentist"),
-        "Expected summary to mention dentist, got: {}",
-        item.summary
-    );
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for a simple reminder, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set for a timed reminder, got: None"
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_realtime_question() {
+async fn test_llm_question_no_item() {
     let state = create_llm_test_state();
     let user = setup_user_with_location(&state);
 
     let response = send_message(&state, &user, "what time is it?").await;
+    assert_no_item(&response);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_email_check_no_item() {
+    let state = create_llm_test_state();
+    let user = setup_user_with_location(&state);
+
+    let response = send_message(&state, &user, "check my email").await;
+    assert_no_item(&response);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_weather_question_no_item() {
+    let state = create_llm_test_state();
+    let user = setup_user_with_location(&state);
+
+    let response = send_message(&state, &user, "what's the weather like right now?").await;
+    assert_no_item(&response);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_question_looks_like_task() {
+    let state = create_llm_test_state();
+    let user = setup_user_with_location(&state);
+
+    let response = send_message(
+        &state,
+        &user,
+        "tomorrow at 8am I have a dentist appointment, what should I bring?",
+    )
+    .await;
 
     assert!(
         response.created_item_id.is_none(),
-        "Expected NO item for a realtime question. Got item_id: {:?}",
+        "Expected NO item - user is asking a question, not scheduling. Got item_id: {:?}",
         response.created_item_id
     );
     assert!(
         !response.message.is_empty(),
-        "Expected non-empty response for realtime question"
+        "Expected non-empty response (AI answers the question)"
     );
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_email_conditional_task() {
-    let (state, user, response) = send_message_with_retry(
-        "at 8am tomorrow check my email and if there's anything from my boss, remind me to reply before lunch",
+async fn test_llm_calendar_question_no_item() {
+    let state = create_llm_test_state();
+    let user = setup_user_with_location(&state);
+
+    let response = send_message(
+        &state,
+        &user,
+        "do I have anything scheduled for tomorrow morning?",
     )
     .await;
 
+    assert_no_item(&response);
+}
+
+// =============================================================================
+// 4. Future actions - must use create_item, not execute immediately
+// =============================================================================
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_future_message_creates_item() {
+    let (state, user, response) =
+        send_message_with_retry("at 5pm text my wife on WhatsApp that I'm running late").await;
+
+    // Should create an item (scheduled for the future), NOT send immediately
     assert!(
         response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
+        "Expected an item to be created (future action). Response: {}",
         response.message
     );
 
     let items = get_user_items(&state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
+
     let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
     assert!(
-        summary_lower.contains("email") || summary_lower.contains("boss"),
-        "Expected summary to mention email/boss, got: {}",
-        item.summary
+        !item.monitor,
+        "Expected monitor=false for a scheduled future action"
     );
     assert!(
         item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got: None"
+        "Expected next_check_at set for a future action"
     );
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_multi_source_task() {
-    let (state, user, response) = send_message_with_retry(
-        "at 10am tomorrow look at my calendar and weather both, and if I have an outdoor meeting during rain, remind me to move it indoors",
-    )
-    .await;
+async fn test_llm_future_email_creates_item() {
+    let (state, user, response) =
+        send_message_with_retry("at 3pm send an email to john@example.com about the meeting").await;
 
     assert!(
         response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
+        "Expected an item to be created (future email). Response: {}",
         response.message
     );
 
     let items = get_user_items(&state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
+
     let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
     assert!(
-        (summary_lower.contains("calendar") || summary_lower.contains("meeting"))
-            && (summary_lower.contains("weather") || summary_lower.contains("rain")),
-        "Expected summary to mention both calendar and weather context, got: {}",
-        item.summary
+        !item.monitor,
+        "Expected monitor=false for a scheduled future action"
+    );
+    assert!(
+        item.next_check_at.is_some(),
+        "Expected next_check_at set for a future action"
     );
 }
+
+// =============================================================================
+// 5. Mixed conversation
+// =============================================================================
 
 #[tokio::test]
 #[ignore]
 async fn test_llm_mixed_conversation() {
     // First message: should create an item (with retry)
     let (state, user, response1) =
-        send_message_with_retry("remind me at 3pm tomorrow to buy groceries").await;
+        send_message_with_retry("remind me at 3pm to buy groceries").await;
 
     assert!(
         response1.created_item_id.is_some(),
@@ -305,7 +504,10 @@ async fn test_llm_mixed_conversation() {
     );
 
     let items_after_first = get_user_items(&state, user.id);
-    assert!(!items_after_first.is_empty(), "Should have at least 1 item");
+    assert!(
+        !items_after_first.is_empty(),
+        "Should have at least 1 item after first message"
+    );
 
     // Second message: should NOT create an item (realtime question)
     // Use the same state/user so conversation context carries over
@@ -323,370 +525,61 @@ async fn test_llm_mixed_conversation() {
 }
 
 // =============================================================================
-// Realtime vs item disambiguation tests
+// 6. Multilingual - item creation should work regardless of language
 // =============================================================================
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_realtime_email_check() {
+async fn test_llm_finnish_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("muistuta mua huomenna aamulla soittaa hammaslaakarille").await;
+
+    assert_reminder_item(&state, &user, &response, &["hammaslaa"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_spanish_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("recuerdame manana a las 9 llamar al dentista").await;
+
+    assert_reminder_item(&state, &user, &response, &["dentista"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_german_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("erinnere mich morgen um 10 Uhr den Zahnarzt anzurufen").await;
+
+    assert_reminder_item(&state, &user, &response, &["Zahnarzt"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_japanese_reminder() {
+    let (state, user, response) =
+        send_message_with_retry("明日の朝9時に歯医者に電話するのをリマインドして").await;
+
+    assert_reminder_item(&state, &user, &response, &["歯医者"]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_llm_finnish_question_no_item() {
     let state = create_llm_test_state();
     let user = setup_user_with_location(&state);
 
-    let response = send_message(&state, &user, "check my email").await;
-
-    assert!(
-        response.created_item_id.is_none(),
-        "Expected NO item for realtime email check. Got item_id: {:?}",
-        response.created_item_id
-    );
-    assert!(
-        !response.message.is_empty(),
-        "Expected non-empty response (AI tries to check email now)"
-    );
+    let response = send_message(&state, &user, "mika kello on?").await;
+    assert_no_item(&response);
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_llm_realtime_weather_check() {
+async fn test_llm_spanish_question_no_item() {
     let state = create_llm_test_state();
     let user = setup_user_with_location(&state);
 
-    let response = send_message(&state, &user, "what's the weather like right now?").await;
-
-    assert!(
-        response.created_item_id.is_none(),
-        "Expected NO item for realtime weather question. Got item_id: {:?}",
-        response.created_item_id
-    );
-    assert!(
-        !response.message.is_empty(),
-        "Expected non-empty response (AI fetches weather in realtime)"
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_tricky_realtime_looks_like_task() {
-    let state = create_llm_test_state();
-    let user = setup_user_with_location(&state);
-
-    let response = send_message(
-        &state,
-        &user,
-        "tomorrow at 8am I have a dentist appointment, what should I bring?",
-    )
-    .await;
-
-    assert!(
-        response.created_item_id.is_none(),
-        "Expected NO item - user is asking a question, not creating a reminder. Got item_id: {:?}",
-        response.created_item_id
-    );
-    assert!(
-        !response.message.is_empty(),
-        "Expected non-empty response (AI answers the question)"
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_tricky_realtime_check_calendar() {
-    let state = create_llm_test_state();
-    let user = setup_user_with_location(&state);
-
-    let response = send_message(
-        &state,
-        &user,
-        "do I have anything scheduled for tomorrow morning?",
-    )
-    .await;
-
-    assert!(
-        response.created_item_id.is_none(),
-        "Expected NO item - user wants to know NOW, not set up a future check. Got item_id: {:?}",
-        response.created_item_id
-    );
-    assert!(!response.message.is_empty(), "Expected non-empty response");
-}
-
-// =============================================================================
-// Hard scenarios - vague datetimes, remind-vs-do, notification types, recurring
-// =============================================================================
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_vague_time_afternoon() {
-    let (state, user, response) =
-        send_message_with_retry("remind me tomorrow afternoon to stretch").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for a one-time reminder, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set for 'tomorrow afternoon', got: None"
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_relative_time() {
-    let (state, user, response) =
-        send_message_with_retry("in 3 hours remind me to check the oven").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for relative time reminder, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got: None"
-    );
-
-    // Verify next_check_at is roughly 3 hours from now (within 1h tolerance)
-    let check_at = item.next_check_at.unwrap() as i64;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let three_hours = 3 * 3600;
-    let one_hour = 3600;
-    let diff = (check_at - now - three_hours).abs();
-    assert!(
-        diff < one_hour,
-        "Expected next_check_at ~3h from now (tolerance 1h). check_at: {}, now: {}, diff_from_3h: {}s",
-        check_at,
-        now,
-        diff
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_implicit_date() {
-    let (state, user, response) = send_message_with_retry("remind me at 9pm to take my meds").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for implicit date reminder, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set for implicit date, got: None"
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_notification_call_me() {
-    let (state, user, response) = send_message_with_retry("call me at 6am tomorrow").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        item.summary.contains("[VIA CALL]"),
-        "Expected summary to contain '[VIA CALL]' for call request, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_remind_vs_do_remind() {
-    let (state, user, response) =
-        send_message_with_retry("remind me to turn on my Tesla climate at 8am tomorrow").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    // User said "remind me" - summary should describe reminding, not the action itself
-    assert!(
-        summary_lower.contains("remind")
-            || summary_lower.contains("tesla")
-            || summary_lower.contains("climate"),
-        "Expected summary to describe the reminder about Tesla climate, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_remind_vs_do_action() {
-    let (state, user, response) =
-        send_message_with_retry("turn on my Tesla climate at 8am tomorrow").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    // User said "turn on" - summary should describe the Tesla action intent
-    assert!(
-        summary_lower.contains("tesla") || summary_lower.contains("climate"),
-        "Expected summary to describe the Tesla action, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_whatsapp_task() {
-    let (state, user, response) =
-        send_message_with_retry("at 5pm text my wife on WhatsApp that I'm running late").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("whatsapp")
-            || summary_lower.contains("wife")
-            || summary_lower.contains("running late"),
-        "Expected summary to mention WhatsApp/wife/running late, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_recurring_email_watch() {
-    let (state, user, response) = send_message_with_retry(
-        "watch my email for anything from HR about the job offer and let me know",
-    )
-    .await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        item.monitor,
-        "Expected monitor=true for recurring email watch, got: false"
-    );
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("hr") || summary_lower.contains("job"),
-        "Expected summary to mention HR/job, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_recurring_messaging_watch() {
-    let (state, user, response) = send_message_with_retry("let me know if mom texts me").await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    assert!(
-        item.monitor,
-        "Expected monitor=true for recurring messaging watch, got: false"
-    );
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("mom") || summary_lower.contains("mother"),
-        "Expected summary to mention mom, got: {}",
-        item.summary
-    );
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_llm_weather_source_with_action() {
-    let (state, user, response) = send_message_with_retry(
-        "at 8am tomorrow if it's above 25 degrees, remind me to water the plants",
-    )
-    .await;
-
-    assert!(
-        response.created_item_id.is_some(),
-        "Expected an item to be created after {} retries. Response: {}",
-        MAX_RETRIES,
-        response.message
-    );
-
-    let items = get_user_items(&state, user.id);
-    let item = &items[0];
-    let summary_lower = item.summary.to_lowercase();
-    assert!(
-        summary_lower.contains("weather")
-            || summary_lower.contains("degrees")
-            || summary_lower.contains("plant")
-            || summary_lower.contains("water"),
-        "Expected summary to mention weather/plants context, got: {}",
-        item.summary
-    );
-    assert!(
-        !item.monitor,
-        "Expected monitor=false for one-time check, got: true"
-    );
-    assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got: None"
-    );
+    let response = send_message(&state, &user, "que hora es?").await;
+    assert_no_item(&response);
 }
