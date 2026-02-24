@@ -1797,29 +1797,28 @@ pub async fn web_chat(
     auth_user: AuthUser,
     Json(request): Json<WebChatRequest>,
 ) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match process_web_chat(&state, auth_user.user_id, request.message).await {
+        Ok(response) => Ok(Json(response)),
+        Err(msg) => Err((StatusCode::BAD_REQUEST, Json(json!({"error": msg})))),
+    }
+}
+
+/// Shared web chat logic used by both REST endpoint and WebSocket handler.
+pub async fn process_web_chat(
+    state: &Arc<AppState>,
+    user_id: i32,
+    message: String,
+) -> Result<WebChatResponse, String> {
     // Get the user
     let user = state
         .user_core
-        .find_by_id(auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            )
-        })?;
+        .find_by_id(user_id)
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or_else(|| "User not found".to_string())?;
 
     // Check subscription - only subscribed users can use web chat
     if user.sub_tier.is_none() {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Please subscribe to use the web chat feature"})),
-        ));
+        return Err("Please subscribe to use the web chat feature".to_string());
     }
 
     // Determine cost based on region (US/CA uses message count, others use euro value)
@@ -1833,10 +1832,7 @@ pub async fn web_chat(
     // Check if user has sufficient credits
     let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
     if !has_credits {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
-        ));
+        return Err("Insufficient credits. Please add more credits to continue.".to_string());
     }
 
     // Deduct credits (prefer credits_left, then credits)
@@ -1844,31 +1840,21 @@ pub async fn web_chat(
         let new_credits_left = user.credits_left - credits_left_cost;
         state
             .user_repository
-            .update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
+            .update_user_credits_left(user_id, new_credits_left)
+            .map_err(|e| format!("Failed to charge credits: {}", e))?;
         credits_left_cost
     } else {
         let new_credits = user.credits - credits_cost;
         state
             .user_repository
-            .update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
+            .update_user_credits(user_id, new_credits)
+            .map_err(|e| format!("Failed to charge credits: {}", e))?;
         credits_cost
     };
 
     // Log the usage
     let _ = state.user_repository.log_usage(LogUsageParams {
-        user_id: auth_user.user_id,
+        user_id,
         sid: None,
         activity_type: "web_chat".to_string(),
         credits: Some(charged_amount),
@@ -1886,7 +1872,7 @@ pub async fn web_chat(
         to: user
             .preferred_number
             .unwrap_or_else(|| "+0987654321".to_string()),
-        body: request.message,
+        body: message,
         num_media: None,
         media_url0: None,
         media_content_type0: None,
@@ -1895,7 +1881,7 @@ pub async fn web_chat(
 
     // Process using existing SMS handler (skip Twilio, credits handled above)
     let (status, _, response) = crate::api::twilio_sms::process_sms(
-        &state,
+        state,
         mock_payload,
         crate::api::twilio_sms::ProcessSmsOptions::web_chat(),
     )
@@ -1906,7 +1892,6 @@ pub async fn web_chat(
         let mut message = response.message.clone();
         let mut media: Option<Vec<MediaResult>> = None;
 
-        // Debug: Log response to check for media tags
         tracing::debug!(
             "web_chat response message (first 500 chars): {}",
             &message.chars().take(500).collect::<String>()
@@ -1939,7 +1924,6 @@ pub async fn web_chat(
                             })
                             .collect(),
                     );
-                    // Replace verbose text list with clean message when showing visual results
                     message = format!(
                         "Here are {} video{} I found:",
                         video_count,
@@ -1949,21 +1933,14 @@ pub async fn web_chat(
             }
         }
 
-        Ok(Json(WebChatResponse {
+        Ok(WebChatResponse {
             message,
             credits_charged: charged_amount,
             media,
             created_task_id: response.created_task_id,
-        }))
+        })
     } else {
-        // No refund - credits are consumed on attempt
-        Err((
-            status,
-            Json(json!({
-                "error": "Failed to process message",
-                "details": response.message
-            })),
-        ))
+        Err(format!("Failed to process message: {}", response.message))
     }
 }
 

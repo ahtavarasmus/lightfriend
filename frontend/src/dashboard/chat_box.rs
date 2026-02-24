@@ -3,10 +3,12 @@ use web_sys::HtmlInputElement;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::{json, Value};
 use crate::utils::api::Api;
+use crate::utils::ws::WsConnection;
 use crate::dashboard::media_panel::{MediaPanel, MediaItem, extract_video_id};
 use crate::dashboard::tesla_quick_panel::TeslaQuickPanel;
 use crate::dashboard::youtube_quick_panel::YouTubeQuickPanel;
 use super::timeline_view::UpcomingTask;
+use std::rc::Rc;
 
 // @mention system - available mentions
 const MENTION_OPTIONS: &[(&str, &str, &str)] = &[
@@ -296,6 +298,29 @@ const CHAT_STYLES: &str = r#"
 .chat-shortcut-btn i {
     font-size: 0.7rem;
 }
+.ws-notification-toast {
+    background: rgba(30, 144, 255, 0.15);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    border-radius: 10px;
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 0.5rem;
+    color: #9ecfff;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    animation: fadeIn 0.3s ease;
+}
+.ws-notification-toast i {
+    color: #5b9bd5;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 "#;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -351,6 +376,130 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
 
     // @mention system state
     let active_mention = use_state(|| None::<String>);
+
+    // WebSocket connection for real-time chat and notifications
+    let ws_conn: UseStateHandle<Option<Rc<WsConnection>>> = use_state(|| None);
+    let ws_notification = use_state(|| None::<String>);
+
+    // Set up WebSocket connection on mount
+    {
+        let ws_conn = ws_conn.clone();
+        let chat_bot_reply_ws = chat_bot_reply.clone();
+        let chat_loading_ws = chat_loading.clone();
+        let chat_error_ws = chat_error.clone();
+        let detected_media_ws = detected_media.clone();
+        let media_playing_ws = media_playing.clone();
+        let on_task_created_ws = props.on_task_created.clone();
+        let refetch_usage_ws = props.on_usage_change.clone();
+        let ws_notification = ws_notification.clone();
+
+        use_effect_with_deps(
+            move |_| {
+                let on_message = Callback::from(move |msg: String| {
+                    if let Ok(data) = serde_json::from_str::<Value>(&msg) {
+                        match data["type"].as_str() {
+                            Some("chat_response") => {
+                                let reply = data["message"]
+                                    .as_str()
+                                    .unwrap_or("No response")
+                                    .to_string();
+                                chat_bot_reply_ws.set(Some(reply));
+                                chat_loading_ws.set(false);
+                                refetch_usage_ws.emit(());
+
+                                // Handle media results
+                                if let Some(media_arr) = data["media"].as_array() {
+                                    let media_items: Vec<MediaItem> = media_arr
+                                        .iter()
+                                        .filter_map(|m| {
+                                            Some(MediaItem {
+                                                platform: m["platform"]
+                                                    .as_str()?
+                                                    .to_string(),
+                                                video_id: m["video_id"]
+                                                    .as_str()?
+                                                    .to_string(),
+                                                title: m["title"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                thumbnail: m["thumbnail"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                duration: m["duration"]
+                                                    .as_str()
+                                                    .map(|s| s.to_string()),
+                                                channel: m["channel"]
+                                                    .as_str()
+                                                    .map(|s| s.to_string()),
+                                                original_url: None,
+                                            })
+                                        })
+                                        .collect();
+                                    if !media_items.is_empty() {
+                                        detected_media_ws.set(media_items);
+                                        media_playing_ws.set(false);
+                                    }
+                                }
+
+                                // Handle task creation
+                                if let Some(task_id) = data["created_task_id"].as_i64() {
+                                    on_task_created_ws.emit(task_id as i32);
+                                }
+
+                                // Dispatch refresh event
+                                if let Some(window) = web_sys::window() {
+                                    if let Ok(event) =
+                                        web_sys::CustomEvent::new("lightfriend-chat-sent")
+                                    {
+                                        let _ = window.dispatch_event(&event);
+                                    }
+                                }
+                            }
+                            Some("chat_error") => {
+                                let err = data["error"]
+                                    .as_str()
+                                    .unwrap_or("Error")
+                                    .to_string();
+                                chat_error_ws.set(Some(err));
+                                chat_loading_ws.set(false);
+                            }
+                            Some("notification") => {
+                                let content = data["content"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string();
+                                if !content.is_empty() {
+                                    let ws_noti = ws_notification.clone();
+                                    ws_noti.set(Some(content));
+                                    // Auto-dismiss after 10s
+                                    gloo_timers::callback::Timeout::new(10_000, move || {
+                                        ws_noti.set(None);
+                                    })
+                                    .forget();
+                                }
+                            }
+                            Some("pong") => {} // Keepalive ack
+                            _ => {}
+                        }
+                    }
+                });
+
+                let conn = Rc::new(WsConnection::new(on_message));
+                ws_conn.set(Some(conn));
+
+                // Cleanup on unmount
+                let ws_conn_cleanup = ws_conn.clone();
+                move || {
+                    if let Some(c) = (*ws_conn_cleanup).as_ref() {
+                        c.close();
+                    }
+                }
+            },
+            (), // Run once on mount
+        );
+    }
 
     // Update call duration every second when call is active
     {
@@ -429,6 +578,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let on_task_cleared = props.on_task_cleared.clone();
         let on_task_created = props.on_task_created.clone();
         let chat_input_ref = chat_input_ref.clone();
+        let ws_conn_send = ws_conn.clone();
 
         Callback::from(move |_| {
             let message = (*chat_input).clone();
@@ -474,6 +624,17 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             chat_error.set(None);
             chat_input.set(String::new());
 
+            // Try WebSocket for text-only regular chat (not task edit, not image)
+            if !is_task_edit && !has_image && !message.trim().is_empty() {
+                if let Some(conn) = (*ws_conn_send).as_ref() {
+                    if conn.send(&json!({"type": "chat", "message": message}).to_string()) {
+                        // Sent via WS - response comes through on_message callback
+                        return;
+                    }
+                }
+            }
+
+            // Fallback to REST API
             spawn_local(async move {
                 // Check if we're in task edit mode
                 let result = if let Some(task) = &focused_task {
@@ -732,6 +893,13 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     html! {
         <>
             <style>{CHAT_STYLES}</style>
+            // WebSocket notification toast
+            if let Some(noti) = (*ws_notification).clone() {
+                <div class="ws-notification-toast">
+                    <i class="fa-solid fa-bell"></i>
+                    <span>{noti}</span>
+                </div>
+            }
             <div class="chat-section">
                 <div class="chat-messages">
                     {

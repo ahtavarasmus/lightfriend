@@ -349,6 +349,7 @@ async fn main() {
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
+        ws_notification_senders: Arc::new(DashMap::new()),
         totp_repository,
         webauthn_repository,
         admin_alert_repository,
@@ -1321,10 +1322,13 @@ async fn main() {
             post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
+    // WebSocket route - auth handled by AuthUser extractor (reads cookie)
+    let ws_routes = Router::new().route("/api/ws", get(handlers::ws_handler::ws_handler));
     let app = Router::new()
         .merge(public_routes)
         .merge(admin_routes)
         .merge(protected_routes)
+        .merge(ws_routes)
         .merge(auth_built_in_webhook_routes)
         .route(
             "/.well-known/appspecific/com.tesla.3p.public-key.pem",
@@ -1359,42 +1363,39 @@ async fn main() {
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .layer(
-            {
-                let frontend_url: HeaderValue = std::env::var("FRONTEND_URL")
-                    .unwrap_or_else(|_| "http://localhost:8080".to_string())
-                    .parse()
-                    .expect("Invalid FRONTEND_URL");
-                let tauri_origins: Vec<HeaderValue> = vec![
-                    "tauri://localhost".parse().unwrap(),
-                    "https://tauri.localhost".parse().unwrap(),
-                ];
-                CorsLayer::new()
-                    .allow_methods([
-                        axum::http::Method::GET,
-                        axum::http::Method::POST,
-                        axum::http::Method::OPTIONS,
-                        axum::http::Method::DELETE,
-                        axum::http::Method::PATCH,
-                        axum::http::Method::PUT,
-                    ])
-                    .allow_origin(AllowOrigin::predicate(move |origin, _| {
-                        origin == frontend_url
-                            || tauri_origins.iter().any(|t| origin == t)
-                    }))
-                    .allow_headers([
-                        axum::http::header::CONTENT_TYPE,
-                        axum::http::header::AUTHORIZATION,
-                        axum::http::header::ACCEPT,
-                        axum::http::header::ORIGIN,
-                    ])
-                    .expose_headers([
-                        axum::http::header::CONTENT_TYPE,
-                        axum::http::header::CONTENT_LENGTH,
-                    ])
-                    .allow_credentials(true)
-            },
-        )
+        .layer({
+            let frontend_url: HeaderValue = std::env::var("FRONTEND_URL")
+                .unwrap_or_else(|_| "http://localhost:8080".to_string())
+                .parse()
+                .expect("Invalid FRONTEND_URL");
+            let tauri_origins: Vec<HeaderValue> = vec![
+                "tauri://localhost".parse().unwrap(),
+                "https://tauri.localhost".parse().unwrap(),
+            ];
+            CorsLayer::new()
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::OPTIONS,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::PATCH,
+                    axum::http::Method::PUT,
+                ])
+                .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                    origin == frontend_url || tauri_origins.iter().any(|t| origin == t)
+                }))
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::ACCEPT,
+                    axum::http::header::ORIGIN,
+                ])
+                .expose_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::CONTENT_LENGTH,
+                ])
+                .allow_credentials(true)
+        })
         // Security headers to prevent clickjacking, XSS, and other attacks
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,

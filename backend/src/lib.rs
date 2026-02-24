@@ -45,6 +45,7 @@ pub mod handlers {
     pub mod webauthn_handlers;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
+    pub mod ws_handler;
     pub mod youtube;
     pub mod youtube_auth;
 }
@@ -215,6 +216,7 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub phone_verify_otps: DashMap<String, (String, u64)>,
     pub pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
+    pub ws_notification_senders: Arc<DashMap<i32, tokio::sync::broadcast::Sender<String>>>,
     pub totp_repository: Arc<TotpRepository>,
     pub webauthn_repository: Arc<WebauthnRepository>,
     pub admin_alert_repository: Arc<AdminAlertRepository>,
