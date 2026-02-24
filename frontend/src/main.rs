@@ -17,6 +17,7 @@ mod utils {
     pub mod webauthn;
     pub mod elevenlabs_web;
     pub mod seo;
+    pub mod ws;
 }
 mod profile {
     pub mod stripe;
