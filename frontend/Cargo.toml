@@ -13,6 +13,9 @@ wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "HtmlSelectElement",
+    "HtmlTextAreaElement",
+    "HtmlElement",
+    "CssStyleDeclaration",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
     "Document",

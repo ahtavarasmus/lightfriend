@@ -10,7 +10,6 @@ use super::triage_indicator::AttentionItem;
 use super::timeline_view::{UpcomingItem, UpcomingDigest};
 use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
-use super::activity_panel::ActivityPanel;
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
 use super::items_status::ItemsStatusSection;
@@ -383,7 +382,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
     // Panel visibility state
     let settings_open = use_state(|| false);
-    let activity_open = use_state(|| false);
     let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
 
     // Handle URL parameters for opening settings panel with specific tab
@@ -704,13 +702,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    let on_activity_click = {
-        let activity_open = activity_open.clone();
-        Callback::from(move |_| {
-            activity_open.set(true);
-        })
-    };
-
     let on_settings_close = {
         let settings_open = settings_open.clone();
         Callback::from(move |_| {
@@ -718,24 +709,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    let on_activity_close = {
-        let activity_open = activity_open.clone();
-        Callback::from(move |_| {
-            activity_open.set(false);
-        })
-    };
-
-    // Item click callback from activity panel - close panel and enter edit mode
-    let on_activity_item_click = {
-        let selected_item = selected_item.clone();
-        let activity_open = activity_open.clone();
-        Callback::from(move |item: UpcomingItem| {
-            activity_open.set(false);
-            selected_item.set(Some(item));
-        })
-    };
-
-    // Item delete callback from activity panel
+    // Item delete callback
     let on_activity_item_delete = {
         let fetch_summary = fetch_summary.clone();
         Callback::from(move |id: i32| {
@@ -809,11 +783,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Chat prefill state (for digest suggestion hint)
     let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
 
-    // Digest suggestion callback - pre-fills chatbox with suggestion text
-    let on_digest_suggestion = {
+    // Digest prefill callback - pre-fills chatbox with prompt from digest creator
+    let on_digest_prefill = {
         let prefill_chat = prefill_chat.clone();
-        Callback::from(move |_: ()| {
-            prefill_chat.set(Some("Set up a daily digest for my emails and messages at 8am".to_string()));
+        Callback::from(move |prompt: String| {
+            prefill_chat.set(Some(prompt));
         })
     };
 
@@ -945,7 +919,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                     }}
                                 </div>
                                 <div class="item-detail-desc">
-                                    {item.description.clone()}
+                                    {super::emoji_utils::emojify_description(&item.description)}
                                 </div>
                                 <div class="item-detail-note">{"You'll be notified when this runs"}</div>
                             </div>
@@ -962,6 +936,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     items={attention_items.clone()}
                     total_tracked_count={total_tracked_count}
                     on_dismiss={on_dismiss_item.clone()}
+                    on_digest_prefill={Some(on_digest_prefill)}
                 />
 
                 // People section with contact avatars
@@ -975,10 +950,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 // Footer with digest info and buttons
                 <DashboardFooter
                     next_digest={next_digest}
-                    quiet_mode={quiet_mode}
-                    on_activity_click={on_activity_click}
-                    on_quiet_mode_change={Some(on_quiet_mode_change)}
-                    on_digest_suggestion={Some(on_digest_suggestion)}
                 />
             </div>
 
@@ -989,18 +960,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 on_close={on_settings_close}
                 on_profile_update={props.on_profile_update.clone()}
                 initial_tab={*settings_initial_tab}
-            />
-
-            // Activity panel (slide-in)
-            <ActivityPanel
-                is_open={*activity_open}
-                on_close={on_activity_close}
-                upcoming_items={upcoming_items}
-                upcoming_digests={upcoming_digests}
-                on_item_click={on_activity_item_click}
-                on_item_delete={on_activity_item_delete}
-                sunrise_hour={sunrise_hour}
-                sunset_hour={sunset_hour}
             />
 
             </div>

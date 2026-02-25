@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use super::triage_indicator::AttentionItem;
 
 const ITEMS_STATUS_STYLES: &str = r#"
@@ -6,23 +7,6 @@ const ITEMS_STATUS_STYLES: &str = r#"
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-}
-.items-grid {
-    display: flex;
-    gap: 0.75rem;
-}
-.items-col {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-@media (max-width: 500px) {
-    .items-grid {
-        flex-direction: column;
-        gap: 0.35rem;
-    }
 }
 
 /* --- Overdue item --- */
@@ -102,10 +86,7 @@ const ITEMS_STATUS_STYLES: &str = r#"
     flex: 1;
     min-width: 0;
     font-size: 0.82rem;
-    color: #aaa;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: #ccc;
 }
 .item-when {
     font-size: 0.7rem;
@@ -114,22 +95,28 @@ const ITEMS_STATUS_STYLES: &str = r#"
     white-space: nowrap;
 }
 .item-badge {
-    font-size: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
+    font-size: 0.7rem;
     flex-shrink: 0;
-    font-weight: 600;
 }
 .badge-call {
     color: #ff6b6b;
-    background: rgba(255, 107, 107, 0.12);
 }
 .badge-sms {
     color: #e8a838;
-    background: rgba(232, 168, 56, 0.1);
 }
+.badge-silent {
+    font-size: 0.6rem;
+    opacity: 0.4;
+}
+.item-type-tag {
+    font-size: 0.55rem;
+    color: #555;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.item-type-tag i { font-size: 0.5rem; }
 .item-x {
     background: none;
     border: none;
@@ -275,6 +262,26 @@ const ITEMS_STATUS_STYLES: &str = r#"
     50% { opacity: 0.4; transform: translate(-50%, -50%) scale(1.15); }
 }
 
+/* Platform icon (center of scene) */
+.mon-center i {
+    font-size: 0.85rem;
+}
+.mon-incoming i {
+    font-size: 0.4rem;
+}
+
+/* Platform tag next to sender */
+.mon-platform-tag {
+    font-size: 0.55rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 /* Monitor info */
 .mon-info {
     flex: 1;
@@ -294,9 +301,24 @@ const ITEMS_STATUS_STYLES: &str = r#"
 .mon-detail {
     font-size: 0.7rem;
     color: #666;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+/* --- Item info (two-line: title + subtitle, used for digests) --- */
+.item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+.item-title {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #ccc;
+}
+.item-subtitle {
+    font-size: 0.7rem;
+    color: #666;
 }
 
 /* --- More button --- */
@@ -329,6 +351,49 @@ const ITEMS_STATUS_STYLES: &str = r#"
     letter-spacing: 0.04em;
 }
 
+/* --- Digest creator row --- */
+.digest-creator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    margin-top: 0.15rem;
+}
+.digest-creator-label {
+    font-size: 0.72rem;
+    color: #555;
+    flex-shrink: 0;
+}
+.digest-creator select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #888;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+}
+.digest-creator select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.digest-creator-btn {
+    background: none;
+    border: 1px solid rgba(126, 178, 255, 0.2);
+    color: #7EB2FF;
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+.digest-creator-btn:hover {
+    background: rgba(126, 178, 255, 0.1);
+    border-color: rgba(126, 178, 255, 0.35);
+}
+
 /* --- Status line --- */
 .items-quiet {
     font-size: 0.72rem;
@@ -338,62 +403,46 @@ const ITEMS_STATUS_STYLES: &str = r#"
 }
 "#;
 
-// -- SVG icon helpers --
-
-fn svg_chat_bubble(size: u32, color: &str) -> Html {
-    let h = (size as f32 * 0.8) as u32;
-    let svg = format!(
-        r#"<svg width="{w}" height="{h}" viewBox="0 0 16 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 1h11a1.5 1.5 0 011.5 1.5v6a1.5 1.5 0 01-1.5 1.5H6.5l-3 2.5V10H2.5A1.5 1.5 0 011 8.5v-6A1.5 1.5 0 012.5 1z" fill="{c}"/></svg>"#,
-        w = size, h = h, c = color
-    );
-    Html::from_html_unchecked(yew::AttrValue::from(svg))
-}
-
-fn svg_envelope(size: u32, color: &str) -> Html {
-    let h = (size as f32 * 0.7) as u32;
-    let svg = format!(
-        r#"<svg width="{w}" height="{h}" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.7" y="0.7" width="14.6" height="9.6" rx="1.5" stroke="{c}" stroke-width="1.2"/><path d="M1.5 1.5L8 6.5l6.5-5" stroke="{c}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
-        w = size, h = h, c = color
-    );
-    Html::from_html_unchecked(yew::AttrValue::from(svg))
-}
-
 // -- Platform info --
 
 struct PlatformVisual {
     name: &'static str,
     color: &'static str,
     glow: &'static str,
-    is_chat: bool, // true = chat bubble icon, false = envelope icon
+    icon: &'static str, // Font Awesome icon class
 }
 
 fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
     if let Some(p) = platform_tag {
         match p {
-            "whatsapp" => return PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", is_chat: true },
-            "email" => return PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", is_chat: false },
-            "telegram" => return PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", is_chat: true },
-            "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", is_chat: true },
-            "messenger" => return PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", is_chat: true },
-            "instagram" => return PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", is_chat: true },
+            "whatsapp" => return PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", icon: "fa-brands fa-whatsapp" },
+            "email" => return PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" },
+            "telegram" => return PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" },
+            "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-solid fa-comment-dots" },
+            "messenger" => return PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" },
+            "instagram" => return PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", icon: "fa-brands fa-instagram" },
+            "internet" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
+            "items" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
+            "calendar" => return PlatformVisual { name: "Calendar", color: "#10b981", glow: "rgba(16,185,129,0.25)", icon: "fa-solid fa-calendar" },
+            "weather" => return PlatformVisual { name: "Weather", color: "#38bdf8", glow: "rgba(56,189,248,0.25)", icon: "fa-solid fa-cloud-sun" },
             _ => {}
         }
     }
     let lower = desc.to_lowercase();
     if lower.contains("whatsapp") {
-        PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", is_chat: true }
+        PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", icon: "fa-brands fa-whatsapp" }
     } else if lower.contains("email") {
-        PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", is_chat: false }
+        PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" }
     } else if lower.contains("telegram") {
-        PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", is_chat: true }
+        PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" }
     } else if lower.contains("signal") {
-        PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", is_chat: true }
+        PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-solid fa-comment-dots" }
     } else if lower.contains("messenger") {
-        PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", is_chat: true }
+        PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" }
     } else if lower.contains("instagram") {
-        PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", is_chat: true }
+        PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", icon: "fa-brands fa-instagram" }
     } else {
-        PlatformVisual { name: "Monitor", color: "#7EB2FF", glow: "rgba(126,178,255,0.25)", is_chat: true }
+        PlatformVisual { name: "Monitor", color: "#7EB2FF", glow: "rgba(126,178,255,0.25)", icon: "fa-solid fa-eye" }
     }
 }
 
@@ -401,6 +450,12 @@ fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
 
 fn clean_description(desc: &str) -> String {
     let s = desc.trim();
+
+    // Digest items: strip everything after the colon
+    if s.starts_with("Daily digest:") || s.starts_with("daily digest:") {
+        return "Digest".to_string();
+    }
+
     let prefixes = [
         "Remind the user to ",
         "Remind user to ",
@@ -449,11 +504,15 @@ fn monitor_topic(desc: &str, sender: Option<&str>) -> String {
             break;
         }
     }
-    // Strip platform prefixes
+    // Strip platform prefixes (case variants)
     for prefix in &[
-        "WhatsApp messages ", "WhatsApp ", "Emails ", "Email ",
-        "Telegram messages ", "Signal messages ", "Messenger messages ",
-        "Instagram messages ", "Messages ", "messages ",
+        "WhatsApp messages ", "WhatsApp ", "whatsapp messages ", "whatsapp ",
+        "Emails ", "Email ", "emails ", "email ",
+        "Telegram messages ", "telegram messages ", "Telegram ", "telegram ",
+        "Signal messages ", "signal messages ", "Signal ", "signal ",
+        "Messenger messages ", "messenger messages ",
+        "Instagram messages ", "instagram messages ",
+        "Messages ", "messages ",
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             s = rest.to_string();
@@ -496,11 +555,109 @@ fn monitor_topic(desc: &str, sender: Option<&str>) -> String {
     if s.is_empty() {
         return String::new();
     }
+
+    // Filter out generic/contact-profile phrases - these aren't real topics
+    let lower = s.to_lowercase();
+    let generic = [
+        "anything urgent", "anything important", "anything",
+        "something urgent", "something important", "something",
+        "urgent messages", "important messages",
+    ];
+    if generic.iter().any(|g| lower == *g) {
+        return String::new();
+    }
+
     let mut chars = s.chars();
     match chars.next() {
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
         None => String::new(),
     }
+}
+
+// -- Summary tag parsing (frontend mirror of backend parse_summary_tags) --
+
+/// Extract value for a `[key:value]` tag from the summary's first line.
+fn extract_tag<'a>(summary: &'a str, key: &str) -> Option<&'a str> {
+    let first_line = summary.lines().next().unwrap_or("");
+    let needle = format!("[{}:", key);
+    let start = first_line.find(&needle)? + needle.len();
+    let end = start + first_line[start..].find(']')?;
+    let val = first_line[start..end].trim();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+/// Check if an item is a digest: has both [fetch:] and [notify:] tags,
+/// or is a legacy item whose summary starts with "Daily digest".
+fn is_digest_item(summary: &str) -> bool {
+    if extract_tag(summary, "fetch").is_some() && extract_tag(summary, "notify").is_some() {
+        return true;
+    }
+    // Legacy digests created before the tag system
+    summary.starts_with("Daily digest")
+}
+
+/// Get the `[repeat:daily HH:MM]` hour from summary tags.
+fn parse_repeat_hour(summary: &str) -> Option<u32> {
+    let val = extract_tag(summary, "repeat")?; // e.g. "daily 19:00"
+    let time_part = val.split_whitespace().last()?; // "19:00"
+    let colon = time_part.find(':')?;
+    time_part[..colon].parse().ok()
+}
+
+/// Get readable sources: from `[fetch:]` tag, or from "Sources:" in legacy descriptions.
+fn digest_sources(summary: &str, description: &str) -> Option<String> {
+    // Tagged items: parse [fetch:email,chat,calendar,items]
+    if let Some(val) = extract_tag(summary, "fetch") {
+        let parts: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if !parts.is_empty() {
+            let labels: Vec<&str> = parts.iter().map(|s| match *s {
+                "email" => "email",
+                "chat" => "messages",
+                "calendar" => "calendar",
+                "weather" => "weather",
+                "items" => "tracked items",
+                other => other,
+            }).collect();
+            return Some(labels.join(", "));
+        }
+    }
+    // Legacy items: look for "Sources: x,y,z" in the summary text
+    let text = if summary.len() > description.len() { summary } else { description };
+    if let Some(idx) = text.find("Sources:").or_else(|| text.find("sources:")) {
+        let rest = text[idx + 8..].trim();
+        // Take until period or "Repeats"
+        let end = rest.find(". ")
+            .or_else(|| rest.find(".\n"))
+            .or_else(|| rest.find(". Repeats"))
+            .unwrap_or(rest.len());
+        let sources = rest[..end].trim().trim_end_matches('.');
+        if !sources.is_empty() {
+            return Some(sources.to_string());
+        }
+    }
+    None
+}
+
+// -- Digest detection --
+
+fn detect_occupied_digest_hours(items: &[AttentionItem]) -> Vec<u32> {
+    let mut occupied = Vec::new();
+    for item in items {
+        if !is_digest_item(&item.summary) {
+            continue;
+        }
+        if let Some(h) = parse_repeat_hour(&item.summary) {
+            let slot_hour = match h {
+                5..=11 => 8,
+                12..=16 => 13,
+                _ => 19,
+            };
+            if !occupied.contains(&slot_hour) {
+                occupied.push(slot_hour);
+            }
+        }
+    }
+    occupied
 }
 
 // -- Component --
@@ -510,207 +667,191 @@ pub struct ItemsStatusProps {
     pub items: Vec<AttentionItem>,
     pub total_tracked_count: i32,
     pub on_dismiss: Callback<AttentionItem>,
+    #[prop_or_default]
+    pub on_digest_prefill: Option<Callback<String>>,
 }
 
 #[function_component(ItemsStatusSection)]
 pub fn items_status_section(props: &ItemsStatusProps) -> Html {
-    let show_all_scheduled = use_state(|| false);
-    let show_all_monitors = use_state(|| false);
+    let show_all = use_state(|| false);
+    let digest_time = use_state(|| String::new());
 
     if props.items.is_empty() && props.total_tracked_count == 0 {
         return html! {};
     }
 
-    let overdue_items: Vec<&AttentionItem> = props.items.iter()
-        .filter(|i| !i.monitor && i.relative_display.as_deref() == Some("overdue"))
-        .collect();
+    // Deduplicate monitors by sender
+    let mut seen_monitors: Vec<String> = Vec::new();
 
-    let scheduled_items: Vec<&AttentionItem> = props.items.iter()
-        .filter(|i| !i.monitor && i.relative_display.as_deref() != Some("overdue"))
-        .collect();
-
-    // Deduplicate monitors by sender, sorted by next_check_at (closest first)
-    let deduped_monitors: Vec<&AttentionItem> = {
-        let mut monitors: Vec<&AttentionItem> = props.items.iter()
-            .filter(|i| i.monitor)
-            .collect();
-        // Sort by next_check_at ascending (closest first, None last)
-        monitors.sort_by(|a, b| match (a.next_check_at, b.next_check_at) {
-            (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        });
-        let mut seen: Vec<String> = Vec::new();
-        let mut result = Vec::new();
-        for m in monitors {
-            let key = m.sender.clone()
-                .or_else(|| extract_sender(&m.description))
-                .unwrap_or_else(|| m.description.clone());
-            if !seen.contains(&key) {
-                seen.push(key);
-                result.push(m);
+    // Build unified list: all items sorted by next_check_at (soonest first)
+    let mut all_items: Vec<&AttentionItem> = props.items.iter()
+        .filter(|i| {
+            if i.monitor {
+                let key = i.sender.clone()
+                    .or_else(|| extract_sender(&i.description))
+                    .unwrap_or_else(|| i.description.clone());
+                if seen_monitors.contains(&key) {
+                    return false;
+                }
+                seen_monitors.push(key);
             }
+            true
+        })
+        .collect();
+
+    // Sort: overdue first, then by next_check_at ascending
+    all_items.sort_by(|a, b| {
+        let a_overdue = a.relative_display.as_deref() == Some("overdue");
+        let b_overdue = b.relative_display.as_deref() == Some("overdue");
+        match (a_overdue, b_overdue) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => match (a.next_check_at, b.next_check_at) {
+                (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            },
         }
-        result
-    };
+    });
 
-    let has_anything = !overdue_items.is_empty()
-        || !scheduled_items.is_empty()
-        || !deduped_monitors.is_empty();
-
-    // How many to show
-    const VISIBLE_LIMIT: usize = 3;
-    let scheduled_hidden = if scheduled_items.len() > VISIBLE_LIMIT && !*show_all_scheduled {
-        scheduled_items.len() - VISIBLE_LIMIT
+    const VISIBLE_LIMIT: usize = 5;
+    let total = all_items.len();
+    let hidden = if total > VISIBLE_LIMIT && !*show_all {
+        total - VISIBLE_LIMIT
     } else {
         0
     };
-    let visible_scheduled: Vec<&&AttentionItem> = if *show_all_scheduled {
-        scheduled_items.iter().collect()
+    let visible: Vec<&&AttentionItem> = if *show_all {
+        all_items.iter().collect()
     } else {
-        scheduled_items.iter().take(VISIBLE_LIMIT).collect()
+        all_items.iter().take(VISIBLE_LIMIT).collect()
     };
 
-    let monitors_hidden = if deduped_monitors.len() > VISIBLE_LIMIT && !*show_all_monitors {
-        deduped_monitors.len() - VISIBLE_LIMIT
-    } else {
-        0
-    };
-    let visible_monitors: Vec<&&AttentionItem> = if *show_all_monitors {
-        deduped_monitors.iter().collect()
-    } else {
-        deduped_monitors.iter().take(VISIBLE_LIMIT).collect()
+    let on_toggle = {
+        let show_all = show_all.clone();
+        Callback::from(move |_: MouseEvent| {
+            show_all.set(!*show_all);
+        })
     };
 
-    let on_show_all_scheduled = {
-        let show_all_scheduled = show_all_scheduled.clone();
-        Callback::from(move |_: MouseEvent| {
-            show_all_scheduled.set(!*show_all_scheduled);
-        })
-    };
-    let on_show_all_monitors = {
-        let show_all_monitors = show_all_monitors.clone();
-        Callback::from(move |_: MouseEvent| {
-            show_all_monitors.set(!*show_all_monitors);
-        })
+    // Digest creator: detect existing digest time slots
+    let occupied_hours = detect_occupied_digest_hours(&props.items);
+    let available_slots: Vec<(String, String)> = [
+        ("Morning (8am)", "8am", 8u32),
+        ("Afternoon (1pm)", "1pm", 13u32),
+        ("Evening (7pm)", "7pm", 19u32),
+    ].iter()
+        .filter(|(_, _, hour)| !occupied_hours.contains(hour))
+        .map(|(label, time, _)| (label.to_string(), time.to_string()))
+        .collect();
+
+    let digest_creator_html = if !available_slots.is_empty() {
+        if let Some(ref cb) = props.on_digest_prefill {
+            let digest_time_for_change = digest_time.clone();
+            let on_time_change = Callback::from(move |e: Event| {
+                if let Some(target) = e.target() {
+                    if let Ok(select) = target.dyn_into::<web_sys::HtmlSelectElement>() {
+                        digest_time_for_change.set(select.value());
+                    }
+                }
+            });
+
+            let cb = cb.clone();
+            let avail_for_click = available_slots.clone();
+            let digest_time_for_click = digest_time.clone();
+            let on_add = Callback::from(move |_: MouseEvent| {
+                let time = if (*digest_time_for_click).is_empty() {
+                    avail_for_click.first().map(|(_, t)| t.clone()).unwrap_or_default()
+                } else {
+                    (*digest_time_for_click).clone()
+                };
+                if !time.is_empty() {
+                    cb.emit(format!(
+                        "Set up a daily digest at {} covering my emails, messages, and calendar",
+                        time
+                    ));
+                }
+            });
+
+            html! {
+                <div class="digest-creator">
+                    <span class="digest-creator-label">{"Add digest"}</span>
+                    <select onchange={on_time_change}>
+                        { for available_slots.iter().map(|(label, time)| {
+                            html! { <option value={time.clone()}>{label.clone()}</option> }
+                        })}
+                    </select>
+                    <button class="digest-creator-btn" onclick={on_add}>{"Add"}</button>
+                </div>
+            }
+        } else {
+            html! {}
+        }
+    } else {
+        html! {}
     };
 
     html! {
         <>
         <style>{ITEMS_STATUS_STYLES}</style>
         <div class="items-status">
-            // Overdue items - always show all
-            { for overdue_items.iter().map(|item| {
-                let desc = clean_description(&item.description);
-                let dismiss_item = (*item).clone();
-                let on_dismiss = props.on_dismiss.clone();
-                html! {
-                    <div class="item-overdue">
-                        <div class="item-clock">
-                            <div class="clock-face"></div>
-                            <div class="clock-hand-wrap">
-                                <div class="clock-hand-line"></div>
+            { for visible.iter().map(|item| {
+                if item.monitor {
+                    render_monitor_card(item)
+                } else if item.relative_display.as_deref() == Some("overdue") {
+                    let desc = clean_description(&item.description);
+                    let dismiss_item: AttentionItem = (***item).clone();
+                    let on_dismiss = props.on_dismiss.clone();
+                    html! {
+                        <div class="item-overdue">
+                            <div class="item-clock">
+                                <div class="clock-face"></div>
+                                <div class="clock-hand-wrap">
+                                    <div class="clock-hand-line"></div>
+                                </div>
                             </div>
-                        </div>
-                        <span class="item-desc">{desc}</span>
-                        { render_badge(item.notify.as_deref()) }
-                        <span class="item-when">{"overdue"}</span>
-                        <button class="item-x"
-                            onclick={Callback::from(move |e: MouseEvent| {
-                                e.stop_propagation();
-                                on_dismiss.emit(dismiss_item.clone());
-                            })}
-                        >{"x"}</button>
-                    </div>
-                }
-            })}
+                            <span class="item-desc">{super::emoji_utils::emojify_description(&desc)}</span>
 
-            // Scheduled items - first 3, then "+N more"
-            { for visible_scheduled.iter().map(|item| {
-                let desc = clean_description(&item.description);
-                let when = match (&item.time_display, &item.relative_display) {
-                    (Some(t), Some(r)) => format!("{} - {}", t, r),
-                    (Some(t), None) => t.clone(),
-                    (None, Some(r)) => r.clone(),
-                    (None, None) => String::new(),
-                };
-                html! {
-                    <div class="item-row">
-                        <div class="item-clock">
-                            <div class="clock-face"></div>
-                            <div class="clock-hand-wrap">
-                                <div class="clock-hand-line"></div>
-                            </div>
-                        </div>
-                        <span class="item-desc">{desc}</span>
-                        { render_badge(item.notify.as_deref()) }
-                        { if !when.is_empty() {
-                            html! { <span class="item-when">{when}</span> }
-                        } else {
-                            html! {}
-                        }}
-                    </div>
-                }
-            })}
-            { if scheduled_hidden > 0 {
-                html! {
-                    <button class="items-more-btn" onclick={on_show_all_scheduled.clone()}>
-                        {format!("+{} more", scheduled_hidden)}
-                    </button>
-                }
-            } else if *show_all_scheduled && scheduled_items.len() > VISIBLE_LIMIT {
-                html! {
-                    <button class="items-more-btn" onclick={on_show_all_scheduled}>
-                        {"show less"}
-                    </button>
-                }
-            } else {
-                html! {}
-            }}
-
-            // Monitors - first 3 shown directly, then "+N more"
-            { if !deduped_monitors.is_empty() {
-                html! {
-                    <div class="mon-section">
-                        <div class="mon-label-row">
-                            <div class="mon-dots">
-                                { for deduped_monitors.iter().map(|m| {
-                                    let pv = platform_visual(m.platform.as_deref(), &m.description);
-                                    let style = format!("background: {};", pv.color);
-                                    html! { <span class="mon-dot" style={style}></span> }
+                            <span class="item-when">{"overdue"}</span>
+                            { render_badge(item.notify.as_deref()) }
+                            <button class="item-x"
+                                onclick={Callback::from(move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    on_dismiss.emit(dismiss_item.clone());
                                 })}
-                            </div>
-                            <span class="mon-label-text">{"watching"}</span>
+                            >{"x"}</button>
                         </div>
-                        <div class="mon-list">
-                            { for visible_monitors.iter().map(|item| {
-                                render_monitor_card(item)
-                            })}
-                        </div>
-                        { if monitors_hidden > 0 {
-                            html! {
-                                <button class="items-more-btn" onclick={on_show_all_monitors.clone()}>
-                                    {format!("+{} more", monitors_hidden)}
-                                </button>
-                            }
-                        } else if *show_all_monitors && deduped_monitors.len() > VISIBLE_LIMIT {
-                            html! {
-                                <button class="items-more-btn" onclick={on_show_all_monitors}>
-                                    {"show less"}
-                                </button>
-                            }
-                        } else {
-                            html! {}
-                        }}
-                    </div>
+                    }
+                } else {
+                    render_scheduled_item(item)
+                }
+            })}
+            { if hidden > 0 {
+                html! {
+                    <button class="items-more-btn" onclick={on_toggle.clone()}>
+                        {format!("+{} more", hidden)}
+                    </button>
                 }
             } else {
-                html! {}
+                html! {
+                    <>
+                    {digest_creator_html}
+                    { if *show_all && total > VISIBLE_LIMIT {
+                        html! {
+                            <button class="items-more-btn" onclick={on_toggle}>
+                                {"show less"}
+                            </button>
+                        }
+                    } else {
+                        html! {}
+                    }}
+                    </>
+                }
             }}
 
-            // Status line
-            { if !has_anything && props.total_tracked_count > 0 {
+            // Status line when nothing visible
+            { if all_items.is_empty() && props.total_tracked_count > 0 {
                 html! {
                     <div class="items-quiet">
                         {format!("Tracking {} item{} - all on schedule",
@@ -729,61 +870,122 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
 
 fn render_badge(notify: Option<&str>) -> Html {
     match notify {
-        Some("call") => html! { <span class="item-badge badge-call">{"call"}</span> },
-        Some("sms") => html! { <span class="item-badge badge-sms">{"sms"}</span> },
+        Some("call") => html! { <span class="item-badge badge-call" title="Call"><i class="fa-solid fa-phone"></i></span> },
+        Some("sms") => html! { <span class="item-badge badge-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span> },
+        _ => html! { <span class="item-badge badge-silent" title="Silent">{"👀"}</span> },
+    }
+}
+
+fn render_type_tag(item_type: &str) -> Html {
+    match item_type {
+        "recurring" => html! {
+            <span class="item-type-tag" title="Recurring">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </span>
+        },
+        "oneshot" => html! {
+            <span class="item-type-tag" title="One-time">
+                <i class="fa-solid fa-1"></i>
+            </span>
+        },
         _ => html! {},
+    }
+}
+
+fn render_scheduled_item(item: &AttentionItem) -> Html {
+    let is_digest = is_digest_item(&item.summary);
+    let is_recurring = item.item_type == "recurring" || item.item_type == "tracking" || is_digest;
+    let when = match (&item.time_display, &item.relative_display) {
+        (Some(t), Some(r)) => {
+            if is_recurring { format!("next {} - {}", t, r) } else { format!("{} - {}", t, r) }
+        }
+        (Some(t), None) => {
+            if is_recurring { format!("next {}", t) } else { t.clone() }
+        }
+        (None, Some(r)) => r.clone(),
+        (None, None) => String::new(),
+    };
+
+    if is_digest {
+        let title = clean_description(&item.description);
+        let sources = digest_sources(&item.summary, &item.description);
+        return html! {
+            <div class="item-row">
+                <div class="item-clock">
+                    <div class="clock-face"></div>
+                    <div class="clock-hand-wrap">
+                        <div class="clock-hand-line"></div>
+                    </div>
+                </div>
+                <div class="item-info">
+                    <span class="item-title">{title}</span>
+                    { if let Some(src) = sources {
+                        html! { <span class="item-subtitle">{src}</span> }
+                    } else {
+                        html! {}
+                    }}
+                </div>
+                { if !when.is_empty() {
+                    html! { <span class="item-when">{when}</span> }
+                } else {
+                    html! {}
+                }}
+                // Digests always notify - default to sms for legacy items
+                { render_badge(Some(item.notify.as_deref().unwrap_or("sms"))) }
+            </div>
+        };
+    }
+
+    let desc = clean_description(&item.description);
+    html! {
+        <div class="item-row">
+            <div class="item-clock">
+                <div class="clock-face"></div>
+                <div class="clock-hand-wrap">
+                    <div class="clock-hand-line"></div>
+                </div>
+            </div>
+            <span class="item-desc">{super::emoji_utils::emojify_description(&desc)}</span>
+            { if !when.is_empty() {
+                html! { <span class="item-when">{when}</span> }
+            } else {
+                html! {}
+            }}
+            { render_badge(item.notify.as_deref()) }
+        </div>
     }
 }
 
 fn render_monitor_card(item: &AttentionItem) -> Html {
     let pv = platform_visual(item.platform.as_deref(), &item.description);
-
-    // Build icon functions based on platform type
-    let small_icon = if pv.is_chat {
-        svg_chat_bubble(8, pv.color)
-    } else {
-        svg_envelope(9, pv.color)
-    };
-    let small_icon_2 = if pv.is_chat {
-        svg_chat_bubble(8, pv.color)
-    } else {
-        svg_envelope(9, pv.color)
-    };
-    let center_icon = if pv.is_chat {
-        svg_chat_bubble(16, pv.color)
-    } else {
-        svg_envelope(16, pv.color)
-    };
-
+    let icon_style = format!("color: {};", pv.color);
     let glow_style = format!("background: {};", pv.glow);
+    let tag_style = format!("color: {}; background: {}33;", pv.color, pv.color);
 
     // Sender: from tag, or extract from description, or platform name
     let sender_display = item.sender.clone()
         .or_else(|| extract_sender(&item.description))
         .unwrap_or_else(|| pv.name.to_string());
-
-    // Check if we have a real sender (not platform fallback)
     let has_sender = item.sender.is_some() || extract_sender(&item.description).is_some();
-
     let topic = monitor_topic(
         &item.description,
         if has_sender { Some(&sender_display) } else { None },
     );
-    let detail = if topic.is_empty() {
-        if has_sender { pv.name.to_string() } else { String::new() }
-    } else if has_sender {
-        format!("{} - {}", pv.name, topic)
-    } else {
-        topic
+    let detail = if !topic.is_empty() { topic } else { String::new() };
+
+    let when = match (&item.time_display, &item.relative_display) {
+        (Some(t), Some(r)) if r != "overdue" => format!("{} - {}", t, r),
+        (_, Some(r)) if r == "overdue" => "checking...".to_string(),
+        _ => String::new(),
     };
 
     html! {
         <div class="mon-card">
             <div class="mon-scene">
-                <div class="mon-incoming">{small_icon}</div>
-                <div class="mon-incoming p2">{small_icon_2}</div>
+                <div class="mon-incoming"><i class={pv.icon} style={icon_style.clone()}></i></div>
+                <div class="mon-incoming p2"><i class={pv.icon} style={icon_style.clone()}></i></div>
                 <span class="mon-glow" style={glow_style}></span>
-                <div class="mon-center">{center_icon}</div>
+                <div class="mon-center"><i class={pv.icon} style={icon_style}></i></div>
             </div>
             <div class="mon-info">
                 <span class="mon-sender">{sender_display}</span>
@@ -793,6 +995,12 @@ fn render_monitor_card(item: &AttentionItem) -> Html {
                     html! {}
                 }}
             </div>
+            // platform icon already shows visually, no text tag needed
+            { if !when.is_empty() {
+                html! { <span class="item-when">{format!("next check in {}", when)}</span> }
+            } else {
+                html! {}
+            }}
             { render_badge(item.notify.as_deref()) }
         </div>
     }

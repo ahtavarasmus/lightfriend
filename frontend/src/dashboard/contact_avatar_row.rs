@@ -97,9 +97,17 @@ const AVATAR_ROW_STYLES: &str = r#"
     cursor: pointer;
     border: 2px solid #1a1a2e;
     z-index: 2;
-    transition: transform 0.15s ease;
+    animation: bubble-breathe 3s ease-in-out infinite;
+}
+.platform-bubble:nth-child(2) { animation-delay: 0.5s; }
+.platform-bubble:nth-child(3) { animation-delay: 1.0s; }
+.platform-bubble:nth-child(4) { animation-delay: 1.5s; }
+@keyframes bubble-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
 }
 .platform-bubble:hover {
+    animation: none;
     transform: scale(1.2);
     z-index: 3;
 }
@@ -108,6 +116,59 @@ const AVATAR_ROW_STYLES: &str = r#"
 .bubble-pos-bl { bottom: -4px; left: -4px; }
 .bubble-pos-tr { top: -4px; right: -4px; }
 .bubble-pos-tl { top: -4px; left: -4px; }
+
+/* Animated glow ring behind avatar */
+.avatar-glow {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    animation: avatar-glow-pulse 5s ease-in-out infinite;
+    z-index: 0;
+    pointer-events: none;
+}
+@keyframes avatar-glow-pulse {
+    0%, 100% { opacity: 0.15; transform: scale(0.95); }
+    50% { opacity: 0.28; transform: scale(1.02); }
+}
+
+/* Floating incoming particles for avatars */
+.avatar-particle {
+    position: absolute;
+    opacity: 0;
+    z-index: 1;
+    pointer-events: none;
+    animation: avatar-drift 4s ease-in-out infinite;
+    display: flex;
+    align-items: center;
+}
+.avatar-particle.p2 {
+    animation-delay: -2s;
+}
+.avatar-particle.p3 {
+    animation-delay: -1s;
+}
+@keyframes avatar-drift {
+    0% { opacity: 0; transform: scale(1) translate(0, 0); }
+    15% { opacity: 0.6; }
+    80% { opacity: 0.2; }
+    100% { opacity: 0; transform: scale(0.3) translate(0, 0); }
+}
+.avatar-particle.from-top { top: -8px; left: 50%; }
+.avatar-particle.from-top { animation-name: drift-top; }
+@keyframes drift-top {
+    0% { opacity: 0; transform: translate(-50%, -6px) scale(1); }
+    15% { opacity: 0.5; }
+    80% { opacity: 0.15; }
+    100% { opacity: 0; transform: translate(-20%, 30px) scale(0.2); }
+}
+.avatar-particle.from-right { top: 50%; right: -8px; }
+.avatar-particle.from-right { animation-name: drift-right; }
+@keyframes drift-right {
+    0% { opacity: 0; transform: translate(6px, -50%) scale(1); }
+    15% { opacity: 0.5; }
+    80% { opacity: 0.15; }
+    100% { opacity: 0; transform: translate(-40px, -30%) scale(0.2); }
+}
 
 /* Modal overlay */
 .avatar-modal-overlay {
@@ -409,7 +470,6 @@ const AVATAR_ROW_STYLES: &str = r#"
 }
 .mode-badge.mode-mention { background: #3b82f6; }
 .mode-badge.mode-critical { background: #f59e0b; }
-.mode-badge.mode-digest { background: #8b5cf6; }
 .mode-badge.mode-ignore { background: #ef4444; }
 
 /* Notification type icon below contact name */
@@ -569,7 +629,6 @@ fn mode_badge_info(mode: &str) -> Option<(&'static str, &'static str)> {
     match mode {
         "mention" => Some(("fa-solid fa-at", "mode-mention")),
         "critical" => Some(("fa-solid fa-bell", "mode-critical")),
-        "digest" => Some(("fa-solid fa-clock", "mode-digest")),
         "ignore" => Some(("fa-solid fa-xmark", "mode-ignore")),
         _ => None, // "all" or unknown - no badge
     }
@@ -1824,37 +1883,67 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             }
         }).collect::<Html>();
 
-        let mode_icon_html = match profile.notification_mode.as_str() {
-            "mention" => html! { <i class="fa-solid fa-at"></i> },
-            "critical" => html! { <i class="fa-solid fa-bell"></i> },
-            "digest" => html! { <i class="fa-solid fa-clock"></i> },
-            "ignore" => html! { <i class="fa-solid fa-xmark"></i> },
-            _ => html! {}, // "all" - no icon
-        };
-
         let noti_type_html = match profile.notification_type.as_str() {
             "sms" => html! {
                 <div class="avatar-noti-type">
-                    {mode_icon_html}
                     <i class="fa-solid fa-comment-sms"></i>
                 </div>
             },
             "call" => html! {
                 <div class="avatar-noti-type">
-                    {mode_icon_html}
                     <i class="fa-solid fa-phone"></i>
                 </div>
             },
             _ => html! {},
         };
 
+        // Glow color from primary platform, or avatar background color
+        let glow_color = if !platforms.is_empty() {
+            platforms[0].color
+        } else {
+            bg
+        };
+
+        // Floating particles: up to 2 tiny platform-colored icons drifting in
+        // Each particle shows the platform icon plus a filter-mode marker.
+        // Platforms in "ignore" mode produce no particle at all.
+        let particles = {
+            let mut particle_htmls = Vec::new();
+            let classes = ["from-top", "from-right p2"];
+            for (i, pi) in platforms.iter().enumerate().take(2) {
+                let mode = effective_mode_for_platform(profile, pi.key);
+                if mode == "ignore" {
+                    continue;
+                }
+                let marker = match mode {
+                    "critical" => html! {
+                        <i class="fa-solid fa-exclamation" style="font-size:0.55rem;color:#f59e0b;margin-left:1px;"></i>
+                    },
+                    "mention" => html! {
+                        <i class="fa-solid fa-at" style="font-size:0.55rem;color:#3b82f6;margin-left:1px;"></i>
+                    },
+                    _ => html! {},
+                };
+                let cls = classes.get(i).unwrap_or(&"from-top");
+                particle_htmls.push(html! {
+                    <span class={format!("avatar-particle {}", cls)}>
+                        <i class={pi.icon} style={format!("font-size:0.7rem;color:{};", pi.color)}></i>
+                        {marker}
+                    </span>
+                });
+            }
+            html! { <>{ for particle_htmls }</> }
+        };
+
         html! {
             <div class="avatar-item" onclick={on_avatar}>
                 <div class="avatar-circle-wrap">
+                    <span class="avatar-glow" style={format!("background: {};", glow_color)}></span>
                     <div class="avatar-circle" style={format!("background: {};", bg)}>
                         {initials}
                     </div>
                     {bubbles}
+                    {particles}
                 </div>
                 <span class="avatar-label" title={nick.clone()}>{nick}</span>
                 {noti_type_html}
@@ -2239,7 +2328,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let current_mode = (*form_mode).clone();
-                let show_type = current_mode != "digest";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -2314,22 +2402,19 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_mode == "critical"}>{"Critical"}</option>
-                                    <option value="digest" selected={current_mode == "digest"}>{"Digest"}</option>
                                 </select>
                             </div>
-                            if show_type {
-                                <div class="avatar-modal-row">
-                                    <label>{"Notification type"}</label>
-                                    <select onchange={on_type}>
-                                        <option value="sms" selected={*form_type == "sms"}>{"SMS"}</option>
-                                        <option value="call" selected={*form_type == "call"}>{"Call"}</option>
-                                    </select>
-                                </div>
-                                <div class="avatar-modal-check">
-                                    <input type="checkbox" id="av-notify-call" checked={*form_notify_call} onchange={on_call} />
-                                    <label for="av-notify-call">{"Notify on incoming call"}</label>
-                                </div>
-                            }
+                            <div class="avatar-modal-row">
+                                <label>{"Notification type"}</label>
+                                <select onchange={on_type}>
+                                    <option value="sms" selected={*form_type == "sms"}>{"SMS"}</option>
+                                    <option value="call" selected={*form_type == "call"}>{"Call"}</option>
+                                </select>
+                            </div>
+                            <div class="avatar-modal-check">
+                                <input type="checkbox" id="av-notify-call" checked={*form_notify_call} onchange={on_call} />
+                                <label for="av-notify-call">{"Notify on incoming call"}</label>
+                            </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-delete" onclick={on_delete} disabled={is_saving}>{"Delete"}</button>
                                 <button class="avatar-modal-btn-cancel" onclick={{
@@ -2661,7 +2746,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let current_exc_mode = (*exc_mode).clone();
-                let show_type = current_exc_mode != "ignore" && current_exc_mode != "digest";
+                let show_type = current_exc_mode != "ignore";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -2705,7 +2790,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                         <option value="mention" selected={current_exc_mode == "mention"}>{"@mention only"}</option>
                                     }
                                     <option value="critical" selected={current_exc_mode == "critical"}>{"Critical"}</option>
-                                    <option value="digest" selected={current_exc_mode == "digest"}>{"Digest"}</option>
                                 </select>
                             </div>
                             if show_type {
@@ -2783,7 +2867,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let current_pc_mode = (*pc_form_mode).clone();
-                let show_type = current_pc_mode != "digest";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -2800,22 +2883,19 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_pc_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_pc_mode == "critical"}>{"Critical"}</option>
-                                    <option value="digest" selected={current_pc_mode == "digest"}>{"Digest"}</option>
                                 </select>
                             </div>
-                            if show_type {
-                                <div class="avatar-modal-row">
-                                    <label>{"Notification type"}</label>
-                                    <select onchange={on_type}>
-                                        <option value="sms" selected={*pc_form_type == "sms"}>{"SMS"}</option>
-                                        <option value="call" selected={*pc_form_type == "call"}>{"Call"}</option>
-                                    </select>
-                                </div>
-                                <div class="avatar-modal-check">
-                                    <input type="checkbox" id="av-pc-call" checked={*pc_form_notify_call} onchange={on_call} />
-                                    <label for="av-pc-call">{"Notify on incoming call"}</label>
-                                </div>
-                            }
+                            <div class="avatar-modal-row">
+                                <label>{"Notification type"}</label>
+                                <select onchange={on_type}>
+                                    <option value="sms" selected={*pc_form_type == "sms"}>{"SMS"}</option>
+                                    <option value="call" selected={*pc_form_type == "call"}>{"Call"}</option>
+                                </select>
+                            </div>
+                            <div class="avatar-modal-check">
+                                <input type="checkbox" id="av-pc-call" checked={*pc_form_notify_call} onchange={on_call} />
+                                <label for="av-pc-call">{"Notify on incoming call"}</label>
+                            </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-cancel" onclick={{
                                     let close = close.clone();
@@ -2864,7 +2944,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let current_def_mode = (*def_form_mode).clone();
-                let show_type = current_def_mode != "digest";
 
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
@@ -2881,22 +2960,19 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_def_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_def_mode == "critical"}>{"Critical"}</option>
-                                    <option value="digest" selected={current_def_mode == "digest"}>{"Digest"}</option>
                                 </select>
                             </div>
-                            if show_type {
-                                <div class="avatar-modal-row">
-                                    <label>{"Notification type"}</label>
-                                    <select onchange={on_type}>
-                                        <option value="sms" selected={*def_form_type == "sms"}>{"SMS"}</option>
-                                        <option value="call" selected={*def_form_type == "call"}>{"Call"}</option>
-                                    </select>
-                                </div>
-                                <div class="avatar-modal-check">
-                                    <input type="checkbox" id="av-def-call" checked={*def_form_notify_call} onchange={on_call} />
-                                    <label for="av-def-call">{"Notify on incoming call"}</label>
-                                </div>
-                            }
+                            <div class="avatar-modal-row">
+                                <label>{"Notification type"}</label>
+                                <select onchange={on_type}>
+                                    <option value="sms" selected={*def_form_type == "sms"}>{"SMS"}</option>
+                                    <option value="call" selected={*def_form_type == "call"}>{"Call"}</option>
+                                </select>
+                            </div>
+                            <div class="avatar-modal-check">
+                                <input type="checkbox" id="av-def-call" checked={*def_form_notify_call} onchange={on_call} />
+                                <label for="av-def-call">{"Notify on incoming call"}</label>
+                            </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-cancel" onclick={{
                                     let close = close.clone();
@@ -2924,7 +3000,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <h4>{"Notification Modes"}</h4>
                                 <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
                                 <p class="people-info-mode"><strong>{"All: "}</strong>{"Get notified about every message from this contact."}</p>
-                                <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are bundled into scheduled digest summaries."}</p>
                                 <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications from this contact."}</p>
                             </div>
                             <div class="people-info-section">
@@ -2971,7 +3046,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <p class="people-info-mode"><strong>{"All: "}</strong>{"Every message triggers a notification."}</p>
                                 <p class="people-info-mode"><strong>{"@mention only: "}</strong>{"Only notifies when you're directly mentioned. Useful for group chats."}</p>
                                 <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
-                                <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are collected and sent as a summary on your digest schedule."}</p>
                                 <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications at all."}</p>
                             </div>
                             <div class="people-info-section">
@@ -3030,7 +3104,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <h4>{"Notification Modes"}</h4>
                                 <p class="people-info-mode"><strong>{"All: "}</strong>{"Every message triggers a notification."}</p>
                                 <p class="people-info-mode"><strong>{"Critical: "}</strong>{"AI determines urgency - notifies you only when delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergency messages, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are not considered critical."}</p>
-                                <p class="people-info-mode"><strong>{"Digest: "}</strong>{"Messages are collected and sent as a summary on your digest schedule."}</p>
                                 <p class="people-info-mode"><strong>{"Ignore: "}</strong>{"No notifications at all."}</p>
                             </div>
                             <div class="people-info-section">
@@ -3155,7 +3228,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let current_add_mode = (*add_mode).clone();
-                let show_type = current_add_mode != "digest";
 
                 // WhatsApp suggestions
                 let wa_suggestions = if *show_whatsapp_suggestions {
@@ -3404,22 +3476,19 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_add_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_add_mode == "critical"}>{"Critical"}</option>
-                                    <option value="digest" selected={current_add_mode == "digest"}>{"Digest"}</option>
                                 </select>
                             </div>
-                            if show_type {
-                                <div class="avatar-modal-row">
-                                    <label>{"Notification type"}</label>
-                                    <select onchange={on_type}>
-                                        <option value="sms" selected={*add_type == "sms"}>{"SMS"}</option>
-                                        <option value="call" selected={*add_type == "call"}>{"Call"}</option>
-                                    </select>
-                                </div>
-                                <div class="avatar-modal-check">
-                                    <input type="checkbox" id="av-add-call" checked={*add_notify_call} onchange={on_call} />
-                                    <label for="av-add-call">{"Notify on incoming call"}</label>
-                                </div>
-                            }
+                            <div class="avatar-modal-row">
+                                <label>{"Notification type"}</label>
+                                <select onchange={on_type}>
+                                    <option value="sms" selected={*add_type == "sms"}>{"SMS"}</option>
+                                    <option value="call" selected={*add_type == "call"}>{"Call"}</option>
+                                </select>
+                            </div>
+                            <div class="avatar-modal-check">
+                                <input type="checkbox" id="av-add-call" checked={*add_notify_call} onchange={on_call} />
+                                <label for="av-add-call">{"Notify on incoming call"}</label>
+                            </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-cancel" onclick={{
                                     let close = close.clone();

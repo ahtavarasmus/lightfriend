@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use web_sys::HtmlInputElement;
+use web_sys::HtmlTextAreaElement;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::{json, Value};
 use crate::utils::api::Api;
@@ -91,12 +91,12 @@ const CHAT_STYLES: &str = r#"
 }
 .chat-input-row {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 0.5rem;
     width: 100%;
     box-sizing: border-box;
 }
-.chat-input-row input[type="text"] {
+.chat-input-row textarea {
     flex: 1 1 0;
     min-width: 50px;
     background: rgba(255, 255, 255, 0.06) !important;
@@ -107,12 +107,18 @@ const CHAT_STYLES: &str = r#"
     font-size: 0.95rem !important;
     outline: none;
     box-sizing: border-box;
+    font-family: inherit;
+    resize: none;
+    overflow-y: hidden;
+    min-height: 38px;
+    max-height: 120px;
+    line-height: 1.4;
 }
-.chat-input-row input[type="text"]:focus {
+.chat-input-row textarea:focus {
     border-color: rgba(30, 144, 255, 0.5);
     background: rgba(255, 255, 255, 0.08);
 }
-.chat-input-row input[type="text"]::placeholder {
+.chat-input-row textarea::placeholder {
     color: #666;
 }
 .chat-btn {
@@ -404,7 +410,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 // Small delay to ensure DOM is updated
                 let chat_input_ref = chat_input_ref.clone();
                 gloo_timers::callback::Timeout::new(100, move || {
-                    if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                    if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                         let _ = input.focus();
                     }
                 }).forget();
@@ -425,7 +431,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     chat_input.set(text.clone());
                     let chat_input_ref = chat_input_ref.clone();
                     gloo_timers::callback::Timeout::new(50, move || {
-                        if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                        if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                             let _ = input.focus();
                         }
                     }).forget();
@@ -732,7 +738,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             }
                                             let chat_input_ref = chat_input_ref.clone();
                                             gloo_timers::callback::Timeout::new(100, move || {
-                                                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                                                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                                                     let _ = input.focus();
                                                 }
                                             }).forget();
@@ -894,7 +900,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             active_mention.set(Some("tesla".to_string()));
             let chat_input_ref = chat_input_ref.clone();
             gloo_timers::callback::Timeout::new(50, move || {
-                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
             }).forget();
@@ -909,7 +915,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             active_mention.set(Some("youtube".to_string()));
             let chat_input_ref = chat_input_ref.clone();
             gloo_timers::callback::Timeout::new(50, move || {
-                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
             }).forget();
@@ -1044,10 +1050,10 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             }
                         }
                     }
-                    <input
-                        type="text"
+                    <textarea
                         class="chat-text-input"
                         style="flex: 1 1 0; min-width: 100px;"
+                        rows="1"
                         ref={chat_input_ref.clone()}
                         value={(*chat_input).clone()}
                         placeholder={if props.focused_item.is_some() { "Edit this item..." } else { "Ask your assistant..." }}
@@ -1058,8 +1064,16 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             let media_playing = media_playing.clone();
                             let active_mention = active_mention.clone();
                             Callback::from(move |e: InputEvent| {
-                                let input: HtmlInputElement = e.target_unchecked_into();
+                                let input: HtmlTextAreaElement = e.target_unchecked_into();
                                 let value = input.value();
+                                // Auto-resize textarea to fit content
+                                {
+                                    use wasm_bindgen::JsCast;
+                                    let el: &web_sys::HtmlElement = input.unchecked_ref();
+                                    let _ = el.style().set_property("height", "auto");
+                                    let scroll_h = el.scroll_height();
+                                    let _ = el.style().set_property("height", &format!("{}px", scroll_h));
+                                }
                                 chat_input.set(value.clone());
 
                                 // @mention detection - check for @word pattern at end of input
@@ -1169,10 +1183,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 }
                             })
                         }}
-                        onkeypress={{
+                        onkeydown={{
                             let on_send = on_send.clone();
                             Callback::from(move |e: KeyboardEvent| {
-                                if e.key() == "Enter" {
+                                if e.key() == "Enter" && !e.shift_key() {
+                                    e.prevent_default();
                                     on_send.emit(());
                                 }
                             })
@@ -1385,7 +1400,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         <div class="item-preview-source">{format!("Sources: {}", src)}</div>
                                     }
                                     <div class="item-preview-desc">
-                                        {item.description.clone()}
+                                        {super::emoji_utils::emojify_description(&item.description)}
                                     </div>
                                     <div class="item-preview-hint">{"Click to edit"}</div>
                                 </div>
