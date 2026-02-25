@@ -9,71 +9,65 @@ pub struct SeoMeta {
 
 /// Sets page-specific title, meta description, canonical URL, and Open Graph tags.
 /// Restores the default (index.html) values on unmount.
+#[hook]
 pub fn use_seo(meta: SeoMeta) {
     use_effect_with_deps(
         move |_| {
-            let window = match web_sys::window() {
-                Some(w) => w,
-                None => return || (),
-            };
-            let document = match window.document() {
-                Some(d) => d,
-                None => return || (),
-            };
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                // Set title
+                document.set_title(meta.title);
 
-            // Set title
-            document.set_title(meta.title);
+                // Helper to set or create a meta tag
+                let set_meta = |selector: &str, attr: &str, value: &str| {
+                    if let Ok(Some(el)) = document.query_selector(selector) {
+                        el.set_attribute(attr, value).ok();
+                    }
+                };
 
-            // Helper to set or create a meta tag
-            let set_meta = |selector: &str, attr: &str, value: &str| {
-                if let Ok(Some(el)) = document.query_selector(selector) {
-                    el.set_attribute(attr, value).ok();
+                set_meta(
+                    r#"meta[name="description"]"#,
+                    "content",
+                    meta.description,
+                );
+                set_meta(
+                    r#"meta[property="og:title"]"#,
+                    "content",
+                    meta.title,
+                );
+                set_meta(
+                    r#"meta[property="og:description"]"#,
+                    "content",
+                    meta.description,
+                );
+                set_meta(
+                    r#"meta[property="og:url"]"#,
+                    "content",
+                    meta.canonical,
+                );
+                set_meta(
+                    r#"meta[property="og:type"]"#,
+                    "content",
+                    meta.og_type,
+                );
+                set_meta(
+                    r#"meta[name="twitter:title"]"#,
+                    "content",
+                    meta.title,
+                );
+                set_meta(
+                    r#"meta[name="twitter:description"]"#,
+                    "content",
+                    meta.description,
+                );
+
+                // Update canonical link
+                if let Ok(Some(el)) = document.query_selector(r#"link[rel="canonical"]"#) {
+                    el.set_attribute("href", meta.canonical).ok();
                 }
-            };
-
-            set_meta(
-                r#"meta[name="description"]"#,
-                "content",
-                meta.description,
-            );
-            set_meta(
-                r#"meta[property="og:title"]"#,
-                "content",
-                meta.title,
-            );
-            set_meta(
-                r#"meta[property="og:description"]"#,
-                "content",
-                meta.description,
-            );
-            set_meta(
-                r#"meta[property="og:url"]"#,
-                "content",
-                meta.canonical,
-            );
-            set_meta(
-                r#"meta[property="og:type"]"#,
-                "content",
-                meta.og_type,
-            );
-            set_meta(
-                r#"meta[name="twitter:title"]"#,
-                "content",
-                meta.title,
-            );
-            set_meta(
-                r#"meta[name="twitter:description"]"#,
-                "content",
-                meta.description,
-            );
-
-            // Update canonical link
-            if let Ok(Some(el)) = document.query_selector(r#"link[rel="canonical"]"#) {
-                el.set_attribute("href", meta.canonical).ok();
             }
 
             // Cleanup: restore defaults on unmount
-            move || {
+            || {
                 if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                     doc.set_title("Lightfriend: The Best AI Assistant for Dumbphones \u{2013} WhatsApp, Telegram, Signal, Email & More");
                     let restore = |selector: &str, attr: &str, value: &str| {
