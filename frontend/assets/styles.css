@@ -61,6 +61,30 @@ body {
     background: #1a1a1a;
 }
 
+.pdl-btn {
+    position: fixed;
+    top: 50px;
+    right: 20px;
+    z-index: 1000; /* Ensure it stays above other elements */
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+}
+
+.pdl-btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Add media query for mobile responsiveness */
+@media (max-width: 768px) {
+    .pdl-btn {
+        right: 10px;
+        padding: 8px 16px;
+    }
+}
+
 .top-nav {
     position: fixed;
     top: 0;
@@ -85,49 +109,40 @@ body {
     transform: translateY(1rem);
 }
 
-.top-nav.nav-static {
-    position: relative;
-    z-index: 1002;
-}
-
-.top-nav.nav-static.scrolled {
-    height: auto;
-    padding: 1rem 0;
-    overflow: visible;
-}
-
-.nav-left {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.nav-back-button {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 1.1rem;
-    text-decoration: none;
-    transition: color 0.3s ease;
-}
-
-.nav-back-button:hover {
-    color: rgba(255, 255, 255, 0.8);
-}
-
 /* Burger menu and mobile overlay removed - simplified nav */
 
 .nav-content {
-    max-width: 100%;
-    margin: 0;
-    padding: 0 3rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
     position: relative;
 }
+.nav-logo-dark {
+    color: white;
+    text-decoration: none;
+    font-size: 2.8rem;
+    font-weight: 600;
+    background: linear-gradient(45deg, #7EB2FF, #4169E1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: opacity 0.3s ease;
+    z-index: 11;
+}
+
+.nav-logo-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    z-index: 11;
+}
+
 .nav-logo {
     color: white;
     text-decoration: none;
-    font-size: 1.5rem;
+    font-size: 2.8rem;
     font-weight: 600;
     background: linear-gradient(45deg, #fff, #7EB2FF);
     -webkit-background-clip: text;
@@ -143,9 +158,6 @@ body {
     -webkit-text-fill-color: initial;
 }
 
-.nav-landing .nav-logo {
-    font-size: 2.8rem;
-}
 .nav-logo:hover {
     opacity: 0.8;
 }
@@ -216,39 +228,6 @@ body {
     box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
 }
 
-.nav-trust-badges {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.nav-trust-badge {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 0.65rem;
-    letter-spacing: 0.04em;
-    padding: 0.35rem 0.7rem;
-    background: linear-gradient(135deg, rgba(126, 178, 255, 0.04), rgba(255, 255, 255, 0.02));
-    backdrop-filter: blur(10px);
-    border-radius: 20px;
-    border: 1px solid rgba(126, 178, 255, 0.1);
-    white-space: nowrap;
-    transition: all 0.3s ease;
-}
-
-.nav-trust-badge:hover {
-    border-color: rgba(126, 178, 255, 0.2);
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.nav-trust-badge i {
-    font-size: 0.6rem;
-    color: rgba(126, 178, 255, 0.4);
-}
-
 .nav-link,
 .nav-profile-link {
     color: white;
@@ -280,11 +259,7 @@ body {
     }
 
     .nav-right {
-        gap: 0.5rem;
-    }
-
-    .nav-trust-badges {
-        display: none;
+        gap: 0.75rem;
     }
 
     .nav-login-button,
@@ -296,6 +271,84 @@ body {
     .nav-seen-on {
         display: none;
     }
+}
+
+.selector-btn {
+    width: 100%;
+    padding: 1rem;
+    background: #1e2634;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    text-align: center;
+}
+
+.selector-btn:hover {
+    background: #2c3644;
+}
+
+.phone-display {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: #1e2634;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.phone-number-item {
+    padding: 0.75rem;
+    border-radius: 6px;
+    background: #2c3644;
+    transition: background 0.2s ease;
+    cursor: pointer;
+}
+
+.phone-number-item:hover {
+    background: #374357;
+}
+
+.number-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.country {
+    color: #8b96a7;
+    font-size: 0.9rem;
+}
+
+.number {
+    color: #fff;
+    font-family: monospace;
+    font-size: 1rem;
+}
+
+.selected-indicator {
+    color: #1E90FF;
+    font-size: 1.2rem;
+    margin-left: 0.5rem;
+}
+
+.phone-number-item.selected {
+    background: #374357;
+    border: 1px solid rgba(30, 144, 255, 0.3);
+}
+
+.country {
+    color: #8b96a7;
+    font-size: 0.9rem;
+}
+
+.number {
+    color: #fff;
+    font-family: monospace;
+    font-size: 1rem;
 }
 
 .broadcast-section {
