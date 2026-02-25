@@ -436,20 +436,6 @@ pub fn landing() -> Html {
                                 <img src="/assets/lightphone-logo.svg" alt="The Light Phone" class="trust-logo" />
                             </a>
                         </div>
-                        <div class="trust-badges hero-anim hero-anim-4">
-                            <div class="trust-badge">
-                                <i class="fa-brands fa-github"></i>
-                                <span>{"Open Source"}</span>
-                            </div>
-                            <div class="trust-badge">
-                                <i class="fa-solid fa-shield-halved"></i>
-                                <span>{"EU Hosted"}</span>
-                            </div>
-                            <div class="trust-badge">
-                                <i class="fa-solid fa-lock"></i>
-                                <span>{"Encrypted"}</span>
-                            </div>
-                        </div>
                         <div class="hero-metric hero-anim hero-anim-3">
                             <span class="hero-metric-number">{"0"}</span>
                             <span class="hero-metric-label">{"smartphone-free days powered"}</span>
@@ -567,7 +553,7 @@ pub fn landing() -> Html {
             </div>
             <section class="trust-proof scroll-animate">
                 <div class="section-intro">
-                    <h2>{"Why this exists"}</h2>
+                    <h2>{"The Story"}</h2>
                     <img src="/assets/rasmus-pfp.png" alt="Rasmus" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
                     <p class="why-lead">{"This isn\u{2019}t a compromise. It\u{2019}s what made things possible."}</p>
                     <p>{"I\u{2019}m Rasmus. I didn\u{2019}t build Lightfriend despite using a dumbphone. I built it because of it."}</p>
@@ -803,7 +789,7 @@ pub fn landing() -> Html {
             <section class="features-section">
                 <div class="feature-list scroll-animate">
                     <style>{feature_css}</style>
-                    <h2>{"Current Capabilities"}</h2>
+                    <h2>{"Your Pocket AI"}</h2>
                     <div class="feature-categories-grid">
                         // Messaging & Communication
                         <div class="feature-category-card">
@@ -1091,7 +1077,7 @@ pub fn landing() -> Html {
             </section>
             <section class="testimonials-section scroll-animate">
                 <div class="testimonials-content">
-                    <h2>{"What Users Are Saying"}</h2>
+                    <h2>{"Life After Smartphones"}</h2>
                     <div class="testimonial">
                         <blockquote>
                             {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
@@ -2798,32 +2784,6 @@ pub fn landing() -> Html {
         width: auto;
         filter: brightness(0) invert(1);
         opacity: 0.9;
-    }
-    .trust-badges {
-        position: fixed;
-        top: 1rem;
-        right: 14rem;
-        display: flex;
-        flex-direction: row;
-        gap: 0.75rem;
-        z-index: 10;
-    }
-    .trust-badge {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 0.95rem;
-        letter-spacing: 0.03em;
-        padding: 0.6rem 1.1rem;
-        background: rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-    }
-    .trust-badge i {
-        font-size: 1rem;
-        color: rgba(200, 200, 200, 0.8);
     }
     /* ========== Animated Comic Strip ========== */
     .comic-section {
