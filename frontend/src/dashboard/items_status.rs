@@ -768,7 +768,7 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
                 };
                 if !time.is_empty() {
                     cb.emit(format!(
-                        "Set up a daily digest at {} covering my emails, messages, and calendar",
+                        "Set up a daily digest at {} covering my emails, messages, calendar, and tracked items",
                         time
                     ));
                 }
