@@ -13,163 +13,6 @@ use crate::proactive::contact_profiles::{
 // ---------------------------------------------------------------------------
 
 const AVATAR_ROW_STYLES: &str = r#"
-.avatar-row-wrap {
-    width: 100%;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-}
-.avatar-row-wrap::-webkit-scrollbar { display: none; }
-
-.avatar-row {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    padding: 1rem 0.25rem 0.5rem;
-    min-width: min-content;
-}
-
-.avatar-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    flex-shrink: 0;
-    cursor: pointer;
-}
-
-.avatar-circle-wrap {
-    position: relative;
-    width: 44px;
-    height: 44px;
-}
-
-.avatar-circle {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #fff;
-    user-select: none;
-}
-
-.avatar-circle.default-avatar {
-    background: #555;
-    font-size: 1rem;
-}
-
-.avatar-circle.add-avatar {
-    background: transparent;
-    border: 2px dashed rgba(255,255,255,0.25);
-    color: #888;
-    font-size: 1rem;
-}
-.avatar-circle.add-avatar:hover {
-    border-color: rgba(255,255,255,0.45);
-    color: #bbb;
-}
-
-.avatar-label {
-    font-size: 0.65rem;
-    color: #888;
-    max-width: 50px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: center;
-}
-
-/* Platform bubbles */
-.platform-bubble {
-    position: absolute;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.55rem;
-    color: #fff;
-    cursor: pointer;
-    border: 2px solid #1a1a2e;
-    z-index: 2;
-    animation: bubble-breathe 3s ease-in-out infinite;
-}
-.platform-bubble:nth-child(2) { animation-delay: 0.5s; }
-.platform-bubble:nth-child(3) { animation-delay: 1.0s; }
-.platform-bubble:nth-child(4) { animation-delay: 1.5s; }
-@keyframes bubble-breathe {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-}
-.platform-bubble:hover {
-    animation: none;
-    transform: scale(1.2);
-    z-index: 3;
-}
-
-.bubble-pos-br { bottom: -4px; right: -4px; }
-.bubble-pos-bl { bottom: -4px; left: -4px; }
-.bubble-pos-tr { top: -4px; right: -4px; }
-.bubble-pos-tl { top: -4px; left: -4px; }
-
-/* Animated glow ring behind avatar */
-.avatar-glow {
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    animation: avatar-glow-pulse 5s ease-in-out infinite;
-    z-index: 0;
-    pointer-events: none;
-}
-@keyframes avatar-glow-pulse {
-    0%, 100% { opacity: 0.15; transform: scale(0.95); }
-    50% { opacity: 0.28; transform: scale(1.02); }
-}
-
-/* Floating incoming particles for avatars */
-.avatar-particle {
-    position: absolute;
-    opacity: 0;
-    z-index: 1;
-    pointer-events: none;
-    animation: avatar-drift 4s ease-in-out infinite;
-    display: flex;
-    align-items: center;
-}
-.avatar-particle.p2 {
-    animation-delay: -2s;
-}
-.avatar-particle.p3 {
-    animation-delay: -1s;
-}
-@keyframes avatar-drift {
-    0% { opacity: 0; transform: scale(1) translate(0, 0); }
-    15% { opacity: 0.6; }
-    80% { opacity: 0.2; }
-    100% { opacity: 0; transform: scale(0.3) translate(0, 0); }
-}
-.avatar-particle.from-top { top: -8px; left: 50%; }
-.avatar-particle.from-top { animation-name: drift-top; }
-@keyframes drift-top {
-    0% { opacity: 0; transform: translate(-50%, -6px) scale(1); }
-    15% { opacity: 0.5; }
-    80% { opacity: 0.15; }
-    100% { opacity: 0; transform: translate(-20%, 30px) scale(0.2); }
-}
-.avatar-particle.from-right { top: 50%; right: -8px; }
-.avatar-particle.from-right { animation-name: drift-right; }
-@keyframes drift-right {
-    0% { opacity: 0; transform: translate(6px, -50%) scale(1); }
-    15% { opacity: 0.5; }
-    80% { opacity: 0.15; }
-    100% { opacity: 0; transform: translate(-40px, -30%) scale(0.2); }
-}
-
 /* Modal overlay */
 .avatar-modal-overlay {
     position: fixed;
@@ -439,51 +282,6 @@ const AVATAR_ROW_STYLES: &str = r#"
     color: #ccc;
 }
 
-/* Override indicator on platform bubbles */
-.platform-bubble.overridden::before {
-    content: '\2605';
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    font-size: 0.45rem;
-    color: #f5c542;
-    z-index: 4;
-}
-
-/* Mode badge on platform bubbles */
-.mode-badge {
-    position: absolute;
-    bottom: -4px;
-    left: -4px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.3rem;
-    color: #fff;
-    z-index: 5;
-    border: 1px solid #1a1a2e;
-    pointer-events: none;
-    line-height: 1;
-}
-.mode-badge.mode-mention { background: #3b82f6; }
-.mode-badge.mode-critical { background: #f59e0b; }
-.mode-badge.mode-ignore { background: #ef4444; }
-
-/* Notification type icon below contact name */
-.avatar-noti-type {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    font-size: 0.5rem;
-    color: #666;
-    margin-top: -2px;
-}
-.avatar-noti-type i { font-size: 0.45rem; }
-
 /* Read-only state for modal fields */
 .avatar-modal-row select:disabled,
 .avatar-modal-check input:disabled {
@@ -534,6 +332,175 @@ const AVATAR_ROW_STYLES: &str = r#"
     color: #666;
     margin-top: 0.2rem;
 }
+
+/* Arena layout */
+.people-arena {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0.25rem 0.5rem;
+    width: 100%;
+}
+
+.people-target {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.target-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    animation: target-pulse 3s ease-in-out infinite;
+}
+
+.target-label {
+    font-size: 0.6rem;
+    color: #888;
+    text-align: center;
+}
+
+@keyframes target-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.06); opacity: 1; }
+}
+
+.people-figures-wrap {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.people-figures-wrap::-webkit-scrollbar { display: none; }
+
+.people-figures {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    padding: 0.25rem 0;
+    min-width: min-content;
+    align-items: flex-end;
+}
+
+.figure-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    position: relative;
+}
+
+.figure-label {
+    font-size: 0.6rem;
+    color: #888;
+    max-width: 50px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+}
+
+/* Flying icons */
+.flying-icon {
+    position: absolute;
+    top: 10px;
+    left: 22px;
+    font-size: 0.6rem;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.fly-sms { animation: fly-to-sms 6s ease-in-out infinite; }
+.fly-call { animation: fly-to-call 6s ease-in-out infinite; }
+
+.fly-delay-0 { animation-delay: 0s; }
+.fly-delay-1 { animation-delay: 1.5s; }
+.fly-delay-2 { animation-delay: 3s; }
+.fly-delay-3 { animation-delay: 4.5s; }
+
+@keyframes fly-to-sms {
+    0%   { transform: translate(0, 0) scale(1); opacity: 0; }
+    5%   { opacity: 1; }
+    50%  { transform: translate(-60px, -25px) scale(0.9); opacity: 0.9; }
+    90%  { transform: translate(-120px, 0) scale(0.7); opacity: 0.4; }
+    100% { transform: translate(-140px, 5px) scale(0.5); opacity: 0; }
+}
+
+@keyframes fly-to-call {
+    0%   { transform: translate(0, 0) scale(1); opacity: 0; }
+    5%   { opacity: 1; }
+    50%  { transform: translate(60px, -25px) scale(0.9); opacity: 0.9; }
+    90%  { transform: translate(120px, 0) scale(0.7); opacity: 0.4; }
+    100% { transform: translate(140px, 5px) scale(0.5); opacity: 0; }
+}
+
+.fly-mode-badge {
+    font-size: 0.35rem;
+    font-weight: bold;
+    position: absolute;
+    top: -2px;
+    right: -5px;
+}
+
+/* Network override section in modal */
+.network-override-section {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+.network-override-section h4 {
+    font-size: 0.85rem;
+    color: #999;
+    margin: 0 0 0.5rem 0;
+    font-weight: 500;
+}
+.network-override-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding: 0.4rem;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+}
+.network-override-row i {
+    font-size: 0.85rem;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.network-override-name {
+    font-size: 0.75rem;
+    color: #bbb;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.network-override-name.not-connected {
+    color: #555;
+    font-style: italic;
+}
+.network-override-row select {
+    padding: 0.25rem 0.35rem;
+    background: #12121f;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 0.7rem;
+    max-width: 100px;
+}
 "#;
 
 // ---------------------------------------------------------------------------
@@ -548,19 +515,6 @@ const AVATAR_COLORS: [&str; 8] = [
 fn color_for_name(name: &str) -> &'static str {
     let hash: u32 = name.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     AVATAR_COLORS[(hash as usize) % AVATAR_COLORS.len()]
-}
-
-fn initials_for_name(name: &str) -> String {
-    let words: Vec<&str> = name.split_whitespace().collect();
-    match words.len() {
-        0 => "?".to_string(),
-        1 => words[0].chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(),
-        _ => {
-            let a = words[0].chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            let b = words[1].chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            format!("{}{}", a, b)
-        }
-    }
 }
 
 struct PlatformInfo {
@@ -594,23 +548,6 @@ fn connected_platforms(profile: &ContactProfile) -> Vec<&'static PlatformInfo> {
     out
 }
 
-/// Positions for 1-4 platform bubbles around the avatar circle.
-fn bubble_position_class(count: usize, idx: usize) -> &'static str {
-    match (count, idx) {
-        (1, 0) => "bubble-pos-br",
-        (2, 0) => "bubble-pos-br",
-        (2, 1) => "bubble-pos-bl",
-        (3, 0) => "bubble-pos-br",
-        (3, 1) => "bubble-pos-bl",
-        (3, 2) => "bubble-pos-tr",
-        (4, 0) => "bubble-pos-br",
-        (4, 1) => "bubble-pos-bl",
-        (4, 2) => "bubble-pos-tr",
-        (4, 3) => "bubble-pos-tl",
-        _ => "bubble-pos-br",
-    }
-}
-
 fn find_exception<'a>(profile: &'a ContactProfile, platform: &str) -> Option<&'a ProfileException> {
     profile.exceptions.iter().find(|e| e.platform == platform)
 }
@@ -624,14 +561,67 @@ fn effective_mode_for_platform<'a>(profile: &'a ContactProfile, platform_key: &s
     }
 }
 
-/// Returns (icon_class, css_class) for modes other than "all". None means no badge needed.
-fn mode_badge_info(mode: &str) -> Option<(&'static str, &'static str)> {
-    match mode {
-        "mention" => Some(("fa-solid fa-at", "mode-mention")),
-        "critical" => Some(("fa-solid fa-bell", "mode-critical")),
-        "ignore" => Some(("fa-solid fa-xmark", "mode-ignore")),
-        _ => None, // "all" or unknown - no badge
+/// Renders an SVG stick figure with one arm raised in a throwing pose.
+/// `special`: None for normal, Some("unknown") for ? head, Some("add") for dashed/plus, Some("contacts") for plain gray
+fn render_stick_figure_svg(color: &str, special: Option<&str>) -> Html {
+    let stroke = match special {
+        Some("add") => "stroke=\"rgba(255,255,255,0.25)\" stroke-dasharray=\"3,3\"".to_string(),
+        _ => format!("stroke=\"{}\"", color),
+    };
+    let head_content = match special {
+        Some("unknown") => format!(
+            r#"<text x="15" y="11" text-anchor="middle" font-size="8" fill="{}" font-weight="bold">?</text>"#,
+            color
+        ),
+        Some("add") => r#"<text x="15" y="12" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.25)" font-weight="300">+</text>"#.to_string(),
+        _ => String::new(),
+    };
+    let svg = format!(
+        r#"<svg viewBox="0 0 30 48" width="30" height="48" xmlns="http://www.w3.org/2000/svg"><circle cx="15" cy="8" r="5" fill="none" {} stroke-width="2"/>{}<line x1="15" y1="13" x2="15" y2="30" {} stroke-width="2"/><line x1="15" y1="19" x2="24" y2="12" {} stroke-width="2"/><line x1="15" y1="19" x2="6" y2="25" {} stroke-width="2"/><line x1="15" y1="30" x2="8" y2="42" {} stroke-width="2"/><line x1="15" y1="30" x2="22" y2="42" {} stroke-width="2"/></svg>"#,
+        stroke, head_content, stroke, stroke, stroke, stroke, stroke
+    );
+    Html::from_html_unchecked(AttrValue::from(svg))
+}
+
+/// Renders flying platform icons for a contact profile.
+/// Each connected platform icon flies toward SMS (left) or Call (right) based on notification_type.
+fn render_flying_icons(profile: &ContactProfile) -> Html {
+    let platforms = connected_platforms(profile);
+    let mut icons = Vec::new();
+    let mut delay_idx = 0usize;
+
+    for pi in &platforms {
+        let mode = effective_mode_for_platform(profile, pi.key);
+        if mode == "ignore" {
+            continue;
+        }
+
+        let noti_type = if let Some(exc) = find_exception(profile, pi.key) {
+            exc.notification_type.as_str()
+        } else {
+            profile.notification_type.as_str()
+        };
+
+        let fly_class = if noti_type == "call" { "fly-call" } else { "fly-sms" };
+        let delay_class = format!("fly-delay-{}", delay_idx);
+
+        let badge_html = match mode {
+            "critical" => html! { <span class="fly-mode-badge" style="color:#f59e0b;">{"!"}</span> },
+            "mention" => html! { <span class="fly-mode-badge" style="color:#3b82f6;">{"@"}</span> },
+            _ => html! {},
+        };
+
+        icons.push(html! {
+            <span class={format!("flying-icon {} {}", fly_class, delay_class)}>
+                <i class={pi.icon} style={format!("color:{};", pi.color)}></i>
+                {badge_html}
+            </span>
+        });
+
+        delay_idx += 1;
     }
+
+    html! { <>{ for icons }</> }
 }
 
 // ---------------------------------------------------------------------------
@@ -688,11 +678,22 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     let form_telegram_selected = use_state(|| false);
     let form_signal_selected = use_state(|| false);
 
-    // Platform exception form state
+    // Platform exception form state (for PlatformException modal - kept for compatibility)
     let exc_mode = use_state(|| String::new());
     let exc_type = use_state(|| "sms".to_string());
     let exc_notify_call = use_state(|| true);
     let exc_override_mode = use_state(|| false);
+
+    // Per-platform inline exception state (for unified ContactSettings modal)
+    // Empty string "" means "same as default" (no override)
+    let exc_wa_mode = use_state(|| String::new());
+    let exc_wa_type = use_state(|| String::new());
+    let exc_tg_mode = use_state(|| String::new());
+    let exc_tg_type = use_state(|| String::new());
+    let exc_sg_mode = use_state(|| String::new());
+    let exc_sg_type = use_state(|| String::new());
+    let exc_em_mode = use_state(|| String::new());
+    let exc_em_type = use_state(|| String::new());
 
     // Default settings form state
     let def_form_mode = use_state(|| "critical".to_string());
@@ -948,6 +949,14 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         let search_error_telegram = search_error_telegram.clone();
         let form_notes = form_notes.clone();
         let search_error_signal = search_error_signal.clone();
+        let exc_wa_mode = exc_wa_mode.clone();
+        let exc_wa_type = exc_wa_type.clone();
+        let exc_tg_mode = exc_tg_mode.clone();
+        let exc_tg_type = exc_tg_type.clone();
+        let exc_sg_mode = exc_sg_mode.clone();
+        let exc_sg_type = exc_sg_type.clone();
+        let exc_em_mode = exc_em_mode.clone();
+        let exc_em_type = exc_em_type.clone();
         Callback::from(move |profile_id: i32| {
             if let Some(p) = profiles.iter().find(|p| p.id == profile_id) {
                 form_nickname.set(p.nickname.clone());
@@ -965,6 +974,21 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 form_whatsapp_selected.set(p.whatsapp_chat.is_some());
                 form_telegram_selected.set(p.telegram_chat.is_some());
                 form_signal_selected.set(p.signal_chat.is_some());
+                // Initialize per-platform exception overrides
+                for plat in &["whatsapp", "telegram", "signal", "email"] {
+                    let (mode_val, type_val) = if let Some(exc) = find_exception(p, plat) {
+                        (exc.notification_mode.clone(), exc.notification_type.clone())
+                    } else {
+                        (String::new(), String::new())
+                    };
+                    match *plat {
+                        "whatsapp" => { exc_wa_mode.set(mode_val); exc_wa_type.set(type_val); }
+                        "telegram" => { exc_tg_mode.set(mode_val); exc_tg_type.set(type_val); }
+                        "signal" => { exc_sg_mode.set(mode_val); exc_sg_type.set(type_val); }
+                        "email" => { exc_em_mode.set(mode_val); exc_em_type.set(type_val); }
+                        _ => {}
+                    }
+                }
                 whatsapp_results.set(vec![]);
                 telegram_results.set(vec![]);
                 signal_results.set(vec![]);
@@ -990,7 +1014,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     // -----------------------------------------------------------------------
     // Bubble click: open platform exception modal
     // -----------------------------------------------------------------------
-    let on_bubble_click = {
+    let _on_bubble_click = {
         let modal = modal.clone();
         let profiles = profiles.clone();
         let exc_mode = exc_mode.clone();
@@ -1197,6 +1221,14 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         let error_msg = error_msg.clone();
         let saving = saving.clone();
         let fetch_profiles = fetch_profiles.clone();
+        let exc_wa_mode = exc_wa_mode.clone();
+        let exc_wa_type = exc_wa_type.clone();
+        let exc_tg_mode = exc_tg_mode.clone();
+        let exc_tg_type = exc_tg_type.clone();
+        let exc_sg_mode = exc_sg_mode.clone();
+        let exc_sg_type = exc_sg_type.clone();
+        let exc_em_mode = exc_em_mode.clone();
+        let exc_em_type = exc_em_type.clone();
         Callback::from(move |profile_id: i32| {
             let profile = profiles.iter().find(|p| p.id == profile_id).cloned();
             let Some(profile) = profile else { return };
@@ -1222,12 +1254,31 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 return;
             }
 
-            let exceptions: Vec<ExceptionRequest> = profile.exceptions.iter().map(|e| ExceptionRequest {
-                platform: e.platform.clone(),
-                notification_mode: e.notification_mode.clone(),
-                notification_type: e.notification_type.clone(),
-                notify_on_call: e.notify_on_call,
-            }).collect();
+            // Build exceptions from per-platform inline overrides
+            let default_mode_val = (*form_mode).clone();
+            let default_type_val = (*form_type).clone();
+            let default_call_val = *form_notify_call;
+            let mut exceptions: Vec<ExceptionRequest> = Vec::new();
+            for (plat, exc_m, exc_t) in [
+                ("whatsapp", (*exc_wa_mode).clone(), (*exc_wa_type).clone()),
+                ("telegram", (*exc_tg_mode).clone(), (*exc_tg_type).clone()),
+                ("signal", (*exc_sg_mode).clone(), (*exc_sg_type).clone()),
+                ("email", (*exc_em_mode).clone(), (*exc_em_type).clone()),
+            ] {
+                // Non-empty mode or type means this platform has an override
+                if !exc_m.is_empty() || !exc_t.is_empty() {
+                    let existing_call = profile.exceptions.iter()
+                        .find(|e| e.platform == plat)
+                        .map(|e| e.notify_on_call)
+                        .unwrap_or(default_call_val);
+                    exceptions.push(ExceptionRequest {
+                        platform: plat.to_string(),
+                        notification_mode: if exc_m.is_empty() { default_mode_val.clone() } else { exc_m },
+                        notification_type: if exc_t.is_empty() { default_type_val.clone() } else { exc_t },
+                        notify_on_call: existing_call,
+                    });
+                }
+            }
 
             let em = (*form_email).clone();
             let notes_val = (*form_notes).trim().to_string();
@@ -1237,10 +1288,10 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 telegram_chat: if tg.is_empty() { None } else { Some(tg) },
                 signal_chat: if sg.is_empty() { None } else { Some(sg) },
                 email_addresses: if em.is_empty() { None } else { Some(em) },
-                notification_mode: (*form_mode).clone(),
-                notification_type: (*form_type).clone(),
-                notify_on_call: *form_notify_call,
-                exceptions: if exceptions.is_empty() { None } else { Some(exceptions) },
+                notification_mode: default_mode_val,
+                notification_type: default_type_val,
+                notify_on_call: default_call_val,
+                exceptions: Some(exceptions),
                 whatsapp_room_id: (*form_whatsapp_room_id).clone(),
                 telegram_room_id: (*form_telegram_room_id).clone(),
                 signal_room_id: (*form_signal_room_id).clone(),
@@ -1822,15 +1873,12 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     // Render helpers
     // -----------------------------------------------------------------------
 
-    let render_avatar = |profile: &ContactProfile| -> Html {
+    let render_figure = |profile: &ContactProfile| -> Html {
         let id = profile.id;
         let nick = profile.nickname.clone();
-        let initials = initials_for_name(&nick);
-        let bg = color_for_name(&nick);
-        let platforms = connected_platforms(profile);
-        let count = platforms.len();
+        let color = color_for_name(&nick);
 
-        let on_avatar = {
+        let on_click = {
             let cb = on_avatar_click.clone();
             Callback::from(move |e: MouseEvent| {
                 e.stop_propagation();
@@ -1838,157 +1886,44 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             })
         };
 
-        let bubbles = platforms.iter().enumerate().map(|(idx, pi)| {
-            let pos = bubble_position_class(count, idx);
-            let has_override = find_exception(profile, pi.key).is_some();
-            let overridden_class = if has_override { " overridden" } else { "" };
-            let platform_key = pi.key.to_string();
-            let icon_class = pi.icon.to_string();
-            let eff_mode = effective_mode_for_platform(profile, pi.key);
-            // Only show badge if this platform has an override that differs from the contact default
-            let badge = if has_override && eff_mode != profile.notification_mode.as_str() {
-                mode_badge_info(eff_mode)
-            } else {
-                None
-            };
-            let on_click = {
-                let cb = on_bubble_click.clone();
-                let pk = platform_key.clone();
-                Callback::from(move |e: MouseEvent| {
-                    e.stop_propagation();
-                    cb.emit((id, pk.clone()));
-                })
-            };
-
-            let badge_html = if let Some((badge_icon, badge_css)) = badge {
-                html! {
-                    <span class={format!("mode-badge {}", badge_css)}>
-                        <i class={badge_icon}></i>
-                    </span>
-                }
-            } else {
-                html! {}
-            };
-
-            html! {
-                <div
-                    class={format!("platform-bubble {}{}", pos, overridden_class)}
-                    style={format!("background: {};", pi.color)}
-                    onclick={on_click}
-                    title={pi.label.to_string()}
-                >
-                    <i class={icon_class}></i>
-                    {badge_html}
-                </div>
-            }
-        }).collect::<Html>();
-
-        let noti_type_html = match profile.notification_type.as_str() {
-            "sms" => html! {
-                <div class="avatar-noti-type">
-                    <i class="fa-solid fa-comment-sms"></i>
-                </div>
-            },
-            "call" => html! {
-                <div class="avatar-noti-type">
-                    <i class="fa-solid fa-phone"></i>
-                </div>
-            },
-            _ => html! {},
-        };
-
-        // Glow color from primary platform, or avatar background color
-        let glow_color = if !platforms.is_empty() {
-            platforms[0].color
-        } else {
-            bg
-        };
-
-        // Floating particles: up to 2 tiny platform-colored icons drifting in
-        // Each particle shows the platform icon plus a filter-mode marker.
-        // Platforms in "ignore" mode produce no particle at all.
-        let particles = {
-            let mut particle_htmls = Vec::new();
-            let classes = ["from-top", "from-right p2"];
-            for (i, pi) in platforms.iter().enumerate().take(2) {
-                let mode = effective_mode_for_platform(profile, pi.key);
-                if mode == "ignore" {
-                    continue;
-                }
-                let marker = match mode {
-                    "critical" => html! {
-                        <i class="fa-solid fa-exclamation" style="font-size:0.55rem;color:#f59e0b;margin-left:1px;"></i>
-                    },
-                    "mention" => html! {
-                        <i class="fa-solid fa-at" style="font-size:0.55rem;color:#3b82f6;margin-left:1px;"></i>
-                    },
-                    _ => html! {},
-                };
-                let cls = classes.get(i).unwrap_or(&"from-top");
-                particle_htmls.push(html! {
-                    <span class={format!("avatar-particle {}", cls)}>
-                        <i class={pi.icon} style={format!("font-size:0.7rem;color:{};", pi.color)}></i>
-                        {marker}
-                    </span>
-                });
-            }
-            html! { <>{ for particle_htmls }</> }
-        };
+        let flying = render_flying_icons(profile);
+        let figure_svg = render_stick_figure_svg(color, None);
 
         html! {
-            <div class="avatar-item" onclick={on_avatar}>
-                <div class="avatar-circle-wrap">
-                    <span class="avatar-glow" style={format!("background: {};", glow_color)}></span>
-                    <div class="avatar-circle" style={format!("background: {};", bg)}>
-                        {initials}
-                    </div>
-                    {bubbles}
-                    {particles}
-                </div>
-                <span class="avatar-label" title={nick.clone()}>{nick}</span>
-                {noti_type_html}
+            <div class="figure-item" onclick={on_click}>
+                {figure_svg}
+                {flying}
+                <span class="figure-label" title={nick.clone()}>{nick}</span>
             </div>
         }
     };
 
-    let render_phone_contact_avatar = {
+    let render_phone_contact_figure = {
         let on_click = on_phone_contact_click.clone();
         html! {
-            <div class="avatar-item" onclick={on_click}>
-                <div class="avatar-circle-wrap">
-                    <div class="avatar-circle default-avatar">
-                        <i class="fa-solid fa-address-book"></i>
-                    </div>
-                </div>
-                <span class="avatar-label">{"Contacts"}</span>
+            <div class="figure-item" onclick={on_click}>
+                {render_stick_figure_svg("#555", None)}
+                <span class="figure-label">{"Contacts"}</span>
             </div>
         }
     };
 
-    let render_unknown_avatar = {
+    let render_unknown_figure = {
         let on_click = on_default_click.clone();
         html! {
-            <div class="avatar-item" onclick={on_click}>
-                <div class="avatar-circle-wrap">
-                    <div class="avatar-circle default-avatar">
-                        <i class="fa-solid fa-user-question"></i>
-                    </div>
-                </div>
-                <span class="avatar-label">{"Unknown"}</span>
+            <div class="figure-item" onclick={on_click}>
+                {render_stick_figure_svg("#555", Some("unknown"))}
+                <span class="figure-label">{"Unknown"}</span>
             </div>
         }
     };
 
-    let render_add_avatar = {
+    let render_add_figure = {
         let on_click = on_add_click.clone();
         html! {
-            <div class="avatar-item" onclick={on_click}>
-                <div class="avatar-circle-wrap">
-                    <div class="avatar-circle add-avatar">
-                        <i class="fa-solid fa-plus"></i>
-                    </div>
-                </div>
-                <span class="avatar-label">{"Add"}</span>
+            <div class="figure-item" onclick={on_click}>
+                {render_stick_figure_svg("rgba(255,255,255,0.25)", Some("add"))}
+                <span class="figure-label">{"Add"}</span>
             </div>
         }
     };
@@ -2414,6 +2349,98 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                             <div class="avatar-modal-check">
                                 <input type="checkbox" id="av-notify-call" checked={*form_notify_call} onchange={on_call} />
                                 <label for="av-notify-call">{"Notify on incoming call"}</label>
+                            </div>
+                            // Per-platform network overrides
+                            <div class="network-override-section">
+                                <h4>{"Network Overrides"}</h4>
+                                { for PLATFORMS.iter().map(|pi| {
+                                    let platform_key = pi.key;
+                                    let is_connected = match platform_key {
+                                        "whatsapp" => profile.whatsapp_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
+                                        "telegram" => profile.telegram_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
+                                        "signal" => profile.signal_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
+                                        "email" => profile.email_addresses.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
+                                        _ => false,
+                                    };
+                                    let chat_name = match platform_key {
+                                        "whatsapp" => profile.whatsapp_chat.clone().unwrap_or_default(),
+                                        "telegram" => profile.telegram_chat.clone().unwrap_or_default(),
+                                        "signal" => profile.signal_chat.clone().unwrap_or_default(),
+                                        "email" => profile.email_addresses.clone().unwrap_or_default(),
+                                        _ => String::new(),
+                                    };
+                                    let (cur_mode, cur_type) = match platform_key {
+                                        "whatsapp" => ((*exc_wa_mode).clone(), (*exc_wa_type).clone()),
+                                        "telegram" => ((*exc_tg_mode).clone(), (*exc_tg_type).clone()),
+                                        "signal" => ((*exc_sg_mode).clone(), (*exc_sg_type).clone()),
+                                        "email" => ((*exc_em_mode).clone(), (*exc_em_type).clone()),
+                                        _ => (String::new(), String::new()),
+                                    };
+                                    let on_mode_change = {
+                                        let exc_wa_mode = exc_wa_mode.clone();
+                                        let exc_tg_mode = exc_tg_mode.clone();
+                                        let exc_sg_mode = exc_sg_mode.clone();
+                                        let exc_em_mode = exc_em_mode.clone();
+                                        let pk = platform_key.to_string();
+                                        Callback::from(move |e: Event| {
+                                            let target: HtmlSelectElement = e.target_unchecked_into();
+                                            let v = target.value();
+                                            match pk.as_str() {
+                                                "whatsapp" => exc_wa_mode.set(v),
+                                                "telegram" => exc_tg_mode.set(v),
+                                                "signal" => exc_sg_mode.set(v),
+                                                "email" => exc_em_mode.set(v),
+                                                _ => {}
+                                            }
+                                        })
+                                    };
+                                    let on_type_change = {
+                                        let exc_wa_type = exc_wa_type.clone();
+                                        let exc_tg_type = exc_tg_type.clone();
+                                        let exc_sg_type = exc_sg_type.clone();
+                                        let exc_em_type = exc_em_type.clone();
+                                        let pk = platform_key.to_string();
+                                        Callback::from(move |e: Event| {
+                                            let target: HtmlSelectElement = e.target_unchecked_into();
+                                            let v = target.value();
+                                            match pk.as_str() {
+                                                "whatsapp" => exc_wa_type.set(v),
+                                                "telegram" => exc_tg_type.set(v),
+                                                "signal" => exc_sg_type.set(v),
+                                                "email" => exc_em_type.set(v),
+                                                _ => {}
+                                            }
+                                        })
+                                    };
+                                    let is_bridge = platform_key != "email";
+                                    let show_mention = is_bridge;
+                                    html! {
+                                        <div class="network-override-row">
+                                            <i class={pi.icon} style={format!("color:{};", pi.color)}></i>
+                                            if is_connected {
+                                                <span class="network-override-name" title={chat_name.clone()}>{&chat_name}</span>
+                                            } else {
+                                                <span class="network-override-name not-connected">{"not connected"}</span>
+                                            }
+                                            <select onchange={on_mode_change}>
+                                                <option value="" selected={cur_mode.is_empty()}>{"Default"}</option>
+                                                <option value="all" selected={cur_mode == "all"}>{"All"}</option>
+                                                if show_mention {
+                                                    <option value="mention" selected={cur_mode == "mention"}>{"@mention"}</option>
+                                                }
+                                                <option value="critical" selected={cur_mode == "critical"}>{"Critical"}</option>
+                                                <option value="ignore" selected={cur_mode == "ignore"}>{"Ignore"}</option>
+                                            </select>
+                                            if cur_mode != "ignore" {
+                                                <select onchange={on_type_change}>
+                                                    <option value="" selected={cur_type.is_empty()}>{"Default"}</option>
+                                                    <option value="sms" selected={cur_type == "sms"}>{"SMS"}</option>
+                                                    <option value="call" selected={cur_type == "call"}>{"Call"}</option>
+                                                </select>
+                                            }
+                                        </div>
+                                    }
+                                })}
                             </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-delete" onclick={on_delete} disabled={is_saving}>{"Delete"}</button>
@@ -3010,7 +3037,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                             </div>
                             <div class="people-info-section">
                                 <h4>{"How to Use"}</h4>
-                                <p>{"Click an avatar to edit settings. Click \"+\" to add a new contact profile. Click \"Contacts\" or \"Unknown\" to change settings for those groups."}</p>
+                                <p>{"Click a figure to edit settings. Click \"+\" to add a new contact profile. Click \"Contacts\" or \"Unknown\" to change settings for those groups."}</p>
                             </div>
                             <div class="people-info-tip">
                                 <strong>{"Tip: "}</strong>{"Use nicknames when chatting with Lightfriend! For example, \"has Mom messaged me?\" or \"send my Boss a WhatsApp message\" will automatically find the right chat."}
@@ -3117,7 +3144,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <p>{"When enabled, Lightfriend notifies you if this contact tries to call you on a linked platform (e.g. a WhatsApp call). Useful when your phone is on silent or you're away from it."}</p>
                             </div>
                             <div class="people-info-tip">
-                                <strong>{"Tip: "}</strong>{"Click the colored platform bubbles on a contact's avatar to set per-platform notification overrides."}
+                                <strong>{"Tip: "}</strong>{"Use the Network Overrides section below to customize notification settings per platform."}
                             </div>
                             <button class="people-info-close" onclick={{
                                 let modal = modal.clone();
@@ -3514,37 +3541,52 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         return html! {
             <>
                 <style>{AVATAR_ROW_STYLES}</style>
-                <div class="avatar-row-wrap">
-                    <div class="avatar-row">
-                        <span style="color:#666;font-size:0.8rem;">{"Loading contacts..."}</span>
-                    </div>
+                <div class="people-arena">
+                    <span style="color:#666;font-size:0.8rem;">{"Loading contacts..."}</span>
                 </div>
             </>
         };
     }
 
-    let profile_avatars = profiles.iter().map(|p| render_avatar(p)).collect::<Html>();
+    let profile_figures = profiles.iter().map(|p| render_figure(p)).collect::<Html>();
 
     html! {
         <>
             <style>{AVATAR_ROW_STYLES}</style>
-            <div class="avatar-row-wrap">
-                <div class="avatar-row">
-                    <div class="avatar-row-info">
-                        <button class="avatar-row-info-btn" onclick={{
-                            let modal = modal.clone();
-                            Callback::from(move |e: MouseEvent| {
-                                e.stop_propagation();
-                                modal.set(Some(ModalType::PeopleInfo));
-                            })
-                        }}>
-                            <i class="fa-solid fa-circle-info"></i>
-                        </button>
+            <div class="people-arena">
+                // SMS target
+                <div class="people-target">
+                    <div class="target-circle" style="background: rgba(74,222,128,0.15); border: 2px solid rgba(74,222,128,0.4);">
+                        <i class="fa-solid fa-comment-sms" style="color: #4ade80;"></i>
                     </div>
-                    {profile_avatars}
-                    {render_phone_contact_avatar}
-                    {render_unknown_avatar}
-                    {render_add_avatar}
+                    <span class="target-label">{"SMS"}</span>
+                </div>
+                // Scrollable figures
+                <div class="people-figures-wrap">
+                    <div class="people-figures">
+                        <div class="avatar-row-info">
+                            <button class="avatar-row-info-btn" onclick={{
+                                let modal = modal.clone();
+                                Callback::from(move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    modal.set(Some(ModalType::PeopleInfo));
+                                })
+                            }}>
+                                <i class="fa-solid fa-circle-info"></i>
+                            </button>
+                        </div>
+                        {profile_figures}
+                        {render_phone_contact_figure}
+                        {render_unknown_figure}
+                        {render_add_figure}
+                    </div>
+                </div>
+                // Call target
+                <div class="people-target">
+                    <div class="target-circle" style="background: rgba(251,191,36,0.15); border: 2px solid rgba(251,191,36,0.4);">
+                        <i class="fa-solid fa-phone" style="color: #fbbf24;"></i>
+                    </div>
+                    <span class="target-label">{"Call"}</span>
                 </div>
             </div>
             {render_modal()}

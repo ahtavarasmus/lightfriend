@@ -51,7 +51,6 @@ mod dashboard {
     pub mod chat_box;
     pub mod triage_indicator;
     pub mod timeline_view;
-    pub mod dashboard_footer;
     pub mod settings_panel;
     pub mod activity_panel;
     pub mod quiet_mode;

@@ -767,29 +767,38 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
                 }
             });
 
+            // Default to first available slot if state is empty or stale
+            let first_available = available_slots.first().map(|(_, t)| t.clone()).unwrap_or_default();
+            if (*digest_time).is_empty() || !available_slots.iter().any(|(_, t)| t == &*digest_time) {
+                digest_time.set(first_available.clone());
+            }
+
             let cb = cb.clone();
             let avail_for_click = available_slots.clone();
             let digest_time_for_click = digest_time.clone();
             let on_add = Callback::from(move |_: MouseEvent| {
-                let time = if (*digest_time_for_click).is_empty() {
-                    avail_for_click.first().map(|(_, t)| t.clone()).unwrap_or_default()
-                } else {
-                    (*digest_time_for_click).clone()
-                };
+                let time = (*digest_time_for_click).clone();
                 if !time.is_empty() {
                     cb.emit(format!(
                         "Set up a daily digest at {} covering my emails, messages, calendar, and tracked items",
                         time
                     ));
+                    // Advance dropdown to the next available slot
+                    let next = avail_for_click.iter()
+                        .find(|(_, t)| *t != time)
+                        .map(|(_, t)| t.clone())
+                        .unwrap_or_default();
+                    digest_time_for_click.set(next);
                 }
             });
 
             html! {
                 <div class="digest-creator">
                     <span class="digest-creator-label"><i class="fa-solid fa-plus"></i>{"digest"}</span>
-                    <select onchange={on_time_change}>
+                    <select onchange={on_time_change} value={(*digest_time).clone()}>
                         { for available_slots.iter().map(|(label, time)| {
-                            html! { <option value={time.clone()}>{label.clone()}</option> }
+                            let selected = *digest_time == *time;
+                            html! { <option value={time.clone()} selected={selected}>{label.clone()}</option> }
                         })}
                     </select>
                     <button class="digest-creator-btn" onclick={on_add}>{"add"}</button>

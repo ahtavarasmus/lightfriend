@@ -433,6 +433,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     gloo_timers::callback::Timeout::new(50, move || {
                         if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                             let _ = input.focus();
+                            // Auto-resize to fit prefilled content
+                            {
+                                use wasm_bindgen::JsCast;
+                                let el: &web_sys::HtmlElement = input.unchecked_ref();
+                                let _ = el.style().set_property("height", "auto");
+                                let scroll_h = el.scroll_height();
+                                let _ = el.style().set_property("height", &format!("{}px", scroll_h));
+                            }
                         }
                     }).forget();
                     if let Some(cb) = &on_prefill_consumed {

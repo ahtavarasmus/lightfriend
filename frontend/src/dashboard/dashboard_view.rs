@@ -8,7 +8,6 @@ use crate::profile::billing_models::UserProfile;
 use super::chat_box::ChatBox;
 use super::triage_indicator::AttentionItem;
 use super::timeline_view::{UpcomingItem, UpcomingDigest};
-use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
 use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
@@ -265,7 +264,6 @@ struct DashboardSummaryResponse {
     #[serde(default)]
     upcoming_digests: Vec<UpcomingDigestResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
-    next_digest: Option<NextDigestResponse>,
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
@@ -346,11 +344,6 @@ struct UpcomingItemResponse {
 struct WatchedContactResponse {
     nickname: String,
     notification_mode: String,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
-struct NextDigestResponse {
-    time_display: String,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -675,12 +668,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    let next_digest = (*summary).as_ref().and_then(|s| {
-        s.next_digest.as_ref().map(|d| NextDigestInfo {
-            time_display: d.time_display.clone(),
-        })
-    });
-
     let quiet_mode = (*summary)
         .as_ref()
         .map(|s| QuietModeStatus {
@@ -946,11 +933,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 <ContactAvatarRow />
 
                 <div class="peace-separator"></div>
-
-                // Footer with digest info and buttons
-                <DashboardFooter
-                    next_digest={next_digest}
-                />
             </div>
 
             // Settings panel (slide-in)

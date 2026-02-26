@@ -458,46 +458,14 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
-/// ElevenLabs voice tool: create_item
-///
-/// Tool description for ElevenLabs configuration:
-/// ---
-/// name: create_item
-/// description: >
-///   Create an item in the user's assistant. Items are the assistant's working
-///   memory: reminders, monitors, and tracked things. The summary field is the
-///   most important - it must be a self-contained natural language description
-///   that a different AI will read later with zero conversation context.
-/// parameters:
-///   summary:
-///     type: string
-///     required: true
-///     description: >
-///       Self-contained natural language description of the item. Include: what
-///       it is, when it's due, what action to take, and how to notify the user.
-///       Examples: "Reminder: Call mom at 5pm. One-shot - delete after notifying."
-///       "Monitor: emails from IRS about tax return. Alert user via SMS when match arrives."
-///       "Invoice from AWS for $45. Due Feb 20. Notify user 3 days before."
-///   monitor:
-///     type: boolean
-///     required: true
-///     description: >
-///       true if this watches for incoming data (emails, messages matching a
-///       pattern). false for scheduled reminders or tracked deadlines.
-///   next_check_at:
-///     type: string
-///     required: false
-///     description: >
-///       ISO datetime for when to first check this item (e.g. "2026-02-20T17:00").
-///       Required for scheduled reminders. Omit for monitors (they trigger on
-///       incoming data, not time).
-/// ---
-
+/// POST /api/call/tasks/create?user_id=X
+/// Creates an item from the ElevenLabs voice agent.
+/// Accepts the legacy {title, description?, due_time?} schema from the agent config.
 #[derive(Deserialize)]
 pub struct CreateItemVoicePayload {
-    pub summary: String,
-    pub monitor: bool,
-    pub next_check_at: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub due_time: Option<String>,
 }
 
 pub async fn handle_create_item_voice(
@@ -505,16 +473,12 @@ pub async fn handle_create_item_voice(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<CreateItemVoicePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received voice item creation request");
-
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
         Some(id) => id,
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid or missing user_id parameter"
-                })),
+                Json(json!({"error": "Invalid or missing user_id parameter"})),
             ));
         }
     };
@@ -524,32 +488,22 @@ pub async fn handle_create_item_voice(
         .unwrap()
         .as_secs() as i32;
 
-    // Parse next_check_at into a unix timestamp if provided
-    let next_check_at = if let Some(ref time_str) = payload.next_check_at {
-        let user_info = state.user_core.get_user_info(user_id).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get user info: {:?}", e)})),
-            )
-        })?;
-        let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
-        let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-
-        let ts = parse_datetime_to_timestamp_elevenlabs(time_str, &tz).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Invalid next_check_at: {}", e)})),
-            )
-        })?;
-        Some(ts)
-    } else {
-        None
+    // Build summary from title + optional description
+    let summary = match &payload.description {
+        Some(desc) if !desc.is_empty() => format!("{} - {}", payload.title, desc),
+        _ => payload.title.clone(),
     };
+
+    // Parse due_time (RFC3339) into unix timestamp
+    let next_check_at = payload
+        .due_time
+        .as_deref()
+        .and_then(crate::proactive::utils::parse_iso_to_timestamp);
 
     let new_item = crate::models::user_models::NewItem {
         user_id,
-        summary: payload.summary.clone(),
-        monitor: payload.monitor,
+        summary: summary.clone(),
+        monitor: false,
         next_check_at,
         priority: 0,
         source_id: None,
@@ -558,16 +512,11 @@ pub async fn handle_create_item_voice(
 
     match state.item_repository.create_item(&new_item) {
         Ok(item_id) => {
-            tracing::debug!("Created item {} for user {}", item_id, user_id);
-
-            let confirmation = if payload.monitor {
-                "Got it! I'll watch for that and alert you.".to_string()
-            } else if payload.next_check_at.is_some() {
-                "Got it! I'll remind you at the scheduled time.".to_string()
+            let confirmation = if next_check_at.is_some() {
+                "Got it! I'll remind you at the scheduled time."
             } else {
-                "Got it! I've noted that down.".to_string()
+                "Got it! I've noted that down."
             };
-
             Ok(Json(json!({
                 "response": confirmation,
                 "status": "success",
@@ -579,103 +528,52 @@ pub async fn handle_create_item_voice(
             error!("Failed to create item: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to create item",
-                    "details": e.to_string()
-                })),
+                Json(json!({"error": "Failed to create item", "details": e.to_string()})),
             ))
         }
     }
 }
 
-/// Parse ISO datetime string (in user's timezone) to UTC unix timestamp
-fn parse_datetime_to_timestamp_elevenlabs(
-    time_str: &str,
-    tz: &chrono_tz::Tz,
-) -> Result<i32, String> {
-    use chrono::{NaiveDateTime, TimeZone};
-
-    // Try parsing as ISO datetime (YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS)
-    let naive = if time_str.len() == 16 {
-        NaiveDateTime::parse_from_str(&format!("{}:00", time_str), "%Y-%m-%dT%H:%M:%S")
-            .map_err(|e| format!("Failed to parse datetime: {}", e))?
-    } else {
-        NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
-            .map_err(|e| format!("Failed to parse datetime: {}", e))?
+/// GET /api/call/tasks?user_id=X
+/// Returns all items for a user (for the ElevenLabs voice agent).
+pub async fn handle_fetch_items_voice(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid or missing user_id parameter"})),
+            ));
+        }
     };
 
-    // Interpret naive datetime in user's timezone, then get UTC timestamp
-    let local_dt = tz
-        .from_local_datetime(&naive)
-        .single()
-        .ok_or("Ambiguous or invalid local time")?;
+    let items = state.item_repository.get_items(user_id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get items: {}", e)})),
+        )
+    })?;
 
-    Ok(local_dt.timestamp() as i32)
-}
+    let items_json: Vec<serde_json::Value> = items
+        .into_iter()
+        .map(|item| {
+            json!({
+                "id": item.id.unwrap_or(0),
+                "summary": item.summary,
+                "monitor": item.monitor,
+                "next_check_at": item.next_check_at,
+                "priority": item.priority,
+            })
+        })
+        .collect();
 
-#[derive(Deserialize)]
-pub struct SetProactiveAgentPayload {
-    pub user_id: i32,
-    pub enabled: bool,
-}
-
-pub async fn handle_update_monitoring_status_tool_call(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<SetProactiveAgentPayload>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Received monitoring status update request");
-
-    // Verify user exists
-    match state.user_core.find_by_id(payload.user_id) {
-        Ok(Some(_user)) => {
-            match state
-                .user_core
-                .update_proactive_agent_on(payload.user_id, payload.enabled)
-            {
-                Ok(_) => {
-                    tracing::debug!(
-                        "Successfully updated monitoring status for user: {}",
-                        payload.user_id
-                    );
-                    let status = if payload.enabled { "on" } else { "off" };
-                    Ok(Json(json!({
-                        "response": format!("Monitoring turned {}.", status),
-                        "status": "success",
-                        "user_id": payload.user_id,
-                    })))
-                }
-                Err(e) => {
-                    error!("Failed to update monitoring status: {}", e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to update monitoring status",
-                            "details": e.to_string()
-                        })),
-                    ))
-                }
-            }
-        }
-        Ok(None) => {
-            tracing::error!("User not found: {}", payload.user_id);
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": "User not found"
-                })),
-            ))
-        }
-        Err(e) => {
-            error!("Error fetching user: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to fetch user",
-                    "details": e.to_string()
-                })),
-            ))
-        }
-    }
+    Ok(Json(json!({
+        "items": items_json,
+        "count": items_json.len(),
+    })))
 }
 
 pub async fn handle_email_fetch_tool_call(
