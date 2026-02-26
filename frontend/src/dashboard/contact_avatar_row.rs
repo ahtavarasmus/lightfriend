@@ -19,18 +19,22 @@ const AVATAR_ROW_STYLES: &str = r#"
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.8);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 9999;
+    overflow-y: auto;
+    padding: 2rem 0;
 }
 .avatar-modal-box {
     background: #1e1e2f;
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 12px;
-    padding: 1.5rem;
+    padding: 1.25rem;
     max-width: 400px;
     width: 90%;
     color: #ddd;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
 }
 .avatar-modal-box h3 {
     margin: 0 0 1rem 0;
@@ -333,38 +337,39 @@ const AVATAR_ROW_STYLES: &str = r#"
     margin-top: 0.2rem;
 }
 
-/* Arena layout */
+/* Arena layout - SMS left, figures center, Call right */
 .people-arena {
     display: flex;
+    flex-direction: row;
     align-items: center;
-    gap: 0.5rem;
-    padding: 1rem 0.25rem 0.5rem;
+    padding: 0.5rem 0;
     width: 100%;
+    overflow: visible;
 }
 
 .people-target {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.2rem;
     flex-shrink: 0;
+    width: 50px;
 }
 
 .target-circle {
-    width: 40px;
-    height: 40px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.9rem;
+    font-size: 0.65rem;
     animation: target-pulse 3s ease-in-out infinite;
 }
 
 .target-label {
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     color: #888;
-    text-align: center;
 }
 
 @keyframes target-pulse {
@@ -372,84 +377,98 @@ const AVATAR_ROW_STYLES: &str = r#"
     50% { transform: scale(1.06); opacity: 1; }
 }
 
-.people-figures-wrap {
+.people-figures-outer {
     flex: 1;
     min-width: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    position: relative;
 }
-.people-figures-wrap::-webkit-scrollbar { display: none; }
+.people-figures-outer::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background: linear-gradient(to bottom, transparent, #16161e);
+    pointer-events: none;
+    z-index: 2;
+}
+.people-figures-wrap {
+    max-height: 260px;
+    overflow-y: auto;
+    overflow-x: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.people-figures-wrap::-webkit-scrollbar { width: 3px; }
+.people-figures-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 
 .people-figures {
     display: flex;
-    gap: 0.75rem;
-    justify-content: center;
-    padding: 0.25rem 0;
-    min-width: min-content;
-    align-items: flex-end;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 0.15rem 0;
 }
 
 .figure-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.15rem;
-    flex-shrink: 0;
     cursor: pointer;
     position: relative;
+    padding: 0.1rem 0 1rem 0;
+    width: 60px;
+}
+.figure-item:hover .figure-label {
+    color: #bbb;
 }
 
 .figure-label {
     font-size: 0.6rem;
-    color: #888;
-    max-width: 50px;
+    color: #666;
+    max-width: 58px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     text-align: center;
 }
 
-/* Flying icons */
+/* Flying icons - use CSS custom props for per-figure targeting */
 .flying-icon {
     position: absolute;
-    top: 10px;
-    left: 22px;
-    font-size: 0.6rem;
+    top: 12px;
+    left: 50%;
+    margin-left: 10px;
+    font-size: 0.65rem;
     pointer-events: none;
     z-index: 1;
+    --fly-x: -120px;
+    --fly-y: 0px;
 }
 
-.fly-sms { animation: fly-to-sms 6s ease-in-out infinite; }
-.fly-call { animation: fly-to-call 6s ease-in-out infinite; }
+.fly-sms { animation: fly-to-target 4s linear infinite; }
+.fly-call { animation: fly-to-target 4s linear infinite; }
 
 .fly-delay-0 { animation-delay: 0s; }
-.fly-delay-1 { animation-delay: 1.5s; }
-.fly-delay-2 { animation-delay: 3s; }
-.fly-delay-3 { animation-delay: 4.5s; }
+.fly-delay-1 { animation-delay: 1s; }
+.fly-delay-2 { animation-delay: 2s; }
+.fly-delay-3 { animation-delay: 3s; }
 
-@keyframes fly-to-sms {
-    0%   { transform: translate(0, 0) scale(1); opacity: 0; }
+@keyframes fly-to-target {
+    0%   { transform: translate(0, 0); opacity: 0; }
     5%   { opacity: 1; }
-    50%  { transform: translate(-60px, -25px) scale(0.9); opacity: 0.9; }
-    90%  { transform: translate(-120px, 0) scale(0.7); opacity: 0.4; }
-    100% { transform: translate(-140px, 5px) scale(0.5); opacity: 0; }
-}
-
-@keyframes fly-to-call {
-    0%   { transform: translate(0, 0) scale(1); opacity: 0; }
-    5%   { opacity: 1; }
-    50%  { transform: translate(60px, -25px) scale(0.9); opacity: 0.9; }
-    90%  { transform: translate(120px, 0) scale(0.7); opacity: 0.4; }
-    100% { transform: translate(140px, 5px) scale(0.5); opacity: 0; }
+    80%  { opacity: 0.6; }
+    100% { transform: translate(var(--fly-x), var(--fly-y)); opacity: 0; }
 }
 
 .fly-mode-badge {
-    font-size: 0.35rem;
+    font-size: 0.4rem;
     font-weight: bold;
     position: absolute;
-    top: -2px;
-    right: -5px;
+    top: -3px;
+    right: -6px;
 }
 
 /* Network override section in modal */
@@ -584,7 +603,7 @@ fn render_stick_figure_svg(color: &str, special: Option<&str>) -> Html {
 }
 
 /// Renders flying platform icons for a contact profile.
-/// Each connected platform icon flies toward SMS (left) or Call (right) based on notification_type.
+/// Each icon gets --fly-x set here; --fly-y is updated dynamically by JS scroll handler.
 fn render_flying_icons(profile: &ContactProfile) -> Html {
     let platforms = connected_platforms(profile);
     let mut icons = Vec::new();
@@ -602,23 +621,30 @@ fn render_flying_icons(profile: &ContactProfile) -> Html {
             profile.notification_type.as_str()
         };
 
-        let fly_class = if noti_type == "call" { "fly-call" } else { "fly-sms" };
-        let delay_class = format!("fly-delay-{}", delay_idx);
-
-        let badge_html = match mode {
-            "critical" => html! { <span class="fly-mode-badge" style="color:#f59e0b;">{"!"}</span> },
-            "mention" => html! { <span class="fly-mode-badge" style="color:#3b82f6;">{"@"}</span> },
-            _ => html! {},
+        // Determine which targets this icon flies toward
+        let targets: Vec<&str> = match noti_type {
+            "call" => vec!["fly-call"],
+            _ => vec!["fly-sms"],
         };
 
-        icons.push(html! {
-            <span class={format!("flying-icon {} {}", fly_class, delay_class)}>
-                <i class={pi.icon} style={format!("color:{};", pi.color)}></i>
-                {badge_html}
-            </span>
-        });
+        for fly_class in &targets {
+            let delay_class = format!("fly-delay-{}", delay_idx % 4);
 
-        delay_idx += 1;
+            let badge_html = match mode {
+                "critical" => html! { <span class="fly-mode-badge" style="color:#f59e0b;">{"!"}</span> },
+                "mention" => html! { <span class="fly-mode-badge" style="color:#3b82f6;">{"@"}</span> },
+                _ => html! {},
+            };
+
+            icons.push(html! {
+                <span class={format!("flying-icon {} {}", fly_class, delay_class)}>
+                    <i class={pi.icon} style={format!("color:{};", pi.color)}></i>
+                    {badge_html}
+                </span>
+            });
+
+            delay_idx += 1;
+        }
     }
 
     html! { <>{ for icons }</> }
@@ -807,6 +833,90 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                             "lightfriend-contact-profiles-updated",
                             cleanup.as_ref().unchecked_ref(),
                         );
+                    }
+                }
+            },
+            (),
+        );
+    }
+
+    // Dynamic --fly-y updater: adjusts icon throw direction based on scroll position
+    {
+        use_effect_with_deps(
+            move |_| {
+                let update_fn = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                    let doc = web_sys::window().unwrap().document().unwrap();
+                    // Find the actual SMS and Call target circle positions
+                    let targets = doc.query_selector_all(".target-circle").unwrap();
+                    if targets.length() < 2 { return; }
+                    let sms_el: web_sys::Element = targets.item(0).unwrap().unchecked_into();
+                    let call_el: web_sys::Element = targets.item(1).unwrap().unchecked_into();
+                    let sms_rect = sms_el.get_bounding_client_rect();
+                    let call_rect = call_el.get_bounding_client_rect();
+                    let sms_center_y = sms_rect.top() + sms_rect.height() / 2.0;
+                    let call_center_y = call_rect.top() + call_rect.height() / 2.0;
+
+                    let sms_center_x = sms_rect.left() + sms_rect.width() / 2.0;
+                    let call_center_x = call_rect.left() + call_rect.width() / 2.0;
+
+                    let items = doc.query_selector_all(".figure-item").unwrap();
+                    for i in 0..items.length() {
+                        let item = items.item(i).unwrap();
+                        let item_el: web_sys::Element = item.unchecked_into();
+                        let item_rect = item_el.get_bounding_client_rect();
+                        let item_center_x = item_rect.left() + item_rect.width() / 2.0;
+                        let item_center_y = item_rect.top() + item_rect.height() / 2.0;
+
+                        let icons = item_el.query_selector_all(".flying-icon").unwrap();
+                        for j in 0..icons.length() {
+                            let icon = icons.item(j).unwrap();
+                            let icon_html: &web_sys::HtmlElement = icon.unchecked_ref();
+                            let classes = icon_html.class_name();
+                            let (target_x, target_y) = if classes.contains("fly-call") {
+                                (call_center_x, call_center_y)
+                            } else {
+                                (sms_center_x, sms_center_y)
+                            };
+                            let fly_x = (target_x - item_center_x) as i32;
+                            // +15 to compensate for icon starting above figure center
+                            let fly_y = (target_y - item_center_y) as i32 + 15;
+                            let _ = icon_html.style().set_property("--fly-x", &format!("{}px", fly_x));
+                            let _ = icon_html.style().set_property("--fly-y", &format!("{}px", fly_y));
+                        }
+                    }
+                }) as Box<dyn FnMut()>);
+
+                // Run once on mount
+                update_fn.as_ref().unchecked_ref::<js_sys::Function>().call0(&wasm_bindgen::JsValue::NULL).ok();
+
+                // Attach scroll listener
+                let doc = web_sys::window().unwrap().document().unwrap();
+                if let Ok(Some(wrap)) = doc.query_selector(".people-figures-wrap") {
+                    let _ = wrap.add_event_listener_with_callback(
+                        "scroll",
+                        update_fn.as_ref().unchecked_ref(),
+                    );
+                }
+
+                // Also run periodically to catch initial render
+                let interval_fn = update_fn.as_ref().unchecked_ref::<js_sys::Function>().clone();
+                let window = web_sys::window().unwrap();
+                let interval_id = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                    &interval_fn, 500
+                ).unwrap_or(0);
+
+                let cleanup = update_fn;
+                move || {
+                    if let Some(window) = web_sys::window() {
+                        window.clear_interval_with_handle(interval_id);
+                        if let Some(doc) = window.document() {
+                            if let Ok(Some(wrap)) = doc.query_selector(".people-figures-wrap") {
+                                let _ = wrap.remove_event_listener_with_callback(
+                                    "scroll",
+                                    cleanup.as_ref().unchecked_ref(),
+                                );
+                            }
+                        }
                     }
                 }
             },
@@ -1893,7 +2003,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             <div class="figure-item" onclick={on_click}>
                 {figure_svg}
                 {flying}
-                <span class="figure-label" title={nick.clone()}>{nick}</span>
+                <span class="figure-label">{nick}</span>
             </div>
         }
     };
@@ -3554,18 +3664,18 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         <>
             <style>{AVATAR_ROW_STYLES}</style>
             <div class="people-arena">
-                // SMS target
+                // SMS target - left side
                 <div class="people-target">
-                    <div class="target-circle" style="background: rgba(74,222,128,0.15); border: 2px solid rgba(74,222,128,0.4);">
+                    <div class="target-circle" style="background: rgba(74,222,128,0.12); border: 1.5px solid rgba(74,222,128,0.35);">
                         <i class="fa-solid fa-comment-sms" style="color: #4ade80;"></i>
                     </div>
                     <span class="target-label">{"SMS"}</span>
                 </div>
-                // Scrollable figures
-                <div class="people-figures-wrap">
-                    <div class="people-figures">
-                        <div class="avatar-row-info">
-                            <button class="avatar-row-info-btn" onclick={{
+                // Figures stacked vertically in center
+                <div class="people-figures-outer">
+                    <div class="people-figures-wrap">
+                        <div class="people-figures">
+                            <button class="avatar-row-info-btn" style="margin-bottom: 0.25rem;" onclick={{
                                 let modal = modal.clone();
                                 Callback::from(move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -3574,16 +3684,16 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                             }}>
                                 <i class="fa-solid fa-circle-info"></i>
                             </button>
+                            {profile_figures}
+                            {render_phone_contact_figure}
+                            {render_unknown_figure}
+                            {render_add_figure}
                         </div>
-                        {profile_figures}
-                        {render_phone_contact_figure}
-                        {render_unknown_figure}
-                        {render_add_figure}
                     </div>
                 </div>
-                // Call target
+                // Call target - right side
                 <div class="people-target">
-                    <div class="target-circle" style="background: rgba(251,191,36,0.15); border: 2px solid rgba(251,191,36,0.4);">
+                    <div class="target-circle" style="background: rgba(251,191,36,0.12); border: 1.5px solid rgba(251,191,36,0.35);">
                         <i class="fa-solid fa-phone" style="color: #fbbf24;"></i>
                     </div>
                     <span class="target-label">{"Call"}</span>

@@ -1,0 +1,1 @@
+-- No-op: cannot reliably reverse since we don't know which rows were 'call_sms'

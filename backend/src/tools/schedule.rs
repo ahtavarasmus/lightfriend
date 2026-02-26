@@ -55,38 +55,3 @@ impl ToolHandler for CreateItemHandler {
         }
     }
 }
-
-// --- update_monitoring_status --------------------------------------------------
-
-pub struct UpdateMonitoringHandler;
-
-#[async_trait::async_trait]
-impl ToolHandler for UpdateMonitoringHandler {
-    fn name(&self) -> &'static str {
-        "update_monitoring_status"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::management::get_update_monitoring_status_tool()
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing update_monitoring_status tool call");
-        match crate::tool_call_utils::management::handle_set_proactive_agent(
-            ctx.state,
-            ctx.user_id,
-            ctx.arguments,
-        )
-        .await
-        {
-            Ok(answer) => Ok(ToolResult::Answer(answer)),
-            Err(e) => {
-                tracing::error!("Failed to toggle monitoring status: {}", e);
-                Ok(ToolResult::Answer(
-                    "Sorry, I failed to toggle monitoring status. (Contact rasmus@ahtava.com pls:D)"
-                        .to_string(),
-                ))
-            }
-        }
-    }
-}
