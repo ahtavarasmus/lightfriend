@@ -419,10 +419,10 @@ async fn main() {
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
         .route(
-            "/api/call/tasks/create",
+            "/api/call/items/create",
             post(elevenlabs::handle_create_item_voice),
         )
-        .route("/api/call/tasks", get(elevenlabs::handle_fetch_items_voice))
+        .route("/api/call/items", get(elevenlabs::handle_fetch_items_voice))
         .route(
             "/api/call/cancel-message",
             get(elevenlabs::handle_cancel_pending_message_tool_call),

@@ -444,6 +444,24 @@ impl UserRepository {
         Ok(())
     }
 
+    /// Expire stale "ongoing" call records older than the given cutoff timestamp.
+    /// These are calls that never received a webhook callback.
+    pub fn expire_stale_ongoing_calls(&self, cutoff_ts: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = diesel::update(
+            usage_logs::table
+                .filter(usage_logs::status.eq("ongoing"))
+                .filter(usage_logs::created_at.lt(cutoff_ts)),
+        )
+        .set((
+            usage_logs::status.eq("expired"),
+            usage_logs::success.eq(false),
+            usage_logs::reason.eq("No webhook callback received"),
+        ))
+        .execute(&mut conn)?;
+        Ok(count)
+    }
+
     pub fn get_all_usage_logs(
         &self,
     ) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {

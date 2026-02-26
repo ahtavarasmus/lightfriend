@@ -110,6 +110,57 @@ impl ItemRepository {
         Ok(count > 0)
     }
 
+    /// Atomic dedup create: insert only if no item with the same source_id exists for this user.
+    /// Returns Ok(Some(id)) if inserted, Ok(None) if already exists.
+    pub fn create_item_if_not_exists(
+        &self,
+        new_item: &NewItem,
+    ) -> Result<Option<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        conn.exclusive_transaction(|conn| {
+            // Check dedup inside transaction
+            if let Some(ref sid) = new_item.source_id {
+                let count: i64 = items::table
+                    .filter(items::user_id.eq(new_item.user_id))
+                    .filter(items::source_id.eq(sid))
+                    .count()
+                    .get_result(conn)?;
+                if count > 0 {
+                    return Ok(None);
+                }
+            }
+
+            // Check item limit
+            let count: i64 = items::table
+                .filter(items::user_id.eq(new_item.user_id))
+                .count()
+                .get_result(conn)?;
+
+            if count >= MAX_ITEMS_PER_USER {
+                return Err(DieselError::DatabaseError(
+                    diesel::result::DatabaseErrorKind::CheckViolation,
+                    Box::new(format!(
+                        "Item limit reached: maximum {} items per user",
+                        MAX_ITEMS_PER_USER
+                    )),
+                ));
+            }
+
+            diesel::insert_into(items::table)
+                .values(new_item)
+                .execute(conn)?;
+
+            let item_id: Option<i32> = items::table
+                .filter(items::user_id.eq(new_item.user_id))
+                .order(items::id.desc())
+                .select(items::id)
+                .first(conn)?;
+
+            Ok(Some(item_id.unwrap_or(0)))
+        })
+    }
+
     /// Update next_check_at (snooze or reschedule).
     pub fn update_next_check_at(
         &self,

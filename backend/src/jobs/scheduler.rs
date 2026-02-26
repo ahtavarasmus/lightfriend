@@ -1554,6 +1554,20 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
                 Err(e) => error!("Failed to auto-expire stale monitors: {}", e),
             }
+
+            // Expire stale "ongoing" call records (no webhook received after 1 hour)
+            let call_cutoff = monitor_now - 3600;
+            match state
+                .user_repository
+                .expire_stale_ongoing_calls(call_cutoff)
+            {
+                Ok(count) => {
+                    if count > 0 {
+                        debug!("Expired {} stale ongoing call records", count);
+                    }
+                }
+                Err(e) => error!("Failed to expire stale ongoing calls: {}", e),
+            }
         })
     })
     .expect("Failed to create task cleanup job");

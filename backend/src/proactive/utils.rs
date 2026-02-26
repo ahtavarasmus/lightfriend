@@ -1649,7 +1649,7 @@ pub async fn check_trackable_items(
     email_uid: &str,
     email_content: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Dedup: skip if we already have an item for this email
+    // Quick dedup: skip LLM call if we already have an item for this email
     let source_id = format!("email_{}", email_uid);
     if state
         .item_repository
@@ -1792,18 +1792,28 @@ pub async fn check_trackable_items(
                 created_at: now,
             };
 
-            if let Err(e) = state.item_repository.create_item(&new_item) {
-                tracing::error!(
-                    "Failed to create trackable item for user {}: {}",
-                    user_id,
-                    e
-                );
-            } else {
-                tracing::debug!(
-                    "Created monitor item for user {} (priority {})",
-                    user_id,
-                    priority
-                );
+            match state.item_repository.create_item_if_not_exists(&new_item) {
+                Ok(Some(_id)) => {
+                    tracing::debug!(
+                        "Created monitor item for user {} (priority {})",
+                        user_id,
+                        priority
+                    );
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        "Skipped duplicate trackable item for user {} source_id={}",
+                        user_id,
+                        new_item.source_id.as_deref().unwrap_or("?")
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create trackable item for user {}: {}",
+                        user_id,
+                        e
+                    );
+                }
             }
         }
     }
@@ -1981,18 +1991,6 @@ pub async fn check_message_trackable_items(
                 room_id,
                 topic.to_lowercase().replace(' ', "_")
             );
-            if state
-                .item_repository
-                .item_exists_by_source(user_id, &source_id)?
-            {
-                tracing::debug!(
-                    "Message trackable item already exists for user {} source_id={}",
-                    user_id,
-                    source_id
-                );
-                return Ok(());
-            }
-
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2022,20 +2020,28 @@ pub async fn check_message_trackable_items(
                 created_at: now,
             };
 
-            if let Err(e) = state.item_repository.create_item(&new_item) {
-                tracing::error!(
-                    "Failed to create message tracking item for user {}: {}",
-                    user_id,
-                    e
-                );
-            } else {
-                tracing::info!(
-                    "Created tracking item for user {} from {} message (topic: {}, source: {})",
-                    user_id,
-                    service,
-                    topic,
-                    source_id
-                );
+            match state.item_repository.create_item_if_not_exists(&new_item) {
+                Ok(Some(_id)) => {
+                    tracing::debug!(
+                        "Created message tracking item for user {} source_id={}",
+                        user_id,
+                        source_id
+                    );
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        "Message trackable item already exists for user {} source_id={}",
+                        user_id,
+                        source_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create message tracking item for user {}: {}",
+                        user_id,
+                        e
+                    );
+                }
             }
         }
     }
@@ -4102,7 +4108,7 @@ pub async fn send_notification_with_context(
 
     match notification_type {
         "call" => {
-            // Call notification: Send SMS first (always charged), then initiate call (conditionally charged)
+            // Call notification: Initiate call first (loud alert), then send SMS with content.
             // The call acts as a loud alert; SMS contains the actual message content.
             // If the user doesn't answer the call (call_initiation_failure webhook),
             // we don't charge for the call - only for the SMS.
@@ -4119,8 +4125,67 @@ pub async fn send_notification_with_context(
                 return;
             }
 
-            // Step 2: Send SMS first (this is always charged)
-            let sms_success = match state
+            // Step 2: Initiate call first as alert (charged conditionally via webhook)
+            // The call will only be charged if the user answers (post_call_transcription webhook)
+            // If declined/no-answer (call_initiation_failure webhook), no charge for call
+            if crate::utils::usage::check_user_credits(state, &user, "noti_call", None)
+                .await
+                .is_ok()
+            {
+                match crate::api::elevenlabs::make_notification_call(
+                    &state.clone(),
+                    format!("{}_call_conditional", content_type),
+                    first_message.clone().unwrap_or(
+                        "Hello, you have a notification. Check your SMS for details.".to_string(),
+                    ),
+                    notification.to_string(),
+                    user.id.to_string(),
+                    user_info.timezone.clone(),
+                )
+                .await
+                {
+                    Ok(response) => {
+                        tracing::info!(
+                            "Call: Call initiated for user {} (will be charged if answered)",
+                            user_id
+                        );
+
+                        // Log call usage as "ongoing" - it will be updated by webhook
+                        if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+                            user_id,
+                            sid: response
+                                .get("sid")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                            activity_type: format!("{}_call_conditional", content_type),
+                            credits: None,
+                            time_consumed: None,
+                            success: None,
+                            reason: None,
+                            status: Some("ongoing".to_string()),
+                            recharge_threshold_timestamp: None,
+                            zero_credits_timestamp: None,
+                        }) {
+                            tracing::error!("Failed to log call notification call usage: {}", e);
+                        }
+                    }
+                    Err((_, json_err)) => {
+                        tracing::error!(
+                            "Call: Failed to initiate call for user {}: {:?}",
+                            user_id,
+                            json_err
+                        );
+                    }
+                }
+            } else {
+                tracing::info!(
+                    "Call: Skipping call for user {} (insufficient credits for call)",
+                    user_id
+                );
+            }
+
+            // Step 3: Send SMS with message content (always sent regardless of call result)
+            match state
                 .twilio_message_service
                 .send_sms(notification, None, &user)
                 .await
@@ -4162,82 +4227,9 @@ pub async fn send_notification_with_context(
                     }) {
                         tracing::error!("Failed to log call notification SMS usage: {}", e);
                     }
-
-                    // SMS credits deducted at Twilio status callback
-
-                    true
                 }
                 Err(e) => {
                     tracing::error!("Call: Failed to send SMS for user {}: {}", user_id, e);
-                    false
-                }
-            };
-
-            // Step 3: Initiate call as alert (only if we have credits, charged conditionally via webhook)
-            // The call will only be charged if the user answers (post_call_transcription webhook)
-            // If declined/no-answer (call_initiation_failure webhook), no charge for call
-            if sms_success {
-                // Check if user has credits for call (but don't charge yet - webhook handles it)
-                if crate::utils::usage::check_user_credits(state, &user, "noti_call", None)
-                    .await
-                    .is_ok()
-                {
-                    match crate::api::elevenlabs::make_notification_call(
-                        &state.clone(),
-                        format!("{}_call_conditional", content_type), // Mark as conditional for webhook
-                        first_message.clone().unwrap_or(
-                            "Hello, you have a notification. Check your SMS for details."
-                                .to_string(),
-                        ),
-                        notification.to_string(),
-                        user.id.to_string(),
-                        user_info.timezone.clone(),
-                    )
-                    .await
-                    {
-                        Ok(response) => {
-                            tracing::info!(
-                                "Call: Call initiated for user {} (will be charged if answered)",
-                                user_id
-                            );
-
-                            // Log call usage as "ongoing" - it will be updated by webhook
-                            // Don't deduct credits here - the webhook will handle it based on answer status
-                            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                                user_id,
-                                sid: response
-                                    .get("sid")
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from),
-                                activity_type: format!("{}_call_conditional", content_type),
-                                credits: None,
-                                time_consumed: None,
-                                success: None, // Don't set success yet
-                                reason: None,
-                                status: Some("ongoing".to_string()),
-                                recharge_threshold_timestamp: None,
-                                zero_credits_timestamp: None,
-                            }) {
-                                tracing::error!(
-                                    "Failed to log call notification call usage: {}",
-                                    e
-                                );
-                            }
-                        }
-                        Err((_, json_err)) => {
-                            tracing::error!(
-                                "Call: Failed to initiate call for user {}: {:?}",
-                                user_id,
-                                json_err
-                            );
-                            // Call failed but SMS was already sent successfully, so notification is partially delivered
-                        }
-                    }
-                } else {
-                    tracing::info!(
-                        "Call: Skipping call for user {} (insufficient credits), SMS already sent",
-                        user_id
-                    );
                 }
             }
         }

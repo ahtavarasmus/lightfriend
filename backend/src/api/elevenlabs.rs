@@ -458,7 +458,7 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
-/// POST /api/call/tasks/create?user_id=X
+/// POST /api/call/items/create?user_id=X
 /// Creates an item from the ElevenLabs voice agent.
 /// Accepts the legacy {title, description?, due_time?} schema from the agent config.
 #[derive(Deserialize)]
@@ -534,7 +534,7 @@ pub async fn handle_create_item_voice(
     }
 }
 
-/// GET /api/call/tasks?user_id=X
+/// GET /api/call/items?user_id=X
 /// Returns all items for a user (for the ElevenLabs voice agent).
 pub async fn handle_fetch_items_voice(
     State(state): State<Arc<AppState>>,
