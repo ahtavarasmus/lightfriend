@@ -450,8 +450,7 @@ pub async fn handle_create_item_with_retry(
     // Ask LLM to retry with fixed arguments
     let retry_req = chat_completion::ChatCompletionRequest::new(model.to_string(), retry_msgs)
         .tools(tools.to_vec())
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .max_tokens(500);
+        .tool_choice(chat_completion::ToolChoiceType::Required);
 
     let retry_result = client
         .chat_completion(retry_req)

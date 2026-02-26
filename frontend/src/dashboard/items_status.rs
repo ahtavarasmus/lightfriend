@@ -355,43 +355,53 @@ const ITEMS_STATUS_STYLES: &str = r#"
 .digest-creator {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.6rem;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
     border-radius: 6px;
-    margin-top: 0.15rem;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+}
+.digest-creator:hover {
+    opacity: 1;
 }
 .digest-creator-label {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: #555;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.digest-creator-label i {
+    font-size: 0.5rem;
 }
 .digest-creator select {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #888;
-    font-size: 0.72rem;
-    padding: 0.2rem 0.4rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #666;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.3rem;
     border-radius: 4px;
     cursor: pointer;
     outline: none;
+    transition: border-color 0.15s, color 0.15s;
 }
-.digest-creator select:hover {
-    border-color: rgba(255, 255, 255, 0.2);
+.digest-creator:hover select {
+    border-color: rgba(255, 255, 255, 0.14);
+    color: #999;
 }
 .digest-creator-btn {
     background: none;
-    border: 1px solid rgba(126, 178, 255, 0.2);
-    color: #7EB2FF;
-    font-size: 0.72rem;
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
+    border: none;
+    color: #555;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.3rem;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: color 0.15s;
     flex-shrink: 0;
 }
 .digest-creator-btn:hover {
-    background: rgba(126, 178, 255, 0.1);
-    border-color: rgba(126, 178, 255, 0.35);
+    color: #7EB2FF;
 }
 
 /* --- Status line --- */
@@ -776,13 +786,13 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
 
             html! {
                 <div class="digest-creator">
-                    <span class="digest-creator-label">{"Add digest"}</span>
+                    <span class="digest-creator-label"><i class="fa-solid fa-plus"></i>{"digest"}</span>
                     <select onchange={on_time_change}>
                         { for available_slots.iter().map(|(label, time)| {
                             html! { <option value={time.clone()}>{label.clone()}</option> }
                         })}
                     </select>
-                    <button class="digest-creator-btn" onclick={on_add}>{"Add"}</button>
+                    <button class="digest-creator-btn" onclick={on_add}>{"add"}</button>
                 </div>
             }
         } else {
@@ -870,7 +880,7 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
 
 fn render_badge(notify: Option<&str>) -> Html {
     match notify {
-        Some("call") => html! { <span class="item-badge badge-call" title="Call"><i class="fa-solid fa-phone"></i></span> },
+        Some("call") => html! { <span class="item-badge badge-call" title="Call (+SMS)"><i class="fa-solid fa-phone"></i></span> },
         Some("sms") => html! { <span class="item-badge badge-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span> },
         _ => html! { <span class="item-badge badge-silent" title="Silent">{"👀"}</span> },
     }

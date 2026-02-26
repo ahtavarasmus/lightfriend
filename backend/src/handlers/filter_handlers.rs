@@ -426,9 +426,7 @@ TIME RULES:
         tool_call_id: None,
     }];
 
-    let ai_request = ChatCompletionRequest::new(ctx.model.clone(), messages)
-        .max_tokens(500)
-        .temperature(0.1);
+    let ai_request = ChatCompletionRequest::new(ctx.model.clone(), messages).temperature(0.1);
 
     let response = ctx.client.chat_completion(ai_request).await.map_err(|e| {
         tracing::error!("AI request failed: {}", e);

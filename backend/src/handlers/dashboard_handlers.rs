@@ -158,20 +158,19 @@ pub async fn get_dashboard_summary(
     let total_tracked_count = items.len() as i32;
     let mut attention_items: Vec<AttentionItem> = Vec::new();
     for item in &items {
-        let is_future_scheduled = item.next_check_at.is_some_and(|nca| nca > now_ts);
-        // Items scheduled for the future (non-priority) go to upcoming_items/upcoming_digests
-        if is_future_scheduled && item.priority == 0 {
-            continue;
-        }
-        // Everything else is an attention item (monitors, high-priority, tracked items)
+        // All items go into the unified attention list
+        // Parse tags and strip tag line from description
+        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
         let item_type = if item.monitor {
             "monitor"
         } else {
-            "tracked_item"
+            match tags.item_type.as_deref() {
+                Some("tracking") => "tracking",
+                Some("recurring") => "recurring",
+                Some("oneshot") => "oneshot",
+                _ => "tracked_item", // legacy items without [type:X] tag
+            }
         };
-
-        // Parse tags and strip tag line from description
-        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
         let description = item
             .summary
             .lines()
@@ -189,6 +188,15 @@ pub async fn get_dashboard_summary(
             }
         });
 
+        // For tracking items, derive platform from fetch sources if no explicit platform tag
+        let platform = tags.platform.or_else(|| {
+            if item_type == "tracking" {
+                tags.fetch.first().cloned()
+            } else {
+                None
+            }
+        });
+
         attention_items.push(AttentionItem {
             id: item.id.unwrap_or(0),
             item_type: item_type.to_string(),
@@ -201,7 +209,7 @@ pub async fn get_dashboard_summary(
             source_id: item.source_id.clone(),
             notify: tags.notify,
             sender: tags.sender,
-            platform: tags.platform,
+            platform,
             time_display,
             relative_display,
         });

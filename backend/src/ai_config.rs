@@ -532,7 +532,7 @@ impl AiConfig {
             tool_call_id: None,
         }];
 
-        let request = ChatCompletionRequest::new(model.to_string(), messages).max_tokens(500);
+        let request = ChatCompletionRequest::new(model.to_string(), messages);
 
         let response = self.chat_completion(provider, &request).await?;
 

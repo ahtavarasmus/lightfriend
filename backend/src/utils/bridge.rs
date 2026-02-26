@@ -1566,10 +1566,11 @@ pub async fn handle_bridge_message(
                         );
                     }
                     tracing::info!("set the last_seen_online to: {}", last_seen_online);
-                    // Auto-dismiss any pending items for this room
+                    // Auto-dismiss any pending tracking items for this room
+                    let source_prefix = format!("msg_{}_{}", service, room_id_str);
                     let _ = state
                         .item_repository
-                        .delete_items_by_source(user_id, &room_id_str);
+                        .delete_items_by_source_prefix(user_id, &source_prefix);
                     return;
                 }
             }
@@ -1615,10 +1616,11 @@ pub async fn handle_bridge_message(
         }
 
         if found_user_reply {
-            // Auto-dismiss any pending items for this room
+            // Auto-dismiss any pending tracking items for this room
+            let source_prefix = format!("msg_{}_{}", service, room_id_str);
             let _ = state
                 .item_repository
-                .delete_items_by_source(user_id, &room_id_str);
+                .delete_items_by_source_prefix(user_id, &source_prefix);
             return;
         }
     }
@@ -1627,7 +1629,23 @@ pub async fn handle_bridge_message(
     let sender_prefix = get_sender_prefix(&service);
     tracing::debug!("sender_prefix: {}", sender_prefix);
     if !sender_localpart.starts_with(&sender_prefix) {
-        tracing::info!("Skipping non-{} sender", service);
+        // User sent a message in this room - resolve tracking items
+        let source_prefix = format!("msg_{}_{}", service, room_id_str);
+        match state
+            .item_repository
+            .delete_items_by_source_prefix(user_id, &source_prefix)
+        {
+            Ok(count) if count > 0 => {
+                tracing::info!(
+                    "Auto-resolved {} tracking item(s) for user {} in room {}",
+                    count,
+                    user_id,
+                    room_id_str
+                );
+            }
+            Err(e) => tracing::error!("Failed to auto-resolve tracking items: {}", e),
+            _ => {}
+        }
         return;
     }
     // Check if user has valid subscription
@@ -1748,6 +1766,29 @@ pub async fn handle_bridge_message(
             }
             return;
         }
+    }
+
+    // Auto-create tracking items from actionable messages (non-blocking)
+    {
+        let state_clone = state.clone();
+        let service_clone = service.clone();
+        let room_id_clone = room.room_id().to_string();
+        let sender_clone = sender_localpart.clone();
+        let content_clone = content.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::proactive::utils::check_message_trackable_items(
+                &state_clone,
+                user_id,
+                &service_clone,
+                &room_id_clone,
+                &sender_clone,
+                &content_clone,
+            )
+            .await
+            {
+                tracing::debug!("Message trackable check failed for user {}: {}", user_id, e);
+            }
+        });
     }
 
     // Extract chat_name early for contact profile matching

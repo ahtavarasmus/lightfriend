@@ -193,6 +193,37 @@ impl ItemRepository {
         Ok(count)
     }
 
+    /// Delete items whose source_id starts with a given prefix (e.g. "msg_whatsapp_!room:").
+    pub fn delete_items_by_source_prefix(
+        &self,
+        user_id: i32,
+        source_id_prefix: &str,
+    ) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let pattern = format!("{}%", source_id_prefix);
+        let count = diesel::delete(
+            items::table
+                .filter(items::user_id.eq(user_id))
+                .filter(items::source_id.like(pattern)),
+        )
+        .execute(&mut conn)?;
+        Ok(count)
+    }
+
+    /// Get items whose source_id starts with a given prefix (e.g. "email_").
+    pub fn get_items_by_source_prefix(
+        &self,
+        user_id: i32,
+        source_id_prefix: &str,
+    ) -> Result<Vec<Item>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let pattern = format!("{}%", source_id_prefix);
+        items::table
+            .filter(items::user_id.eq(user_id))
+            .filter(items::source_id.like(pattern))
+            .load::<Item>(&mut conn)
+    }
+
     /// Cleanup: delete items older than a given timestamp.
     pub fn delete_old_items(&self, before_ts: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

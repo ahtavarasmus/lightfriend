@@ -7,6 +7,217 @@ use tracing::{debug, error};
 
 use crate::handlers::imap_handlers;
 
+// ---------------------------------------------------------------------------
+// Migration summary helpers (pure functions, testable from integration tests)
+// ---------------------------------------------------------------------------
+
+/// Map comma-separated legacy source names to the fetch tag format.
+/// "whatsapp", "telegram", "signal" all map to "chat" (deduped).
+/// "email" stays "email", "calendar" stays "calendar".
+/// "items" is always appended.
+pub fn map_sources_to_fetch(sources: &str) -> String {
+    let mut fetch = Vec::new();
+    let mut has_chat = false;
+    for src in sources.split(',').map(|s| s.trim().to_lowercase()) {
+        match src.as_str() {
+            "whatsapp" | "telegram" | "signal" | "messenger" => {
+                if !has_chat {
+                    fetch.push("chat".to_string());
+                    has_chat = true;
+                }
+            }
+            "email" | "calendar" => {
+                if !fetch.contains(&src) {
+                    fetch.push(src);
+                }
+            }
+            other if !other.is_empty() => {
+                if !fetch.contains(&other.to_string()) {
+                    fetch.push(other.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if !fetch.contains(&"items".to_string()) {
+        fetch.push("items".to_string());
+    }
+    fetch.join(",")
+}
+
+/// Map a weekday number (0=Sun or 1=Mon depending on legacy format) to a name.
+/// The legacy format uses 0=Sunday, 1=Monday, ..., 6=Saturday.
+pub fn weekday_number_to_name(n: u32) -> Option<&'static str> {
+    match n {
+        0 => Some("Sunday"),
+        1 => Some("Monday"),
+        2 => Some("Tuesday"),
+        3 => Some("Wednesday"),
+        4 => Some("Thursday"),
+        5 => Some("Friday"),
+        6 => Some("Saturday"),
+        _ => None,
+    }
+}
+
+/// Build a tagged summary for a digest migration item.
+/// Returns (summary_string, priority).
+pub fn build_digest_migration_summary(
+    time: &str,
+    notification_type: Option<&str>,
+    sources: Option<&str>,
+) -> (String, i32) {
+    let hour_min = normalize_time(time);
+    let (notify_tag, priority) = match notification_type {
+        Some("call") => ("call", 2),
+        _ => ("sms", 1),
+    };
+    let fetch = match sources {
+        Some(s) => map_sources_to_fetch(s),
+        None => "email,chat,calendar,items".to_string(),
+    };
+    let tags = format!(
+        "[type:recurring] [notify:{}] [repeat:daily {}] [fetch:{}]",
+        notify_tag, hour_min, fetch
+    );
+    let description =
+        "Summarize recent emails, messages, calendar events, and tracked items for the user.";
+    (format!("{}\n{}", tags, description), priority)
+}
+
+/// Build a tagged summary for a digest task (from tasks table).
+/// Returns (summary, monitor, priority).
+pub fn build_digest_task_summary(
+    notification_type: Option<&str>,
+    recurrence_time: Option<&str>,
+    sources: Option<&str>,
+) -> (String, bool, i32) {
+    let time = recurrence_time.unwrap_or("08:00");
+    let (summary, priority) = build_digest_migration_summary(time, notification_type, sources);
+    (summary, false, priority)
+}
+
+/// Build a tagged summary for a monitor task.
+/// Returns (summary, monitor, priority).
+pub fn build_monitor_task_summary(
+    trigger: &str,
+    condition: Option<&str>,
+    notification_type: Option<&str>,
+) -> (String, bool, i32) {
+    let platform = if trigger.starts_with("recurring_email") {
+        "email"
+    } else {
+        "chat"
+    };
+    let (notify_tag, priority) = match notification_type {
+        Some("call") => ("call", 2),
+        _ => ("sms", 1),
+    };
+    let condition_text = condition.unwrap_or("any matching content");
+    let tags = format!(
+        "[type:tracking] [notify:{}] [platform:{}] [sender:any] [topic:{}]",
+        notify_tag, platform, condition_text
+    );
+    (format!("{}\n{}", tags, condition_text), true, priority)
+}
+
+/// Build a tagged summary for a recurring (non-digest) task.
+/// Returns a Vec of (summary, monitor, priority) - multiple items if weekly with multiple days.
+pub fn build_recurring_task_summary(
+    action: &str,
+    recurrence_rule: Option<&str>,
+    recurrence_time: Option<&str>,
+    notification_type: Option<&str>,
+) -> Vec<(String, bool, i32)> {
+    let rule = recurrence_rule.unwrap_or("daily");
+    let time = normalize_time(recurrence_time.unwrap_or("08:00"));
+    let (notify_tag, priority) = match notification_type {
+        Some("call") => ("call", 2),
+        _ => ("sms", 1),
+    };
+
+    if rule == "daily" {
+        let tags = format!(
+            "[type:recurring] [notify:{}] [repeat:daily {}]",
+            notify_tag, time
+        );
+        return vec![(format!("{}\n{}", tags, action), false, priority)];
+    }
+
+    if rule.starts_with("weekly:") {
+        let days_str = rule.trim_start_matches("weekly:");
+        let day_nums: Vec<u32> = days_str
+            .split(',')
+            .filter_map(|d| d.trim().parse().ok())
+            .collect();
+
+        // Check for weekdays (Mon-Fri = 1,2,3,4,5)
+        if day_nums.len() == 5 && (1..=5).all(|d| day_nums.contains(&d)) {
+            let tags = format!(
+                "[type:recurring] [notify:{}] [repeat:weekdays {}]",
+                notify_tag, time
+            );
+            return vec![(format!("{}\n{}", tags, action), false, priority)];
+        }
+
+        // Otherwise create one item per day
+        return day_nums
+            .iter()
+            .filter_map(|&d| {
+                weekday_number_to_name(d).map(|name| {
+                    let tags = format!(
+                        "[type:recurring] [notify:{}] [repeat:weekly {} {}]",
+                        notify_tag, name, time
+                    );
+                    (format!("{}\n{}", tags, action), false, priority)
+                })
+            })
+            .collect();
+    }
+
+    // Fallback: treat as daily
+    let tags = format!(
+        "[type:recurring] [notify:{}] [repeat:daily {}]",
+        notify_tag, time
+    );
+    vec![(format!("{}\n{}", tags, action), false, priority)]
+}
+
+/// Build a tagged summary for a one-shot reminder.
+/// Returns (summary, monitor, priority).
+pub fn build_oneshot_task_summary(
+    action: &str,
+    notification_type: Option<&str>,
+) -> (String, bool, i32) {
+    let (notify_tag, priority) = match notification_type {
+        Some("call") => ("call", 2),
+        _ => ("sms", 1),
+    };
+    let tags = format!("[type:oneshot] [notify:{}]", notify_tag);
+    (format!("{}\n{}", tags, action), false, priority)
+}
+
+/// Build a tagged summary for a quiet mode task.
+/// Returns (summary, monitor, priority).
+pub fn build_quiet_mode_summary() -> (String, bool, i32) {
+    let tags = "[type:oneshot] [notify:silent]";
+    let description = "Quiet mode - suppress notifications until end time.";
+    (format!("{}\n{}", tags, description), false, 0)
+}
+
+/// Normalize a time string to "HH:MM" format.
+/// Handles inputs like "9:00" -> "09:00", "14:30" -> "14:30".
+fn normalize_time(time: &str) -> String {
+    let parts: Vec<&str> = time.split(':').collect();
+    if parts.len() >= 2 {
+        let hour: u32 = parts[0].parse().unwrap_or(8);
+        let minute: u32 = parts[1].parse().unwrap_or(0);
+        format!("{:02}:{:02}", hour, minute)
+    } else {
+        "08:00".to_string()
+    }
+}
+
 async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
 
@@ -230,8 +441,8 @@ async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
 
 /// Migrate existing digest settings to items (one-time migration).
 /// Converts morning_digest, day_digest, evening_digest from user_settings
-/// into recurring items with self-rescheduling summaries.
-async fn migrate_digests_to_items(state: &Arc<AppState>) {
+/// into recurring items with tagged summaries.
+pub async fn migrate_digests_to_items(state: &Arc<AppState>) {
     tracing::info!("Starting digest migration to items...");
 
     let users = match state.user_core.get_all_users() {
@@ -257,11 +468,11 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
             continue;
         }
 
-        // Idempotency: skip users who already have digest items
+        // Idempotency: skip users who already have tagged digest items
         let existing_items = state.item_repository.get_items(user_id).unwrap_or_default();
         let has_digest_items = existing_items
             .iter()
-            .any(|i| i.summary.contains("digest") && i.summary.contains("Reschedule"));
+            .any(|i| i.summary.contains("[type:recurring]") && i.summary.contains("[fetch:"));
         if has_digest_items {
             tracing::debug!(
                 "User {} already has digest items, skipping migration",
@@ -286,46 +497,40 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
         let now_local = now.with_timezone(&tz);
         let current_ts = now.timestamp() as i32;
 
-        let create_digest_item = |digest_time: &str,
-                                  digest_name: &str|
-         -> Option<crate::models::user_models::NewItem> {
-            let hour: u32 = digest_time
-                .split(':')
-                .next()
-                .and_then(|h| h.parse().ok())
-                .unwrap_or(8);
+        let create_digest_item =
+            |digest_time: &str| -> Option<crate::models::user_models::NewItem> {
+                let hour: u32 = digest_time
+                    .split(':')
+                    .next()
+                    .and_then(|h| h.parse().ok())
+                    .unwrap_or(8);
 
-            let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
-            let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
-            if now_local.time() >= check_time {
-                next_time += chrono::Duration::days(1);
-            }
-            let next_dt = tz.from_local_datetime(&next_time).single()?;
-            let trigger_ts = next_dt.timestamp() as i32;
+                let mut next_time = now_local.date_naive().and_hms_opt(hour, 0, 0)?;
+                let check_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0)?;
+                if now_local.time() >= check_time {
+                    next_time += chrono::Duration::days(1);
+                }
+                let next_dt = tz.from_local_datetime(&next_time).single()?;
+                let trigger_ts = next_dt.timestamp() as i32;
 
-            let friendly_time = format!("{}:00", hour);
-            let summary = format!(
-                    "Daily {} digest: fetch emails, messages from all messaging apps, upcoming calendar events, \
-                 and tracked items. Summarize as a glanceable digest for the user. Reschedule for tomorrow at {}.",
-                    digest_name, friendly_time
-                );
+                let (summary, priority) = build_digest_migration_summary(digest_time, None, None);
 
-            Some(crate::models::user_models::NewItem {
-                user_id,
-                summary,
-                monitor: false,
-                next_check_at: Some(trigger_ts),
-                priority: 1,
-                source_id: None,
-                created_at: current_ts,
-            })
-        };
+                Some(crate::models::user_models::NewItem {
+                    user_id,
+                    summary,
+                    monitor: false,
+                    next_check_at: Some(trigger_ts),
+                    priority,
+                    source_id: None,
+                    created_at: current_ts,
+                })
+            };
 
         let mut created = Vec::new();
         let mut failed = Vec::new();
 
         if let Some(ref time) = morning {
-            if let Some(item) = create_digest_item(time, "morning") {
+            if let Some(item) = create_digest_item(time) {
                 match state.item_repository.create_item(&item) {
                     Ok(_) => created.push("morning"),
                     Err(e) => {
@@ -341,7 +546,7 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
         }
 
         if let Some(ref time) = day {
-            if let Some(item) = create_digest_item(time, "midday") {
+            if let Some(item) = create_digest_item(time) {
                 match state.item_repository.create_item(&item) {
                     Ok(_) => created.push("midday"),
                     Err(e) => {
@@ -357,7 +562,7 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
         }
 
         if let Some(ref time) = evening {
-            if let Some(item) = create_digest_item(time, "evening") {
+            if let Some(item) = create_digest_item(time) {
                 match state.item_repository.create_item(&item) {
                     Ok(_) => created.push("evening"),
                     Err(e) => {
@@ -399,7 +604,7 @@ async fn migrate_digests_to_items(state: &Arc<AppState>) {
 }
 
 /// Migrate existing tasks to unified items table (one-time migration).
-/// For each active task, builds a natural language summary and creates an item.
+/// For each active task, builds a tagged summary and creates an item.
 /// Successfully migrated tasks are marked as "migrated" to prevent re-processing.
 pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
     tracing::info!("Starting task -> item migration...");
@@ -447,83 +652,112 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                 .strip_prefix("once_")
                 .and_then(|s| s.parse().ok());
 
-            // Determine item fields based on task type
-            let (summary, is_monitor, next_check_at) = if task.action == "generate_digest" {
-                // Digest task: recurring, has sources
-                let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
-                let time = task.recurrence_time.as_deref().unwrap_or("08:00");
-                let sources = task
-                    .sources
-                    .as_deref()
-                    .unwrap_or("email,whatsapp,telegram,signal,calendar");
-                let summary = format!(
-                    "Daily digest: fetch emails, messages, calendar events, and tracked items. \
-                 Sources: {}. Repeats {} at {}.",
-                    sources, rule, time
-                );
-                // Calculate next trigger for recurring
-                let next_ts = state
-                    .user_repository
-                    .calculate_next_trigger_public(task, &user_tz)
-                    .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, false, next_ts)
-            } else if task.action.contains("quiet_mode") {
-                // Quiet mode task
-                let end = task.end_time.unwrap_or(now + 3600);
-                let summary = format!("Quiet mode until {}.", format_ts_short(end));
-                (summary, false, Some(end))
-            } else if task.trigger.starts_with("recurring_email")
-                || task.trigger.starts_with("recurring_messaging")
+            // Skip expired one-shot tasks (trigger in the past, not recurring)
+            if task.is_permanent != Some(1)
+                && task.action != "generate_digest"
+                && !task.action.contains("quiet_mode")
+                && !task.trigger.starts_with("recurring_")
             {
-                // Monitor task: has condition
-                let condition_text = task.condition.as_deref().unwrap_or("any matching content");
-                let summary = format!("Monitor: {}. Alert when match arrives.", condition_text);
-                (summary, true, None)
-            } else if task.is_permanent == Some(1) {
-                // Recurring non-digest task
-                let rule = task.recurrence_rule.as_deref().unwrap_or("daily");
-                let time = task.recurrence_time.as_deref().unwrap_or("08:00");
-                let summary = format!("Reminder: {}. Repeats {} at {}.", task.action, rule, time);
-                let next_ts = state
-                    .user_repository
-                    .calculate_next_trigger_public(task, &user_tz)
-                    .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                (summary, false, next_ts)
-            } else {
-                // One-shot reminder
-                let summary = format!("Reminder: {}", task.action);
-                (summary, false, trigger_ts)
-            };
-
-            // Create the item
-            let new_item = crate::models::user_models::NewItem {
-                user_id,
-                summary,
-                monitor: is_monitor,
-                next_check_at,
-                priority: 0,
-                source_id: None,
-                created_at: task.created_at,
-            };
-
-            match state.item_repository.create_item(&new_item) {
-                Ok(_) => {
-                    // Mark task as migrated
-                    if let Err(e) = state
-                        .user_repository
-                        .update_task_status(task_id, "migrated")
-                    {
-                        tracing::warn!("Failed to mark task {} as migrated: {}", task_id, e);
+                if let Some(ts) = trigger_ts {
+                    if ts < now {
+                        tracing::debug!(
+                            "Skipping expired one-shot task {} (trigger {} < now {})",
+                            task_id,
+                            ts,
+                            now
+                        );
+                        // Mark as migrated so it's not re-processed
+                        let _ = state
+                            .user_repository
+                            .update_task_status(task_id, "migrated");
+                        continue;
                     }
-                    migrated_count += 1;
                 }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to create item from task {} for user {}: {}",
-                        task_id,
-                        user_id,
-                        e
+            }
+
+            // Build items based on task type
+            // Each branch produces a Vec of (summary, monitor, priority, next_check_at)
+            let items_to_create: Vec<(String, bool, i32, Option<i32>)> =
+                if task.action == "generate_digest" {
+                    let (summary, monitor, priority) = build_digest_task_summary(
+                        task.notification_type.as_deref(),
+                        task.recurrence_time.as_deref(),
+                        task.sources.as_deref(),
                     );
+                    let next_ts = state
+                        .user_repository
+                        .calculate_next_trigger_public(task, &user_tz)
+                        .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
+                    vec![(summary, monitor, priority, next_ts)]
+                } else if task.action.contains("quiet_mode") {
+                    let end = task.end_time.unwrap_or(now + 3600);
+                    let (summary, monitor, priority) = build_quiet_mode_summary();
+                    vec![(summary, monitor, priority, Some(end))]
+                } else if task.trigger.starts_with("recurring_email")
+                    || task.trigger.starts_with("recurring_messaging")
+                {
+                    let (summary, monitor, priority) = build_monitor_task_summary(
+                        &task.trigger,
+                        task.condition.as_deref(),
+                        task.notification_type.as_deref(),
+                    );
+                    vec![(summary, monitor, priority, None)]
+                } else if task.is_permanent == Some(1) {
+                    let items = build_recurring_task_summary(
+                        &task.action,
+                        task.recurrence_rule.as_deref(),
+                        task.recurrence_time.as_deref(),
+                        task.notification_type.as_deref(),
+                    );
+                    let next_ts = state
+                        .user_repository
+                        .calculate_next_trigger_public(task, &user_tz)
+                        .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
+                    items
+                        .into_iter()
+                        .map(|(s, m, p)| (s, m, p, next_ts))
+                        .collect()
+                } else {
+                    let (summary, monitor, priority) =
+                        build_oneshot_task_summary(&task.action, task.notification_type.as_deref());
+                    vec![(summary, monitor, priority, trigger_ts)]
+                };
+
+            let mut all_ok = true;
+            for (summary, is_monitor, priority, next_check_at) in &items_to_create {
+                let new_item = crate::models::user_models::NewItem {
+                    user_id,
+                    summary: summary.clone(),
+                    monitor: *is_monitor,
+                    next_check_at: *next_check_at,
+                    priority: *priority,
+                    source_id: None,
+                    created_at: task.created_at,
+                };
+
+                match state.item_repository.create_item(&new_item) {
+                    Ok(_) => {
+                        migrated_count += 1;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create item from task {} for user {}: {}",
+                            task_id,
+                            user_id,
+                            e
+                        );
+                        all_ok = false;
+                    }
+                }
+            }
+
+            // Mark task as migrated only if all items were created
+            if all_ok {
+                if let Err(e) = state
+                    .user_repository
+                    .update_task_status(task_id, "migrated")
+                {
+                    tracing::warn!("Failed to mark task {} as migrated: {}", task_id, e);
                 }
             }
         }
@@ -533,16 +767,6 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
         "Task migration complete: {} tasks migrated to items",
         migrated_count
     );
-}
-
-/// Format a unix timestamp as a short human-readable string (for migration summaries)
-fn format_ts_short(ts: i32) -> String {
-    use chrono::TimeZone;
-    chrono::Utc
-        .timestamp_opt(ts as i64, 0)
-        .single()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
-        .unwrap_or_else(|| ts.to_string())
 }
 
 /// Initialize the smartphone-free days metric if it doesn't exist.
@@ -615,8 +839,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         let state = state_clone.clone();
         Box::pin(async move {
 
-            // Process each subscribed user
-            for user in state.user_core.get_users_by_tier("tier 2").unwrap_or_default(){
+            // Process each user with auto-features (autopilot/byot)
+            let tier2_users = state.user_core.get_users_by_tier("tier 2").unwrap_or_default();
+            for user in tier2_users.into_iter().filter(|u| {
+                crate::utils::plan_features::has_auto_features(u.plan_type.as_deref())
+            }) {
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
@@ -865,6 +1092,19 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             Err(e) => {
                                 error!("Failed to fetch IMAP emails for user {}: Error: {:?}", user.id, e);
                             }
+                        }
+
+                        // Auto-resolve email tracking items for emails the user has read
+                        {
+                            let state_clone = state.clone();
+                            let user_id = user.id;
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::proactive::utils::resolve_read_email_items(
+                                    &state_clone, user_id
+                                ).await {
+                                    tracing::debug!("Email tracking item resolve failed for user {}: {}", user_id, e);
+                                }
+                            });
                         }
                     }
                 }

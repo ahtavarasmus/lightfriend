@@ -258,8 +258,7 @@ pub async fn select_most_relevant_email(
 
     let select_req = chat_completion::ChatCompletionRequest::new(model, select_messages)
         .tools(select_tools)
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .max_tokens(200);
+        .tool_choice(chat_completion::ToolChoiceType::Required);
 
     match state.ai_config.chat_completion(provider, &select_req).await {
         Ok(result) => {

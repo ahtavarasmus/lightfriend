@@ -60,6 +60,7 @@ mod dashboard {
     pub mod youtube_quick_panel;
     pub mod contact_avatar_row;
     pub mod items_status;
+    pub mod emoji_utils;
 }
 mod proactive {
     pub mod contact_profiles;

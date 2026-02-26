@@ -395,8 +395,7 @@ async fn condense_response(
             tool_calls: None,
             tool_call_id: None,
         }],
-    )
-    .max_tokens(300);
+    );
 
     match state.ai_config.chat_completion(provider, &req).await {
         Ok(response) => {
@@ -1025,8 +1024,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 completion_messages.clone(),
             )
             .tools(tools.clone())
-            .tool_choice(chat_completion::ToolChoiceType::Required)
-            .max_tokens(250);
+            .tool_choice(chat_completion::ToolChoiceType::Required);
 
             match ctx.client.chat_completion(request).await {
                 Ok(result) => {
@@ -1303,8 +1301,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                 let follow_up_req = chat_completion::ChatCompletionRequest::new(
                     model.clone(),
                     follow_up_messages.clone(),
-                )
-                .max_tokens(250);
+                );
 
                 match ctx.client.chat_completion(follow_up_req).await {
                     Ok(result) => {

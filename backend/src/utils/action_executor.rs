@@ -628,8 +628,7 @@ Generate a concise, informative SMS notification.
         },
     ];
 
-    let request =
-        chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages).max_tokens(350);
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages);
 
     match ctx.client.chat_completion(request).await {
         Ok(result) => Ok(result
@@ -710,8 +709,7 @@ Be strict - only return true if there's a clear match."#,
         },
     ];
 
-    let request =
-        chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages).max_tokens(100);
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages);
 
     match ctx.client.chat_completion(request).await {
         Ok(result) => {

@@ -432,8 +432,7 @@ pub async fn check_item_monitor_match(
     let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.0)
-        .max_tokens(500);
+        .temperature(0.0);
 
     let result = ctx.client.chat_completion(request).await?;
     let tool_call = result.choices[0]
@@ -943,8 +942,7 @@ pub async fn process_triggered_item(
             chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages.clone())
                 .tools(tools.clone())
                 .tool_choice(chat_completion::ToolChoiceType::Required)
-                .temperature(0.0)
-                .max_tokens(800);
+                .temperature(0.0);
 
         let result = ctx.client.chat_completion(request).await?;
         let choice = result.choices.first().ok_or("No choices in LLM response")?;
@@ -1559,8 +1557,7 @@ pub async fn check_message_importance(
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         // Lower temperature for more deterministic classification
-        .temperature(0.2)
-        .max_tokens(200);
+        .temperature(0.2);
     // ---------------------------------------------------------------------
     match ctx.client.chat_completion(request).await {
         Ok(result) => {
@@ -1749,8 +1746,7 @@ pub async fn check_trackable_items(
     let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.1)
-        .max_tokens(200);
+        .temperature(0.1);
 
     let result = ctx.client.chat_completion(request).await?;
 
@@ -1801,6 +1797,238 @@ pub async fn check_trackable_items(
                     "Created monitor item for user {} (priority {})",
                     user_id,
                     priority
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Message trackable item detection (bridge messages)
+// ---------------------------------------------------------------------------
+
+const MESSAGE_TRACKABLE_PROMPT: &str = r#"You are an AI that detects items worth tracking from chat messages (WhatsApp, Telegram, Signal, etc.).
+
+A "trackable item" is something the user would want to remember or follow up on. Examples:
+- Invoices or payment requests ("please pay invoice #1234")
+- Questions or requests from people that need a response
+- Deliveries and shipping updates ("your package shipped, tracking #1Z999")
+- Appointments and scheduled events ("dentist at 3pm Thursday")
+- Deadlines or due dates ("report due by Friday")
+- Promises or commitments someone made ("I'll send the contract tomorrow")
+- Important decisions or confirmations ("we agreed on $500/month")
+
+Skip these - they are NOT trackable:
+- Greetings, small talk, casual chat ("hey", "how are you", "lol")
+- Simple acknowledgements ("ok", "thanks", "got it", "sure")
+- Reactions or emoji-only messages
+- Marketing/spam messages
+- Messages with no actionable content
+
+Return JSON with:
+- `is_trackable` (boolean): whether this message contains something worth tracking
+- `summary` (string, max 80 chars): concise description e.g. "Invoice #1234 from John - $450 due Friday" or "" if not trackable
+- `topic` (string, max 20 chars): short topic label for dedup grouping e.g. "invoice", "delivery", "dentist". Empty if not trackable.
+- `next_check_at` (string): ISO datetime for when this item should first be checked. Set sooner for urgent items (e.g. 1 day for overdue invoices, unanswered questions), later for non-urgent (e.g. 3-7 days for deliveries in transit). Empty string if no scheduled check needed.
+
+Include any deadline or due date directly in the summary text.
+"#;
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct MessageTrackableResponse {
+    is_trackable: bool,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    topic: String,
+    #[serde(default)]
+    next_check_at: String,
+}
+
+/// Checks whether a bridge message contains a trackable item and silently
+/// creates a monitor item if detected. Always priority 0 (silent).
+/// LLM decides next_check_at based on message urgency.
+/// Uses source_id = "msg_{service}_{room_id}_{topic}" for dedup.
+pub async fn check_message_trackable_items(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    room_id: &str,
+    sender: &str,
+    message_content: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Skip very short messages - no point evaluating "ok" or "hi"
+    if message_content.len() < 10 {
+        return Ok(());
+    }
+
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(MESSAGE_TRACKABLE_PROMPT.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!(
+                "Platform: {}\nFrom: {}\nMessage: {}",
+                service, sender, message_content
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "is_trackable".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether the message contains something worth tracking".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "summary".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Concise summary of the trackable item (max 80 chars)".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "topic".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "Short topic label for dedup grouping, max 20 chars (e.g. invoice, delivery)"
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "next_check_at".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "ISO datetime for when to first check this item. Sooner for urgent items (1 day), later for non-urgent (3-7 days). Empty string if no check needed."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "analyze_message_trackable".to_string(),
+            description: Some("Analyzes if a chat message contains a trackable item".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    "is_trackable".to_string(),
+                    "summary".to_string(),
+                    "topic".to_string(),
+                    "next_check_at".to_string(),
+                ]),
+            },
+        },
+    }];
+
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.1);
+
+    let result = ctx.client.chat_completion(request).await?;
+
+    let response = result.choices[0]
+        .message
+        .tool_calls
+        .as_ref()
+        .and_then(|tc| tc.first())
+        .and_then(|tc| tc.function.arguments.as_ref())
+        .and_then(|args| serde_json::from_str::<MessageTrackableResponse>(args).ok());
+
+    if let Some(resp) = response {
+        if resp.is_trackable && !resp.summary.is_empty() {
+            let topic = if resp.topic.is_empty() {
+                "general"
+            } else {
+                &resp.topic
+            };
+
+            // Dedup: one item per topic per room
+            let source_id = format!(
+                "msg_{}_{}_{}",
+                service,
+                room_id,
+                topic.to_lowercase().replace(' ', "_")
+            );
+            if state
+                .item_repository
+                .item_exists_by_source(user_id, &source_id)?
+            {
+                tracing::debug!(
+                    "Message trackable item already exists for user {} source_id={}",
+                    user_id,
+                    source_id
+                );
+                return Ok(());
+            }
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let max_future = now + 30 * 86400; // 30 days cap
+            let parsed_next_check = parse_iso_to_timestamp(&resp.next_check_at);
+            let next_check_at = match parsed_next_check {
+                Some(ts) if ts <= now => Some(now + 3600), // Past: clamp to now + 1 hour
+                Some(ts) if ts > max_future => Some(max_future), // >30 days: cap
+                Some(ts) => Some(ts),
+                None => Some(now + 2 * 86400), // Default: check in 2 days
+            };
+
+            let summary = format!(
+                "[type:tracking] [notify:silent] [platform:{}] [sender:{}] [topic:{}]\n{}",
+                service, sender, topic, resp.summary
+            );
+
+            let new_item = crate::models::user_models::NewItem {
+                user_id,
+                summary,
+                monitor: true,
+                next_check_at,
+                priority: 0,
+                source_id: Some(source_id.clone()),
+                created_at: now,
+            };
+
+            if let Err(e) = state.item_repository.create_item(&new_item) {
+                tracing::error!(
+                    "Failed to create message tracking item for user {}: {}",
+                    user_id,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Created tracking item for user {} from {} message (topic: {}, source: {})",
+                    user_id,
+                    service,
+                    topic,
+                    source_id
                 );
             }
         }
@@ -1966,8 +2194,7 @@ Rules:
     let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.7)
-        .max_tokens(300);
+        .temperature(0.7);
 
     #[derive(Deserialize, Debug)]
     struct ReplyResponse {
@@ -3688,8 +3915,7 @@ pub async fn generate_digest(
     }];
     let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
         .tools(tools)
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .max_tokens(350);
+        .tool_choice(chat_completion::ToolChoiceType::Required);
     match ctx.client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -4023,6 +4249,94 @@ pub async fn send_notification(
             }
         }
     }
+}
+
+/// Resolve email tracking items for emails the user has since read.
+///
+/// Fetches all tracking items with source_id prefix "email_", extracts UIDs,
+/// opens a lightweight IMAP connection to check flags, and deletes items
+/// whose emails now have the \Seen flag set.
+pub async fn resolve_read_email_items(
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Only auto-feature plans (autopilot/byot) have tracking items
+    let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
+    if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+        return Ok(());
+    }
+
+    // Get all email tracking items for this user
+    let email_items = state
+        .item_repository
+        .get_items_by_source_prefix(user_id, "email_")?;
+
+    if email_items.is_empty() {
+        return Ok(());
+    }
+
+    // Extract UIDs from source_ids: "email_{uid}" -> "{uid}"
+    let uid_to_item: std::collections::HashMap<String, i32> = email_items
+        .iter()
+        .filter_map(|item| {
+            let source = item.source_id.as_deref()?;
+            let uid = source.strip_prefix("email_")?;
+            Some((uid.to_string(), item.id?))
+        })
+        .collect();
+
+    if uid_to_item.is_empty() {
+        return Ok(());
+    }
+
+    // Get IMAP credentials
+    let (email, password, imap_server, imap_port) = state
+        .user_repository
+        .get_imap_credentials(user_id)?
+        .ok_or("No IMAP credentials configured")?;
+
+    // Connect to IMAP
+    let tls = native_tls::TlsConnector::builder().build()?;
+    let server = imap_server.as_deref().unwrap_or("imap.gmail.com");
+    let port = imap_port.unwrap_or(993) as u16;
+    let client = imap::connect((server, port), server, &tls)?;
+    let mut session = client
+        .login(&email, &password)
+        .map_err(|(e, _)| format!("IMAP login failed: {}", e))?;
+    session.select("INBOX")?;
+
+    // Build a single UID FETCH for all UIDs at once
+    let uid_list: String = uid_to_item.keys().cloned().collect::<Vec<_>>().join(",");
+
+    let mut resolved = 0usize;
+    if let Ok(fetched) = session.uid_fetch(&uid_list, "FLAGS") {
+        for msg in fetched.iter() {
+            if let Some(uid) = msg.uid {
+                let uid_str = uid.to_string();
+                if let Some(&item_id) = uid_to_item.get(&uid_str) {
+                    // Check if \Seen flag is present
+                    let is_read = msg.flags().iter().any(|flag| flag.to_string() == "\\Seen");
+                    if is_read {
+                        if let Ok(true) = state.item_repository.delete_item(item_id, user_id) {
+                            resolved += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = session.logout();
+
+    if resolved > 0 {
+        tracing::info!(
+            "Auto-resolved {} email tracking item(s) for user {}",
+            resolved,
+            user_id
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

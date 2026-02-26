@@ -671,7 +671,7 @@ fn render_upcoming_entry(
                     {&time_display}
                     <span class="relative">{&relative}</span>
                 </div>
-                <div class="upcoming-item-desc">{&description}</div>
+                <div class="upcoming-item-desc">{super::emoji_utils::emojify_description(&description)}</div>
                 <div class="upcoming-item-tags">
                     {if let Some(ref t) = item_type {
                         html! { <span class="upcoming-item-type">{t}</span> }

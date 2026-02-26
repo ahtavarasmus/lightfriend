@@ -2408,7 +2408,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <label>{"Notification type"}</label>
                                 <select onchange={on_type}>
                                     <option value="sms" selected={*form_type == "sms"}>{"SMS"}</option>
-                                    <option value="call" selected={*form_type == "call"}>{"Call"}</option>
+                                    <option value="call" selected={*form_type == "call"}>{"Call (+SMS)"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-check">
@@ -2797,7 +2797,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                     <label>{"Notification type"}</label>
                                     <select onchange={on_type} disabled={!is_override}>
                                         <option value="sms" selected={*exc_type == "sms"}>{"SMS"}</option>
-                                        <option value="call" selected={*exc_type == "call"}>{"Call"}</option>
+                                        <option value="call" selected={*exc_type == "call"}>{"Call (+SMS)"}</option>
                                     </select>
                                 </div>
                                 <div class="avatar-modal-check">
@@ -2889,7 +2889,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <label>{"Notification type"}</label>
                                 <select onchange={on_type}>
                                     <option value="sms" selected={*pc_form_type == "sms"}>{"SMS"}</option>
-                                    <option value="call" selected={*pc_form_type == "call"}>{"Call"}</option>
+                                    <option value="call" selected={*pc_form_type == "call"}>{"Call (+SMS)"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-check">
@@ -2966,7 +2966,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <label>{"Notification type"}</label>
                                 <select onchange={on_type}>
                                     <option value="sms" selected={*def_form_type == "sms"}>{"SMS"}</option>
-                                    <option value="call" selected={*def_form_type == "call"}>{"Call"}</option>
+                                    <option value="call" selected={*def_form_type == "call"}>{"Call (+SMS)"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-check">
@@ -3482,7 +3482,7 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <label>{"Notification type"}</label>
                                 <select onchange={on_type}>
                                     <option value="sms" selected={*add_type == "sms"}>{"SMS"}</option>
-                                    <option value="call" selected={*add_type == "call"}>{"Call"}</option>
+                                    <option value="call" selected={*add_type == "call"}>{"Call (+SMS)"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-check">
