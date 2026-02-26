@@ -68,10 +68,16 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Comma-separated list of data sources to fetch at trigger time.\n\
-                Available: email, chat, calendar, weather, items\n\
-                Example: 'email,chat,calendar,items'\n\
-                Omit if no data fetching needed."
+                "REQUIRED when the item needs to check/summarize external data at trigger time.\n\
+                Without this tag the system CANNOT fetch the data - the item will fire with no context.\n\
+                Available sources: email, chat, calendar, weather, items\n\
+                - 'email' - email summaries, email checks\n\
+                - 'chat' - WhatsApp, Telegram, Signal, or any messaging platform summaries\n\
+                - 'calendar' - calendar event summaries\n\
+                - 'weather' - weather checks\n\
+                - 'items' - tracked item status updates\n\
+                Examples: 'email,chat,calendar,items' for full digest. 'chat' for WhatsApp-only summary.\n\
+                Only omit for pure reminders that need no external data (e.g. 'remind me to call mom')."
                     .to_string(),
             ),
             ..Default::default()
@@ -194,6 +200,8 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
                     item_type='oneshot', notify='call', description='Scheduled check-in for the user.', monitor=false, next_check_at='2026-02-29T00:00'\n\
                 - 'every morning at 9am summarize my messages and email' ->\n\
                     item_type='recurring', notify='sms', repeat='daily 09:00', fetch='email,chat,calendar,items', description='Summarize recent emails, messages, calendar events, and tracked items.', monitor=false, next_check_at='2026-02-25T09:00'\n\
+                - 'every morning at 8am give me a summary of my whatsapp messages' ->\n\
+                    item_type='recurring', notify='sms', repeat='daily 08:00', fetch='chat', description='Summarize WhatsApp messages from last night for the user.', monitor=false, next_check_at='2026-02-25T08:00'\n\
                 - 'let me know if mom emails' ->\n\
                     item_type='oneshot', notify='sms', description='Watch for emails from mom.', monitor=true, platform='email', sender='mom', scope='any', next_check_at='2026-03-09T09:00'\n\
                 - 'call me when John messages about the project' ->\n\
@@ -255,7 +263,7 @@ pub async fn handle_create_item(
     user_id: i32,
     args: &str,
 ) -> Result<CreateItemResult, Box<dyn Error>> {
-    let args: CreateItemArgs = serde_json::from_str(args)?;
+    let mut args: CreateItemArgs = serde_json::from_str(args)?;
 
     // Gate monitor items to Autopilot/BYOT plans only
     if args.monitor {
@@ -278,6 +286,51 @@ pub async fn handle_create_item(
     let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
     let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
     let ts = parse_datetime_to_timestamp(&args.next_check_at, &tz)?;
+
+    // Auto-infer fetch sources if AI omitted them for a non-monitor summary/digest item
+    if args.fetch.is_none() && !args.monitor {
+        let lower = args.description.to_lowercase();
+        let is_summary = lower.contains("summarize")
+            || lower.contains("summary")
+            || lower.contains("digest")
+            || lower.contains("check")
+            || lower.contains("report")
+            || lower.contains("recap");
+        if is_summary {
+            let mut sources = Vec::new();
+            if lower.contains("email") || lower.contains("mail") {
+                sources.push("email");
+            }
+            if lower.contains("whatsapp")
+                || lower.contains("telegram")
+                || lower.contains("signal")
+                || lower.contains("message")
+                || lower.contains("chat")
+            {
+                sources.push("chat");
+            }
+            if lower.contains("calendar") || lower.contains("event") || lower.contains("schedule") {
+                sources.push("calendar");
+            }
+            if lower.contains("weather")
+                || lower.contains("forecast")
+                || lower.contains("temperature")
+            {
+                sources.push("weather");
+            }
+            if lower.contains("tracked item") || lower.contains("tracked things") {
+                sources.push("items");
+            }
+            if !sources.is_empty() {
+                tracing::info!(
+                    "Auto-inferred fetch sources [{}] from description: {}",
+                    sources.join(","),
+                    args.description
+                );
+                args.fetch = Some(sources.join(","));
+            }
+        }
+    }
 
     // Build summary from structured params: tags line + "\n" + description
     let summary = build_summary_from_params(&args);
