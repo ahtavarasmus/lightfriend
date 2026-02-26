@@ -146,6 +146,28 @@ pub trait UserCoreOps: Send + Sync {
     // Quiet mode
     fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError>;
     fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError>;
+    #[allow(clippy::too_many_arguments)]
+    fn add_quiet_rule(
+        &self,
+        user_id: i32,
+        until: i32,
+        rule_type: &str,
+        platform: Option<&str>,
+        sender: Option<&str>,
+        topic: Option<&str>,
+        description: &str,
+    ) -> Result<i32, DieselError>;
+    fn get_quiet_rules(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<crate::models::user_models::Item>, DieselError>;
+    fn check_quiet_with_context(
+        &self,
+        user_id: i32,
+        platform: Option<&str>,
+        sender: Option<&str>,
+        content: Option<&str>,
+    ) -> Result<bool, DieselError>;
     fn update_critical_enabled(
         &self,
         user_id: i32,
@@ -245,6 +267,51 @@ impl UserCore {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
+}
+
+/// Check if a quiet rule's tag conditions match a notification context.
+/// All specified conditions are AND'd. Platform is exact (case-insensitive),
+/// sender and topic are substring matches (case-insensitive).
+pub fn rule_matches(
+    rule: &crate::proactive::utils::ParsedTags,
+    platform: Option<&str>,
+    sender: Option<&str>,
+    content: Option<&str>,
+) -> bool {
+    // Platform: exact match (case-insensitive)
+    if let Some(rule_platform) = &rule.platform {
+        match platform {
+            Some(p) if p.to_lowercase() == rule_platform.to_lowercase() => {}
+            _ => return false,
+        }
+    }
+
+    // Sender: substring match (case-insensitive)
+    if let Some(rule_sender) = &rule.sender {
+        let rule_lower = rule_sender.to_lowercase();
+        let sender_match = sender
+            .map(|s| s.to_lowercase().contains(&rule_lower))
+            .unwrap_or(false);
+        let content_match = content
+            .map(|c| c.to_lowercase().contains(&rule_lower))
+            .unwrap_or(false);
+        if !sender_match && !content_match {
+            return false;
+        }
+    }
+
+    // Topic: substring match (case-insensitive)
+    if let Some(rule_topic) = &rule.topic {
+        let rule_lower = rule_topic.to_lowercase();
+        let content_match = content
+            .map(|c| c.to_lowercase().contains(&rule_lower))
+            .unwrap_or(false);
+        if !content_match {
+            return false;
+        }
+    }
+
+    true
 }
 
 impl UserCoreOps for UserCore {
@@ -1170,6 +1237,163 @@ impl UserCoreOps for UserCore {
         }
 
         Ok(None)
+    }
+
+    fn add_quiet_rule(
+        &self,
+        user_id: i32,
+        until: i32,
+        rule_type: &str,
+        platform: Option<&str>,
+        sender: Option<&str>,
+        topic: Option<&str>,
+        description: &str,
+    ) -> Result<i32, DieselError> {
+        use crate::schema::items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Build tagged summary line
+        let mut tags = format!("[quiet:{}]", rule_type);
+        if let Some(p) = platform {
+            tags.push_str(&format!(" [platform:{}]", p));
+        }
+        if let Some(s) = sender {
+            tags.push_str(&format!(" [sender:{}]", s));
+        }
+        if let Some(t) = topic {
+            tags.push_str(&format!(" [topic:{}]", t));
+        }
+        let summary = format!("{}\n{}", tags, description);
+
+        let new_item = crate::models::user_models::NewItem {
+            user_id,
+            summary,
+            monitor: false,
+            next_check_at: Some(until),
+            priority: 0,
+            source_id: Some("quiet_mode".to_string()),
+            created_at: now,
+        };
+        diesel::insert_into(items::table)
+            .values(&new_item)
+            .execute(&mut conn)?;
+
+        // Return the id of the inserted item
+        let id = items::table
+            .filter(items::user_id.eq(user_id))
+            .filter(items::source_id.eq("quiet_mode"))
+            .order(items::created_at.desc())
+            .select(items::id)
+            .first::<Option<i32>>(&mut conn)?
+            .unwrap_or(0);
+
+        Ok(id)
+    }
+
+    fn get_quiet_rules(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<crate::models::user_models::Item>, DieselError> {
+        use crate::schema::items;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        let all_items = items::table
+            .filter(items::user_id.eq(user_id))
+            .filter(items::source_id.eq("quiet_mode"))
+            .load::<crate::models::user_models::Item>(&mut conn)?;
+
+        let mut active = Vec::new();
+        for item in all_items {
+            match item.next_check_at {
+                None => {
+                    // Indefinite - always active
+                    active.push(item);
+                }
+                Some(end_ts) if end_ts > now => {
+                    active.push(item);
+                }
+                Some(_) => {
+                    // Expired - clean up
+                    if let Some(item_id) = item.id {
+                        diesel::delete(items::table.filter(items::id.eq(item_id)))
+                            .execute(&mut conn)?;
+                    }
+                }
+            }
+        }
+
+        Ok(active)
+    }
+
+    fn check_quiet_with_context(
+        &self,
+        user_id: i32,
+        platform: Option<&str>,
+        sender: Option<&str>,
+        content: Option<&str>,
+    ) -> Result<bool, DieselError> {
+        let items = self.get_quiet_rules(user_id)?;
+
+        if items.is_empty() {
+            return Ok(false);
+        }
+
+        // Parse tags from each item
+        let mut has_global_suppress = false;
+        let mut suppress_rules: Vec<crate::proactive::utils::ParsedTags> = Vec::new();
+        let mut allow_rules: Vec<crate::proactive::utils::ParsedTags> = Vec::new();
+
+        for item in &items {
+            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+            match tags.quiet.as_deref() {
+                None => {
+                    // No [quiet:...] tag - backward compat global suppress
+                    has_global_suppress = true;
+                }
+                Some("suppress") => {
+                    suppress_rules.push(tags);
+                }
+                Some("allow") => {
+                    allow_rules.push(tags);
+                }
+                _ => {}
+            }
+        }
+
+        // 1. Global suppress (backward compat - tagless items)
+        if has_global_suppress {
+            return Ok(true);
+        }
+
+        // 2. Check suppress rules - if any match, suppress
+        for rule in &suppress_rules {
+            if rule_matches(rule, platform, sender, content) {
+                return Ok(true);
+            }
+        }
+
+        // 3. If allow rules exist but none match, suppress
+        if !allow_rules.is_empty() {
+            let any_match = allow_rules
+                .iter()
+                .any(|rule| rule_matches(rule, platform, sender, content));
+            if !any_match {
+                return Ok(true);
+            }
+        }
+
+        // 4. Otherwise allow
+        Ok(false)
     }
 
     fn update_critical_enabled(

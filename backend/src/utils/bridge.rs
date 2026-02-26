@@ -1959,13 +1959,21 @@ pub async fn handle_bridge_message(
                                 // Spawn a new task for sending critical message notification
                                 let state_clone = state.clone();
                                 let notification_type = format!("{}_critical", service);
+                                let meta_service = service.clone();
+                                let meta_sender = chat_name.clone();
+                                let meta_content = triggering_msg.content.clone();
                                 tokio::spawn(async move {
-                                    crate::proactive::utils::send_notification(
+                                    crate::proactive::utils::send_notification_with_context(
                                         &state_clone,
                                         user_id,
                                         &message,
                                         notification_type,
                                         Some(first_message),
+                                        Some(crate::proactive::utils::NotificationMeta {
+                                            platform: Some(meta_service),
+                                            sender: Some(meta_sender),
+                                            content: Some(meta_content),
+                                        }),
                                     ).await;
                                 });
                                 return;
@@ -2129,13 +2137,21 @@ pub async fn handle_bridge_message(
             );
 
             let state_clone = state.clone();
+            let meta_service = service.clone();
+            let meta_sender = chat_name.clone();
+            let meta_content = content.clone();
             tokio::spawn(async move {
-                crate::proactive::utils::send_notification(
+                crate::proactive::utils::send_notification_with_context(
                     &state_clone,
                     user_id,
                     &what_to_inform,
                     notification_type,
                     Some(first_message),
+                    Some(crate::proactive::utils::NotificationMeta {
+                        platform: Some(meta_service),
+                        sender: Some(meta_sender),
+                        content: Some(meta_content),
+                    }),
                 )
                 .await;
             });
@@ -2169,14 +2185,22 @@ pub async fn handle_bridge_message(
                         "Hello, you have a {} message from {}.",
                         service_cap, sender_display
                     );
+                    let meta_service = service.clone();
+                    let meta_sender = sender_display.to_string();
+                    let meta_content = content_clone.clone();
 
                     tokio::spawn(async move {
-                        crate::proactive::utils::send_notification(
+                        crate::proactive::utils::send_notification_with_context(
                             &state_clone,
                             user_id,
                             &message,
                             notification_type,
                             Some(first_message),
+                            Some(crate::proactive::utils::NotificationMeta {
+                                platform: Some(meta_service),
+                                sender: Some(meta_sender),
+                                content: Some(meta_content),
+                            }),
                         )
                         .await;
                     });
@@ -2247,13 +2271,21 @@ pub async fn handle_bridge_message(
 
                     // Spawn a new task for sending critical message notification
                     let state_clone = state.clone();
+                    let meta_service = service.clone();
+                    let meta_sender = chat_name.clone();
+                    let meta_content = content.clone();
                     tokio::spawn(async move {
-                        crate::proactive::utils::send_notification(
+                        crate::proactive::utils::send_notification_with_context(
                             &state_clone,
                             user_id,
                             &message,
                             notification_type,
                             Some(first_message),
+                            Some(crate::proactive::utils::NotificationMeta {
+                                platform: Some(meta_service),
+                                sender: Some(meta_sender),
+                                content: Some(meta_content),
+                            }),
                         )
                         .await;
                     });
@@ -2282,14 +2314,22 @@ pub async fn handle_bridge_message(
                             "Hello, you were mentioned in a {} group {}.",
                             service_cap, sender_display
                         );
+                        let meta_service = service.clone();
+                        let meta_sender = sender_display.to_string();
+                        let meta_content = content_clone.clone();
 
                         tokio::spawn(async move {
-                            crate::proactive::utils::send_notification(
+                            crate::proactive::utils::send_notification_with_context(
                                 &state_clone,
                                 user_id,
                                 &message,
                                 notification_type,
                                 Some(first_message),
+                                Some(crate::proactive::utils::NotificationMeta {
+                                    platform: Some(meta_service),
+                                    sender: Some(meta_sender),
+                                    content: Some(meta_content),
+                                }),
                             )
                             .await;
                         });

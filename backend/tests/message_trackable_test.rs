@@ -188,7 +188,7 @@ fn assert_tracking_item(items: &[Item], expected_summary_words: &[&str]) {
     assert!(
         item.source_id
             .as_ref()
-            .map_or(false, |s| s.starts_with("msg_")),
+            .is_some_and(|s| s.starts_with("msg_")),
         "Expected source_id starting with 'msg_', got: {:?}. Summary: {}",
         item.source_id,
         item.summary

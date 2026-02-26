@@ -98,6 +98,7 @@ pub mod tools {
     pub mod email;
     pub mod items;
     pub mod messaging;
+    pub mod quiet_mode;
     pub mod registry;
     pub mod respond;
     pub mod schedule;
@@ -280,7 +281,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // Schedule/management tools
     registry.register(Arc::new(tools::schedule::CreateItemHandler));
-    registry.register(Arc::new(tools::schedule::UpdateMonitoringHandler));
 
     // Tesla tools
     registry.register(Arc::new(tools::tesla::TeslaControlHandler));
@@ -295,6 +295,9 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // Direct response
     registry.register(Arc::new(tools::respond::DirectResponseHandler));
+
+    // Quiet mode
+    registry.register(Arc::new(tools::quiet_mode::QuietModeHandler));
 
     registry
 }

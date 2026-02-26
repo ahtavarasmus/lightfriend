@@ -29,11 +29,6 @@ async fn geocode_location(location: &str) -> Option<(f64, f64)> {
     Some((lat, lon))
 }
 
-#[derive(Deserialize)]
-pub struct ProactiveAgentEnabledRequest {
-    enabled: bool,
-}
-
 #[derive(Serialize)]
 pub struct ProactiveAgentEnabledResponse {
     enabled: bool,
@@ -1464,31 +1459,6 @@ pub async fn get_critical_settings(
     }
 }
 
-pub async fn update_proactive_agent_on(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<ProactiveAgentEnabledRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Update critical enabled setting
-    match state
-        .user_core
-        .update_proactive_agent_on(auth_user.user_id, request.enabled)
-    {
-        Ok(_) => Ok(Json(json!({
-            "message": "Proactive notifications setting updated successfully"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to update proactive notifications setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": format!("Failed to update proactive notifications setting: {}", e)}),
-                ),
-            ))
-        }
-    }
-}
-
 pub async fn get_proactive_agent_on(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -1511,11 +1481,58 @@ pub struct QuietModeStatus {
     pub is_quiet: bool,
     pub until: Option<i32>,
     pub until_display: Option<String>,
+    pub rules: Vec<QuietRuleInfo>,
+}
+
+#[derive(Serialize)]
+pub struct QuietRuleInfo {
+    pub id: i32,
+    pub rule_type: String,
+    pub platform: Option<String>,
+    pub sender: Option<String>,
+    pub topic: Option<String>,
+    pub until: Option<i32>,
+    pub until_display: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct SetQuietModeRequest {
     pub until: Option<i32>, // None = disable quiet mode, 0 = indefinite, timestamp = until
+}
+
+#[derive(Deserialize)]
+pub struct AddQuietRuleRequest {
+    pub until: i32,
+    pub rule_type: String, // "suppress" or "allow"
+    pub platform: Option<String>,
+    pub sender: Option<String>,
+    pub topic: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Parse quiet rule info from an item's tagged summary.
+fn parse_rule_info_from_item(
+    item: &crate::models::user_models::Item,
+    user_id: i32,
+    state: &Arc<AppState>,
+) -> Option<QuietRuleInfo> {
+    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+    // Only return items that have a [quiet:...] tag (not backward-compat global items)
+    let rule_type = tags.quiet?;
+
+    let until_display = item
+        .next_check_at
+        .map(|ts| format_quiet_until_display(ts, user_id, state));
+
+    Some(QuietRuleInfo {
+        id: item.id.unwrap_or(0),
+        rule_type,
+        platform: tags.platform,
+        sender: tags.sender,
+        topic: tags.topic,
+        until: item.next_check_at,
+        until_display,
+    })
 }
 
 /// GET /api/profile/quiet-mode
@@ -1546,10 +1563,23 @@ pub async fn get_quiet_mode(
                 }
             };
 
+            // Get quiet rules
+            let rules = match state.user_core.get_quiet_rules(auth_user.user_id) {
+                Ok(items) => items
+                    .iter()
+                    .filter_map(|item| parse_rule_info_from_item(item, auth_user.user_id, &state))
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+
+            // is_quiet should also be true if there are active rules
+            let effective_quiet = is_quiet || !rules.is_empty();
+
             Ok(Json(QuietModeStatus {
-                is_quiet,
+                is_quiet: effective_quiet,
                 until: if is_quiet { quiet_until } else { None },
                 until_display,
+                rules,
             }))
         }
         Err(e) => {
@@ -1585,6 +1615,59 @@ pub async fn set_quiet_mode(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to set quiet mode: {}", e)})),
+            ))
+        }
+    }
+}
+
+/// POST /api/profile/quiet-rules
+pub async fn add_quiet_rule(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<AddQuietRuleRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if request.rule_type != "suppress" && request.rule_type != "allow" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "rule_type must be 'suppress' or 'allow'"})),
+        ));
+    }
+
+    let description = request.description.as_deref().unwrap_or("Quiet rule");
+
+    match state.user_core.add_quiet_rule(
+        auth_user.user_id,
+        request.until,
+        &request.rule_type,
+        request.platform.as_deref(),
+        request.sender.as_deref(),
+        request.topic.as_deref(),
+        description,
+    ) {
+        Ok(rule_id) => Ok(Json(json!({ "id": rule_id, "message": "Rule added" }))),
+        Err(e) => {
+            tracing::error!("Failed to add quiet rule: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to add quiet rule: {}", e)})),
+            ))
+        }
+    }
+}
+
+/// DELETE /api/profile/quiet-rules
+pub async fn delete_quiet_rules(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Delete all quiet_mode items (rules + global). This is the same as disabling quiet mode.
+    match state.user_core.set_quiet_mode(auth_user.user_id, None) {
+        Ok(_) => Ok(Json(json!({ "message": "All quiet rules cleared" }))),
+        Err(e) => {
+            tracing::error!("Failed to clear quiet rules: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to clear quiet rules: {}", e)})),
             ))
         }
     }

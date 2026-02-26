@@ -40,6 +40,7 @@ pub struct QuietModeInfo {
     pub is_quiet: bool,
     pub until: Option<i32>,
     pub until_display: Option<String>,
+    pub rule_count: i32,
 }
 
 #[derive(Serialize)]
@@ -550,25 +551,44 @@ fn get_quiet_mode_info(
 ) -> QuietModeInfo {
     let quiet_until = state.user_core.get_quiet_mode(user_id).ok().flatten();
 
+    // Count active rules (items with [quiet:...] tags)
+    let rule_count = state
+        .user_core
+        .get_quiet_rules(user_id)
+        .ok()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| {
+                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                    tags.quiet.is_some()
+                })
+                .count() as i32
+        })
+        .unwrap_or(0);
+
     match quiet_until {
         None => QuietModeInfo {
-            is_quiet: false,
+            is_quiet: rule_count > 0,
             until: None,
             until_display: None,
+            rule_count,
         },
         Some(0) => QuietModeInfo {
             is_quiet: true,
             until: Some(0),
             until_display: Some("indefinitely".to_string()),
+            rule_count,
         },
         Some(ts) => {
             if ts <= now_ts {
                 // Quiet mode expired - clear it and return not quiet
                 let _ = state.user_core.set_quiet_mode(user_id, None);
                 QuietModeInfo {
-                    is_quiet: false,
+                    is_quiet: rule_count > 0,
                     until: None,
                     until_display: None,
+                    rule_count,
                 }
             } else {
                 // Still in quiet mode - format the display time
@@ -577,6 +597,7 @@ fn get_quiet_mode_info(
                     is_quiet: true,
                     until: Some(ts),
                     until_display: Some(until_display),
+                    rule_count,
                 }
             }
         }

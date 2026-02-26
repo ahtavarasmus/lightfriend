@@ -65,6 +65,8 @@ pub struct ParsedTags {
     pub platform: Option<String>,
     /// Topic from [topic:X] tag
     pub topic: Option<String>,
+    /// Quiet rule type from [quiet:X] tag: "suppress" or "allow"
+    pub quiet: Option<String>,
     /// Whether any structured tags were found
     pub has_tags: bool,
 }
@@ -113,6 +115,10 @@ pub fn parse_summary_tags(summary: &str) -> ParsedTags {
             }
             "topic" => {
                 tags.topic = Some(value.to_string());
+                tags.has_tags = true;
+            }
+            "quiet" => {
+                tags.quiet = Some(value.to_string());
                 tags.has_tags = true;
             }
             "scope" => {
@@ -3955,12 +3961,60 @@ pub async fn generate_digest(
     }
 }
 
+/// Metadata for contextual quiet-mode rule matching.
+pub struct NotificationMeta {
+    pub platform: Option<String>,
+    pub sender: Option<String>,
+    pub content: Option<String>,
+}
+
+/// Extract platform name from a content_type string like "whatsapp_profile_sms".
+pub fn extract_platform_from_content_type(ct: &str) -> Option<String> {
+    let ct_lower = ct.to_lowercase();
+    for prefix in &[
+        "whatsapp",
+        "telegram",
+        "signal",
+        "email",
+        "calendar",
+        "tesla",
+        "messenger",
+        "instagram",
+        "bluesky",
+        "digest",
+    ] {
+        if ct_lower.starts_with(prefix) {
+            return Some(prefix.to_string());
+        }
+    }
+    None
+}
+
 pub async fn send_notification(
     state: &Arc<AppState>,
     user_id: i32,
     notification: &str,
     content_type: String,
     first_message: Option<String>,
+) {
+    send_notification_with_context(
+        state,
+        user_id,
+        notification,
+        content_type,
+        first_message,
+        None,
+    )
+    .await;
+}
+
+pub async fn send_notification_with_context(
+    state: &Arc<AppState>,
+    user_id: i32,
+    notification: &str,
+    content_type: String,
+    first_message: Option<String>,
+    meta: Option<NotificationMeta>,
 ) {
     // Get current timestamp for message history
     let current_time = std::time::SystemTime::now()
@@ -3989,25 +4043,38 @@ pub async fn send_notification(
         }
     };
 
-    // Check quiet mode - skip notification if user is in quiet mode
-    match state.user_core.get_quiet_mode(user_id) {
-        Ok(Some(0)) => {
+    // Check quiet mode with rule-based filtering
+    let inferred_platform = extract_platform_from_content_type(&content_type);
+    let check_platform = meta
+        .as_ref()
+        .and_then(|m| m.platform.as_deref())
+        .or(inferred_platform.as_deref());
+    let check_sender = meta.as_ref().and_then(|m| m.sender.as_deref());
+    let check_content = meta.as_ref().and_then(|m| m.content.as_deref());
+
+    match state.user_core.check_quiet_with_context(
+        user_id,
+        check_platform,
+        check_sender,
+        check_content,
+    ) {
+        Ok(true) => {
             tracing::debug!(
-                "Skipping notification for user {} - indefinite quiet mode",
-                user_id
-            );
-            return;
-        }
-        Ok(Some(ts)) if ts > current_time => {
-            tracing::debug!(
-                "Skipping notification for user {} - quiet mode until {}",
+                "Suppressed notification for user {} by quiet rule (platform={:?}, sender={:?})",
                 user_id,
-                ts
+                check_platform,
+                check_sender,
             );
             return;
         }
-        _ => {
-            // No quiet mode or expired - proceed with notification
+        Ok(false) => {}
+        Err(e) => {
+            tracing::error!(
+                "Quiet mode check failed for user {}: {} - proceeding with notification",
+                user_id,
+                e
+            );
+            // Fail open - send the notification
         }
     }
 

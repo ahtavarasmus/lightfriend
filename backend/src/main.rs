@@ -418,11 +418,11 @@ async fn main() {
             post(elevenlabs::handle_respond_to_email),
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
-        .route("/api/call/task", post(elevenlabs::handle_create_item_voice))
         .route(
-            "/api/call/monitoring-status",
-            post(elevenlabs::handle_update_monitoring_status_tool_call),
+            "/api/call/tasks/create",
+            post(elevenlabs::handle_create_item_voice),
         )
+        .route("/api/call/tasks", get(elevenlabs::handle_fetch_items_voice))
         .route(
             "/api/call/cancel-message",
             get(elevenlabs::handle_cancel_pending_message_tool_call),
@@ -766,10 +766,6 @@ async fn main() {
         )
         .route(
             "/api/profile/proactive-agent",
-            post(profile_handlers::update_proactive_agent_on),
-        )
-        .route(
-            "/api/profile/proactive-agent",
             get(profile_handlers::get_proactive_agent_on),
         )
         .route(
@@ -779,6 +775,14 @@ async fn main() {
         .route(
             "/api/profile/quiet-mode",
             post(profile_handlers::set_quiet_mode),
+        )
+        .route(
+            "/api/profile/quiet-rules",
+            post(profile_handlers::add_quiet_rule),
+        )
+        .route(
+            "/api/profile/quiet-rules",
+            delete(profile_handlers::delete_quiet_rules),
         )
         .route(
             "/api/profile/get_nearby_places",

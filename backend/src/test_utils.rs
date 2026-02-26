@@ -623,6 +623,7 @@ pub mod mock_user_core {
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
+        pub quiet_rules: Mutex<HashMap<i32, Vec<crate::models::user_models::Item>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -648,6 +649,7 @@ pub mod mock_user_core {
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
                 quiet_mode: Mutex::new(HashMap::new()),
+                quiet_rules: Mutex::new(HashMap::new()),
                 llm_provider: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
@@ -1232,6 +1234,32 @@ pub mod mock_user_core {
         }
 
         fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
+            // Global quiet mode deletes all items including rules
+            self.quiet_rules.lock().unwrap().remove(&user_id);
+            if let Some(ts) = until {
+                // Store as an item in quiet_rules too for get_quiet_rules/check_quiet_with_context
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+                let end_time = if ts == 0 { None } else { Some(ts) };
+                let item = crate::models::user_models::Item {
+                    id: Some(now), // use timestamp as fake id
+                    user_id,
+                    summary: "Quiet mode.".to_string(),
+                    monitor: false,
+                    next_check_at: end_time,
+                    priority: 0,
+                    source_id: Some("quiet_mode".to_string()),
+                    created_at: now,
+                };
+                self.quiet_rules
+                    .lock()
+                    .unwrap()
+                    .entry(user_id)
+                    .or_default()
+                    .push(item);
+            }
             self.quiet_mode.lock().unwrap().insert(user_id, until);
             Ok(())
         }
@@ -1244,6 +1272,130 @@ pub mod mock_user_core {
                 .get(&user_id)
                 .copied()
                 .flatten())
+        }
+
+        fn add_quiet_rule(
+            &self,
+            user_id: i32,
+            until: i32,
+            rule_type: &str,
+            platform: Option<&str>,
+            sender: Option<&str>,
+            topic: Option<&str>,
+            description: &str,
+        ) -> Result<i32, DieselError> {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let mut tags = format!("[quiet:{}]", rule_type);
+            if let Some(p) = platform {
+                tags.push_str(&format!(" [platform:{}]", p));
+            }
+            if let Some(s) = sender {
+                tags.push_str(&format!(" [sender:{}]", s));
+            }
+            if let Some(t) = topic {
+                tags.push_str(&format!(" [topic:{}]", t));
+            }
+            let summary = format!("{}\n{}", tags, description);
+
+            let id = now; // use timestamp as fake id
+            let item = crate::models::user_models::Item {
+                id: Some(id),
+                user_id,
+                summary,
+                monitor: false,
+                next_check_at: Some(until),
+                priority: 0,
+                source_id: Some("quiet_mode".to_string()),
+                created_at: now,
+            };
+            self.quiet_rules
+                .lock()
+                .unwrap()
+                .entry(user_id)
+                .or_default()
+                .push(item);
+            Ok(id)
+        }
+
+        fn get_quiet_rules(
+            &self,
+            user_id: i32,
+        ) -> Result<Vec<crate::models::user_models::Item>, DieselError> {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let items = self
+                .quiet_rules
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .cloned()
+                .unwrap_or_default();
+
+            // Filter out expired
+            let active: Vec<_> = items
+                .into_iter()
+                .filter(|item| match item.next_check_at {
+                    None => true,
+                    Some(ts) => ts > now,
+                })
+                .collect();
+            Ok(active)
+        }
+
+        fn check_quiet_with_context(
+            &self,
+            user_id: i32,
+            platform: Option<&str>,
+            sender: Option<&str>,
+            content: Option<&str>,
+        ) -> Result<bool, DieselError> {
+            let items = self.get_quiet_rules(user_id)?;
+
+            if items.is_empty() {
+                return Ok(false);
+            }
+
+            let mut has_global_suppress = false;
+            let mut suppress_rules = Vec::new();
+            let mut allow_rules = Vec::new();
+
+            for item in &items {
+                let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                match tags.quiet.as_deref() {
+                    None => has_global_suppress = true,
+                    Some("suppress") => suppress_rules.push(tags),
+                    Some("allow") => allow_rules.push(tags),
+                    _ => {}
+                }
+            }
+
+            if has_global_suppress {
+                return Ok(true);
+            }
+
+            for rule in &suppress_rules {
+                if crate::repositories::user_core::rule_matches(rule, platform, sender, content) {
+                    return Ok(true);
+                }
+            }
+
+            if !allow_rules.is_empty() {
+                let any_match = allow_rules.iter().any(|rule| {
+                    crate::repositories::user_core::rule_matches(rule, platform, sender, content)
+                });
+                if !any_match {
+                    return Ok(true);
+                }
+            }
+
+            Ok(false)
         }
     }
 }

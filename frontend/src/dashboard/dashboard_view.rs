@@ -283,6 +283,8 @@ struct QuietModeResponse {
     is_quiet: bool,
     until: Option<i32>,
     until_display: Option<String>,
+    #[serde(default)]
+    rule_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -674,6 +676,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             is_quiet: s.quiet_mode.is_quiet,
             until: s.quiet_mode.until,
             until_display: s.quiet_mode.until_display.clone(),
+            rule_count: s.quiet_mode.rule_count,
         })
         .unwrap_or_default();
 
