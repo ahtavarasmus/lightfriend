@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use web_sys::HtmlInputElement;
+use web_sys::HtmlTextAreaElement;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::{json, Value};
 use crate::utils::api::Api;
@@ -7,7 +7,7 @@ use crate::utils::ws::WsConnection;
 use crate::dashboard::media_panel::{MediaPanel, MediaItem, extract_video_id};
 use crate::dashboard::tesla_quick_panel::TeslaQuickPanel;
 use crate::dashboard::youtube_quick_panel::YouTubeQuickPanel;
-use super::timeline_view::UpcomingTask;
+use super::timeline_view::UpcomingItem;
 use std::rc::Rc;
 
 // @mention system - available mentions
@@ -93,12 +93,12 @@ const CHAT_STYLES: &str = r#"
 }
 .chat-input-row {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 0.5rem;
     width: 100%;
     box-sizing: border-box;
 }
-.chat-input-row input[type="text"] {
+.chat-input-row textarea {
     flex: 1 1 0;
     min-width: 50px;
     background: rgba(255, 255, 255, 0.06) !important;
@@ -109,12 +109,18 @@ const CHAT_STYLES: &str = r#"
     font-size: 0.95rem !important;
     outline: none;
     box-sizing: border-box;
+    font-family: inherit;
+    resize: none;
+    overflow-y: hidden;
+    min-height: 38px;
+    max-height: 120px;
+    line-height: 1.4;
 }
-.chat-input-row input[type="text"]:focus {
+.chat-input-row textarea:focus {
     border-color: rgba(30, 144, 255, 0.5);
     background: rgba(255, 255, 255, 0.08);
 }
-.chat-input-row input[type="text"]::placeholder {
+.chat-input-row textarea::placeholder {
     color: #666;
 }
 .chat-btn {
@@ -190,20 +196,20 @@ const CHAT_STYLES: &str = r#"
     color: rgba(255, 255, 255, 0.8);
 }
 /* Task preview panel */
-.task-preview-panel {
+.item-preview-panel {
     background: rgba(30, 144, 255, 0.1);
     border: 1px solid rgba(30, 144, 255, 0.3);
     border-radius: 12px;
     padding: 0.75rem;
     margin-top: 0.5rem;
 }
-.task-preview-header {
+.item-preview-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.5rem;
 }
-.task-preview-label {
+.item-preview-label {
     color: #7eb2ff;
     font-size: 0.8rem;
     font-weight: 500;
@@ -211,7 +217,7 @@ const CHAT_STYLES: &str = r#"
     align-items: center;
     gap: 0.4rem;
 }
-.task-preview-close {
+.item-preview-close {
     background: transparent;
     border: none;
     color: #666;
@@ -221,20 +227,20 @@ const CHAT_STYLES: &str = r#"
     border-radius: 4px;
     transition: all 0.2s;
 }
-.task-preview-close:hover {
+.item-preview-close:hover {
     color: #999;
     background: rgba(255, 255, 255, 0.05);
 }
-.task-preview-content {
+.item-preview-content {
     cursor: pointer;
     padding: 0.5rem;
     border-radius: 8px;
     transition: background 0.2s;
 }
-.task-preview-content:hover {
+.item-preview-content:hover {
     background: rgba(30, 144, 255, 0.1);
 }
-.task-preview-time {
+.item-preview-time {
     color: #fff;
     font-size: 0.9rem;
     font-weight: 500;
@@ -242,32 +248,45 @@ const CHAT_STYLES: &str = r#"
     align-items: center;
     gap: 0.4rem;
 }
-.task-preview-time i {
+.item-preview-time i {
     color: #7eb2ff;
 }
-.task-preview-date {
+.item-preview-date {
     color: #888;
     font-weight: 400;
 }
-.task-preview-desc {
+.item-preview-desc {
     color: #ccc;
     font-size: 0.85rem;
     margin-top: 0.25rem;
     line-height: 1.4;
 }
-.task-preview-source {
+.item-preview-source {
     color: #7eb2ff;
     font-size: 0.75rem;
     margin-top: 0.15rem;
     opacity: 0.8;
 }
-.task-preview-condition {
-    color: #e8a838;
-    font-size: 0.75rem;
+.item-preview-meta {
+    display: flex;
+    gap: 0.4rem;
     margin-top: 0.15rem;
-    font-style: italic;
+    flex-wrap: wrap;
 }
-.task-preview-hint {
+.item-preview-meta span {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgba(255,255,255,0.08);
+    color: #aaa;
+}
+.item-preview-monitor {
+    color: #7eb2ff !important;
+}
+.item-preview-notify {
+    color: #e8a838 !important;
+}
+.item-preview-hint {
     color: #666;
     font-size: 0.75rem;
     margin-top: 0.5rem;
@@ -331,21 +350,27 @@ pub struct ChatBoxProps {
     #[prop_or(false)]
     pub tesla_connected: bool,
     #[prop_or_default]
-    pub focused_task: Option<UpcomingTask>,
+    pub focused_item: Option<UpcomingItem>,
     #[prop_or_default]
-    pub on_task_cleared: Callback<()>,
-    /// Callback when a task is created via chat - passes the task ID
+    pub on_item_cleared: Callback<()>,
+    /// Callback when an item is created via chat - passes the item ID
     #[prop_or_default]
-    pub on_task_created: Callback<i32>,
-    /// Task preview (shown after creation, before entering edit mode)
+    pub on_item_created: Callback<i32>,
+    /// Item preview (shown after creation, before entering edit mode)
     #[prop_or_default]
-    pub preview_task: Option<UpcomingTask>,
-    /// Callback when user clicks preview task to edit it
+    pub preview_item: Option<UpcomingItem>,
+    /// Callback when user clicks preview item to edit it
     #[prop_or_default]
-    pub on_preview_click: Callback<UpcomingTask>,
-    /// Callback to close task preview
+    pub on_preview_click: Callback<UpcomingItem>,
+    /// Callback to close item preview
     #[prop_or_default]
     pub on_preview_close: Callback<()>,
+    /// Pre-fill text for the chat input (e.g. from digest suggestion)
+    #[prop_or_default]
+    pub prefill_text: Option<String>,
+    /// Called after prefill text is consumed so parent can clear it
+    #[prop_or_default]
+    pub on_prefill_consumed: Option<Callback<()>>,
 }
 
 #[function_component(ChatBox)]
@@ -355,6 +380,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let chat_bot_reply = use_state(|| None::<String>);
     let chat_input = use_state(|| String::new());
     let chat_loading = use_state(|| false);
+    let chat_status = use_state(|| "...".to_string()); // Status text shown during loading
     let chat_error = use_state(|| None::<String>);
     let chat_input_ref = use_node_ref();
 
@@ -533,7 +559,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 // Small delay to ensure DOM is updated
                 let chat_input_ref = chat_input_ref.clone();
                 gloo_timers::callback::Timeout::new(100, move || {
-                    if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                    if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                         let _ = input.focus();
                     }
                 }).forget();
@@ -543,23 +569,56 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         );
     }
 
-    // Clear chat history when a task is selected for editing
+    // Pre-fill chat input when prefill_text prop changes
+    {
+        let chat_input = chat_input.clone();
+        let chat_input_ref = chat_input_ref.clone();
+        let on_prefill_consumed = props.on_prefill_consumed.clone();
+        use_effect_with_deps(
+            move |text: &Option<String>| {
+                if let Some(text) = text {
+                    chat_input.set(text.clone());
+                    let chat_input_ref = chat_input_ref.clone();
+                    gloo_timers::callback::Timeout::new(50, move || {
+                        if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
+                            let _ = input.focus();
+                            // Auto-resize to fit prefilled content
+                            {
+                                use wasm_bindgen::JsCast;
+                                let el: &web_sys::HtmlElement = input.unchecked_ref();
+                                let _ = el.style().set_property("height", "auto");
+                                let scroll_h = el.scroll_height();
+                                let _ = el.style().set_property("height", &format!("{}px", scroll_h));
+                            }
+                        }
+                    }).forget();
+                    if let Some(cb) = &on_prefill_consumed {
+                        cb.emit(());
+                    }
+                }
+                || ()
+            },
+            props.prefill_text.clone(),
+        );
+    }
+
+    // Clear chat history when an item is selected for editing
     {
         let chat_user_msg = chat_user_msg.clone();
         let chat_bot_reply = chat_bot_reply.clone();
         let chat_error = chat_error.clone();
-        let focused_task_id = props.focused_task.as_ref().and_then(|t| t.task_id);
+        let focused_item_id = props.focused_item.as_ref().and_then(|t| t.item_id);
         use_effect_with_deps(
-            move |task_id: &Option<i32>| {
-                if task_id.is_some() {
-                    // Clear chat when task is selected
+            move |id: &Option<i32>| {
+                if id.is_some() {
+                    // Clear chat when item is selected
                     chat_user_msg.set(None);
                     chat_bot_reply.set(None);
                     chat_error.set(None);
                 }
                 || ()
             },
-            focused_task_id,
+            focused_item_id,
         );
     }
 
@@ -568,15 +627,16 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let chat_user_msg = chat_user_msg.clone();
         let chat_bot_reply = chat_bot_reply.clone();
         let chat_loading = chat_loading.clone();
+        let chat_status = chat_status.clone();
         let chat_error = chat_error.clone();
         let refetch_usage = props.on_usage_change.clone();
         let chat_image = chat_image.clone();
         let chat_image_preview = chat_image_preview.clone();
         let detected_media_send = detected_media.clone();
         let media_playing_send = media_playing.clone();
-        let focused_task = props.focused_task.clone();
-        let on_task_cleared = props.on_task_cleared.clone();
-        let on_task_created = props.on_task_created.clone();
+        let focused_item = props.focused_item.clone();
+        let on_item_cleared = props.on_item_cleared.clone();
+        let on_item_created = props.on_item_created.clone();
         let chat_input_ref = chat_input_ref.clone();
         let ws_conn_send = ws_conn.clone();
 
@@ -593,6 +653,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let chat_user_msg = chat_user_msg.clone();
             let chat_bot_reply = chat_bot_reply.clone();
             let chat_loading = chat_loading.clone();
+            let chat_status = chat_status.clone();
             let chat_error = chat_error.clone();
             let refetch_usage = refetch_usage.clone();
             let chat_image = chat_image.clone();
@@ -600,14 +661,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let image_file = (*chat_image).clone();
             let detected_media = detected_media_send.clone();
             let media_playing = media_playing_send.clone();
-            let focused_task = focused_task.clone();
-            let on_task_cleared = on_task_cleared.clone();
-            let on_task_created = on_task_created.clone();
+            let focused_item = focused_item.clone();
+            let on_item_cleared = on_item_cleared.clone();
+            let on_item_created = on_item_created.clone();
             let chat_input_ref = chat_input_ref.clone();
 
-            // Set user message and clear previous reply (only for regular chat, not task editing)
-            let is_task_edit = focused_task.is_some();
-            if !is_task_edit {
+            // Set user message and clear previous reply (only for regular chat, not item editing)
+            let is_item_edit = focused_item.is_some();
+            if !is_item_edit {
                 let display_msg = if has_image {
                     if message.trim().is_empty() {
                         "[Image]".to_string()
@@ -621,151 +682,280 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 chat_bot_reply.set(None);
             }
             chat_loading.set(true);
+            chat_status.set("Thinking...".to_string());
             chat_error.set(None);
             chat_input.set(String::new());
 
-            // Try WebSocket for text-only regular chat (not task edit, not image)
-            if !is_task_edit && !has_image && !message.trim().is_empty() {
-                if let Some(conn) = (*ws_conn_send).as_ref() {
-                    if conn.send(&json!({"type": "chat", "message": message}).to_string()) {
-                        // Sent via WS - response comes through on_message callback
-                        return;
-                    }
-                }
-            }
+            // Use SSE streaming for text-only messages (no image, not item edit)
+            let use_sse = !is_item_edit && image_file.is_none();
 
-            // Fallback to REST API
-            spawn_local(async move {
-                // Check if we're in task edit mode
-                let result = if let Some(task) = &focused_task {
-                    // Task edit mode - call edit endpoint
-                    if let Some(task_id) = task.task_id {
-                        Api::post(&format!("/api/tasks/{}/edit-ai", task_id))
-                            .json(&json!({ "instruction": message }))
-                            .unwrap()
-                            .send()
-                            .await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Task has no ID".to_string()))
-                    }
-                } else if let Some(file) = image_file {
-                    // Send with image
-                    let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
-                    if let Ok(buffer) = array_buffer {
-                        let uint8_array = js_sys::Uint8Array::new(&buffer);
-                        let bytes: Vec<u8> = uint8_array.to_vec();
-                        let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                        let content_type = file.type_();
+            if use_sse {
+                // SSE streaming path
+                use wasm_bindgen::JsCast;
+                use wasm_bindgen::closure::Closure;
 
-                        Api::post("/api/chat/web")
-                            .json(&json!({
-                                "message": message,
-                                "image": base64_image,
-                                "image_type": content_type
-                            }))
-                            .unwrap()
-                            .send()
-                            .await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Failed to read image".to_string()))
-                    }
-                } else {
-                    // Send text only
-                    Api::post("/api/chat/web")
-                        .json(&json!({ "message": message }))
-                        .unwrap()
-                        .send()
-                        .await
-                };
+                let encoded_msg = js_sys::encode_uri_component(&message).as_string().unwrap_or_default();
+                let url = format!("{}/api/chat/web-stream?message={}", crate::config::get_backend_url(), encoded_msg);
 
-                // Clear image after sending
-                chat_image.set(None);
-                chat_image_preview.set(None);
-
-                match result {
-                    Ok(response) => {
-                        if response.ok() {
-                            match response.json::<Value>().await {
-                                Ok(data) => {
-                                    let reply = data["message"].as_str().unwrap_or("No response").to_string();
-
-                                    // For task edits, show the response and refresh
-                                    if focused_task.is_some() {
-                                        // Show the AI's response/explanation
-                                        chat_bot_reply.set(Some(reply));
-
-                                        // Dispatch event to refresh dashboard (updates task details)
-                                        if let Some(window) = web_sys::window() {
-                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                            let _ = window.dispatch_event(&event);
-                                        }
-                                        // Refocus the input for continued editing (with delay to ensure re-render completes)
-                                        let chat_input_ref = chat_input_ref.clone();
-                                        gloo_timers::callback::Timeout::new(100, move || {
-                                            if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
-                                                let _ = input.focus();
-                                            }
-                                        }).forget();
-                                        // Stay in task edit mode - don't call on_task_cleared
-                                    } else {
-                                        // Regular chat - show in message history
+                let mut init = web_sys::EventSourceInit::new();
+                init.set_with_credentials(true);
+                let es = match web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
+                    Ok(es) => es,
+                    Err(_) => {
+                        // Fall back to POST if EventSource creation fails
+                        chat_status.set("...".to_string());
+                        let chat_bot_reply = chat_bot_reply.clone();
+                        let chat_loading = chat_loading.clone();
+                        let chat_error = chat_error.clone();
+                        let refetch_usage = refetch_usage.clone();
+                        let detected_media = detected_media.clone();
+                        let media_playing = media_playing.clone();
+                        let on_item_created = on_item_created.clone();
+                        spawn_local(async move {
+                            match Api::post("/api/chat/web")
+                                .json(&json!({ "message": message })).unwrap()
+                                .send().await
+                            {
+                                Ok(response) if response.ok() => {
+                                    if let Ok(data) = response.json::<Value>().await {
+                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
                                         chat_bot_reply.set(Some(reply));
                                         refetch_usage.emit(());
-
-                                        // Check for media results from AI tool calls
-                                        if let Some(media_arr) = data["media"].as_array() {
-                                            let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
-                                                Some(MediaItem {
-                                                    platform: m["platform"].as_str()?.to_string(),
-                                                    video_id: m["video_id"].as_str()?.to_string(),
-                                                    title: m["title"].as_str().unwrap_or("").to_string(),
-                                                    thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
-                                                    duration: m["duration"].as_str().map(|s| s.to_string()),
-                                                    channel: m["channel"].as_str().map(|s| s.to_string()),
-                                                    original_url: None, // AI search results don't have original URLs
-                                                })
-                                            }).collect();
-                                            if !media_items.is_empty() {
-                                                detected_media.set(media_items);
-                                                media_playing.set(false);
-                                            }
-                                        }
-
-                                        // Check if a task was created - trigger preview
-                                        if let Some(task_id) = data["created_task_id"].as_i64() {
-                                            on_task_created.emit(task_id as i32);
-                                        }
-
-                                        // Dispatch event for other components
-                                        if let Some(window) = web_sys::window() {
-                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                            let _ = window.dispatch_event(&event);
+                                        if let Some(item_id) = data["created_item_id"].as_i64() {
+                                            on_item_created.emit(item_id as i32);
                                         }
                                     }
                                 }
+                                Ok(response) => {
+                                    if let Ok(data) = response.json::<Value>().await {
+                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                        chat_error.set(Some(err));
+                                    }
+                                }
                                 Err(_) => {
-                                    chat_error.set(Some("Failed to parse response".to_string()));
+                                    chat_error.set(Some("Network error".to_string()));
                                 }
                             }
-                        } else {
-                            let status = response.status();
-                            match response.json::<Value>().await {
-                                Ok(data) => {
-                                    let err = data["error"].as_str().unwrap_or("Request failed").to_string();
-                                    chat_error.set(Some(err));
+                            chat_loading.set(false);
+                        });
+                        return;
+                    }
+                };
+
+                // onmessage handler for SSE events
+                let chat_status_msg = chat_status.clone();
+                let chat_bot_reply_msg = chat_bot_reply.clone();
+                let chat_loading_msg = chat_loading.clone();
+                let chat_error_msg = chat_error.clone();
+                let refetch_usage_msg = refetch_usage.clone();
+                let detected_media_msg = detected_media.clone();
+                let media_playing_msg = media_playing.clone();
+                let on_item_created_msg = on_item_created.clone();
+                let es_ref = es.clone();
+
+                let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+                    if let Some(data_str) = event.data().as_string() {
+                        if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
+                            let step = data["step"].as_str().unwrap_or("");
+                            match step {
+                                "thinking" | "tool_call" | "retry" => {
+                                    if let Some(msg) = data["message"].as_str() {
+                                        chat_status_msg.set(msg.to_string());
+                                    }
                                 }
-                                Err(e) => {
-                                    chat_error.set(Some(format!("Request failed ({}): {}", status, e)));
+                                "complete" => {
+                                    let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                    chat_bot_reply_msg.set(Some(reply));
+                                    refetch_usage_msg.emit(());
+
+                                    // Check for media results
+                                    if let Some(media_arr) = data["media"].as_array() {
+                                        let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
+                                            Some(MediaItem {
+                                                platform: m["platform"].as_str()?.to_string(),
+                                                video_id: m["video_id"].as_str()?.to_string(),
+                                                title: m["title"].as_str().unwrap_or("").to_string(),
+                                                thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
+                                                duration: m["duration"].as_str().map(|s| s.to_string()),
+                                                channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                original_url: None,
+                                            })
+                                        }).collect();
+                                        if !media_items.is_empty() {
+                                            detected_media_msg.set(media_items);
+                                            media_playing_msg.set(false);
+                                        }
+                                    }
+
+                                    // Check if an item was created
+                                    if let Some(item_id) = data["created_item_id"].as_i64() {
+                                        on_item_created_msg.emit(item_id as i32);
+                                    }
+
+                                    // Dispatch event for other components
+                                    if let Some(window) = web_sys::window() {
+                                        let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                        let _ = window.dispatch_event(&event);
+                                    }
+
+                                    chat_loading_msg.set(false);
+                                    es_ref.close();
                                 }
+                                "error" => {
+                                    let msg = data["message"].as_str().unwrap_or("An error occurred").to_string();
+                                    chat_error_msg.set(Some(msg));
+                                    chat_loading_msg.set(false);
+                                    es_ref.close();
+                                }
+                                _ => {}
                             }
                         }
                     }
-                    Err(_) => {
-                        chat_error.set(Some("Network error".to_string()));
+                }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+
+                es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                onmessage.forget();
+
+                // onerror handler
+                let chat_error_err = chat_error.clone();
+                let chat_loading_err = chat_loading.clone();
+                let es_err = es.clone();
+                let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                    // Only set error if we haven't received a complete/error event yet
+                    if *chat_loading_err {
+                        chat_error_err.set(Some("Connection lost. Please try again.".to_string()));
+                        chat_loading_err.set(false);
                     }
-                }
-                chat_loading.set(false);
-            });
+                    es_err.close();
+                }) as Box<dyn FnMut(web_sys::Event)>);
+
+                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                onerror.forget();
+            } else {
+                // POST path for image uploads and item edits
+                spawn_local(async move {
+                    let result = if let Some(item) = &focused_item {
+                        // Item edit mode - call edit endpoint
+                        if let Some(id) = item.item_id {
+                            Api::post(&format!("/api/items/{}/edit-ai", id))
+                                .json(&json!({ "instruction": message }))
+                                .unwrap()
+                                .send()
+                                .await
+                        } else {
+                            Err(gloo_net::Error::GlooError("Item has no ID".to_string()))
+                        }
+                    } else if let Some(file) = image_file {
+                        // Send with image
+                        let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
+                        if let Ok(buffer) = array_buffer {
+                            let uint8_array = js_sys::Uint8Array::new(&buffer);
+                            let bytes: Vec<u8> = uint8_array.to_vec();
+                            let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                            let content_type = file.type_();
+
+                            Api::post("/api/chat/web")
+                                .json(&json!({
+                                    "message": message,
+                                    "image": base64_image,
+                                    "image_type": content_type
+                                }))
+                                .unwrap()
+                                .send()
+                                .await
+                        } else {
+                            Err(gloo_net::Error::GlooError("Failed to read image".to_string()))
+                        }
+                    } else {
+                        // Shouldn't happen (SSE path handles text-only), but fallback
+                        Api::post("/api/chat/web")
+                            .json(&json!({ "message": message }))
+                            .unwrap()
+                            .send()
+                            .await
+                    };
+
+                    // Clear image after sending
+                    chat_image.set(None);
+                    chat_image_preview.set(None);
+
+                    match result {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<Value>().await {
+                                    Ok(data) => {
+                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
+
+                                        // For item edits, show the response and refresh
+                                        if focused_item.is_some() {
+                                            chat_bot_reply.set(Some(reply));
+
+                                            if let Some(window) = web_sys::window() {
+                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                                let _ = window.dispatch_event(&event);
+                                            }
+                                            let chat_input_ref = chat_input_ref.clone();
+                                            gloo_timers::callback::Timeout::new(100, move || {
+                                                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
+                                                    let _ = input.focus();
+                                                }
+                                            }).forget();
+                                        } else {
+                                            chat_bot_reply.set(Some(reply));
+                                            refetch_usage.emit(());
+
+                                            if let Some(media_arr) = data["media"].as_array() {
+                                                let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
+                                                    Some(MediaItem {
+                                                        platform: m["platform"].as_str()?.to_string(),
+                                                        video_id: m["video_id"].as_str()?.to_string(),
+                                                        title: m["title"].as_str().unwrap_or("").to_string(),
+                                                        thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
+                                                        duration: m["duration"].as_str().map(|s| s.to_string()),
+                                                        channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                        original_url: None,
+                                                    })
+                                                }).collect();
+                                                if !media_items.is_empty() {
+                                                    detected_media.set(media_items);
+                                                    media_playing.set(false);
+                                                }
+                                            }
+
+                                            if let Some(item_id) = data["created_item_id"].as_i64() {
+                                                on_item_created.emit(item_id as i32);
+                                            }
+
+                                            if let Some(window) = web_sys::window() {
+                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                                let _ = window.dispatch_event(&event);
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        chat_error.set(Some("Failed to parse response".to_string()));
+                                    }
+                                }
+                            } else {
+                                let status = response.status();
+                                match response.json::<Value>().await {
+                                    Ok(data) => {
+                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                        chat_error.set(Some(err));
+                                    }
+                                    Err(e) => {
+                                        chat_error.set(Some(format!("Request failed ({}): {}", status, e)));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            chat_error.set(Some("Network error".to_string()));
+                        }
+                    }
+                    chat_loading.set(false);
+                });
+            }
         })
     };
 
@@ -857,7 +1047,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     };
 
     // Connection shortcut icon callbacks
-    let show_shortcuts = props.focused_task.is_none()
+    let show_shortcuts = props.focused_item.is_none()
         && (props.tesla_connected || props.youtube_connected);
     let tesla_shortcut_click = {
         let chat_input = chat_input.clone();
@@ -868,7 +1058,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             active_mention.set(Some("tesla".to_string()));
             let chat_input_ref = chat_input_ref.clone();
             gloo_timers::callback::Timeout::new(50, move || {
-                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
             }).forget();
@@ -883,12 +1073,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             active_mention.set(Some("youtube".to_string()));
             let chat_input_ref = chat_input_ref.clone();
             gloo_timers::callback::Timeout::new(50, move || {
-                if let Some(input) = chat_input_ref.cast::<HtmlInputElement>() {
+                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
             }).forget();
         })
     };
+
+    let status_text = (*chat_status).clone();
 
     html! {
         <>
@@ -910,7 +1102,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Loading state in task edit mode (no user message shown)
                             (None, None, true) => html! {
-                                <div class="chat-msg assistant loading">{"..."}</div>
+                                <div class="chat-msg assistant loading">{&status_text}</div>
                             },
                             // No messages, not loading - show nothing
                             (None, None, false) => html! {},
@@ -918,7 +1110,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             (Some(user_msg), None, true) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
-                                    <div class="chat-msg assistant loading">{"..."}</div>
+                                    <div class="chat-msg assistant loading">{&status_text}</div>
                                 </>
                             },
                             // Regular chat: both messages
@@ -934,7 +1126,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Task edit mode: loading with existing reply
                             (None, Some(_), true) => html! {
-                                <div class="chat-msg assistant loading">{"..."}</div>
+                                <div class="chat-msg assistant loading">{&status_text}</div>
                             },
                         }
                     }
@@ -979,7 +1171,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 <div class="chat-input-row">
                     {
                         // Hide call button when in task edit mode
-                        if props.focused_task.is_some() {
+                        if props.focused_item.is_some() {
                             html! {}
                         } else if *call_active {
                             let duration = *call_duration;
@@ -1023,13 +1215,13 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             }
                         }
                     }
-                    <input
-                        type="text"
+                    <textarea
                         class="chat-text-input"
                         style="flex: 1 1 0; min-width: 100px;"
+                        rows="1"
                         ref={chat_input_ref.clone()}
                         value={(*chat_input).clone()}
-                        placeholder={if props.focused_task.is_some() { "Describe an edit to the task..." } else { "Ask your assistant..." }}
+                        placeholder={if props.focused_item.is_some() { "Edit this item..." } else { "Ask your assistant..." }}
                         disabled={*chat_loading || *call_active}
                         oninput={{
                             let chat_input = chat_input.clone();
@@ -1037,8 +1229,16 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             let media_playing = media_playing.clone();
                             let active_mention = active_mention.clone();
                             Callback::from(move |e: InputEvent| {
-                                let input: HtmlInputElement = e.target_unchecked_into();
+                                let input: HtmlTextAreaElement = e.target_unchecked_into();
                                 let value = input.value();
+                                // Auto-resize textarea to fit content
+                                {
+                                    use wasm_bindgen::JsCast;
+                                    let el: &web_sys::HtmlElement = input.unchecked_ref();
+                                    let _ = el.style().set_property("height", "auto");
+                                    let scroll_h = el.scroll_height();
+                                    let _ = el.style().set_property("height", &format!("{}px", scroll_h));
+                                }
                                 chat_input.set(value.clone());
 
                                 // @mention detection - check for @word pattern at end of input
@@ -1148,10 +1348,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 }
                             })
                         }}
-                        onkeypress={{
+                        onkeydown={{
                             let on_send = on_send.clone();
                             Callback::from(move |e: KeyboardEvent| {
-                                if e.key() == "Enter" {
+                                if e.key() == "Enter" && !e.shift_key() {
+                                    e.prevent_default();
                                     on_send.emit(());
                                 }
                             })
@@ -1231,7 +1432,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 // Media panel for detected URLs and AI search results
                 // Hide media panel when editing a task (will reappear when task editing ends)
                 {
-                    if !(*detected_media).is_empty() && props.focused_task.is_none() {
+                    if !(*detected_media).is_empty() && props.focused_item.is_none() {
                         let on_media_close = {
                             let detected_media = detected_media.clone();
                             let media_playing = media_playing.clone();
@@ -1289,14 +1490,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 // @mention control panels
                 {
                     match (*active_mention).as_deref() {
-                        Some("tesla") if props.focused_task.is_none() => {
+                        Some("tesla") if props.focused_item.is_none() => {
                             let on_close = {
                                 let active_mention = active_mention.clone();
                                 Callback::from(move |_: ()| active_mention.set(None))
                             };
                             html! { <TeslaQuickPanel on_close={on_close} /> }
                         }
-                        Some("youtube") if props.focused_task.is_none() => {
+                        Some("youtube") if props.focused_item.is_none() => {
                             let on_close = {
                                 let active_mention = active_mention.clone();
                                 Callback::from(move |_: ()| active_mention.set(None))
@@ -1321,47 +1522,52 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         _ => html! {}
                     }
                 }
-                // Task preview panel (shown after task creation)
+                // Item preview panel (shown after item creation)
                 {
-                    if let Some(task) = &props.preview_task {
-                        let task_for_click = task.clone();
+                    if let Some(item) = &props.preview_item {
+                        let item_for_click = item.clone();
                         let on_click = props.on_preview_click.clone();
                         let on_close = props.on_preview_close.clone();
-                        let is_recurring = task.trigger_type == "recurring_email" || task.trigger_type == "recurring_messaging";
                         html! {
-                            <div class="task-preview-panel">
-                                <div class="task-preview-header">
-                                    <span class="task-preview-label">{if is_recurring { "Monitoring active" } else { "Task scheduled" }}</span>
-                                    <button class="task-preview-close" onclick={Callback::from(move |_: MouseEvent| on_close.emit(()))}>{"x"}</button>
+                            <div class="item-preview-panel">
+                                <div class="item-preview-header">
+                                    <span class="item-preview-label">{"Item scheduled"}</span>
+                                    <button class="item-preview-close" onclick={Callback::from(move |_: MouseEvent| on_close.emit(()))}>{"x"}</button>
                                 </div>
-                                <div class="task-preview-content" onclick={Callback::from(move |_: MouseEvent| on_click.emit(task_for_click.clone()))}>
-                                    <div class="task-preview-time">
-                                        {if is_recurring {
-                                            html! { <i class="fa-solid fa-eye"></i> }
-                                        } else {
-                                            html! { <i class="fa-regular fa-clock"></i> }
-                                        }}
-                                        {&task.time_display}
-                                        {if !task.date_display.is_empty() {
-                                            html! { <span class="task-preview-date">{format!(" - {}", &task.date_display)}</span> }
+                                <div class="item-preview-content" onclick={Callback::from(move |_: MouseEvent| on_click.emit(item_for_click.clone()))}>
+                                    <div class="item-preview-time">
+                                        <i class="fa-regular fa-clock"></i>
+                                        {&item.time_display}
+                                        {if !item.date_display.is_empty() {
+                                            html! { <span class="item-preview-date">{format!(" - {}", &item.date_display)}</span> }
                                         } else {
                                             html! {}
                                         }}
                                     </div>
-                                    if let Some(ref src) = task.sources_display {
-                                        <div class="task-preview-source">{format!("Check: {}", src)}</div>
-                                    }
-                                    if let Some(ref cond) = task.condition {
-                                        <div class="task-preview-condition">{format!("Condition: {}", cond)}</div>
-                                    }
-                                    <div class="task-preview-desc">
-                                        {if task.condition.is_some() || task.sources_display.is_some() {
-                                            format!("Then: {}", &task.description)
+                                    <div class="item-preview-meta">
+                                        {if let Some(ref t) = item.item_type {
+                                            html! { <span class="item-preview-type">{t}</span> }
                                         } else {
-                                            task.description.clone()
+                                            html! {}
+                                        }}
+                                        {if item.monitor {
+                                            html! { <span class="item-preview-monitor">{"monitoring"}</span> }
+                                        } else {
+                                            html! {}
+                                        }}
+                                        {if let Some(ref n) = item.notify {
+                                            html! { <span class="item-preview-notify">{n}</span> }
+                                        } else {
+                                            html! {}
                                         }}
                                     </div>
-                                    <div class="task-preview-hint">{"Click to edit"}</div>
+                                    if let Some(ref src) = item.sources_display {
+                                        <div class="item-preview-source">{format!("Sources: {}", src)}</div>
+                                    }
+                                    <div class="item-preview-desc">
+                                        {super::emoji_utils::emojify_description(&item.description)}
+                                    </div>
+                                    <div class="item-preview-hint">{"Click to edit"}</div>
                                 </div>
                             </div>
                         }

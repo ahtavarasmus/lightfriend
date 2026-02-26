@@ -42,34 +42,13 @@ pub fn is_notification_only_country_code(country: &str) -> bool {
     !LOCAL_NUMBER_COUNTRY_CODES.contains(&country)
 }
 
-/// Check if a Stripe price ID is the Monitor plan
-pub fn is_monitor_plan_price(price_id: &str) -> bool {
-    std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
-        .map(|p| p == price_id)
-        .unwrap_or(false)
-}
-
-/// Check if a Stripe price ID is the Digest plan
-pub fn is_digest_plan_price(price_id: &str) -> bool {
-    std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
-        .map(|p| p == price_id)
-        .unwrap_or(false)
-}
-
-/// Check if a Stripe price ID is a legacy euro plan (for migration)
-pub fn is_legacy_euro_plan_price(price_id: &str) -> bool {
-    let legacy_price_ids = [
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI").ok(),
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_NL").ok(),
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK").ok(),
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU").ok(),
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER").ok(),
+/// Check if a Stripe price ID is the Assistant plan (new tier)
+pub fn is_assistant_plan_price(price_id: &str) -> bool {
+    let ids = [
+        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID").ok(),
+        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US").ok(),
     ];
-
-    legacy_price_ids
-        .iter()
-        .filter_map(|p| p.as_ref())
-        .any(|p| p == price_id)
+    ids.iter().filter_map(|p| p.as_ref()).any(|p| p == price_id)
 }
 
 /// Check if a Stripe price ID is the BYOT plan

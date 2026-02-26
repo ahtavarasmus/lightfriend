@@ -1,0 +1,414 @@
+//! Centralized context assembly for LLM calls.
+//!
+//! `ContextBuilder` assembles what the agent needs before any LLM call.
+//! Bare `.build()` gives just client/provider/model (cheap - 1 DB query).
+//! Chain `.with_user_context()`, `.with_tools()`, `.with_history()` to
+//! opt into heavier layers.
+
+use std::sync::Arc;
+
+use chrono::{FixedOffset, Utc};
+use openai_api_rs::v1::api::OpenAIClient;
+use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
+
+use crate::models::user_models::{ContactProfile, User, UserInfo, UserSettings};
+use crate::{AiProvider, AppState, ModelPurpose, UserCoreOps};
+
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error)]
+pub enum ContextError {
+    #[error("user not found: {0}")]
+    UserNotFound(String),
+
+    #[error("database error: {0}")]
+    Database(#[from] diesel::result::Error),
+
+    #[error("timezone error: {0}")]
+    Timezone(String),
+
+    #[error("AI client error: {0}")]
+    AiClient(String),
+}
+
+// ---------------------------------------------------------------------------
+// TimezoneInfo
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TimezoneInfo {
+    pub tz_str: String,
+    pub offset_hours: i32,
+    pub offset_minutes: i32,
+    pub offset_string: String,
+    pub formatted_now: String,
+    pub fixed_offset: FixedOffset,
+}
+
+impl TimezoneInfo {
+    fn compute(tz_str: &str) -> Self {
+        let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(tz_str) {
+            Ok((h, m)) => (h, m),
+            Err(_) => {
+                tracing::error!(
+                    "Failed to get timezone offset for {}, defaulting to UTC",
+                    tz_str
+                );
+                (0, 0)
+            }
+        };
+
+        let offset_seconds = hours * 3600 + minutes * 60 * if hours >= 0 { 1 } else { -1 };
+        let fixed_offset = FixedOffset::east_opt(offset_seconds)
+            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+
+        let formatted_now = Utc::now().with_timezone(&fixed_offset).to_rfc3339();
+
+        let offset_string = format!(
+            "{}{:02}:{:02}",
+            if hours >= 0 { "+" } else { "-" },
+            hours.abs(),
+            minutes.abs()
+        );
+
+        Self {
+            tz_str: tz_str.to_string(),
+            offset_hours: hours,
+            offset_minutes: minutes,
+            offset_string,
+            formatted_now,
+            fixed_offset,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentContext
+// ---------------------------------------------------------------------------
+
+pub struct AgentContext {
+    // Always present (bare .build())
+    pub state: Arc<AppState>,
+    pub user: User,
+    pub user_id: i32,
+    pub provider: AiProvider,
+    pub client: OpenAIClient,
+    pub model: String,
+    pub current_time_unix: i32,
+
+    // Opt-in via .with_user_context()
+    pub user_settings: Option<UserSettings>,
+    pub user_info: Option<UserInfo>,
+    pub timezone: Option<TimezoneInfo>,
+    pub contact_profiles: Option<Vec<ContactProfile>>,
+    pub user_given_info: Option<String>,
+    pub contacts_prompt_fragment: Option<String>,
+
+    // Opt-in via .with_tools() / .with_mcp_tools()
+    pub tools: Option<Vec<chat_completion::Tool>>,
+
+    // Opt-in via .with_history()
+    pub conversation_history: Option<Vec<ChatCompletionMessage>>,
+}
+
+// ---------------------------------------------------------------------------
+// ContextBuilder
+// ---------------------------------------------------------------------------
+
+pub struct ContextBuilder {
+    state: Arc<AppState>,
+    user: Option<User>,
+    user_id: Option<i32>,
+    phone: Option<String>,
+    want_user_context: bool,
+    want_tools: bool,
+    want_mcp_tools: bool,
+    want_history: bool,
+    history_depth_override: Option<i32>,
+}
+
+impl ContextBuilder {
+    pub fn for_user(state: &Arc<AppState>, user_id: i32) -> Self {
+        Self {
+            state: Arc::clone(state),
+            user: None,
+            user_id: Some(user_id),
+            phone: None,
+            want_user_context: false,
+            want_tools: false,
+            want_mcp_tools: false,
+            want_history: false,
+            history_depth_override: None,
+        }
+    }
+
+    pub fn for_phone(state: &Arc<AppState>, phone: &str) -> Self {
+        Self {
+            state: Arc::clone(state),
+            user: None,
+            user_id: None,
+            phone: Some(phone.to_string()),
+            want_user_context: false,
+            want_tools: false,
+            want_mcp_tools: false,
+            want_history: false,
+            history_depth_override: None,
+        }
+    }
+
+    pub fn for_resolved_user(state: &Arc<AppState>, user: User) -> Self {
+        let user_id = user.id;
+        Self {
+            state: Arc::clone(state),
+            user: Some(user),
+            user_id: Some(user_id),
+            phone: None,
+            want_user_context: false,
+            want_tools: false,
+            want_mcp_tools: false,
+            want_history: false,
+            history_depth_override: None,
+        }
+    }
+
+    /// Fetch user settings, info, timezone, contacts.
+    pub fn with_user_context(mut self) -> Self {
+        self.want_user_context = true;
+        self
+    }
+
+    pub fn with_tools(mut self) -> Self {
+        self.want_tools = true;
+        self
+    }
+
+    pub fn with_mcp_tools(mut self) -> Self {
+        self.want_mcp_tools = true;
+        self
+    }
+
+    /// Load conversation history. Implies `with_user_context()` (needs save_context).
+    pub fn with_history(mut self) -> Self {
+        self.want_history = true;
+        self.want_user_context = true;
+        self
+    }
+
+    pub fn with_history_depth(mut self, depth: i32) -> Self {
+        self.want_history = true;
+        self.history_depth_override = Some(depth);
+        self
+    }
+
+    pub async fn build(self) -> Result<AgentContext, ContextError> {
+        // 1. Resolve user
+        let user = if let Some(u) = self.user {
+            u
+        } else if let Some(phone) = &self.phone {
+            self.state
+                .user_core
+                .find_by_phone_number(phone)?
+                .ok_or_else(|| ContextError::UserNotFound(phone.clone()))?
+        } else if let Some(uid) = self.user_id {
+            self.state
+                .user_core
+                .find_by_id(uid)?
+                .ok_or_else(|| ContextError::UserNotFound(format!("id={}", uid)))?
+        } else {
+            return Err(ContextError::UserNotFound(
+                "no user identifier provided".to_string(),
+            ));
+        };
+        let user_id = user.id;
+
+        // 2. LLM provider + client + model (always)
+        let llm_pref = self
+            .state
+            .user_core
+            .get_llm_provider(user_id)
+            .unwrap_or(None);
+        let provider = self
+            .state
+            .ai_config
+            .provider_for_user_with_preference(llm_pref.as_deref());
+        let client = self
+            .state
+            .ai_config
+            .create_client(provider)
+            .map_err(|e| ContextError::AiClient(e.to_string()))?;
+        let model = self
+            .state
+            .ai_config
+            .model(provider, ModelPurpose::Default)
+            .to_string();
+
+        let current_time_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+
+        // 3. User context (opt-in)
+        let (
+            user_settings,
+            user_info,
+            timezone,
+            contact_profiles,
+            user_given_info,
+            contacts_prompt_fragment,
+        ) = if self.want_user_context {
+            let settings = self.state.user_core.get_user_settings(user_id)?;
+            let info = self.state.user_core.get_user_info(user_id)?;
+
+            let tz_str = info.timezone.as_deref().unwrap_or("UTC");
+            let tz = TimezoneInfo::compute(tz_str);
+
+            let profiles = self
+                .state
+                .user_repository
+                .get_contact_profiles(user_id)
+                .unwrap_or_default();
+
+            let fragment = if profiles.is_empty() {
+                String::new()
+            } else {
+                let nicknames: Vec<&str> = profiles.iter().map(|p| p.nickname.as_str()).collect();
+                format!(
+                        "\n\nYour contacts: {}. When the user refers to a contact by name, use the matching nickname in tool calls.",
+                        nicknames.join(", ")
+                    )
+            };
+
+            let given_info = info.info.clone().unwrap_or_default();
+
+            (
+                Some(settings),
+                Some(info),
+                Some(tz),
+                Some(profiles),
+                Some(given_info),
+                Some(fragment),
+            )
+        } else {
+            (None, None, None, None, None, None)
+        };
+
+        // 4. Tools (opt-in)
+        let tools = if self.want_tools {
+            let mut tool_defs = self.state.tool_registry.definitions();
+            if self.want_mcp_tools {
+                let mcp =
+                    crate::tool_call_utils::mcp::get_mcp_tools_for_user(&self.state, user_id).await;
+                tool_defs.extend(mcp);
+            }
+            Some(tool_defs)
+        } else {
+            None
+        };
+
+        // 5. History (opt-in, requires user_settings for save_context)
+        let conversation_history = if self.want_history {
+            let depth = self.history_depth_override.unwrap_or_else(|| {
+                user_settings
+                    .as_ref()
+                    .and_then(|s| s.save_context)
+                    .unwrap_or(0)
+            });
+            if depth > 0 {
+                let raw = self
+                    .state
+                    .user_repository
+                    .get_conversation_history(user_id, depth as i64, true)
+                    .unwrap_or_default();
+                Some(convert_history(raw))
+            } else {
+                Some(Vec::new())
+            }
+        } else {
+            None
+        };
+
+        Ok(AgentContext {
+            state: self.state,
+            user,
+            user_id,
+            provider,
+            client,
+            model,
+            current_time_unix,
+            user_settings,
+            user_info,
+            timezone,
+            contact_profiles,
+            user_given_info,
+            contacts_prompt_fragment,
+            tools,
+            conversation_history,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// History conversion
+// ---------------------------------------------------------------------------
+
+const SKIP_FROM_HISTORY: &[&str] = &[
+    "fetch_chat_messages",
+    "fetch_recent_messages",
+    "fetch_emails",
+    "fetch_specific_email",
+    "get_weather",
+    "fetch_calendar_events",
+    "direct_response",
+];
+
+pub fn convert_history(
+    raw: Vec<crate::models::user_models::MessageHistory>,
+) -> Vec<ChatCompletionMessage> {
+    let mut out = Vec::new();
+
+    for msg in raw.into_iter().rev() {
+        if msg.role == "assistant" && msg.tool_calls_json.is_some() {
+            continue;
+        }
+
+        if msg.role == "tool" {
+            if let Some(ref tool_name) = msg.tool_name {
+                if SKIP_FROM_HISTORY.contains(&tool_name.as_str()) {
+                    continue;
+                }
+            }
+
+            let context_content = format!("[Previous result: {}]", msg.encrypted_content);
+            out.push(ChatCompletionMessage {
+                role: chat_completion::MessageRole::assistant,
+                content: chat_completion::Content::Text(context_content),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            });
+            continue;
+        }
+
+        let role = match msg.role.as_str() {
+            "user" => chat_completion::MessageRole::user,
+            "assistant" => chat_completion::MessageRole::assistant,
+            _ => continue,
+        };
+
+        if msg.encrypted_content.trim().is_empty() {
+            continue;
+        }
+
+        out.push(ChatCompletionMessage {
+            role,
+            content: chat_completion::Content::Text(msg.encrypted_content),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+
+    out
+}

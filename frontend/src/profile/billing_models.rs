@@ -62,9 +62,9 @@ pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;
 /// Usage projection response - all values in NOTIFICATION UNITS (not currency)
 #[derive(Deserialize, Clone, PartialEq, Debug)]
 pub struct UsageProjection {
-    /// User's plan type: "monitor" or "digest"
+    /// User's plan type: "assistant", "autopilot", or "byot"
     pub plan_type: Option<String>,
-    /// Plan capacity in notifications per month (40 for monitor, 120 for digest)
+    /// Plan capacity in notifications per month
     pub plan_capacity: i32,
     /// Whether auto top-up is enabled
     pub has_auto_topup: bool,

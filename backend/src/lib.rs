@@ -59,6 +59,7 @@ pub mod utils {
     pub mod matrix_auth;
     pub mod migration_proxy;
     pub mod notification_utils;
+    pub mod plan_features;
     pub mod tesla_keys;
     pub mod tool_exec;
     pub mod usage;
@@ -91,13 +92,29 @@ pub mod api {
     pub mod twilio_sms;
     pub mod twilio_utils;
 }
+pub mod context;
 pub mod error;
+pub mod tools {
+    pub mod calendar;
+    pub mod email;
+    pub mod items;
+    pub mod messaging;
+    pub mod quiet_mode;
+    pub mod registry;
+    pub mod respond;
+    pub mod schedule;
+    pub mod search;
+    pub mod tesla;
+    pub mod weather;
+    pub mod youtube;
+}
 pub mod models {
     pub mod mcp_models;
     pub mod user_models;
 }
 pub mod repositories {
     pub mod admin_alert_repository;
+    pub mod item_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
@@ -137,6 +154,7 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
+pub use repositories::item_repository::ItemRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
@@ -188,6 +206,7 @@ pub struct AppState {
     pub db_pool: DbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
+    pub item_repository: Arc<ItemRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
@@ -228,4 +247,59 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub tool_registry: tools::registry::ToolRegistry,
+}
+
+/// Build the tool registry with all static tool handlers.
+pub fn build_tool_registry() -> tools::registry::ToolRegistry {
+    use tools::registry::ToolRegistry;
+
+    let mut registry = ToolRegistry::new();
+
+    // Search tools
+    registry.register(Arc::new(tools::search::PerplexityHandler));
+    registry.register(Arc::new(tools::search::FirecrawlHandler));
+    registry.register(Arc::new(tools::search::DirectionsHandler));
+    registry.register(Arc::new(tools::search::QrScanHandler));
+
+    // Weather
+    registry.register(Arc::new(tools::weather::WeatherHandler));
+
+    // Email tools
+    registry.register(Arc::new(tools::email::FetchEmailsHandler));
+    registry.register(Arc::new(tools::email::FetchSpecificEmailHandler));
+    registry.register(Arc::new(tools::email::SendEmailHandler));
+    registry.register(Arc::new(tools::email::RespondEmailHandler));
+
+    // Messaging tools
+    registry.register(Arc::new(tools::messaging::SearchContactsHandler));
+    registry.register(Arc::new(tools::messaging::FetchRecentHandler));
+    registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
+    registry.register(Arc::new(tools::messaging::SendMessageHandler));
+
+    // Calendar tools
+    registry.register(Arc::new(tools::calendar::FetchEventsHandler));
+    registry.register(Arc::new(tools::calendar::CreateEventHandler));
+
+    // Schedule/management tools
+    registry.register(Arc::new(tools::schedule::CreateItemHandler));
+
+    // Tesla tools
+    registry.register(Arc::new(tools::tesla::TeslaControlHandler));
+    registry.register(Arc::new(tools::tesla::TeslaSwitchHandler));
+
+    // YouTube
+    registry.register(Arc::new(tools::youtube::YouTubeHandler));
+
+    // Item tracking tools
+    registry.register(Arc::new(tools::items::ListTrackedItemsHandler));
+    registry.register(Arc::new(tools::items::UpdateTrackedItemHandler));
+
+    // Direct response
+    registry.register(Arc::new(tools::respond::DirectResponseHandler));
+
+    // Quiet mode
+    registry.register(Arc::new(tools::quiet_mode::QuietModeHandler));
+
+    registry
 }

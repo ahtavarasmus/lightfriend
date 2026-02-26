@@ -61,30 +61,6 @@ body {
     background: #1a1a1a;
 }
 
-.pdl-btn {
-    position: fixed;
-    top: 50px;
-    right: 20px;
-    z-index: 1000; /* Ensure it stays above other elements */
-    padding: 10px 20px;
-    border-radius: 6px;
-    font-weight: 600;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    transition: transform 0.2s ease;
-}
-
-.pdl-btn:hover {
-    transform: translateY(-2px);
-}
-
-/* Add media query for mobile responsiveness */
-@media (max-width: 768px) {
-    .pdl-btn {
-        right: 10px;
-        padding: 8px 16px;
-    }
-}
-
 .top-nav {
     position: fixed;
     top: 0;
@@ -120,25 +96,6 @@ body {
     align-items: center;
     position: relative;
 }
-.nav-logo-dark {
-    color: white;
-    text-decoration: none;
-    font-size: 2.8rem;
-    font-weight: 600;
-    background: linear-gradient(45deg, #7EB2FF, #4169E1);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    transition: opacity 0.3s ease;
-    z-index: 11;
-}
-
-.nav-logo-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    z-index: 11;
-}
-
 .nav-logo {
     color: white;
     text-decoration: none;
@@ -271,84 +228,6 @@ body {
     .nav-seen-on {
         display: none;
     }
-}
-
-.selector-btn {
-    width: 100%;
-    padding: 1rem;
-    background: #1e2634;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    text-align: center;
-}
-
-.selector-btn:hover {
-    background: #2c3644;
-}
-
-.phone-display {
-    margin-top: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    background: #1e2634;
-    border-radius: 8px;
-    padding: 1rem;
-}
-
-.phone-number-item {
-    padding: 0.75rem;
-    border-radius: 6px;
-    background: #2c3644;
-    transition: background 0.2s ease;
-    cursor: pointer;
-}
-
-.phone-number-item:hover {
-    background: #374357;
-}
-
-.number-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.country {
-    color: #8b96a7;
-    font-size: 0.9rem;
-}
-
-.number {
-    color: #fff;
-    font-family: monospace;
-    font-size: 1rem;
-}
-
-.selected-indicator {
-    color: #1E90FF;
-    font-size: 1.2rem;
-    margin-left: 0.5rem;
-}
-
-.phone-number-item.selected {
-    background: #374357;
-    border: 1px solid rgba(30, 144, 255, 0.3);
-}
-
-.country {
-    color: #8b96a7;
-    font-size: 0.9rem;
-}
-
-.number {
-    color: #fff;
-    font-family: monospace;
-    font-size: 1rem;
 }
 
 .broadcast-section {

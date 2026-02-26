@@ -1,8 +1,7 @@
 //! Centralized AI provider configuration
 //!
-//! Users can choose their preferred provider in settings:
-//! - "openai" (default): Uses OpenRouter with GPT-4o (faster, smarter)
-//! - "tinfoil": Uses Tinfoil for privacy-focused LLM (slower but private)
+//! Tinfoil is the sole AI provider for all users.
+//! OpenRouter code is kept as dead-code fallback but never selected.
 
 use openai_api_rs::v1::api::OpenAIClient;
 
@@ -23,8 +22,8 @@ pub enum ModelPurpose {
 /// Centralized AI configuration
 #[derive(Debug, Clone)]
 pub struct AiConfig {
-    // We keep OpenRouter key always available as fallback
-    openrouter_api_key: String,
+    // OpenRouter key kept as optional fallback (only needed if OpenRouter is used directly)
+    openrouter_api_key: Option<String>,
     tinfoil_api_key: Option<String>,
 }
 
@@ -32,22 +31,18 @@ impl AiConfig {
     /// Create a minimal AiConfig for tests (no actual API calls will be made)
     pub fn default_for_tests() -> Self {
         Self {
-            openrouter_api_key: "test_openrouter_key".to_string(),
-            tinfoil_api_key: None,
+            openrouter_api_key: Some("test_openrouter_key".to_string()),
+            tinfoil_api_key: Some("test_tinfoil_key".to_string()),
         }
     }
 
     pub fn from_env() -> Self {
-        let openrouter_api_key =
-            std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY required");
+        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY").ok();
 
-        let tinfoil_api_key = std::env::var("TINFOIL_API_KEY").ok();
+        let tinfoil_api_key =
+            Some(std::env::var("TINFOIL_API_KEY").expect("TINFOIL_API_KEY required"));
 
-        if tinfoil_api_key.is_some() {
-            tracing::info!("AI config initialized: OpenRouter + Tinfoil available");
-        } else {
-            tracing::info!("AI config initialized: OpenRouter only");
-        }
+        tracing::info!("AI config initialized: Tinfoil (primary)");
 
         Self {
             openrouter_api_key,
@@ -55,18 +50,10 @@ impl AiConfig {
         }
     }
 
-    /// Determine which provider to use based on user's preference setting
-    ///
-    /// Determine which provider to use based on user's preference setting.
-    ///
-    /// preference: The user's llm_provider setting from the database
-    /// - Some("tinfoil") -> use Tinfoil
-    /// - Some("openai") or None -> use OpenRouter (default)
-    pub fn provider_for_user_with_preference(&self, preference: Option<&str>) -> AiProvider {
-        match preference {
-            Some("tinfoil") if self.tinfoil_api_key.is_some() => AiProvider::Tinfoil,
-            _ => AiProvider::OpenRouter,
-        }
+    /// Always returns Tinfoil. The preference parameter is accepted for
+    /// backward compatibility but ignored.
+    pub fn provider_for_user_with_preference(&self, _preference: Option<&str>) -> AiProvider {
+        AiProvider::Tinfoil
     }
 
     /// Get the endpoint URL for a provider
@@ -80,7 +67,10 @@ impl AiConfig {
     /// Get the API key for a provider
     pub fn api_key(&self, provider: AiProvider) -> &str {
         match provider {
-            AiProvider::OpenRouter => &self.openrouter_api_key,
+            AiProvider::OpenRouter => self
+                .openrouter_api_key
+                .as_ref()
+                .expect("OPENROUTER_API_KEY not set but OpenRouter provider requested"),
             AiProvider::Tinfoil => self
                 .tinfoil_api_key
                 .as_ref()
@@ -91,26 +81,22 @@ impl AiConfig {
     /// Get the model name for a provider and purpose
     ///
     /// OpenRouter: GPT-4o for everything (supports vision + tools)
-    /// Tinfoil: kimi-k2-5 for tool calling (via streaming), qwen3-vl-30b for vision
+    /// Tinfoil: kimi-k2-5 for everything (supports vision + tools in single call)
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
             // OpenRouter models
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
             (AiProvider::OpenRouter, ModelPurpose::VisionOnly) => "openai/gpt-4o-2024-11-20",
 
-            // Tinfoil models (kept for future use when tool calling is reliable)
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
-            (AiProvider::Tinfoil, ModelPurpose::VisionOnly) => "qwen3-vl-30b",
+            // Tinfoil: single model for all purposes
+            (AiProvider::Tinfoil, _) => "kimi-k2-5",
         }
     }
 
-    /// Check if a provider needs two-step vision processing
-    /// (i.e., vision model can't do tool calling)
-    pub fn needs_two_step_vision(&self, provider: AiProvider) -> bool {
-        match provider {
-            AiProvider::OpenRouter => false, // GPT-4o handles vision + tools together
-            AiProvider::Tinfoil => true,     // Must describe image first, then tool-call
-        }
+    /// Check if a provider needs two-step vision processing.
+    /// Both providers now support vision + tools in a single call.
+    pub fn needs_two_step_vision(&self, _provider: AiProvider) -> bool {
+        false
     }
 
     /// Create an OpenAI-compatible client for a specific provider
@@ -122,6 +108,29 @@ impl AiConfig {
             .with_endpoint(self.endpoint(provider))
             .with_api_key(self.api_key(provider))
             .build()
+    }
+
+    /// Sanitize message content for Tinfoil API.
+    /// Replaces characters known to cause 500 errors (e.g. `@` in email addresses).
+    fn sanitize_content(s: &str) -> String {
+        s.replace('@', "(at)")
+    }
+
+    /// Apply sanitization to all message content in a serialized request body.
+    /// Only used for Tinfoil provider.
+    fn sanitize_request_body(body: &mut serde_json::Value) {
+        if let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) {
+            for msg in messages {
+                if let Some(content) = msg
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string())
+                {
+                    let sanitized = Self::sanitize_content(&content);
+                    msg["content"] = serde_json::Value::String(sanitized);
+                }
+            }
+        }
     }
 
     /// Make a chat completion request directly via reqwest.
@@ -164,6 +173,8 @@ impl AiConfig {
                     // actual tool call is produced
                     obj.remove("max_tokens");
                 }
+                // Sanitize message content for Tinfoil
+                Self::sanitize_request_body(&mut body);
                 client
                     .post(&url)
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -521,7 +532,7 @@ impl AiConfig {
             tool_call_id: None,
         }];
 
-        let request = ChatCompletionRequest::new(model.to_string(), messages).max_tokens(500);
+        let request = ChatCompletionRequest::new(model.to_string(), messages);
 
         let response = self.chat_completion(provider, &request).await?;
 

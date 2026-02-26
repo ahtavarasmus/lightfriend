@@ -3,7 +3,7 @@
 //! Tests the public structs used for AI response parsing and digest data.
 
 use backend::proactive::utils::{
-    CalendarEvent, DigestData, MatchResponse, MessageInfo, TaskMatchResponse,
+    CalendarEvent, DigestData, ItemMatchResponse, MatchResponse, MessageInfo,
 };
 
 // =========================================================================
@@ -75,61 +75,38 @@ fn test_match_response_parses_null_optional_fields() {
 }
 
 // =========================================================================
-// TaskMatchResponse Parsing Tests
+// ItemMatchResponse Parsing Tests
 // =========================================================================
 
 #[test]
 fn test_task_match_response_parses_matched_task() {
-    let json = r#"{
-        "task_id": 42,
-        "sms_message": "Your package has arrived at the office",
-        "first_message": "Hey, your package is here!",
-        "match_explanation": "Message mentions package delivery"
-    }"#;
+    let json = r#"{"is_match": true, "task_id": 42}"#;
 
-    let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+    let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(response.is_match);
     assert_eq!(response.task_id, Some(42));
-    assert_eq!(
-        response.sms_message,
-        Some("Your package has arrived at the office".to_string())
-    );
-    assert_eq!(
-        response.first_message,
-        Some("Hey, your package is here!".to_string())
-    );
-    assert_eq!(
-        response.match_explanation,
-        Some("Message mentions package delivery".to_string())
-    );
 }
 
 #[test]
 fn test_task_match_response_parses_no_match() {
-    let json = r#"{
-        "task_id": null,
-        "sms_message": "",
-        "first_message": "",
-        "match_explanation": ""
-    }"#;
+    let json = r#"{"is_match": false, "task_id": null}"#;
 
-    let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+    let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(!response.is_match);
     assert!(response.task_id.is_none());
-    assert_eq!(response.sms_message, Some("".to_string()));
 }
 
 #[test]
 fn test_task_match_response_parses_minimal_response() {
-    // LLM might return just task_id
-    let json = r#"{"task_id": null}"#;
+    // LLM might return empty object
+    let json = r#"{}"#;
 
-    let response: TaskMatchResponse = serde_json::from_str(json).unwrap();
+    let response: ItemMatchResponse = serde_json::from_str(json).unwrap();
 
+    assert!(!response.is_match);
     assert!(response.task_id.is_none());
-    assert!(response.sms_message.is_none());
-    assert!(response.first_message.is_none());
-    assert!(response.match_explanation.is_none());
 }
 
 // =========================================================================

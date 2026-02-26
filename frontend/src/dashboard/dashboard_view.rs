@@ -6,16 +6,12 @@ use crate::utils::api::Api;
 use crate::profile::billing_models::UserProfile;
 
 use super::chat_box::ChatBox;
-use super::triage_indicator::{
-    AttentionItem as TriageAttentionItem, ConversationMessage,
-    QuickReplyButton, QuickReplyFlow,
-};
-use super::timeline_view::{UpcomingTask, UpcomingDigest};
-use super::dashboard_footer::{DashboardFooter, NextDigestInfo};
+use super::triage_indicator::AttentionItem;
+use super::timeline_view::{UpcomingItem, UpcomingDigest};
 use super::settings_panel::{SettingsPanel, SettingsTab};
-use super::activity_panel::ActivityPanel;
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
+use super::items_status::ItemsStatusSection;
 
 const DASHBOARD_STYLES: &str = r#"
 .peace-dashboard {
@@ -27,7 +23,7 @@ const DASHBOARD_STYLES: &str = r#"
     padding: 0;
     position: relative;
 }
-.task-focus-overlay {
+.item-focus-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -37,7 +33,7 @@ const DASHBOARD_STYLES: &str = r#"
     z-index: 100;
     cursor: pointer;
 }
-.task-edit-container {
+.item-edit-container {
     position: relative;
     z-index: 101;
 }
@@ -47,7 +43,7 @@ const DASHBOARD_STYLES: &str = r#"
     gap: 1.5rem;
     transition: all 0.2s ease;
 }
-.peace-main.task-focused {
+.peace-main.item-focused {
     filter: blur(4px);
     opacity: 0.6;
 }
@@ -56,7 +52,7 @@ const DASHBOARD_STYLES: &str = r#"
     background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.1), transparent);
     margin: 1rem 0;
 }
-.task-detail-bar {
+.item-detail-bar {
     background: rgba(30, 30, 46, 0.95);
     border: 1px solid rgba(126, 178, 255, 0.3);
     border-radius: 12px;
@@ -67,41 +63,54 @@ const DASHBOARD_STYLES: &str = r#"
     justify-content: space-between;
     gap: 1rem;
 }
-.task-detail-info {
+.item-detail-info {
     flex: 1;
     min-width: 0;
 }
-.task-detail-time {
+.item-detail-time {
     font-size: 1rem;
     font-weight: 600;
     color: #7EB2FF;
 }
-.task-detail-desc {
+.item-detail-desc {
     font-size: 0.85rem;
     color: #999;
     white-space: pre-wrap;
     word-wrap: break-word;
     line-height: 1.4;
 }
-.task-detail-source {
+.item-detail-source {
     font-size: 0.75rem;
     color: #7eb2ff;
     margin-top: 0.15rem;
     opacity: 0.8;
 }
-.task-detail-condition {
-    font-size: 0.75rem;
-    color: #e8a838;
+.item-detail-meta {
+    display: flex;
+    gap: 0.4rem;
     margin-top: 0.15rem;
-    font-style: italic;
+    flex-wrap: wrap;
 }
-.task-detail-note {
+.item-detail-meta span {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgba(255,255,255,0.08);
+    color: #aaa;
+}
+.item-detail-monitor {
+    color: #7eb2ff !important;
+}
+.item-detail-notify {
+    color: #e8a838 !important;
+}
+.item-detail-note {
     font-size: 0.7rem;
     color: #666;
     margin-top: 0.25rem;
     font-style: italic;
 }
-.task-btn-delete {
+.item-btn-delete {
     background: rgba(255, 68, 68, 0.15);
     border: 1px solid rgba(255, 68, 68, 0.4);
     color: #ff6b6b;
@@ -111,10 +120,10 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 0.85rem;
     transition: all 0.2s;
 }
-.task-btn-delete:hover {
+.item-btn-delete:hover {
     background: rgba(255, 68, 68, 0.25);
 }
-.task-btn-close {
+.item-btn-close {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: #888;
@@ -123,7 +132,7 @@ const DASHBOARD_STYLES: &str = r#"
     cursor: pointer;
     font-size: 0.85rem;
 }
-.task-btn-close:hover {
+.item-btn-close:hover {
     color: #fff;
     background: rgba(255, 255, 255, 0.1);
 }
@@ -251,20 +260,22 @@ struct DashboardSummaryResponse {
     attention_count: i32,
     attention_items: Vec<AttentionItemResponse>,
     next_scheduled: Option<ScheduledItemResponse>,
-    upcoming_tasks: Vec<UpcomingTaskResponse>,
+    upcoming_items: Vec<UpcomingItemResponse>,
     #[serde(default)]
     upcoming_digests: Vec<UpcomingDigestResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
-    next_digest: Option<NextDigestResponse>,
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
-    /// Tasks beyond the current timeline range (for extend button preview)
+    /// Items beyond the current timeline range (for extend button preview)
     #[serde(default)]
-    tasks_beyond: Vec<UpcomingTaskResponse>,
-    /// Total count of tasks beyond the timeline range
+    items_beyond: Vec<UpcomingItemResponse>,
+    /// Total count of items beyond the timeline range
     #[serde(default)]
-    tasks_beyond_count: i32,
+    items_beyond_count: i32,
+    /// Total number of tracked items
+    #[serde(default)]
+    total_tracked_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize, Default)]
@@ -272,6 +283,8 @@ struct QuietModeResponse {
     is_quiet: bool,
     until: Option<i32>,
     until_display: Option<String>,
+    #[serde(default)]
+    rule_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -279,31 +292,40 @@ struct AttentionItemResponse {
     id: i32,
     item_type: String,
     summary: String,
-    timestamp: i32,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    priority: i32,
+    #[serde(default)]
+    monitor: bool,
+    #[serde(default)]
+    next_check_at: Option<i32>,
     source: Option<String>,
     #[serde(default)]
-    suggested_action: Option<String>,
-    #[serde(default)]
-    reasoning: Option<String>,
-    #[serde(default)]
-    context_json: Option<serde_json::Value>,
-    #[serde(default)]
     source_id: Option<String>,
+    #[serde(default)]
+    notify: Option<String>,
+    #[serde(default)]
+    sender: Option<String>,
+    #[serde(default)]
+    platform: Option<String>,
+    #[serde(default)]
+    time_display: Option<String>,
+    #[serde(default)]
+    relative_display: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
 struct ScheduledItemResponse {
     time_display: String,
     description: String,
-    task_id: Option<i32>,
+    item_id: Option<i32>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct UpcomingTaskResponse {
-    task_id: Option<i32>,
+struct UpcomingItemResponse {
+    item_id: Option<i32>,
     timestamp: i32,
-    #[serde(default)]
-    trigger_type: String,
     time_display: String,
     description: String,
     #[serde(default)]
@@ -311,7 +333,11 @@ struct UpcomingTaskResponse {
     #[serde(default)]
     relative_display: String,
     #[serde(default)]
-    condition: Option<String>,
+    item_type: Option<String>,
+    #[serde(default)]
+    monitor: bool,
+    #[serde(default)]
+    notify: Option<String>,
     #[serde(default)]
     sources_display: Option<String>,
 }
@@ -323,14 +349,9 @@ struct WatchedContactResponse {
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct NextDigestResponse {
-    time_display: String,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
 struct UpcomingDigestResponse {
     #[serde(default)]
-    task_id: Option<i32>,
+    item_id: Option<i32>,
     timestamp: i32,
     time_display: String,
     sources: Option<String>,
@@ -356,7 +377,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
     // Panel visibility state
     let settings_open = use_state(|| false);
-    let activity_open = use_state(|| false);
     let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
 
     // Handle URL parameters for opening settings panel with specific tab
@@ -433,14 +453,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Task detail modal state
-    let selected_task = use_state(|| None::<UpcomingTask>);
+    // Item detail modal state
+    let selected_item = use_state(|| None::<UpcomingItem>);
 
-    // Task preview state (shown below chatbox after creation, before entering edit mode)
-    let preview_task = use_state(|| None::<UpcomingTask>);
-
-    // Quick reply card flow state
-    let quick_reply_open = use_state(|| false);
+    // Item preview state (shown below chatbox after creation, before entering edit mode)
+    let preview_item = use_state(|| None::<UpcomingItem>);
 
     // Fetch YouTube connection status
     {
@@ -555,61 +572,48 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     }
 
     // Convert API response to component props
-    let (_attention_count, attention_items) = match (*summary).as_ref() {
+    let (_attention_count, attention_items, total_tracked_count) = match (*summary).as_ref() {
         Some(s) => (
             s.attention_count,
             s.attention_items
                 .iter()
-                .map(|item| {
-                    let ctx = item.context_json.as_ref();
-                    let conversation_snippet = ctx
-                        .and_then(|v| v["conversation_snippet"].as_array())
-                        .map(|arr| arr.iter().filter_map(|entry| {
-                            Some(ConversationMessage {
-                                sender: entry["sender"].as_str()?.to_string(),
-                                text: entry["text"].as_str()?.to_string(),
-                                ts: entry["ts"].as_i64().unwrap_or(0),
-                            })
-                        }).collect())
-                        .unwrap_or_default();
-                    TriageAttentionItem {
-                        id: item.id,
-                        item_type: item.item_type.clone(),
-                        summary: item.summary.clone(),
-                        timestamp: item.timestamp,
-                        source: item.source.clone(),
-                        suggested_action: item.suggested_action.clone(),
-                        reasoning: item.reasoning.clone(),
-                        original_message: ctx
-                            .and_then(|v| v["original_message"].as_str().map(|s| s.to_string())),
-                        source_id: item.source_id.clone(),
-                        conversation_snippet,
-                        service: ctx.and_then(|v| v["service"].as_str().map(|s| s.to_string()))
-                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").next().map(|n| n.to_lowercase()))),
-                        sender_name: ctx.and_then(|v| v["sender_name"].as_str().map(|s| s.to_string()))
-                            .or_else(|| ctx.and_then(|v| v["chat_name"].as_str().map(|s| s.to_string())))
-                            .or_else(|| item.source.as_ref().and_then(|s| s.split(" from ").nth(1).map(|n| n.to_string()))),
-                    }
+                .map(|item| AttentionItem {
+                    id: item.id,
+                    item_type: item.item_type.clone(),
+                    summary: item.summary.clone(),
+                    description: item.description.clone(),
+                    priority: item.priority,
+                    monitor: item.monitor,
+                    next_check_at: item.next_check_at,
+                    source: item.source.clone(),
+                    source_id: item.source_id.clone(),
+                    notify: item.notify.clone(),
+                    sender: item.sender.clone(),
+                    platform: item.platform.clone(),
+                    time_display: item.time_display.clone(),
+                    relative_display: item.relative_display.clone(),
                 })
                 .collect(),
+            s.total_tracked_count,
         ),
-        None => (0, vec![]),
+        None => (0, vec![], 0),
     };
 
-    let upcoming_tasks: Vec<UpcomingTask> = (*summary)
+    let upcoming_items: Vec<UpcomingItem> = (*summary)
         .as_ref()
         .map(|s| {
-            s.upcoming_tasks
+            s.upcoming_items
                 .iter()
-                .map(|t| UpcomingTask {
-                    task_id: t.task_id,
+                .map(|t| UpcomingItem {
+                    item_id: t.item_id,
                     timestamp: t.timestamp,
-                    trigger_type: t.trigger_type.clone(),
                     time_display: t.time_display.clone(),
                     description: t.description.clone(),
                     date_display: t.date_display.clone(),
                     relative_display: t.relative_display.clone(),
-                    condition: t.condition.clone(),
+                    item_type: t.item_type.clone(),
+                    monitor: t.monitor,
+                    notify: t.notify.clone(),
                     sources_display: t.sources_display.clone(),
                 })
                 .collect()
@@ -622,7 +626,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             s.upcoming_digests
                 .iter()
                 .map(|d| UpcomingDigest {
-                    task_id: d.task_id,
+                    item_id: d.item_id,
                     timestamp: d.timestamp,
                     time_display: d.time_display.clone(),
                     sources: d.sources.clone(),
@@ -632,44 +636,39 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .unwrap_or_default();
 
 
-    // Update selected_task with fresh data when summary changes (check both tasks and digests)
+    // Update selected_item with fresh data when summary changes (check both items and digests)
     {
-        let selected_task = selected_task.clone();
-        let upcoming_tasks = upcoming_tasks.clone();
+        let selected_item = selected_item.clone();
+        let upcoming_items_for_effect = upcoming_items.clone();
         let upcoming_digests_for_effect = upcoming_digests.clone();
         use_effect_with_deps(
-            move |(tasks, digests): &(Vec<UpcomingTask>, Vec<UpcomingDigest>)| {
-                if let Some(current) = (*selected_task).as_ref() {
-                    if let Some(task_id) = current.task_id {
-                        if let Some(updated) = tasks.iter().find(|t| t.task_id == Some(task_id)) {
-                            selected_task.set(Some(updated.clone()));
-                        } else if let Some(updated_digest) = digests.iter().find(|d| d.task_id == Some(task_id)) {
-                            let task = UpcomingTask {
-                                task_id: updated_digest.task_id,
+            move |(items, digests): &(Vec<UpcomingItem>, Vec<UpcomingDigest>)| {
+                if let Some(current) = (*selected_item).as_ref() {
+                    if let Some(id) = current.item_id {
+                        if let Some(updated) = items.iter().find(|t| t.item_id == Some(id)) {
+                            selected_item.set(Some(updated.clone()));
+                        } else if let Some(updated_digest) = digests.iter().find(|d| d.item_id == Some(id)) {
+                            let item = UpcomingItem {
+                                item_id: updated_digest.item_id,
                                 timestamp: updated_digest.timestamp,
-                                trigger_type: "once".to_string(),
                                 time_display: updated_digest.time_display.clone(),
                                 description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
                                 date_display: String::new(),
                                 relative_display: String::new(),
-                                condition: None,
+                                item_type: Some("recurring".to_string()),
+                                monitor: false,
+                                notify: None,
                                 sources_display: None,
                             };
-                            selected_task.set(Some(task));
+                            selected_item.set(Some(item));
                         }
                     }
                 }
                 || ()
             },
-            (upcoming_tasks, upcoming_digests_for_effect),
+            (upcoming_items_for_effect, upcoming_digests_for_effect),
         );
     }
-
-    let next_digest = (*summary).as_ref().and_then(|s| {
-        s.next_digest.as_ref().map(|d| NextDigestInfo {
-            time_display: d.time_display.clone(),
-        })
-    });
 
     let quiet_mode = (*summary)
         .as_ref()
@@ -677,6 +676,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             is_quiet: s.quiet_mode.is_quiet,
             until: s.quiet_mode.until,
             until_display: s.quiet_mode.until_display.clone(),
+            rule_count: s.quiet_mode.rule_count,
         })
         .unwrap_or_default();
 
@@ -692,13 +692,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    let on_activity_click = {
-        let activity_open = activity_open.clone();
-        Callback::from(move |_| {
-            activity_open.set(true);
-        })
-    };
-
     let on_settings_close = {
         let settings_open = settings_open.clone();
         Callback::from(move |_| {
@@ -706,30 +699,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    let on_activity_close = {
-        let activity_open = activity_open.clone();
-        Callback::from(move |_| {
-            activity_open.set(false);
-        })
-    };
-
-    // Task click callback from activity panel - close panel and enter edit mode
-    let on_activity_task_click = {
-        let selected_task = selected_task.clone();
-        let activity_open = activity_open.clone();
-        Callback::from(move |task: UpcomingTask| {
-            activity_open.set(false);
-            selected_task.set(Some(task));
-        })
-    };
-
-    // Task delete callback from activity panel
-    let on_activity_task_delete = {
+    // Item delete callback
+    let on_activity_item_delete = {
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |task_id: i32| {
+        Callback::from(move |id: i32| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                if let Ok(resp) = Api::delete(&format!("/api/tasks/{}", task_id)).send().await {
+                if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
                     }
@@ -738,27 +714,27 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Close task modal callback
-    let on_task_modal_close = {
-        let selected_task = selected_task.clone();
+    // Close item modal callback
+    let on_item_modal_close = {
+        let selected_item = selected_item.clone();
         Callback::from(move |_: MouseEvent| {
-            selected_task.set(None);
+            selected_item.set(None);
         })
     };
 
-    // Delete task callback
-    let on_delete_task = {
-        let selected_task = selected_task.clone();
+    // Delete item callback
+    let on_delete_item = {
+        let selected_item = selected_item.clone();
         let fetch_summary = fetch_summary.clone();
         Callback::from(move |_: MouseEvent| {
-            if let Some(task) = (*selected_task).as_ref() {
-                if let Some(task_id) = task.task_id {
-                    let selected_task = selected_task.clone();
+            if let Some(item) = (*selected_item).as_ref() {
+                if let Some(id) = item.item_id {
+                    let selected_item = selected_item.clone();
                     let fetch_summary = fetch_summary.clone();
                     spawn_local(async move {
-                        if let Ok(resp) = Api::delete(&format!("/api/tasks/{}", task_id)).send().await {
+                        if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
                             if resp.ok() {
-                                selected_task.set(None);
+                                selected_item.set(None);
                                 fetch_summary.emit(());
                             }
                         }
@@ -768,23 +744,23 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Callback for when task is cleared after editing
-    let on_task_cleared = {
-        let selected_task = selected_task.clone();
+    // Callback for when item is cleared after editing
+    let on_item_cleared = {
+        let selected_item = selected_item.clone();
         let fetch_summary = fetch_summary.clone();
         Callback::from(move |_: ()| {
-            selected_task.set(None);
+            selected_item.set(None);
             fetch_summary.emit(());
         })
     };
 
-    // Dismiss triage item callback
-    let on_triage_dismiss = {
+    // Dismiss item callback
+    let on_dismiss_item = {
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: TriageAttentionItem| {
+        Callback::from(move |item: AttentionItem| {
             let fetch_summary = fetch_summary.clone();
             spawn_local(async move {
-                let url = format!("/api/triage/{}", item.id);
+                let url = format!("/api/items/{}", item.id);
                 if let Ok(resp) = Api::delete(&url).send().await {
                     if resp.ok() {
                         fetch_summary.emit(());
@@ -794,50 +770,22 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Snooze triage item callback
-    let on_triage_snooze = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: TriageAttentionItem| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                let url = format!("/api/triage/{}/snooze", item.id);
-                if let Ok(req) = Api::post(&url).json(&serde_json::json!({"minutes": 60})) {
-                    if let Ok(resp) = req.send().await {
-                        if resp.ok() {
-                            fetch_summary.emit(());
-                        }
-                    }
-                }
-            });
+    // Chat prefill state (for digest suggestion hint)
+    let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
+
+    // Digest prefill callback - pre-fills chatbox with prompt from digest creator
+    let on_digest_prefill = {
+        let prefill_chat = prefill_chat.clone();
+        Callback::from(move |prompt: String| {
+            prefill_chat.set(Some(prompt));
         })
     };
 
-    // Quick reply flow callbacks
-    let on_open_quick_reply = {
-        let quick_reply_open = quick_reply_open.clone();
+    // Callback to clear prefill after it's consumed
+    let on_prefill_consumed = {
+        let prefill_chat = prefill_chat.clone();
         Callback::from(move |_: ()| {
-            quick_reply_open.set(true);
-        })
-    };
-
-    let on_close_quick_reply = {
-        let quick_reply_open = quick_reply_open.clone();
-        Callback::from(move |_: ()| {
-            quick_reply_open.set(false);
-        })
-    };
-
-    let on_item_sent = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_item: TriageAttentionItem| {
-            fetch_summary.emit(());
-        })
-    };
-
-    let on_item_dismissed = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_item: TriageAttentionItem| {
-            fetch_summary.emit(());
+            prefill_chat.set(None);
         })
     };
 
@@ -845,34 +793,35 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let on_usage_change = fetch_summary.clone();
 
 
-    // Callback for when a task is created via chat - show preview below chatbox
-    let on_task_created = {
-        let preview_task = preview_task.clone();
+    // Callback for when an item is created via chat - show preview below chatbox
+    let on_item_created = {
+        let preview_item = preview_item.clone();
         let fetch_summary = fetch_summary.clone();
-        Callback::from(move |task_id: i32| {
-            // Refresh the dashboard to get the new task
+        Callback::from(move |item_id: i32| {
+            // Refresh the dashboard to get the new item
             fetch_summary.emit(());
 
             // Schedule a check after a short delay to find and show preview
-            let preview_task = preview_task.clone();
+            let preview_item = preview_item.clone();
             gloo_timers::callback::Timeout::new(500, move || {
-                let preview_task = preview_task.clone();
+                let preview_item = preview_item.clone();
                 spawn_local(async move {
-                    if let Ok(response) = Api::get(&format!("/api/tasks/{}", task_id)).send().await {
+                    if let Ok(response) = Api::get(&format!("/api/items/{}", item_id)).send().await {
                         if response.ok() {
-                            if let Ok(task_data) = response.json::<serde_json::Value>().await {
-                                let task = UpcomingTask {
-                                    task_id: task_data["id"].as_i64().map(|i| i as i32),
-                                    timestamp: task_data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
-                                    trigger_type: task_data["trigger_type"].as_str().unwrap_or("once").to_string(),
-                                    time_display: task_data["time_display"].as_str().unwrap_or("").to_string(),
-                                    description: task_data["description"].as_str().unwrap_or("").to_string(),
-                                    date_display: task_data["date_display"].as_str().unwrap_or("").to_string(),
-                                    relative_display: task_data["relative_display"].as_str().unwrap_or("").to_string(),
-                                    condition: task_data["condition"].as_str().map(|s| s.to_string()),
-                                    sources_display: task_data["sources_display"].as_str().map(|s| s.to_string()),
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                let item = UpcomingItem {
+                                    item_id: data["id"].as_i64().map(|i| i as i32),
+                                    timestamp: data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
+                                    time_display: data["time_display"].as_str().unwrap_or("").to_string(),
+                                    description: data["description"].as_str().unwrap_or("").to_string(),
+                                    date_display: data["date_display"].as_str().unwrap_or("").to_string(),
+                                    relative_display: data["relative_display"].as_str().unwrap_or("").to_string(),
+                                    item_type: data["item_type"].as_str().map(|s| s.to_string()),
+                                    monitor: data["monitor"].as_bool().unwrap_or(false),
+                                    notify: data["notify"].as_str().map(|s| s.to_string()),
+                                    sources_display: data["sources_display"].as_str().map(|s| s.to_string()),
                                 };
-                                preview_task.set(Some(task));
+                                preview_item.set(Some(item));
                             }
                         }
                     }
@@ -881,21 +830,21 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Callback for when user clicks on task preview to edit it
+    // Callback for when user clicks on item preview to edit it
     let on_preview_click = {
-        let selected_task = selected_task.clone();
-        let preview_task = preview_task.clone();
-        Callback::from(move |task: UpcomingTask| {
-            selected_task.set(Some(task));
-            preview_task.set(None);
+        let selected_item = selected_item.clone();
+        let preview_item = preview_item.clone();
+        Callback::from(move |item: UpcomingItem| {
+            selected_item.set(Some(item));
+            preview_item.set(None);
         })
     };
 
-    // Callback to close task preview
+    // Callback to close item preview
     let on_preview_close = {
-        let preview_task = preview_task.clone();
+        let preview_item = preview_item.clone();
         Callback::from(move |_: ()| {
-            preview_task.set(None);
+            preview_item.set(None);
         })
     };
 
@@ -903,160 +852,90 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         <>
             <style>{DASHBOARD_STYLES}</style>
             <div class="peace-dashboard">
-                // Overlay for clicking outside to close task edit mode
-                if selected_task.is_some() {
-                    <div class="task-focus-overlay" onclick={on_task_modal_close.clone()}></div>
+                // Overlay for clicking outside to close item edit mode
+                if selected_item.is_some() {
+                    <div class="item-focus-overlay" onclick={on_item_modal_close.clone()}></div>
                 }
 
-                // Chat box and task bar in a container above the overlay
-                <div class={if selected_task.is_some() { "task-edit-container" } else { "" }}>
+                // Chat box and item bar in a container above the overlay
+                <div class={if selected_item.is_some() { "item-edit-container" } else { "" }}>
                     // Show the user's Lightfriend SMS number above chat
                     if let Some(ref num) = props.user_profile.preferred_number {
                         <div class="lf-number-label">
                             {"SMS: "}{num}
                         </div>
                     }
-                    // Chat box - always at the top, pass focused_task for edit mode
+                    // Chat box - always at the top, pass focused_item for edit mode
                     <ChatBox
                         on_usage_change={on_usage_change}
                         youtube_connected={*youtube_connected}
                         tesla_connected={*tesla_connected}
-                        focused_task={(*selected_task).clone()}
-                        on_task_cleared={on_task_cleared}
-                        on_task_created={on_task_created}
-                        preview_task={(*preview_task).clone()}
+                        focused_item={(*selected_item).clone()}
+                        on_item_cleared={on_item_cleared}
+                        on_item_created={on_item_created}
+                        preview_item={(*preview_item).clone()}
                         on_preview_click={on_preview_click}
                         on_preview_close={on_preview_close}
+                        prefill_text={(*prefill_chat).clone()}
+                        on_prefill_consumed={Some(on_prefill_consumed)}
                     />
 
-                    // Task detail bar (shown when task selected) - below ChatBox
-                    if let Some(task) = (*selected_task).as_ref() {
-                        <div class="task-detail-bar">
-                            <div class="task-detail-info">
-                                <div class="task-detail-time">{&task.time_display}</div>
-                                if let Some(ref src) = task.sources_display {
-                                    <div class="task-detail-source">{format!("Check: {}", src)}</div>
+                    // Item detail bar (shown when item selected) - below ChatBox
+                    if let Some(item) = (*selected_item).as_ref() {
+                        <div class="item-detail-bar">
+                            <div class="item-detail-info">
+                                <div class="item-detail-time">{&item.time_display}</div>
+                                if let Some(ref src) = item.sources_display {
+                                    <div class="item-detail-source">{format!("Check: {}", src)}</div>
                                     if src.to_lowercase().contains("weather") {
-                                        <div class="task-detail-note">{"Location from Settings > Account"}</div>
+                                        <div class="item-detail-note">{"Location from Settings > Account"}</div>
                                     }
                                 }
-                                if let Some(ref cond) = task.condition {
-                                    <div class="task-detail-condition">{format!("Condition: {}", cond)}</div>
-                                }
-                                <div class="task-detail-desc">
-                                    {if task.condition.is_some() || task.sources_display.is_some() {
-                                        format!("Then: {}", &task.description)
+                                <div class="item-detail-meta">
+                                    {if let Some(ref t) = item.item_type {
+                                        html! { <span class="item-detail-type">{t}</span> }
                                     } else {
-                                        task.description.clone()
+                                        html! {}
+                                    }}
+                                    {if item.monitor {
+                                        html! { <span class="item-detail-monitor">{"monitoring"}</span> }
+                                    } else {
+                                        html! {}
+                                    }}
+                                    {if let Some(ref n) = item.notify {
+                                        html! { <span class="item-detail-notify">{n}</span> }
+                                    } else {
+                                        html! {}
                                     }}
                                 </div>
-                                if task.trigger_type != "reminder" {
-                                    <div class="task-detail-note">{"You'll be notified when this task runs"}</div>
-                                }
+                                <div class="item-detail-desc">
+                                    {super::emoji_utils::emojify_description(&item.description)}
+                                </div>
+                                <div class="item-detail-note">{"You'll be notified when this runs"}</div>
                             </div>
-                            <button class="task-btn-delete" onclick={on_delete_task}>{"Delete"}</button>
-                            <button class="task-btn-close" onclick={on_task_modal_close.clone()}>{"x"}</button>
+                            <button class="item-btn-delete" onclick={on_delete_item}>{"Delete"}</button>
+                            <button class="item-btn-close" onclick={on_item_modal_close.clone()}>{"x"}</button>
                         </div>
                     }
                 </div>
 
-            // Main dashboard content - blurred when task focused
-            <div class={if selected_task.is_some() { "peace-main task-focused" } else { "peace-main" }}>
-                // System-level notices (bridge disconnected etc. - items with no source_id)
-                // Admin-only for now
-                { if props.user_profile.id == 1 {
-                    let system_items: Vec<_> = attention_items.iter()
-                        .filter(|item| item.source_id.is_none())
-                        .collect();
-                    if system_items.is_empty() {
-                        html! {}
-                    } else {
-                        html! {
-                            <div>
-                                { for system_items.iter().map(|item| {
-                                    let dismiss_item = (*item).clone();
-                                    let on_dismiss = on_triage_dismiss.clone();
-                                    html! {
-                                        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.2);border-radius:8px;margin-bottom:0.5rem;">
-                                            <span style="color:#f59e0b;font-size:0.8rem;font-weight:600;">{"!"}</span>
-                                            <span style="flex:1;color:#ccc;font-size:0.85rem;">{&item.summary}</span>
-                                            <button
-                                                style="background:none;border:none;color:#666;font-size:0.9rem;cursor:pointer;padding:0.2rem 0.4rem;"
-                                                onclick={Callback::from(move |e: MouseEvent| {
-                                                    e.stop_propagation();
-                                                    on_dismiss.emit(dismiss_item.clone());
-                                                })}
-                                                title="Dismiss"
-                                            >{"x"}</button>
-                                        </div>
-                                    }
-                                })}
-                            </div>
-                        }
-                    }
-                } else {
-                    html! {}
-                }}
+            // Main dashboard content - blurred when item focused
+            <div class={if selected_item.is_some() { "peace-main item-focused" } else { "peace-main" }}>
+                // Items status: urgent cards, monitor group, and status line
+                <ItemsStatusSection
+                    items={attention_items.clone()}
+                    total_tracked_count={total_tracked_count}
+                    on_dismiss={on_dismiss_item.clone()}
+                    on_digest_prefill={Some(on_digest_prefill)}
+                />
 
                 // People section with contact avatars
                 <div class="section-label">
                     <span>{"People"}</span>
                 </div>
-                // Filter: message_reply items go to quick reply flow, rest stay as banners
-                { {
-                    let message_reply_items: Vec<TriageAttentionItem> = if props.user_profile.id == 1 {
-                        attention_items.iter()
-                            .filter(|item| item.item_type == "message_reply")
-                            .cloned()
-                            .collect()
-                    } else {
-                        vec![]
-                    };
-                    let reply_count = message_reply_items.len();
-                    html! {
-                        <>
-                            <QuickReplyButton
-                                message_reply_count={reply_count}
-                                on_open={on_open_quick_reply.clone()}
-                            />
-                            if *quick_reply_open {
-                                <QuickReplyFlow
-                                    items={message_reply_items}
-                                    on_close={on_close_quick_reply.clone()}
-                                    on_item_sent={on_item_sent.clone()}
-                                    on_item_dismissed={on_item_dismissed.clone()}
-                                />
-                            }
-                        </>
-                    }
-                }}
-                { if props.user_profile.id == 1 {
-                    html! {
-                        <ContactAvatarRow
-                            attention_items={attention_items.clone()}
-                            on_triage_dismiss={on_triage_dismiss.clone()}
-                            on_triage_snooze={on_triage_snooze.clone()}
-                        />
-                    }
-                } else {
-                    html! {
-                        <ContactAvatarRow
-                            attention_items={vec![]}
-                            on_triage_dismiss={on_triage_dismiss.clone()}
-                            on_triage_snooze={on_triage_snooze.clone()}
-                        />
-                    }
-                }}
+                <ContactAvatarRow />
 
                 <div class="peace-separator"></div>
-
-                // Footer with digest info and buttons
-                <DashboardFooter
-                    next_digest={next_digest}
-                    quiet_mode={quiet_mode}
-                    on_activity_click={on_activity_click}
-                    on_quiet_mode_change={Some(on_quiet_mode_change)}
-                />
             </div>
 
             // Settings panel (slide-in)
@@ -1066,18 +945,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 on_close={on_settings_close}
                 on_profile_update={props.on_profile_update.clone()}
                 initial_tab={*settings_initial_tab}
-            />
-
-            // Activity panel (slide-in)
-            <ActivityPanel
-                is_open={*activity_open}
-                on_close={on_activity_close}
-                upcoming_tasks={upcoming_tasks}
-                upcoming_digests={upcoming_digests}
-                on_task_click={on_activity_task_click}
-                on_task_delete={on_activity_task_delete}
-                sunrise_hour={sunrise_hour}
-                sunset_hour={sunset_hour}
             />
 
             </div>

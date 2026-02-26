@@ -173,7 +173,9 @@
       "Bash(DOCKER_HOST=unix:///Users/ahtavarasmus/.docker/run/docker.sock docker ps:*)",
       "Bash(DOCKER_HOST=unix:///var/run/docker.sock docker ps:*)",
       "Bash(docker compose:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(git commit:*)",
+      "Bash(trash:*)"
     ],
     "deny": [
       "Read(.env)",

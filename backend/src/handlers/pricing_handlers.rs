@@ -421,7 +421,7 @@ pub struct DashboardCreditsResponse {
     pub is_notification_only: bool,
     /// Whether this country has local numbers (can receive inbound calls)
     pub has_local_numbers: bool,
-    /// User's plan type: "monitor" or "digest"
+    /// User's plan type: "assistant", "autopilot", or "byot"
     pub plan_type: Option<String>,
     /// Monthly credits info (if user has subscription)
     pub monthly: Option<CreditEquivalents>,
@@ -581,8 +581,9 @@ pub async fn get_dashboard_credits(
         None
     };
 
-    // Overage credits (only for digest plan users or anyone with overage > 0)
-    let show_overage = user.plan_type.as_deref() == Some("digest") || user.credits > 0.0;
+    // Overage credits (for hosted-credit plan users or anyone with overage > 0)
+    let show_overage = crate::utils::plan_features::uses_hosted_credits(user.plan_type.as_deref())
+        || user.credits > 0.0;
     let overage = if show_overage {
         Some(calculate_equivalents(user.credits, true)) // Overage is always in €
     } else {
@@ -617,9 +618,9 @@ pub async fn get_dashboard_credits(
 /// Response for usage projection - all values in NOTIFICATION UNITS (not currency)
 #[derive(Serialize)]
 pub struct UsageProjectionResponse {
-    /// User's plan type: "monitor" or "digest"
+    /// User's plan type: "assistant", "autopilot", or "byot"
     pub plan_type: Option<String>,
-    /// Plan capacity in notifications per month (30 for monitor, 120 for digest)
+    /// Plan capacity in notifications per month
     pub plan_capacity: i32,
     /// Whether auto top-up is enabled
     pub has_auto_topup: bool,
@@ -758,18 +759,22 @@ pub async fn get_usage_projection(
     .filter(|&&x| x.is_some())
     .count() as i32;
 
-    // Get plan capacity based on country and plan type
-    // US/CA: always 400 messages (hosted plan)
-    // Other countries: monitor=40, digest=120
+    // Get plan capacity: derive message-equivalent from budget / per-message price
     let plan_type = user.plan_type.clone();
     let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
     let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
-    let plan_capacity = if is_us_ca {
-        400 // US/CA hosted plan
-    } else {
-        match plan_type.as_deref() {
-            Some("digest") => 120,
-            _ => 40, // monitor or default
+    let plan_capacity = {
+        use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
+        if is_us_ca {
+            // $25 / $0.075 display price = ~333 message equivalents
+            (MONTHLY_CREDIT_BUDGET / 0.075).floor() as i32
+        } else {
+            let country_code = detected_country.as_deref().unwrap_or("FI");
+            if let Ok(pricing) = get_notification_only_pricing(&state, country_code).await {
+                (MONTHLY_CREDIT_BUDGET / pricing.regular_message_price).floor() as i32
+            } else {
+                (MONTHLY_CREDIT_BUDGET / 0.39).floor() as i32 // fallback: ~64
+            }
         }
     };
 
@@ -801,15 +806,16 @@ pub async fn get_usage_projection(
 
         if active_days_count < 3 {
             // Not enough data - use example data based on plan type
-            // Monitor plan: typically no digests, ~0.5 critical notis/day
-            // Digest plan: typically 2 digests (already counted), ~0.5 critical notis/day, ~0.3 messages/day
+            // Assistant plan: typically no digests, ~0.5 critical notis/day
+            // Autopilot plan: typically 2 digests (already counted), ~0.5 critical notis/day, ~0.3 messages/day
             let example_sms_notis = 0.5_f32;
             let example_call_notis = 0.0_f32;
-            let example_messages = if plan_type.as_deref() == Some("digest") {
-                0.3_f32
-            } else {
-                0.0_f32
-            };
+            let example_messages =
+                if crate::utils::plan_features::has_auto_features(plan_type.as_deref()) {
+                    0.3_f32
+                } else {
+                    0.0_f32
+                };
             let example_voice_mins = 0.0_f32;
 
             (
@@ -1084,7 +1090,8 @@ pub async fn get_usage_projection(
         Some(OverageInfo {
             notifications_over,
             estimated_cost_euros,
-            covered_by_auto_topup: has_auto_topup && plan_type.as_deref() == Some("digest"),
+            covered_by_auto_topup: has_auto_topup
+                && crate::utils::plan_features::uses_hosted_credits(plan_type.as_deref()),
         })
     } else {
         None
@@ -1134,39 +1141,35 @@ pub async fn get_usage_projection(
     // Generate recommendation based on plan type and status
     let recommendation = if status == "on_track" {
         None
-    } else {
-        match plan_type.as_deref() {
-            Some("monitor") => {
-                // Monitor plan user going over
-                if digest_count > 0 {
-                    Some(UsageRecommendation {
-                        message: "Reduce digest frequency to stay within quota".to_string(),
-                        action_type: "reduce_digests".to_string(),
-                        action_link: Some("/dashboard?tab=settings".to_string()),
-                    })
-                } else {
-                    Some(UsageRecommendation {
-                        message: "Upgrade to Digest Plan for 3x more capacity".to_string(),
-                        action_type: "upgrade_plan".to_string(),
-                        action_link: Some("/pricing".to_string()),
-                    })
-                }
-            }
-            Some("digest") => {
-                // Digest plan user going over
-                if !has_auto_topup {
-                    Some(UsageRecommendation {
-                        message: "Enable auto top-up to cover overages automatically".to_string(),
-                        action_type: "enable_topup".to_string(),
-                        action_link: Some("/dashboard?tab=billing".to_string()),
-                    })
-                } else {
-                    // They have auto top-up, no action needed - just show cost
-                    None
-                }
-            }
-            _ => None,
+    } else if !crate::utils::plan_features::has_auto_features(plan_type.as_deref()) {
+        // Assistant plan user going over
+        if digest_count > 0 {
+            Some(UsageRecommendation {
+                message: "Reduce digest frequency to stay within quota".to_string(),
+                action_type: "reduce_digests".to_string(),
+                action_link: Some("/dashboard?tab=settings".to_string()),
+            })
+        } else {
+            Some(UsageRecommendation {
+                message: "Upgrade to Autopilot for more capacity and automatic features"
+                    .to_string(),
+                action_type: "upgrade_plan".to_string(),
+                action_link: Some("/pricing".to_string()),
+            })
         }
+    } else if crate::utils::plan_features::uses_hosted_credits(plan_type.as_deref()) {
+        // Autopilot plan user going over
+        if !has_auto_topup {
+            Some(UsageRecommendation {
+                message: "Enable auto top-up to cover overages automatically".to_string(),
+                action_type: "enable_topup".to_string(),
+                action_link: Some("/dashboard?tab=billing".to_string()),
+            })
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     // === CALCULATE SEGMENTED BAR FIELDS ===

@@ -32,35 +32,19 @@ const SUBSCRIPTION_USAGE_THRESHOLD: f32 = 30.0; // 30%
 const REFUND_WINDOW_DAYS: i64 = 7;
 const CONTACT_EMAIL: &str = "rasmus@ahtava.com";
 
-/// Calculate max credits_left for a user based on country and plan type
-/// Mirrors logic from profile_handlers.rs:recalculate_credits_for_country_change
+/// Calculate max credits_left for a user.
+/// With unified credit budget, all hosted plans get 25.0 credits.
 pub async fn get_max_credits_left(
-    state: &Arc<AppState>,
-    country: Option<&str>,
+    _state: &Arc<AppState>,
+    _country: Option<&str>,
     plan_type: Option<&str>,
 ) -> f32 {
-    use crate::api::twilio_pricing::get_euro_country_pricing;
+    use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
 
-    let plan_messages: f32 = match plan_type {
-        Some("digest") => 120.0,
-        _ => 40.0, // monitor or default
-    };
-
-    // US/CA: credits_left is message count (always 400 for all plans)
-    if matches!(country, Some("US") | Some("CA")) {
-        400.0
-    } else if let Some(c) = country {
-        // Euro: credits_left is € value based on SMS pricing
-        match get_euro_country_pricing(state, c).await {
-            Ok(pricing) => plan_messages * pricing.regular_message_price,
-            Err(_) => {
-                // Fallback: €0.39 per message (0.10 × 3 segments × 1.3 margin)
-                plan_messages * 0.39
-            }
-        }
+    if crate::utils::plan_features::uses_hosted_credits(plan_type) {
+        MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
     } else {
-        // Unknown country fallback
-        plan_messages * 0.39
+        0.0 // BYOT or no plan
     }
 }
 

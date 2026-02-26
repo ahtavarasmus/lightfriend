@@ -1,3 +1,0 @@
--- SQLite doesn't support DROP COLUMN easily, so we recreate the table
--- This is a placeholder - in production, handle this carefully
--- For now, this column is optional so leaving it is acceptable

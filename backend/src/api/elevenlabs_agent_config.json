@@ -581,7 +581,7 @@
                   "secret_id": "9MjdWiGarqujOpNBrtUP"
                 }
               },
-              "url": "{{SERVER_URL}}/api/call/tasks/create",
+              "url": "{{SERVER_URL}}/api/call/items/create",
               "method": "POST",
               "path_params_schema": {},
               "query_params_schema": {
@@ -1090,7 +1090,7 @@
                   "secret_id": "9MjdWiGarqujOpNBrtUP"
                 }
               },
-              "url": "{{SERVER_URL}}/api/call/tasks",
+              "url": "{{SERVER_URL}}/api/call/items",
               "method": "GET",
               "path_params_schema": {},
               "query_params_schema": {

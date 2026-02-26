@@ -7,11 +7,13 @@
 //! require mocking external services (AI, Twilio). These are structured
 //! to document expected behavior.
 
-use backend::models::user_models::NewTask;
+use backend::models::user_models::{NewContactProfile, NewTask};
 use backend::test_utils::{
     create_test_state, create_test_task, create_test_user, TestTaskParams, TestUserParams,
 };
-use backend::utils::action_executor::ActionResult;
+use backend::utils::action_executor::{
+    is_sender_trusted, parse_action_structured, ActionResult, SenderContext, StructuredAction,
+};
 
 /// Fixed reference timestamp for deterministic tests.
 /// T - 60 = "60s ago", T + 3600 = "1h later".
@@ -423,87 +425,8 @@ fn test_known_action_fetch_calendar() {
 }
 
 // =============================================================================
-// Task State Transition Tests
-// =============================================================================
-
-#[test]
-fn test_task_lifecycle_one_time() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // 1. Create one-time task
-    let params = TestTaskParams::once_task(user.id, T + 3600);
-    let task = create_test_task(&state, &params);
-    assert_eq!(task.status, Some("active".to_string()));
-    assert!(task.completed_at.is_none());
-
-    // 2. Complete the task (simulating execution)
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-
-    assert!(!rescheduled); // One-time task should be completed, not rescheduled
-
-    // 3. Task should no longer be active
-    let tasks = state
-        .user_repository
-        .get_user_tasks(user.id)
-        .expect("Failed to get tasks");
-    assert!(tasks.is_empty());
-}
-
-#[test]
-fn test_task_lifecycle_permanent_recurring() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // 1. Create permanent recurring task
-    let params = TestTaskParams::permanent_daily(user.id, "09:00");
-    let task = create_test_task(&state, &params);
-    let original_trigger = task.trigger.clone();
-
-    assert_eq!(task.status, Some("active".to_string()));
-    assert_eq!(task.is_permanent, Some(1));
-
-    // 2. Complete/reschedule the task
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to reschedule task");
-
-    assert!(rescheduled); // Permanent task should be rescheduled
-
-    // 3. Task should still be active with new trigger
-    let tasks = state
-        .user_repository
-        .get_user_tasks(user.id)
-        .expect("Failed to get tasks");
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].status, Some("active".to_string()));
-    assert_ne!(tasks[0].trigger, original_trigger);
-}
-
-// =============================================================================
 // Action Parsing - New JSON Format
 // =============================================================================
-
-use backend::utils::action_executor::parse_action_structured;
-
-/// Query a task by id regardless of status (get_user_tasks only returns active tasks)
-fn get_task_by_id(
-    state: &std::sync::Arc<backend::AppState>,
-    task_id: i32,
-) -> backend::models::user_models::Task {
-    use backend::schema::tasks;
-    use diesel::prelude::*;
-
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
-    tasks::table
-        .filter(tasks::id.eq(task_id))
-        .first::<backend::models::user_models::Task>(&mut conn)
-        .expect("Failed to find task by id")
-}
 
 #[test]
 fn test_parse_action_json_send_reminder() {
@@ -584,175 +507,6 @@ fn test_parse_action_empty() {
     let action = parse_action_structured("");
     assert_eq!(action.tool, "");
     assert!(action.params.is_none());
-}
-
-// =============================================================================
-// Due Task Finding
-// =============================================================================
-
-#[test]
-fn test_get_due_once_tasks_past_trigger() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Task triggered 60 seconds ago
-    let params = TestTaskParams::once_task(user.id, T - 60);
-    create_test_task(&state, &params);
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert_eq!(due.len(), 1);
-    assert!(due[0].trigger.starts_with("once_"));
-}
-
-#[test]
-fn test_get_due_once_tasks_future_trigger() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Task scheduled 1 hour in the future
-    let params = TestTaskParams::once_task(user.id, T + 3600);
-    create_test_task(&state, &params);
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert!(due.is_empty(), "Future task should not be due");
-}
-
-#[test]
-fn test_get_due_once_tasks_skips_recurring() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Create a recurring_email task (not a once_ task)
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: "recurring_email".to_string(),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(0),
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        condition: Some("from HR".to_string()),
-        end_time: None,
-    };
-    create_test_task(&state, &params);
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert!(
-        due.is_empty(),
-        "recurring_email task should not appear in once_ due tasks"
-    );
-}
-
-// =============================================================================
-// Task Lifecycle for Recurring Triggers
-// =============================================================================
-
-#[test]
-fn test_recurring_email_task_lifecycle() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Create recurring_email task
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: "recurring_email".to_string(),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(0),
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        condition: Some("from HR".to_string()),
-        end_time: None,
-    };
-    let task = create_test_task(&state, &params);
-    assert_eq!(task.status, Some("active".to_string()));
-    assert_eq!(task.trigger, "recurring_email");
-
-    // complete_or_reschedule_task on a recurring_email task:
-    // - not permanent+recurrence+once_, so it marks completed
-    // In production, recurring_email tasks are evaluated inline on each
-    // incoming email and are NOT processed through complete_or_reschedule.
-    // This test verifies the fallthrough behavior.
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(
-        !rescheduled,
-        "recurring_email should not be rescheduled via complete_or_reschedule"
-    );
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-}
-
-#[test]
-fn test_recurring_messaging_task_lifecycle() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Create recurring_messaging task
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: "recurring_messaging".to_string(),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(0),
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        condition: Some("from mom".to_string()),
-        end_time: None,
-    };
-    let task = create_test_task(&state, &params);
-    assert_eq!(task.status, Some("active".to_string()));
-    assert_eq!(task.trigger, "recurring_messaging");
-
-    // Same fallthrough as recurring_email
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(
-        !rescheduled,
-        "recurring_messaging should not be rescheduled via complete_or_reschedule"
-    );
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-}
-
-#[test]
-fn test_task_lifecycle_with_json_action() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    // Create a one-time task with JSON action
-    let params = TestTaskParams::once_task(user.id, T - 60)
-        .with_action(r#"{"tool":"send_reminder","params":{"message":"test"}}"#);
-    let task = create_test_task(&state, &params);
-    assert_eq!(task.status, Some("active".to_string()));
-
-    // One-time task (is_permanent=0) should complete, not reschedule
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(!rescheduled, "One-time task should not be rescheduled");
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
 }
 
 // =============================================================================
@@ -886,8 +640,6 @@ fn test_parse_action_old_format_param_with_nested_parens() {
 // Action Parsing - Roundtrip (parse -> to_action_string -> parse)
 // =============================================================================
 
-use backend::utils::action_executor::StructuredAction;
-
 #[test]
 fn test_roundtrip_json_to_display_to_parse() {
     // Parse JSON format
@@ -936,302 +688,449 @@ fn test_to_action_string_empty_object() {
 }
 
 // =============================================================================
-// Due Task Finding - Corner Cases
+// parse_action_structured Tests
 // =============================================================================
 
 #[test]
-fn test_get_due_once_tasks_exact_boundary() {
-    // Task trigger timestamp exactly == T (ts <= T should match)
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let params = TestTaskParams::once_task(user.id, T);
-    create_test_task(&state, &params);
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert_eq!(due.len(), 1, "Task at exact now boundary should be due");
+fn test_parse_structured_json_format() {
+    let action = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
+    let result = parse_action_structured(action);
+    assert_eq!(result.tool, "send_reminder");
+    let msg = result.params.unwrap();
+    assert_eq!(msg["message"], "Call mom");
 }
 
 #[test]
-fn test_get_due_once_tasks_corrupted_trigger() {
-    // Task with trigger "once_notanumber" - parse::<i32>() fails, filtered out
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+fn test_parse_structured_old_format() {
+    let result = parse_action_structured("send_reminder(Call mom)");
+    assert_eq!(result.tool, "send_reminder");
+    let params = result.params.unwrap();
+    assert_eq!(params["message"], "Call mom");
+}
 
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: "once_notanumber".to_string(),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(0),
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        condition: None,
-        end_time: None,
+#[test]
+fn test_parse_structured_old_tesla() {
+    let result = parse_action_structured("control_tesla(climate_on)");
+    assert_eq!(result.tool, "control_tesla");
+    let params = result.params.unwrap();
+    assert_eq!(params["command"], "climate_on");
+}
+
+#[test]
+fn test_parse_structured_simple_tool() {
+    let result = parse_action_structured("generate_digest");
+    assert_eq!(result.tool, "generate_digest");
+    assert!(result.params.is_none());
+}
+
+#[test]
+fn test_parse_structured_empty() {
+    let result = parse_action_structured("");
+    assert_eq!(result.tool, "");
+    assert!(result.params.is_none());
+}
+
+#[test]
+fn test_structured_to_action_string() {
+    let action = StructuredAction {
+        tool: "send_reminder".to_string(),
+        params: Some(serde_json::json!({"message": "Call mom"})),
     };
-    create_test_task(&state, &params);
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert!(due.is_empty(), "Corrupted trigger should be filtered out");
+    assert_eq!(action.to_action_string(), "send_reminder(Call mom)");
 }
 
 #[test]
-fn test_get_due_once_tasks_completed_not_returned() {
-    // Completed tasks should not appear in due list (status filter)
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let params = TestTaskParams::once_task(user.id, T - 60);
-    let task = create_test_task(&state, &params);
-
-    // Mark it completed
-    state
-        .user_repository
-        .update_task_status(task.id.unwrap(), "completed")
-        .expect("Failed to update status");
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert!(due.is_empty(), "Completed task should not be due");
+fn test_structured_to_action_string_no_params() {
+    let action = StructuredAction {
+        tool: "generate_digest".to_string(),
+        params: None,
+    };
+    assert_eq!(action.to_action_string(), "generate_digest");
 }
 
 #[test]
-fn test_get_due_once_tasks_cancelled_not_returned() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+fn test_roundtrip_json_serialize() {
+    let action = StructuredAction {
+        tool: "control_tesla".to_string(),
+        params: Some(serde_json::json!({"command": "climate_on"})),
+    };
+    let json = serde_json::to_string(&action).unwrap();
+    let parsed = parse_action_structured(&json);
+    assert_eq!(parsed.tool, "control_tesla");
+    assert_eq!(parsed.params.unwrap()["command"], "climate_on");
+}
 
-    let params = TestTaskParams::once_task(user.id, T - 60);
-    let task = create_test_task(&state, &params);
+// =============================================================================
+// Sender Trust Tier Tests
+// =============================================================================
 
-    // Cancel it
-    state
-        .user_repository
-        .cancel_task(user.id, task.id.unwrap())
-        .expect("Failed to cancel task");
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert!(due.is_empty(), "Cancelled task should not be due");
+#[test]
+fn test_registry_restricted_tools() {
+    let registry = backend::build_tool_registry();
+    // These tools perform external actions and should be restricted
+    assert!(registry.is_restricted("send_email"));
+    assert!(registry.is_restricted("respond_to_email"));
+    assert!(registry.is_restricted("send_chat_message"));
+    assert!(registry.is_restricted("control_tesla"));
+    // Safe/read-only tools should NOT be restricted
+    assert!(!registry.is_restricted("get_weather"));
+    assert!(!registry.is_restricted("fetch_calendar_events"));
+    assert!(!registry.is_restricted("fetch_emails"));
+    assert!(!registry.is_restricted("direct_response"));
+    // Unknown tools should not be restricted (fall through)
+    assert!(!registry.is_restricted("nonexistent_tool"));
 }
 
 #[test]
-fn test_get_due_once_tasks_mixed_due_and_future() {
-    // Multiple tasks across users - only past ones returned
+fn test_sender_trust_time_based_always_trusted() {
     let state = create_test_state();
-    let user1 = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-    let user2 = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    assert!(is_sender_trusted(&state, 999, &SenderContext::TimeBased));
+}
 
-    // User1: due task (past)
-    create_test_task(&state, &TestTaskParams::once_task(user1.id, T - 120));
-    // User1: future task
-    create_test_task(&state, &TestTaskParams::once_task(user1.id, T + 3600));
-    // User2: due task (past)
-    create_test_task(&state, &TestTaskParams::once_task(user2.id, T - 30));
-    // User2: recurring (should not appear)
-    create_test_task(
+#[test]
+fn test_sender_trust_email_no_profiles() {
+    let state = create_test_state();
+    // No contact profiles exist, so any email sender is untrusted
+    let trusted = is_sender_trusted(
         &state,
-        &TestTaskParams {
-            user_id: user2.id,
-            trigger: "recurring_messaging".to_string(),
-            action: "test_action".to_string(),
-            notification_type: Some("sms".to_string()),
-            is_permanent: Some(0),
-            recurrence_rule: None,
-            recurrence_time: None,
-            sources: None,
-            condition: Some("test".to_string()),
-            end_time: None,
+        999,
+        &SenderContext::Email {
+            from_email: "attacker@evil.com",
+            from_display: "Attacker",
         },
     );
-
-    let due = state
-        .user_repository
-        .get_due_once_tasks(T)
-        .expect("Failed to get due tasks");
-    assert_eq!(due.len(), 2, "Should find exactly 2 due tasks across users");
+    assert!(!trusted);
 }
 
-// =============================================================================
-// Task Lifecycle - Corner Cases
-// =============================================================================
-
 #[test]
-fn test_lifecycle_permanent_without_recurrence_rule() {
-    // is_permanent=1 but recurrence_rule is None - has_recurrence is false, completes
+fn test_sender_trust_email_matching_profile() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    let params = TestTaskParams {
+    let profile = NewContactProfile {
         user_id: user.id,
-        trigger: format!("once_{}", T - 60),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(1),
-        recurrence_rule: None, // Missing!
-        recurrence_time: Some("09:00".to_string()),
-        sources: None,
-        condition: None,
-        end_time: None,
-    };
-    let task = create_test_task(&state, &params);
-
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(
-        !rescheduled,
-        "Permanent without recurrence_rule should complete, not reschedule"
-    );
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-}
-
-#[test]
-fn test_lifecycle_permanent_without_recurrence_time() {
-    // is_permanent=1, has rule but no time - has_recurrence is false, completes
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: format!("once_{}", T - 60),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: Some(1),
-        recurrence_rule: Some("daily".to_string()),
-        recurrence_time: None, // Missing!
-        sources: None,
-        condition: None,
-        end_time: None,
-    };
-    let task = create_test_task(&state, &params);
-
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(
-        !rescheduled,
-        "Permanent without recurrence_time should complete, not reschedule"
-    );
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-}
-
-#[test]
-fn test_lifecycle_is_permanent_none_treated_as_not_permanent() {
-    // is_permanent=None (unwrap_or(0) == 0) - should complete
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let params = TestTaskParams {
-        user_id: user.id,
-        trigger: format!("once_{}", T - 60),
-        action: "test_action".to_string(),
-        notification_type: Some("sms".to_string()),
-        is_permanent: None, // NULL in DB
-        recurrence_rule: Some("daily".to_string()),
-        recurrence_time: Some("09:00".to_string()),
-        sources: None,
-        condition: None,
-        end_time: None,
-    };
-    let task = create_test_task(&state, &params);
-
-    let rescheduled = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    assert!(
-        !rescheduled,
-        "is_permanent=None should be treated as non-permanent"
-    );
-
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-}
-
-#[test]
-fn test_lifecycle_task_with_no_id_errors() {
-    // Task with id=None should return NotFound error
-    let state = create_test_state();
-
-    let task = backend::models::user_models::Task {
-        id: None,
-        user_id: 1,
-        trigger: "once_0".to_string(),
-        condition: None,
-        action: "test".to_string(),
-        notification_type: None,
-        status: Some("active".to_string()),
+        nickname: "Mom".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("mom@family.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
         created_at: 0,
-        completed_at: None,
-        is_permanent: None,
-        recurrence_rule: None,
-        recurrence_time: None,
-        sources: None,
-        end_time: None,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
     };
-
-    let result = state
-        .user_repository
-        .complete_or_reschedule_task(&task, "UTC");
-    assert!(result.is_err(), "Task with no id should error");
-}
-
-#[test]
-fn test_lifecycle_completed_at_is_set_on_completion() {
-    // Verify completed_at timestamp is populated when task completes
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let params = TestTaskParams::once_task(user.id, T - 60);
-    let task = create_test_task(&state, &params);
-    assert!(
-        task.completed_at.is_none(),
-        "Fresh task should have no completed_at"
-    );
-
-    // Bracket the completion call so completed_at is guaranteed between before and after
-    let before = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
     state
         .user_repository
-        .complete_or_reschedule_task(&task, "UTC")
-        .expect("Failed to complete task");
-    let after = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
+        .create_contact_profile(&profile)
+        .unwrap();
 
-    let updated = get_task_by_id(&state, task.id.unwrap());
-    assert_eq!(updated.status, Some("completed".to_string()));
-    assert!(
-        updated.completed_at.is_some(),
-        "Completed task must have completed_at"
-    );
-    let completed_ts = updated.completed_at.unwrap();
-    assert!(
-        completed_ts >= before && completed_ts <= after,
-        "completed_at ({}) should be between before ({}) and after ({})",
-        completed_ts,
-        before,
-        after
-    );
+    // Matching sender is trusted
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "mom@family.com",
+            from_display: "Mom",
+        },
+    ));
+
+    // Non-matching sender is untrusted
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "stranger@unknown.com",
+            from_display: "Stranger",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_email_case_insensitive() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Boss".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("Boss@Work.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "boss@work.com",
+            from_display: "boss",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_email_multiple_addresses() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Partner".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: Some("partner@gmail.com, partner@work.com".to_string()),
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Both addresses should match
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "partner@gmail.com",
+            from_display: "",
+        },
+    ));
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Email {
+            from_email: "partner@work.com",
+            from_display: "",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_messaging_by_room_id() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Alice".to_string(),
+        whatsapp_chat: Some("Alice (WA)".to_string()),
+        telegram_chat: None,
+        signal_chat: None,
+        email_addresses: None,
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: Some("!room123:matrix.org".to_string()),
+        telegram_room_id: None,
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Matching room_id is trusted
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!room123:matrix.org",
+            room_name: "Alice",
+        },
+    ));
+
+    // Non-matching room_id and name is untrusted
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!different:matrix.org",
+            room_name: "UnknownPerson",
+        },
+    ));
+}
+
+#[test]
+fn test_sender_trust_messaging_chat_name_fallback() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let profile = NewContactProfile {
+        user_id: user.id,
+        nickname: "Bob".to_string(),
+        whatsapp_chat: None,
+        telegram_chat: Some("Bob Smith (Telegram)".to_string()),
+        signal_chat: None,
+        email_addresses: None,
+        notification_mode: "all".to_string(),
+        notification_type: "sms".to_string(),
+        notify_on_call: 0,
+        created_at: 0,
+        whatsapp_room_id: None,
+        telegram_room_id: None, // No room_id - forces name fallback
+        signal_room_id: None,
+        notes: None,
+    };
+    state
+        .user_repository
+        .create_contact_profile(&profile)
+        .unwrap();
+
+    // Name match should work even without room_id
+    assert!(is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "telegram",
+            room_id: "!unknown:matrix.org",
+            room_name: "Bob Smith",
+        },
+    ));
+
+    // Wrong service should not match
+    assert!(!is_sender_trusted(
+        &state,
+        user.id,
+        &SenderContext::Messaging {
+            service: "whatsapp",
+            room_id: "!unknown:matrix.org",
+            room_name: "Bob Smith",
+        },
+    ));
+}
+
+// =============================================================================
+// Sender Trust - execute_action_spec integration tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_untrusted_sender_blocked_from_restricted_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Untrusted sender tries to send email via action spec
+    let action_spec =
+        r#"{"tool":"send_email","params":{"to":"victim@example.com","subject":"hi"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        false, // untrusted sender
+    )
+    .await;
+
+    match result {
+        ActionResult::Failed { error } => {
+            assert!(
+                error.contains("blocked"),
+                "Error should mention 'blocked': {}",
+                error
+            );
+            assert!(
+                error.contains("send_email"),
+                "Error should mention tool name: {}",
+                error
+            );
+        }
+        ActionResult::Success { message } => {
+            panic!("Expected ActionResult::Failed, got Success: {}", message)
+        }
+        ActionResult::Skipped { reason } => {
+            panic!("Expected ActionResult::Failed, got Skipped: {}", reason)
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_untrusted_sender_allowed_safe_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Untrusted sender can use send_reminder (not restricted)
+    let action_spec = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        false, // untrusted sender
+    )
+    .await;
+
+    match result {
+        ActionResult::Success { message } => {
+            assert_eq!(message, "Call mom");
+        }
+        ActionResult::Failed { error } => {
+            panic!("Expected ActionResult::Success, got Failed: {}", error)
+        }
+        ActionResult::Skipped { reason } => {
+            panic!("Expected ActionResult::Success, got Skipped: {}", reason)
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_trusted_sender_allowed_restricted_action() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    // Trusted sender tries control_tesla - should NOT get "blocked" error.
+    // May fail for other reasons (no tesla credentials), but trust gate passes.
+    let action_spec = r#"{"tool":"control_tesla","params":{"command":"status"}}"#;
+    let result = backend::utils::action_executor::execute_action_spec(
+        &state,
+        user.id,
+        action_spec,
+        "sms",
+        None,
+        None,
+        None,
+        true, // trusted sender
+    )
+    .await;
+
+    if let ActionResult::Failed { error } = result {
+        assert!(
+            !error.contains("blocked"),
+            "Trusted sender should not be blocked: {}",
+            error
+        );
+    }
 }

@@ -176,6 +176,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    items (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        summary -> Text,
+        monitor -> Bool,
+        next_check_at -> Nullable<Integer>,
+        priority -> Integer,
+        source_id -> Nullable<Text>,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     keywords (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -340,25 +353,6 @@ diesel::table! {
         encrypted_secret -> Text,
         enabled -> Integer,
         created_at -> Integer,
-    }
-}
-
-diesel::table! {
-    triage_items (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        item_type -> Text,
-        status -> Text,
-        summary -> Text,
-        suggested_action -> Nullable<Text>,
-        reasoning -> Nullable<Text>,
-        context_json -> Nullable<Text>,
-        priority -> Integer,
-        source_type -> Nullable<Text>,
-        source_id -> Nullable<Text>,
-        created_at -> Integer,
-        snooze_until -> Nullable<Integer>,
-        expires_at -> Nullable<Integer>,
     }
 }
 
@@ -553,6 +547,7 @@ diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
+diesel::joinable!(items -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(mcp_servers -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
@@ -563,7 +558,6 @@ diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
-diesel::joinable!(triage_items -> users (user_id));
 diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(webauthn_challenges -> users (user_id));
@@ -584,6 +578,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     email_judgments,
     google_calendar,
     imap_connection,
+    items,
     keywords,
     mcp_servers,
     message_history,
@@ -597,7 +592,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     tesla,
     totp_backup_codes,
     totp_secrets,
-    triage_items,
     uber,
     usage_logs,
     user_info,

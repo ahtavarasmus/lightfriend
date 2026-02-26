@@ -745,9 +745,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     };
 
                                     let plan_name = match projection.plan_type.as_deref() {
-                                        Some("digest") => "Digest",
-                                        Some("monitor") => "Monitor",
-                                        _ => "Monitor"
+                                        Some("autopilot") => "Autopilot",
+                                        Some("assistant") => "Assistant",
+                                        Some("byot") => "BYOT",
+                                        _ => "Assistant"
                                     };
 
                                     // Calculate messages per month for display
@@ -797,7 +798,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     let remaining_voice_mins = (projection.remaining_capacity as f32 * 0.67).round() as i32; // rough estimate
 
                                     // Check if user should downgrade (Digest plan, usage <= 40)
-                                    let should_suggest_downgrade = projection.plan_type.as_deref() == Some("digest")
+                                    let should_suggest_downgrade = projection.plan_type.as_deref() == Some("autopilot")
                                         && projection.total_usage_per_month <= 40
                                         && projection.overage.is_none();
 
@@ -1025,11 +1026,11 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                                         {format!("Estimated extra: ~{:.0}EUR/month (covered by auto top-up)", overage.estimated_cost_euros)}
                                                                     </div>
                                                                 }
-                                                            } else if projection.plan_type.as_deref() == Some("monitor") || user_profile.plan_type.as_deref() == Some("monitor") {
-                                                                // Monitor plan users cannot buy overage credits - suggest upgrade
+                                                            } else if projection.plan_type.as_deref() == Some("byot") || user_profile.plan_type.as_deref() == Some("byot") {
+                                                                // BYOT plan users pay Twilio directly
                                                                 html! {
                                                                     <div style="color: #fbbf24; font-size: 0.9rem;">
-                                                                        {format!("~{:.0}EUR over limit - upgrade to Digest plan for more capacity + overage credits", overage.estimated_cost_euros)}
+                                                                        {"BYOT plan - you pay Twilio directly for messaging costs"}
                                                                     </div>
                                                                 }
                                                             } else if projection.overage_credits > 0.0 {
@@ -1144,14 +1145,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
                                 <div class="auto-topup-container" style="margin-top: 12px; padding: 0;">
                                 {
-                                    // Monitor plan users cannot buy overage credits
-                                    if user_profile.plan_type.as_deref() == Some("monitor") {
-                                        html! {
-                                            <div class="tooltip" style="color: #888; font-size: 0.85rem;">
-                                                {"Overage credits are available on the Digest plan. Upgrade to get more capacity and the ability to buy extra credits."}
-                                            </div>
-                                        }
-                                    } else if user_profile.plan_type.as_deref() == Some("byot") {
+                                    if user_profile.plan_type.as_deref() == Some("byot") {
                                         // BYOT users don't need overage credits - they pay Twilio directly
                                         html! {
                                             <>
