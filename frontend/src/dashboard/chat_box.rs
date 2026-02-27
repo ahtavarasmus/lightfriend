@@ -389,7 +389,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let chat_error_ws = chat_error.clone();
         let detected_media_ws = detected_media.clone();
         let media_playing_ws = media_playing.clone();
-        let on_task_created_ws = props.on_task_created.clone();
+        let on_task_created_ws = props.on_item_created.clone();
         let refetch_usage_ws = props.on_usage_change.clone();
         let ws_notification = ws_notification.clone();
 
