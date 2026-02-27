@@ -174,8 +174,13 @@
       "Bash(DOCKER_HOST=unix:///var/run/docker.sock docker ps:*)",
       "Bash(docker compose:*)",
       "Bash(docker exec:*)",
-      "Bash(git commit:*)",
-      "Bash(trash:*)"
+      "Bash(echo gh not installed:*)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1)",
+      "Bash(source \"$HOME/.cargo/env\" && cd /Users/kasperi/lightfriend-cloud/frontend && trunk serve 2>&1)",
+      "Bash(open:*)",
+      "Bash(source \"$HOME/.cargo/env\" && rustup target add wasm32-unknown-unknown 2>&1)",
+      "Bash(python3:*)",
+      "Bash(git add:*)"
     ],
     "deny": [
       "Read(.env)",

@@ -216,15 +216,15 @@ pub fn landing() -> Html {
         .feature-category-card {
             background: rgba(126, 178, 255, 0.03);
             backdrop-filter: blur(8px);
-            border: 1px solid rgba(126, 178, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 16px;
             padding: 1.5rem;
             box-shadow: 0 0 15px rgba(126, 178, 255, 0.05);
             transition: all 0.3s ease;
         }
         .feature-category-card:hover {
-            border-color: rgba(126, 178, 255, 0.25);
-            box-shadow: 0 0 25px rgba(126, 178, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
         }
         .feature-category-header {
             display: flex;
@@ -232,7 +232,7 @@ pub fn landing() -> Html {
             gap: 0.75rem;
             margin-bottom: 1rem;
             padding-bottom: 0.75rem;
-            border-bottom: 1px solid rgba(126, 178, 255, 0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
         .feature-category-header i {
             font-size: 1.3rem;
@@ -311,7 +311,7 @@ pub fn landing() -> Html {
             width: 100%;
             margin: 1rem auto;
             border-radius: 12px;
-            border: 1px solid rgba(30, 144, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
         .feature-preview-wrapper {
@@ -423,7 +423,7 @@ pub fn landing() -> Html {
                 </div>
                 <div class="hero-content">
                     <div class="hero-right-panel">
-                        <h1 class="hero-title hero-anim hero-anim-1">{"Break Free from Smartphone"}</h1>
+                        <h1 class="hero-title hero-anim hero-anim-1">{"Safe AI Assistant"}</h1>
                         <p class="hero-subtitle hero-anim hero-anim-2">{"WhatsApp & Email on Your Flip Phone"}</p>
                         <div class="hero-cta-group hero-anim hero-anim-3">
                             <Link<Route> to={Route::Pricing} classes="forward-link">
@@ -524,7 +524,7 @@ pub fn landing() -> Html {
                     <div class="capabilities-grid">
                         <div class="capability-category">
                             <h3>{"Integrations"}</h3>
-                            <p>{"WhatsApp, Telegram, Signal, Email, Google Calendar"}</p>
+                            <p>{"WhatsApp, Telegram, Signal, Email, Google Calendar, MCP-Server"}</p>
                         </div>
                         <div class="capability-category">
                             <h3>{"Interfaces"}</h3>
@@ -1364,7 +1364,7 @@ pub fn landing() -> Html {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .trust-proof p {
         font-size: 1.3rem;
@@ -1392,15 +1392,15 @@ pub fn landing() -> Html {
         margin-bottom: 1.5rem;
         background: rgba(126, 178, 255, 0.03);
         backdrop-filter: blur(8px);
-        border: 1px solid rgba(126, 178, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 1.5rem;
         box-shadow: 0 0 15px rgba(126, 178, 255, 0.05);
         transition: all 0.3s ease;
     }
     .faq-item:hover {
-        border-color: rgba(126, 178, 255, 0.25);
-        box-shadow: 0 0 25px rgba(126, 178, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.25);
+        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
     }
     .faq-item h3 {
         font-size: 1.4rem;
@@ -1452,7 +1452,7 @@ pub fn landing() -> Html {
     .dual-section-card {
         background: rgba(0, 0, 0, 0.3);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(126, 178, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 20px;
         padding: 2.5rem;
     }
@@ -1575,14 +1575,14 @@ pub fn landing() -> Html {
     .comparison-table th, .comparison-table td {
         padding: 1rem;
         text-align: left;
-        border-bottom: 1px solid rgba(126, 178, 255, 0.2);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
     }
     .comparison-table th {
         background: rgba(0, 0, 0, 0.5);
         color: #7EB2FF;
     }
     .comparison-table tr:hover {
-        background: rgba(126, 178, 255, 0.1);
+        background: rgba(255, 255, 255, 0.1);
     }
     @media (max-width: 768px) {
         .comparison-table table {
@@ -1597,7 +1597,7 @@ pub fn landing() -> Html {
         background: linear-gradient(45deg, #7EB2FF, #4169E1);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
     }
     .difference-image {
         flex: 1;
@@ -1609,13 +1609,13 @@ pub fn landing() -> Html {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 25px rgba(126, 178, 255, 0.12);
-        border: 1px solid rgba(126, 178, 255, 0.1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 25px rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         transition: all 0.3s ease;
     }
     .difference-image img:hover {
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 35px rgba(126, 178, 255, 0.2);
-        border-color: rgba(126, 178, 255, 0.25);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 35px rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.25);
     }
     @media (max-width: 768px) {
         .difference-section {
@@ -1724,7 +1724,7 @@ pub fn landing() -> Html {
     }
     .demo-link:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.3);
     }
     @media (max-width: 1024px) {
         .feature-block {
@@ -1801,7 +1801,7 @@ pub fn landing() -> Html {
     .how-it-works h2 {
         font-size: 3rem;
         margin-bottom: 1rem;
-        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .how-it-works > p {
         color: #7EB2FF;
@@ -1834,7 +1834,7 @@ pub fn landing() -> Html {
         background: linear-gradient(
             90deg,
             transparent,
-            rgba(30, 144, 255, 0.3),
+            rgba(255, 255, 255, 0.3),
             transparent
         );
     }
@@ -1861,7 +1861,7 @@ pub fn landing() -> Html {
         width: 30px;
         height: 30px;
         border-radius: 50%;
-        border: 2px solid rgba(30, 144, 255, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1880,7 +1880,7 @@ pub fn landing() -> Html {
     .footer-cta {
         padding: 6rem 0;
         background: transparent;
-        border-top: 1px solid rgba(30, 144, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
         text-align: left;
         position: relative;
         z-index: 1;
@@ -1988,9 +1988,7 @@ pub fn landing() -> Html {
     .hero-title {
         font-size: clamp(2.5rem, 8vw, 5.5rem);
         font-weight: 800;
-        background: linear-gradient(135deg, #fff 0%, #F5F0E1 50%, #7EB2FF 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         text-shadow: none;
         margin: 0 auto 0.5rem;
         width: 100%;
@@ -2025,7 +2023,7 @@ pub fn landing() -> Html {
         background: linear-gradient(45deg, #7EB2FF, #4169E1);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
         vertical-align: middle;
     }
     @media (max-width: 768px) {
@@ -2132,7 +2130,7 @@ pub fn landing() -> Html {
         padding: 0.6rem 1rem;
         background: rgba(0, 0, 0, 0.35);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(126, 178, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 30px;
         margin-top: 1rem;
         margin-bottom: 4rem;
@@ -2197,7 +2195,7 @@ pub fn landing() -> Html {
     .sms-demo {
         background: rgba(0, 0, 0, 0.55);
         backdrop-filter: blur(20px);
-        border: 1px solid rgba(126, 178, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 24px;
         padding: 1.4rem;
         width: 100%;
@@ -2411,8 +2409,8 @@ pub fn landing() -> Html {
         gap: 0.6rem;
         margin-top: 1.5rem;
         padding: 0.8rem 1.6rem;
-        background: rgba(126, 178, 255, 0.12);
-        border: 1px solid rgba(126, 178, 255, 0.3);
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 30px;
         color: #7EB2FF;
         font-size: 0.95rem;
@@ -2423,9 +2421,9 @@ pub fn landing() -> Html {
     }
     .story-toggle-btn:hover {
         background: rgba(126, 178, 255, 0.22);
-        border-color: rgba(126, 178, 255, 0.5);
+        border-color: rgba(255, 255, 255, 0.4);
         transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(126, 178, 255, 0.2);
+        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
     }
     .story-toggle-btn i {
         font-size: 1rem;
@@ -2554,7 +2552,7 @@ pub fn landing() -> Html {
     }
     .faq-link:hover {
         color: #90c2ff;
-        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
     }
     .faq-link:hover::after {
         transform: scaleX(1);
@@ -2598,7 +2596,7 @@ pub fn landing() -> Html {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .before-after p {
         font-size: 1.3rem;
@@ -2636,7 +2634,7 @@ pub fn landing() -> Html {
     .waitlist-section {
         margin-top: 2.5rem;
         padding-top: 2rem;
-        border-top: 1px solid rgba(30, 144, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
     .waitlist-intro {
         color: #888;
@@ -2652,7 +2650,7 @@ pub fn landing() -> Html {
     }
     .waitlist-input {
         padding: 0.75rem 1rem;
-        border: 1px solid rgba(30, 144, 255, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 8px;
         background: rgba(30, 30, 30, 0.7);
         color: #fff;
@@ -2664,7 +2662,7 @@ pub fn landing() -> Html {
     .waitlist-input:focus {
         outline: none;
         border-color: #1E90FF;
-        box-shadow: 0 0 10px rgba(30, 144, 255, 0.2);
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
     }
     .waitlist-input::placeholder {
         color: #666;
@@ -2742,7 +2740,7 @@ pub fn landing() -> Html {
     }
     .development-links a:hover {
         color: #7EB2FF;
-        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
     }
     .development-links a:hover::after {
         transform: scaleX(1);
@@ -2768,15 +2766,15 @@ pub fn landing() -> Html {
         align-items: center;
         padding: 0.5rem 1rem;
         border-radius: 20px;
-        background: rgba(126, 178, 255, 0.1);
+        background: rgba(255, 255, 255, 0.1);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(126, 178, 255, 0.2);
-        box-shadow: 0 0 20px rgba(126, 178, 255, 0.15), inset 0 0 20px rgba(126, 178, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.15), inset 0 0 20px rgba(126, 178, 255, 0.05);
         transition: all 0.3s ease;
     }
     .trust-link:hover {
-        background: rgba(126, 178, 255, 0.15);
-        box-shadow: 0 0 30px rgba(126, 178, 255, 0.25), inset 0 0 20px rgba(126, 178, 255, 0.1);
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 0 30px rgba(255, 255, 255, 0.25), inset 0 0 20px rgba(255, 255, 255, 0.1);
         border-color: rgba(126, 178, 255, 0.4);
     }
     .trust-logo {
@@ -2809,7 +2807,7 @@ pub fn landing() -> Html {
         overflow: hidden;
     }
     .comic-panel:hover {
-        border-color: rgba(126, 178, 255, 0.25);
+        border-color: rgba(255, 255, 255, 0.25);
         background: rgba(126, 178, 255, 0.04);
         transform: translateY(-3px);
     }
@@ -3015,7 +3013,7 @@ pub fn landing() -> Html {
     .capabilities-content {
         background: rgba(126, 178, 255, 0.03);
         backdrop-filter: blur(8px);
-        border: 1px solid rgba(126, 178, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 16px;
         padding: 2rem;
         box-shadow: 0 0 25px rgba(126, 178, 255, 0.08);
@@ -3055,7 +3053,7 @@ pub fn landing() -> Html {
     .availability-info {
         text-align: center;
         padding-top: 1rem;
-        border-top: 1px solid rgba(126, 178, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
     .availability-info p {
         font-size: 0.95rem;
@@ -3100,7 +3098,7 @@ pub fn landing() -> Html {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .testimonial {
         background: rgba(126, 178, 255, 0.05);
@@ -3108,13 +3106,13 @@ pub fn landing() -> Html {
         border-radius: 12px;
         padding: 2rem;
         margin: 1rem 0;
-        border: 1px solid rgba(126, 178, 255, 0.15);
-        box-shadow: 0 0 20px rgba(126, 178, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
         transition: all 0.3s ease;
     }
     .testimonial:hover {
-        border-color: rgba(126, 178, 255, 0.3);
-        box-shadow: 0 0 30px rgba(126, 178, 255, 0.15);
+        border-color: rgba(255, 255, 255, 0.3);
+        box-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
     }
     .testimonial blockquote {
         font-size: 1.2rem;

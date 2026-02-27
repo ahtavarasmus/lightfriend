@@ -477,6 +477,8 @@ pub struct NavProps {
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { auth_state } = props;
+    let route = use_route::<Route>();
+    let is_pricing = matches!(route, Some(Route::Pricing));
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
@@ -499,19 +501,45 @@ pub fn nav(props: &NavProps) -> Html {
         }, ());
     }
     html! {
-        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
+        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"))}>
             <div class="nav-content">
-                <Link<Route> to={Route::Home} classes="nav-logo">
-                    {"lightfriend"}
-                </Link<Route>>
+                <div class="nav-left">
+                    <Link<Route> to={Route::Home} classes="nav-logo">
+                        {"lightfriend"}
+                    </Link<Route>>
+                    if is_pricing {
+                        <Link<Route> to={Route::Home} classes="nav-back-button">
+                            <i class="fa-solid fa-arrow-left"></i>
+                        </Link<Route>>
+                    }
+                </div>
                 <div class="nav-right">
                     {
                         match auth_state {
                             AuthState::LoggedOut => html! {
                                 <>
-                                    <Link<Route> to={Route::Pricing} classes="nav-link">
-                                        {"Pricing"}
-                                    </Link<Route>>
+                                    <div class="nav-trust-badges">
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-brands fa-github"></i>
+                                            <span>{"Open Source"}</span>
+                                        </div>
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-solid fa-shield-halved"></i>
+                                            <span>{"EU Hosted"}</span>
+                                        </div>
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-solid fa-lock"></i>
+                                            <span>{"Encrypted"}</span>
+                                        </div>
+                                    </div>
+                                    if !is_pricing {
+                                        <Link<Route> to={Route::Pricing} classes="nav-link">
+                                            {"Pricing"}
+                                        </Link<Route>>
+                                    }
+                                    <a href="mailto:support@lightfriend.ai" class="nav-link">
+                                        {"Support"}
+                                    </a>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
                                         {"Login"}
                                     </Link<Route>>
