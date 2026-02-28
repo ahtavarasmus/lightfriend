@@ -1356,6 +1356,10 @@ async fn main() {
             "/llms-full.txt",
             tower_http::services::ServeFile::new("static/llms-full.txt"),
         )
+        .nest_service(
+            "/.well-known/llms.txt",
+            tower_http::services::ServeFile::new("static/llms.txt"),
+        )
         .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()
