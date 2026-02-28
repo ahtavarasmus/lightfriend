@@ -36,6 +36,9 @@ Smartphones with app stores offer messaging, email, and calendars but come with 
 ### Smart Home & Vehicle
 - **Tesla Vehicle Control**: Lock/unlock doors, start/stop climate control, check battery level — all via text message.
 
+### Extensibility
+- **MCP Server Support**: Connect custom MCP (Model Context Protocol) servers to extend Lightfriend with additional tools and data sources. Add any MCP-compatible service through the dashboard.
+
 ### Proactive Monitoring
 - **24/7 Critical Message Monitoring**: AI continuously monitors connected messaging apps and email for urgent messages, alerting users immediately via SMS.
 - **Scheduled Digests**: Morning, daytime, and evening summaries of messages received across all platforms.
@@ -47,23 +50,22 @@ Smartphones with app stores offer messaging, email, and calendars but come with 
 
 ## Pricing
 
-### Digest Plan - $9/month
+### Assistant Plan - $19/month (US/CA) or €29/month (EU/international)
 - SMS chat interface with AI assistant
 - Voice calling interface
 - Web search, weather, directions
 - Connected app access (WhatsApp, Telegram, Signal, email, calendar)
 - Scheduled daily digests (morning, day, evening summaries)
-- 50 message credits per month (US pricing)
+- MCP server support for custom integrations
 
-### Monitor Plan - $29/month
-- Everything in Digest plan
+### Autopilot Plan - $29/month (US/CA) or €49/month (EU/international)
+- Everything in Assistant plan
 - 24/7 critical message monitoring with instant SMS alerts
 - Priority sender notifications
 - Temporary event monitoring
-- 150 message credits per month (US pricing)
 - Priority support
 
-### BYOT (Bring Your Own Twilio)
+### BYOT (Bring Your Own Twilio) - $19/month or €19/month
 - Users in unsupported countries can bring their own Twilio phone number
 - Pay Twilio directly for SMS costs at local rates
 - Lightfriend subscription still required
@@ -134,6 +136,7 @@ A: No. Any phone that can send texts and make calls works with Lightfriend.
 
 ## Contact
 
+- Support: support@lightfriend.ai
 - Email: rasmus@ahtava.com
 - Twitter/X: @ahtavarasm_us
 - GitHub: https://github.com/ahtavarasmus/lightfriend
