@@ -1,5 +1,4 @@
 use yew::prelude::*;
-use wasm_bindgen::JsCast;
 use super::triage_indicator::AttentionItem;
 
 const ITEMS_STATUS_STYLES: &str = r#"
@@ -18,6 +17,11 @@ const ITEMS_STATUS_STYLES: &str = r#"
     border-radius: 8px;
     background: rgba(255, 107, 107, 0.07);
     border: 1px solid rgba(255, 107, 107, 0.18);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.item-overdue:hover {
+    background: rgba(255, 107, 107, 0.12);
 }
 .item-overdue .item-desc { color: #ddd; }
 .item-overdue .item-when { color: #ff6b6b; }
@@ -32,6 +36,11 @@ const ITEMS_STATUS_STYLES: &str = r#"
     gap: 0.5rem;
     padding: 0.3rem 0.6rem;
     border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.item-row:hover {
+    background: rgba(255, 255, 255, 0.03);
 }
 
 /* --- Animated clock icon --- */
@@ -196,6 +205,7 @@ const ITEMS_STATUS_STYLES: &str = r#"
     gap: 0.65rem;
     padding: 0.4rem 0.5rem;
     border-radius: 8px;
+    cursor: pointer;
     transition: background 0.15s;
 }
 .mon-card:hover {
@@ -351,65 +361,48 @@ const ITEMS_STATUS_STYLES: &str = r#"
     letter-spacing: 0.04em;
 }
 
-/* --- Digest creator row --- */
-.digest-creator {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 6px;
-    opacity: 0.55;
-    transition: opacity 0.15s;
-}
-.digest-creator:hover {
-    opacity: 1;
-}
-.digest-creator-label {
-    font-size: 0.7rem;
-    color: #555;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-}
-.digest-creator-label i {
-    font-size: 0.5rem;
-}
-.digest-creator select {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    color: #666;
-    font-size: 0.7rem;
-    padding: 0.15rem 0.3rem;
-    border-radius: 4px;
-    cursor: pointer;
-    outline: none;
-    transition: border-color 0.15s, color 0.15s;
-}
-.digest-creator:hover select {
-    border-color: rgba(255, 255, 255, 0.14);
-    color: #999;
-}
-.digest-creator-btn {
-    background: none;
-    border: none;
-    color: #555;
-    font-size: 0.7rem;
-    padding: 0.1rem 0.3rem;
-    cursor: pointer;
-    transition: color 0.15s;
-    flex-shrink: 0;
-}
-.digest-creator-btn:hover {
-    color: #7EB2FF;
-}
-
 /* --- Status line --- */
 .items-quiet {
     font-size: 0.72rem;
     color: #4a4a5a;
     text-align: center;
     padding: 0.2rem 0;
+}
+
+/* --- Example/ghost items --- */
+.example-items-wrapper {
+    position: relative;
+    cursor: pointer;
+}
+.example-items-hint {
+    position: absolute;
+    top: -0.1rem;
+    right: 0.5rem;
+    font-size: 0.6rem;
+    color: #555;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.example-items-wrapper:hover .example-items-hint {
+    opacity: 1;
+}
+.example-item {
+    opacity: 0.35;
+    transition: opacity 0.2s;
+    position: relative;
+}
+.example-item:hover {
+    opacity: 0.6;
+}
+.example-item::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    pointer-events: none;
 }
 "#;
 
@@ -503,8 +496,8 @@ fn extract_sender(desc: &str) -> Option<String> {
     }
 }
 
-/// Build a short topic line for monitor display.
-fn monitor_topic(desc: &str, sender: Option<&str>) -> String {
+/// Build a short topic line for tracking item display.
+fn tracking_topic(desc: &str, sender: Option<&str>) -> String {
     let mut s = desc.trim().to_string();
 
     // Strip leading "Watch for " / "Monitor: "
@@ -615,7 +608,7 @@ fn parse_repeat_hour(summary: &str) -> Option<u32> {
 }
 
 /// Get readable sources: from `[fetch:]` tag, or from "Sources:" in legacy descriptions.
-fn digest_sources(summary: &str, description: &str) -> Option<String> {
+pub fn digest_sources(summary: &str, description: &str) -> Option<String> {
     // Tagged items: parse [fetch:email,chat,calendar,items]
     if let Some(val) = extract_tag(summary, "fetch") {
         let parts: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
@@ -670,6 +663,114 @@ fn detect_occupied_digest_hours(items: &[AttentionItem]) -> Vec<u32> {
     occupied
 }
 
+// -- Contextual suggestions based on existing items --
+
+fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
+    let mut suggestions = Vec::new();
+    let occupied = detect_occupied_digest_hours(items);
+
+    // Suggest one digest: first free time slot
+    if !occupied.contains(&8) {
+        suggestions.push(AttentionItem {
+            id: -1,
+            item_type: "recurring".to_string(),
+            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 08:00]".to_string(),
+            description: "Daily digest: morning briefing".to_string(),
+            priority: 0,
+            due_at: None,
+            source: None,
+            source_id: None,
+            notify: Some("sms".to_string()),
+            sender: None,
+            platform: None,
+            time_display: Some("8:00 AM".to_string()),
+            relative_display: Some("daily".to_string()),
+        });
+    } else if !occupied.contains(&13) {
+        suggestions.push(AttentionItem {
+            id: -4,
+            item_type: "recurring".to_string(),
+            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 13:00]".to_string(),
+            description: "Daily digest: afternoon update".to_string(),
+            priority: 0,
+            due_at: None,
+            source: None,
+            source_id: None,
+            notify: Some("sms".to_string()),
+            sender: None,
+            platform: None,
+            time_display: Some("1:00 PM".to_string()),
+            relative_display: Some("daily".to_string()),
+        });
+    } else if !occupied.contains(&19) {
+        suggestions.push(AttentionItem {
+            id: -5,
+            item_type: "recurring".to_string(),
+            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 19:00]".to_string(),
+            description: "Daily digest: evening recap".to_string(),
+            priority: 0,
+            due_at: None,
+            source: None,
+            source_id: None,
+            notify: Some("sms".to_string()),
+            sender: None,
+            platform: None,
+            time_display: Some("7:00 PM".to_string()),
+            relative_display: Some("daily".to_string()),
+        });
+    }
+
+    // Suggest tracking if no tracking items exist
+    let has_tracking = items.iter().any(|i| i.item_type == "tracking");
+    if !has_tracking {
+        suggestions.push(AttentionItem {
+            id: -2,
+            item_type: "tracking".to_string(),
+            summary: "Watch for delivery updates".to_string(),
+            description: "Watch for delivery updates from Amazon".to_string(),
+            priority: 0,
+            due_at: None,
+            source: None,
+            source_id: None,
+            notify: Some("sms".to_string()),
+            sender: Some("Amazon".to_string()),
+            platform: Some("email".to_string()),
+            time_display: None,
+            relative_display: None,
+        });
+    }
+
+    // Always suggest a reminder (one-shot reminders are always useful)
+    suggestions.push(AttentionItem {
+        id: -3,
+        item_type: "oneshot".to_string(),
+        summary: "Reminder".to_string(),
+        description: "Take the cake out of the oven".to_string(),
+        priority: 0,
+        due_at: None,
+        source: None,
+        source_id: None,
+        notify: Some("sms".to_string()),
+        sender: None,
+        platform: None,
+        time_display: Some("3:30 PM".to_string()),
+        relative_display: Some("in 2h".to_string()),
+    });
+
+    suggestions
+}
+
+fn example_prefill_prompt(id: i32) -> Option<String> {
+    match id {
+        -1 => Some("Set up a daily digest at 8am covering my emails, messages, calendar, and tracked items".to_string()),
+        -4 => Some("Set up a daily digest at 1pm covering my emails, messages, calendar, and tracked items".to_string()),
+        -5 => Some("Set up a daily digest at 7pm covering my emails, messages, calendar, and tracked items".to_string()),
+        -2 => Some("Watch for delivery updates from Amazon in my email and text me when it ships".to_string()),
+        -3 => Some("Remind me to take the cake out of the oven in 2 hours".to_string()),
+        _ => None,
+    }
+}
+
 // -- Component --
 
 #[derive(Properties, PartialEq)]
@@ -679,44 +780,44 @@ pub struct ItemsStatusProps {
     pub on_dismiss: Callback<AttentionItem>,
     #[prop_or_default]
     pub on_digest_prefill: Option<Callback<String>>,
+    #[prop_or_default]
+    pub on_item_click: Option<Callback<AttentionItem>>,
 }
 
 #[function_component(ItemsStatusSection)]
 pub fn items_status_section(props: &ItemsStatusProps) -> Html {
     let show_all = use_state(|| false);
-    let digest_time = use_state(|| String::new());
 
-    if props.items.is_empty() && props.total_tracked_count == 0 {
-        return html! {};
-    }
+    // Build contextual suggestions based on what the user already has
+    let suggestions = build_suggestions(&props.items);
 
-    // Deduplicate monitors by sender
-    let mut seen_monitors: Vec<String> = Vec::new();
+    // Deduplicate tracking items by sender
+    let mut seen_tracking: Vec<String> = Vec::new();
 
-    // Build unified list: all items sorted by next_check_at (soonest first)
+    // Build unified list: all items sorted by due_at (soonest first)
     let mut all_items: Vec<&AttentionItem> = props.items.iter()
         .filter(|i| {
-            if i.monitor {
+            if i.item_type == "tracking" {
                 let key = i.sender.clone()
                     .or_else(|| extract_sender(&i.description))
                     .unwrap_or_else(|| i.description.clone());
-                if seen_monitors.contains(&key) {
+                if seen_tracking.contains(&key) {
                     return false;
                 }
-                seen_monitors.push(key);
+                seen_tracking.push(key);
             }
             true
         })
         .collect();
 
-    // Sort: overdue first, then by next_check_at ascending
+    // Sort: overdue first, then by due_at ascending
     all_items.sort_by(|a, b| {
         let a_overdue = a.relative_display.as_deref() == Some("overdue");
         let b_overdue = b.relative_display.as_deref() == Some("overdue");
         match (a_overdue, b_overdue) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => match (a.next_check_at, b.next_check_at) {
+            _ => match (a.due_at, b.due_at) {
                 (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (None, Some(_)) => std::cmp::Ordering::Greater,
@@ -745,67 +846,30 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
         })
     };
 
-    // Digest creator: detect existing digest time slots
-    let occupied_hours = detect_occupied_digest_hours(&props.items);
-    let available_slots: Vec<(String, String)> = [
-        ("Morning (8am)", "8am", 8u32),
-        ("Afternoon (1pm)", "1pm", 13u32),
-        ("Evening (7pm)", "7pm", 19u32),
-    ].iter()
-        .filter(|(_, _, hour)| !occupied_hours.contains(hour))
-        .map(|(label, time, _)| (label.to_string(), time.to_string()))
-        .collect();
-
-    let digest_creator_html = if !available_slots.is_empty() {
-        if let Some(ref cb) = props.on_digest_prefill {
-            let digest_time_for_change = digest_time.clone();
-            let on_time_change = Callback::from(move |e: Event| {
-                if let Some(target) = e.target() {
-                    if let Ok(select) = target.dyn_into::<web_sys::HtmlSelectElement>() {
-                        digest_time_for_change.set(select.value());
+    // Build suggestion HTML
+    let suggestions_html = if !suggestions.is_empty() {
+        html! {
+            <div class="example-items-wrapper">
+                <span class="example-items-hint">{"click to try"}</span>
+                { for suggestions.iter().map(|item| {
+                    let prefill_cb = props.on_digest_prefill.clone();
+                    let item_id = item.id;
+                    let onclick = Callback::from(move |_: MouseEvent| {
+                        if let (Some(ref cb), Some(prompt)) = (&prefill_cb, example_prefill_prompt(item_id)) {
+                            cb.emit(prompt);
+                        }
+                    });
+                    html! {
+                        <div class="example-item">
+                            { if item.item_type == "tracking" {
+                                render_tracking_card(item, onclick)
+                            } else {
+                                render_scheduled_item(item, onclick)
+                            }}
+                        </div>
                     }
-                }
-            });
-
-            // Default to first available slot if state is empty or stale
-            let first_available = available_slots.first().map(|(_, t)| t.clone()).unwrap_or_default();
-            if (*digest_time).is_empty() || !available_slots.iter().any(|(_, t)| t == &*digest_time) {
-                digest_time.set(first_available.clone());
-            }
-
-            let cb = cb.clone();
-            let avail_for_click = available_slots.clone();
-            let digest_time_for_click = digest_time.clone();
-            let on_add = Callback::from(move |_: MouseEvent| {
-                let time = (*digest_time_for_click).clone();
-                if !time.is_empty() {
-                    cb.emit(format!(
-                        "Set up a daily digest at {} covering my emails, messages, calendar, and tracked items",
-                        time
-                    ));
-                    // Advance dropdown to the next available slot
-                    let next = avail_for_click.iter()
-                        .find(|(_, t)| *t != time)
-                        .map(|(_, t)| t.clone())
-                        .unwrap_or_default();
-                    digest_time_for_click.set(next);
-                }
-            });
-
-            html! {
-                <div class="digest-creator">
-                    <span class="digest-creator-label"><i class="fa-solid fa-plus"></i>{"digest"}</span>
-                    <select onchange={on_time_change} value={(*digest_time).clone()}>
-                        { for available_slots.iter().map(|(label, time)| {
-                            let selected = *digest_time == *time;
-                            html! { <option value={time.clone()} selected={selected}>{label.clone()}</option> }
-                        })}
-                    </select>
-                    <button class="digest-creator-btn" onclick={on_add}>{"add"}</button>
-                </div>
-            }
-        } else {
-            html! {}
+                })}
+            </div>
         }
     } else {
         html! {}
@@ -816,14 +880,21 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
         <style>{ITEMS_STATUS_STYLES}</style>
         <div class="items-status">
             { for visible.iter().map(|item| {
-                if item.monitor {
-                    render_monitor_card(item)
+                let on_click = props.on_item_click.clone();
+                let click_item: AttentionItem = (***item).clone();
+                let onclick = Callback::from(move |_: MouseEvent| {
+                    if let Some(ref cb) = on_click {
+                        cb.emit(click_item.clone());
+                    }
+                });
+                if item.item_type == "tracking" {
+                    render_tracking_card(item, onclick)
                 } else if item.relative_display.as_deref() == Some("overdue") {
                     let desc = clean_description(&item.description);
                     let dismiss_item: AttentionItem = (***item).clone();
                     let on_dismiss = props.on_dismiss.clone();
                     html! {
-                        <div class="item-overdue">
+                        <div class="item-overdue" {onclick}>
                             <div class="item-clock">
                                 <div class="clock-face"></div>
                                 <div class="clock-hand-wrap">
@@ -843,7 +914,7 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
                         </div>
                     }
                 } else {
-                    render_scheduled_item(item)
+                    render_scheduled_item(item, onclick)
                 }
             })}
             { if hidden > 0 {
@@ -852,21 +923,14 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
                         {format!("+{} more", hidden)}
                     </button>
                 }
-            } else {
+            } else if *show_all && total > VISIBLE_LIMIT {
                 html! {
-                    <>
-                    {digest_creator_html}
-                    { if *show_all && total > VISIBLE_LIMIT {
-                        html! {
-                            <button class="items-more-btn" onclick={on_toggle}>
-                                {"show less"}
-                            </button>
-                        }
-                    } else {
-                        html! {}
-                    }}
-                    </>
+                    <button class="items-more-btn" onclick={on_toggle}>
+                        {"show less"}
+                    </button>
                 }
+            } else {
+                html! {}
             }}
 
             // Status line when nothing visible
@@ -882,6 +946,9 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
             } else {
                 html! {}
             }}
+
+            // Contextual suggestions
+            {suggestions_html}
         </div>
         </>
     }
@@ -911,7 +978,7 @@ fn render_type_tag(item_type: &str) -> Html {
     }
 }
 
-fn render_scheduled_item(item: &AttentionItem) -> Html {
+fn render_scheduled_item(item: &AttentionItem, onclick: Callback<MouseEvent>) -> Html {
     let is_digest = is_digest_item(&item.summary);
     let is_recurring = item.item_type == "recurring" || item.item_type == "tracking" || is_digest;
     let when = match (&item.time_display, &item.relative_display) {
@@ -929,7 +996,7 @@ fn render_scheduled_item(item: &AttentionItem) -> Html {
         let title = clean_description(&item.description);
         let sources = digest_sources(&item.summary, &item.description);
         return html! {
-            <div class="item-row">
+            <div class="item-row" {onclick}>
                 <div class="item-clock">
                     <div class="clock-face"></div>
                     <div class="clock-hand-wrap">
@@ -957,7 +1024,7 @@ fn render_scheduled_item(item: &AttentionItem) -> Html {
 
     let desc = clean_description(&item.description);
     html! {
-        <div class="item-row">
+        <div class="item-row" {onclick}>
             <div class="item-clock">
                 <div class="clock-face"></div>
                 <div class="clock-hand-wrap">
@@ -975,7 +1042,7 @@ fn render_scheduled_item(item: &AttentionItem) -> Html {
     }
 }
 
-fn render_monitor_card(item: &AttentionItem) -> Html {
+fn render_tracking_card(item: &AttentionItem, onclick: Callback<MouseEvent>) -> Html {
     let pv = platform_visual(item.platform.as_deref(), &item.description);
     let icon_style = format!("color: {};", pv.color);
     let glow_style = format!("background: {};", pv.glow);
@@ -986,7 +1053,7 @@ fn render_monitor_card(item: &AttentionItem) -> Html {
         .or_else(|| extract_sender(&item.description))
         .unwrap_or_else(|| pv.name.to_string());
     let has_sender = item.sender.is_some() || extract_sender(&item.description).is_some();
-    let topic = monitor_topic(
+    let topic = tracking_topic(
         &item.description,
         if has_sender { Some(&sender_display) } else { None },
     );
@@ -999,7 +1066,7 @@ fn render_monitor_card(item: &AttentionItem) -> Html {
     };
 
     html! {
-        <div class="mon-card">
+        <div class="mon-card" {onclick}>
             <div class="mon-scene">
                 <div class="mon-incoming"><i class={pv.icon} style={icon_style.clone()}></i></div>
                 <div class="mon-incoming p2"><i class={pv.icon} style={icon_style.clone()}></i></div>
@@ -1016,7 +1083,8 @@ fn render_monitor_card(item: &AttentionItem) -> Html {
             </div>
             // platform icon already shows visually, no text tag needed
             { if !when.is_empty() {
-                html! { <span class="item-when">{format!("next check in {}", when)}</span> }
+                let label = if when == "checking..." { when.clone() } else { format!("next check in {}", when) };
+                html! { <span class="item-when">{label}</span> }
             } else {
                 html! {}
             }}

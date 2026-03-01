@@ -471,19 +471,13 @@ const AVATAR_ROW_STYLES: &str = r#"
     right: -6px;
 }
 
-/* Network override section in modal */
-.network-override-section {
+/* Platform section in modal */
+.platform-section {
     margin-top: 0.75rem;
     padding-top: 0.5rem;
     border-top: 1px solid rgba(255,255,255,0.08);
 }
-.network-override-section h4 {
-    font-size: 0.85rem;
-    color: #999;
-    margin: 0 0 0.5rem 0;
-    font-weight: 500;
-}
-.network-override-row {
+.platform-row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -491,27 +485,50 @@ const AVATAR_ROW_STYLES: &str = r#"
     padding: 0.4rem;
     border-radius: 6px;
     background: rgba(255,255,255,0.03);
+    flex-wrap: wrap;
 }
-.network-override-row i {
+.platform-row i {
     font-size: 0.85rem;
     width: 20px;
     text-align: center;
     flex-shrink: 0;
 }
-.network-override-name {
-    font-size: 0.75rem;
-    color: #bbb;
-    min-width: 0;
+.platform-row .input-with-suggestions {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 80px;
+    position: relative;
 }
-.network-override-name.not-connected {
-    color: #555;
-    font-style: italic;
+.platform-row .input-with-suggestions input[type="text"] {
+    width: 100%;
+    padding: 0.3rem 0.4rem;
+    background: #12121f;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 0.75rem;
 }
-.network-override-row select {
+.platform-row .input-with-suggestions input[type="text"]:focus {
+    outline: none;
+    border-color: rgba(255,255,255,0.3);
+}
+.platform-row .input-with-suggestions input.warn-border {
+    border-color: #e55 !important;
+}
+.platform-row input.platform-email-input {
+    flex: 1;
+    min-width: 80px;
+    padding: 0.3rem 0.4rem;
+    background: #12121f;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 0.75rem;
+}
+.platform-row input.platform-email-input:focus {
+    outline: none;
+    border-color: rgba(255,255,255,0.3);
+}
+.platform-row select {
     padding: 0.25rem 0.35rem;
     background: #12121f;
     border: 1px solid rgba(255,255,255,0.12);
@@ -565,6 +582,41 @@ fn connected_platforms(profile: &ContactProfile) -> Vec<&'static PlatformInfo> {
         out.push(&PLATFORMS[3]);
     }
     out
+}
+
+fn render_platform_row(
+    icon: &str,
+    color: &str,
+    is_bridge: bool,
+    search_html: Html,
+    exc_mode: String,
+    exc_type: String,
+    on_mode: Callback<Event>,
+    on_type: Callback<Event>,
+) -> Html {
+    html! {
+        <div class="platform-row">
+            <i class={icon.to_string()} style={format!("color:{};", color)}></i>
+            {search_html}
+            <select onchange={on_mode}>
+                <option value="" selected={exc_mode.is_empty()}>{"Default"}</option>
+                <option value="all" selected={exc_mode == "all"}>{"All"}</option>
+                if is_bridge {
+                    <option value="mention" selected={exc_mode == "mention"}>{"@mention"}</option>
+                }
+                <option value="critical" selected={exc_mode == "critical"}>{"Critical"}</option>
+                <option value="digest" selected={exc_mode == "digest"}>{"Digest"}</option>
+                <option value="ignore" selected={exc_mode == "ignore"}>{"Ignore"}</option>
+            </select>
+            if exc_mode != "ignore" {
+                <select onchange={on_type}>
+                    <option value="" selected={exc_type.is_empty()}>{"Default"}</option>
+                    <option value="sms" selected={exc_type == "sms"}>{"SMS"}</option>
+                    <option value="call" selected={exc_type == "call"}>{"Call"}</option>
+                </select>
+            }
+        </div>
+    }
 }
 
 fn find_exception<'a>(profile: &'a ContactProfile, platform: &str) -> Option<&'a ProfileException> {
@@ -750,6 +802,15 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     let add_whatsapp_selected = use_state(|| false);
     let add_telegram_selected = use_state(|| false);
     let add_signal_selected = use_state(|| false);
+    let add_notes = use_state(|| String::new());
+    let add_exc_wa_mode = use_state(|| String::new());
+    let add_exc_wa_type = use_state(|| String::new());
+    let add_exc_tg_mode = use_state(|| String::new());
+    let add_exc_tg_type = use_state(|| String::new());
+    let add_exc_sg_mode = use_state(|| String::new());
+    let add_exc_sg_type = use_state(|| String::new());
+    let add_exc_em_mode = use_state(|| String::new());
+    let add_exc_em_type = use_state(|| String::new());
 
     // Search state per platform
     let whatsapp_results = use_state(|| Vec::<Room>::new());
@@ -1258,6 +1319,15 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         let add_whatsapp_selected = add_whatsapp_selected.clone();
         let add_telegram_selected = add_telegram_selected.clone();
         let add_signal_selected = add_signal_selected.clone();
+        let add_notes = add_notes.clone();
+        let add_exc_wa_mode = add_exc_wa_mode.clone();
+        let add_exc_wa_type = add_exc_wa_type.clone();
+        let add_exc_tg_mode = add_exc_tg_mode.clone();
+        let add_exc_tg_type = add_exc_tg_type.clone();
+        let add_exc_sg_mode = add_exc_sg_mode.clone();
+        let add_exc_sg_type = add_exc_sg_type.clone();
+        let add_exc_em_mode = add_exc_em_mode.clone();
+        let add_exc_em_type = add_exc_em_type.clone();
         let error_msg = error_msg.clone();
         let whatsapp_results = whatsapp_results.clone();
         let telegram_results = telegram_results.clone();
@@ -1277,12 +1347,21 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             add_mode.set("critical".to_string());
             add_type.set("sms".to_string());
             add_notify_call.set(true);
+            add_notes.set(String::new());
             add_whatsapp_room_id.set(None);
             add_telegram_room_id.set(None);
             add_signal_room_id.set(None);
             add_whatsapp_selected.set(false);
             add_telegram_selected.set(false);
             add_signal_selected.set(false);
+            add_exc_wa_mode.set(String::new());
+            add_exc_wa_type.set(String::new());
+            add_exc_tg_mode.set(String::new());
+            add_exc_tg_type.set(String::new());
+            add_exc_sg_mode.set(String::new());
+            add_exc_sg_type.set(String::new());
+            add_exc_em_mode.set(String::new());
+            add_exc_em_type.set(String::new());
             error_msg.set(None);
             whatsapp_results.set(vec![]);
             telegram_results.set(vec![]);
@@ -1900,12 +1979,21 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
         let add_mode = add_mode.clone();
         let add_type = add_type.clone();
         let add_notify_call = add_notify_call.clone();
+        let add_notes = add_notes.clone();
         let add_whatsapp_room_id = add_whatsapp_room_id.clone();
         let add_telegram_room_id = add_telegram_room_id.clone();
         let add_signal_room_id = add_signal_room_id.clone();
         let add_whatsapp_selected = add_whatsapp_selected.clone();
         let add_telegram_selected = add_telegram_selected.clone();
         let add_signal_selected = add_signal_selected.clone();
+        let add_exc_wa_mode = add_exc_wa_mode.clone();
+        let add_exc_wa_type = add_exc_wa_type.clone();
+        let add_exc_tg_mode = add_exc_tg_mode.clone();
+        let add_exc_tg_type = add_exc_tg_type.clone();
+        let add_exc_sg_mode = add_exc_sg_mode.clone();
+        let add_exc_sg_type = add_exc_sg_type.clone();
+        let add_exc_em_mode = add_exc_em_mode.clone();
+        let add_exc_em_type = add_exc_em_type.clone();
         let error_msg = error_msg.clone();
         let saving = saving.clone();
         let fetch_profiles = fetch_profiles.clone();
@@ -1935,20 +2023,42 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             let signal = if add_signal.is_empty() { None } else { Some((*add_signal).clone()) };
             let email = if add_email.is_empty() { None } else { Some((*add_email).clone()) };
 
+            let default_mode_val = (*add_mode).clone();
+            let default_type_val = (*add_type).clone();
+            let default_call_val = *add_notify_call;
+            let mut exceptions: Vec<ExceptionRequest> = Vec::new();
+            for (plat, exc_m, exc_t) in [
+                ("whatsapp", (*add_exc_wa_mode).clone(), (*add_exc_wa_type).clone()),
+                ("telegram", (*add_exc_tg_mode).clone(), (*add_exc_tg_type).clone()),
+                ("signal", (*add_exc_sg_mode).clone(), (*add_exc_sg_type).clone()),
+                ("email", (*add_exc_em_mode).clone(), (*add_exc_em_type).clone()),
+            ] {
+                if !exc_m.is_empty() || !exc_t.is_empty() {
+                    exceptions.push(ExceptionRequest {
+                        platform: plat.to_string(),
+                        notification_mode: if exc_m.is_empty() { default_mode_val.clone() } else { exc_m },
+                        notification_type: if exc_t.is_empty() { default_type_val.clone() } else { exc_t },
+                        notify_on_call: default_call_val,
+                    });
+                }
+            }
+
+            let notes_val = (*add_notes).trim().to_string();
+
             let request = CreateProfileRequest {
                 nickname,
                 whatsapp_chat: whatsapp,
                 telegram_chat: telegram,
                 signal_chat: signal,
                 email_addresses: email,
-                notification_mode: (*add_mode).clone(),
-                notification_type: (*add_type).clone(),
-                notify_on_call: *add_notify_call,
-                exceptions: None,
+                notification_mode: default_mode_val,
+                notification_type: default_type_val,
+                notify_on_call: default_call_val,
+                exceptions: Some(exceptions),
                 whatsapp_room_id: (*add_whatsapp_room_id).clone(),
                 telegram_room_id: (*add_telegram_room_id).clone(),
                 signal_room_id: (*add_signal_room_id).clone(),
-                notes: None,
+                notes: if notes_val.is_empty() { None } else { Some(notes_val) },
             };
 
             let modal = modal.clone();
@@ -2061,10 +2171,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
             ModalType::ContactSettings(pid) => {
                 let profile = profiles.iter().find(|p| p.id == pid).cloned();
                 let Some(profile) = profile else { return html! {} };
-                let has_whatsapp = profile.whatsapp_chat.is_some();
-                let has_telegram = profile.telegram_chat.is_some();
-                let has_signal = profile.signal_chat.is_some();
-
                 let err = (*error_msg).clone();
                 let is_saving = *saving;
 
@@ -2374,6 +2480,61 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
 
                 let current_mode = (*form_mode).clone();
 
+                // Build each platform row via helper function to reduce locals
+                let wa_row_html = render_platform_row(
+                    "fa-brands fa-whatsapp", "#25D366", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*form_whatsapp).clone()} oninput={on_form_whatsapp_input}
+                                class={if !form_whatsapp.is_empty() && !*form_whatsapp_selected { "warn-border" } else { "" }}
+                                placeholder="Search WhatsApp" />
+                            {settings_wa_suggestions}
+                        </div>
+                    },
+                    (*exc_wa_mode).clone(), (*exc_wa_type).clone(),
+                    { let s = exc_wa_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = exc_wa_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let tg_row_html = render_platform_row(
+                    "fa-brands fa-telegram", "#0088CC", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*form_telegram).clone()} oninput={on_form_telegram_input}
+                                class={if !form_telegram.is_empty() && !*form_telegram_selected { "warn-border" } else { "" }}
+                                placeholder="Search Telegram" />
+                            {settings_tg_suggestions}
+                        </div>
+                    },
+                    (*exc_tg_mode).clone(), (*exc_tg_type).clone(),
+                    { let s = exc_tg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let sg_row_html = render_platform_row(
+                    "fa-solid fa-comment-dots", "#3A76F1", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*form_signal).clone()} oninput={on_form_signal_input}
+                                class={if !form_signal.is_empty() && !*form_signal_selected { "warn-border" } else { "" }}
+                                placeholder="Search Signal" />
+                            {settings_sg_suggestions}
+                        </div>
+                    },
+                    (*exc_sg_mode).clone(), (*exc_sg_type).clone(),
+                    { let s = exc_sg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = exc_sg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let em_row_html = render_platform_row(
+                    "fa-solid fa-envelope", "#7EB2FF", false,
+                    html! {
+                        <input type="text" class="platform-email-input"
+                            value={(*form_email).clone()} oninput={on_form_email_input}
+                            placeholder="email@example.com" />
+                    },
+                    (*exc_em_mode).clone(), (*exc_em_type).clone(),
+                    { let s = exc_em_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = exc_em_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
                         <div class="avatar-modal-box" onclick={stop_prop}>
@@ -2396,57 +2557,21 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <label>{"Nickname"}</label>
                                 <input type="text" value={(*form_nickname).clone()} onchange={on_nick} />
                             </div>
-                            if !has_whatsapp {
-                                <div class="avatar-modal-row">
-                                    <label>{"WhatsApp"}</label>
-                                    <div class="input-with-suggestions">
-                                        <input type="text" value={(*form_whatsapp).clone()} oninput={on_form_whatsapp_input}
-                                            class={if !form_whatsapp.is_empty() && !*form_whatsapp_selected { "warn-border" } else { "" }}
-                                            placeholder="Search chat name" />
-                                        {settings_wa_suggestions}
-                                    </div>
-                                </div>
-                            }
-                            if !has_telegram {
-                                <div class="avatar-modal-row">
-                                    <label>{"Telegram"}</label>
-                                    <div class="input-with-suggestions">
-                                        <input type="text" value={(*form_telegram).clone()} oninput={on_form_telegram_input}
-                                            class={if !form_telegram.is_empty() && !*form_telegram_selected { "warn-border" } else { "" }}
-                                            placeholder="Search chat name" />
-                                        {settings_tg_suggestions}
-                                    </div>
-                                </div>
-                            }
-                            if !has_signal {
-                                <div class="avatar-modal-row">
-                                    <label>{"Signal"}</label>
-                                    <div class="input-with-suggestions">
-                                        <input type="text" value={(*form_signal).clone()} oninput={on_form_signal_input}
-                                            class={if !form_signal.is_empty() && !*form_signal_selected { "warn-border" } else { "" }}
-                                            placeholder="Search chat name" />
-                                        {settings_sg_suggestions}
-                                    </div>
-                                </div>
-                            }
-                            <div class="avatar-modal-row">
-                                <label>{"Email"}</label>
-                                <input type="text" value={(*form_email).clone()} oninput={on_form_email_input}
-                                    placeholder="email@example.com" />
-                            </div>
                             <div class="avatar-modal-row">
                                 <label>{"Notes"}</label>
                                 <textarea class="avatar-modal-notes" rows="2"
                                     value={(*form_notes).clone()}
                                     oninput={on_notes_input}
                                     placeholder="e.g. My mom. Reply in Finnish." />
-                                <div class="avatar-modal-notes-hint">{"Helps AI draft better replies"}</div>
+                                <div class="avatar-modal-notes-hint">{"Helps AI understand context"}</div>
                             </div>
                             <div class="avatar-modal-row">
                                 <label>{"Notification mode"}</label>
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_mode == "digest"}>{"Digest"}</option>
+                                    <option value="ignore" selected={current_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-row">
@@ -2460,97 +2585,12 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <input type="checkbox" id="av-notify-call" checked={*form_notify_call} onchange={on_call} />
                                 <label for="av-notify-call">{"Notify on incoming call"}</label>
                             </div>
-                            // Per-platform network overrides
-                            <div class="network-override-section">
-                                <h4>{"Network Overrides"}</h4>
-                                { for PLATFORMS.iter().map(|pi| {
-                                    let platform_key = pi.key;
-                                    let is_connected = match platform_key {
-                                        "whatsapp" => profile.whatsapp_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
-                                        "telegram" => profile.telegram_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
-                                        "signal" => profile.signal_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
-                                        "email" => profile.email_addresses.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
-                                        _ => false,
-                                    };
-                                    let chat_name = match platform_key {
-                                        "whatsapp" => profile.whatsapp_chat.clone().unwrap_or_default(),
-                                        "telegram" => profile.telegram_chat.clone().unwrap_or_default(),
-                                        "signal" => profile.signal_chat.clone().unwrap_or_default(),
-                                        "email" => profile.email_addresses.clone().unwrap_or_default(),
-                                        _ => String::new(),
-                                    };
-                                    let (cur_mode, cur_type) = match platform_key {
-                                        "whatsapp" => ((*exc_wa_mode).clone(), (*exc_wa_type).clone()),
-                                        "telegram" => ((*exc_tg_mode).clone(), (*exc_tg_type).clone()),
-                                        "signal" => ((*exc_sg_mode).clone(), (*exc_sg_type).clone()),
-                                        "email" => ((*exc_em_mode).clone(), (*exc_em_type).clone()),
-                                        _ => (String::new(), String::new()),
-                                    };
-                                    let on_mode_change = {
-                                        let exc_wa_mode = exc_wa_mode.clone();
-                                        let exc_tg_mode = exc_tg_mode.clone();
-                                        let exc_sg_mode = exc_sg_mode.clone();
-                                        let exc_em_mode = exc_em_mode.clone();
-                                        let pk = platform_key.to_string();
-                                        Callback::from(move |e: Event| {
-                                            let target: HtmlSelectElement = e.target_unchecked_into();
-                                            let v = target.value();
-                                            match pk.as_str() {
-                                                "whatsapp" => exc_wa_mode.set(v),
-                                                "telegram" => exc_tg_mode.set(v),
-                                                "signal" => exc_sg_mode.set(v),
-                                                "email" => exc_em_mode.set(v),
-                                                _ => {}
-                                            }
-                                        })
-                                    };
-                                    let on_type_change = {
-                                        let exc_wa_type = exc_wa_type.clone();
-                                        let exc_tg_type = exc_tg_type.clone();
-                                        let exc_sg_type = exc_sg_type.clone();
-                                        let exc_em_type = exc_em_type.clone();
-                                        let pk = platform_key.to_string();
-                                        Callback::from(move |e: Event| {
-                                            let target: HtmlSelectElement = e.target_unchecked_into();
-                                            let v = target.value();
-                                            match pk.as_str() {
-                                                "whatsapp" => exc_wa_type.set(v),
-                                                "telegram" => exc_tg_type.set(v),
-                                                "signal" => exc_sg_type.set(v),
-                                                "email" => exc_em_type.set(v),
-                                                _ => {}
-                                            }
-                                        })
-                                    };
-                                    let is_bridge = platform_key != "email";
-                                    let show_mention = is_bridge;
-                                    html! {
-                                        <div class="network-override-row">
-                                            <i class={pi.icon} style={format!("color:{};", pi.color)}></i>
-                                            if is_connected {
-                                                <span class="network-override-name" title={chat_name.clone()}>{&chat_name}</span>
-                                            } else {
-                                                <span class="network-override-name not-connected">{"not connected"}</span>
-                                            }
-                                            <select onchange={on_mode_change}>
-                                                <option value="" selected={cur_mode.is_empty()}>{"Default"}</option>
-                                                <option value="all" selected={cur_mode == "all"}>{"All"}</option>
-                                                if show_mention {
-                                                    <option value="mention" selected={cur_mode == "mention"}>{"@mention"}</option>
-                                                }
-                                                <option value="critical" selected={cur_mode == "critical"}>{"Critical"}</option>
-                                                <option value="ignore" selected={cur_mode == "ignore"}>{"Ignore"}</option>
-                                            </select>
-                                            if cur_mode != "ignore" {
-                                                <select onchange={on_type_change}>
-                                                    <option value="" selected={cur_type.is_empty()}>{"Default"}</option>
-                                                    <option value="sms" selected={cur_type == "sms"}>{"SMS"}</option>
-                                                    <option value="call" selected={cur_type == "call"}>{"Call"}</option>
-                                                </select>
-                                            }
-                                        </div>
-                                    }
-                                })}
+                            // Per-platform rows: chat search + override dropdowns
+                            <div class="platform-section">
+                                {wa_row_html}
+                                {tg_row_html}
+                                {sg_row_html}
+                                {em_row_html}
                             </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-delete" onclick={on_delete} disabled={is_saving}>{"Delete"}</button>
@@ -2927,6 +2967,8 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                         <option value="mention" selected={current_exc_mode == "mention"}>{"@mention only"}</option>
                                     }
                                     <option value="critical" selected={current_exc_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_exc_mode == "digest"}>{"Digest"}</option>
+                                    <option value="ignore" selected={current_exc_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             if show_type {
@@ -3020,6 +3062,8 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_pc_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_pc_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_pc_mode == "digest"}>{"Digest"}</option>
+                                    <option value="ignore" selected={current_pc_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-row">
@@ -3097,6 +3141,8 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_def_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_def_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_def_mode == "digest"}>{"Digest"}</option>
+                                    <option value="ignore" selected={current_def_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-row">
@@ -3364,6 +3410,14 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                     Callback::from(move |_: MouseEvent| { save.emit(()); })
                 };
 
+                let on_notes_input = {
+                    let add_notes = add_notes.clone();
+                    Callback::from(move |e: InputEvent| {
+                        let target: HtmlInputElement = e.target_unchecked_into();
+                        add_notes.set(target.value());
+                    })
+                };
+
                 let current_add_mode = (*add_mode).clone();
 
                 // WhatsApp suggestions
@@ -3564,6 +3618,60 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                     html! {}
                 };
 
+                let add_wa_row = render_platform_row(
+                    "fa-brands fa-whatsapp", "#25D366", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*add_whatsapp).clone()} oninput={on_whatsapp_input}
+                                class={if !add_whatsapp.is_empty() && !*add_whatsapp_selected { "warn-border" } else { "" }}
+                                placeholder="Search WhatsApp" />
+                            {wa_suggestions}
+                        </div>
+                    },
+                    (*add_exc_wa_mode).clone(), (*add_exc_wa_type).clone(),
+                    { let s = add_exc_wa_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = add_exc_wa_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let add_tg_row = render_platform_row(
+                    "fa-brands fa-telegram", "#0088CC", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*add_telegram).clone()} oninput={on_telegram_input}
+                                class={if !add_telegram.is_empty() && !*add_telegram_selected { "warn-border" } else { "" }}
+                                placeholder="Search Telegram" />
+                            {tg_suggestions}
+                        </div>
+                    },
+                    (*add_exc_tg_mode).clone(), (*add_exc_tg_type).clone(),
+                    { let s = add_exc_tg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = add_exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let add_sg_row = render_platform_row(
+                    "fa-solid fa-comment-dots", "#3A76F1", true,
+                    html! {
+                        <div class="input-with-suggestions">
+                            <input type="text" value={(*add_signal).clone()} oninput={on_signal_input}
+                                class={if !add_signal.is_empty() && !*add_signal_selected { "warn-border" } else { "" }}
+                                placeholder="Search Signal" />
+                            {sg_suggestions}
+                        </div>
+                    },
+                    (*add_exc_sg_mode).clone(), (*add_exc_sg_type).clone(),
+                    { let s = add_exc_sg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = add_exc_sg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+                let add_em_row = render_platform_row(
+                    "fa-solid fa-envelope", "#7EB2FF", false,
+                    html! {
+                        <input type="text" class="platform-email-input"
+                            value={(*add_email).clone()} oninput={on_email}
+                            placeholder="email@example.com" />
+                    },
+                    (*add_exc_em_mode).clone(), (*add_exc_em_type).clone(),
+                    { let s = add_exc_em_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    { let s = add_exc_em_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                );
+
                 html! {
                     <div class="avatar-modal-overlay" onclick={on_overlay_click}>
                         <div class="avatar-modal-box" onclick={stop_prop}>
@@ -3577,42 +3685,20 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                                     placeholder="e.g. Mom, Boss, Partner" />
                             </div>
                             <div class="avatar-modal-row">
-                                <label>{"WhatsApp"}</label>
-                                <div class="input-with-suggestions">
-                                    <input type="text" value={(*add_whatsapp).clone()} oninput={on_whatsapp_input}
-                                        class={if !add_whatsapp.is_empty() && !*add_whatsapp_selected { "warn-border" } else { "" }}
-                                        placeholder="Search chat name" />
-                                    {wa_suggestions}
-                                </div>
-                            </div>
-                            <div class="avatar-modal-row">
-                                <label>{"Telegram"}</label>
-                                <div class="input-with-suggestions">
-                                    <input type="text" value={(*add_telegram).clone()} oninput={on_telegram_input}
-                                        class={if !add_telegram.is_empty() && !*add_telegram_selected { "warn-border" } else { "" }}
-                                        placeholder="Search chat name" />
-                                    {tg_suggestions}
-                                </div>
-                            </div>
-                            <div class="avatar-modal-row">
-                                <label>{"Signal"}</label>
-                                <div class="input-with-suggestions">
-                                    <input type="text" value={(*add_signal).clone()} oninput={on_signal_input}
-                                        class={if !add_signal.is_empty() && !*add_signal_selected { "warn-border" } else { "" }}
-                                        placeholder="Search chat name" />
-                                    {sg_suggestions}
-                                </div>
-                            </div>
-                            <div class="avatar-modal-row">
-                                <label>{"Email"}</label>
-                                <input type="text" value={(*add_email).clone()} oninput={on_email}
-                                    placeholder="email@example.com" />
+                                <label>{"Notes"}</label>
+                                <textarea class="avatar-modal-notes" rows="2"
+                                    value={(*add_notes).clone()}
+                                    oninput={on_notes_input}
+                                    placeholder="e.g. My mom. Reply in Finnish." />
+                                <div class="avatar-modal-notes-hint">{"Helps AI understand context"}</div>
                             </div>
                             <div class="avatar-modal-row">
                                 <label>{"Notification mode"}</label>
                                 <select onchange={on_mode}>
                                     <option value="all" selected={current_add_mode == "all"}>{"All"}</option>
                                     <option value="critical" selected={current_add_mode == "critical"}>{"Critical"}</option>
+                                    <option value="digest" selected={current_add_mode == "digest"}>{"Digest"}</option>
+                                    <option value="ignore" selected={current_add_mode == "ignore"}>{"Ignore"}</option>
                                 </select>
                             </div>
                             <div class="avatar-modal-row">
@@ -3625,6 +3711,12 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                             <div class="avatar-modal-check">
                                 <input type="checkbox" id="av-add-call" checked={*add_notify_call} onchange={on_call} />
                                 <label for="av-add-call">{"Notify on incoming call"}</label>
+                            </div>
+                            <div class="platform-section">
+                                {add_wa_row}
+                                {add_tg_row}
+                                {add_sg_row}
+                                {add_em_row}
                             </div>
                             <div class="avatar-modal-actions">
                                 <button class="avatar-modal-btn-cancel" onclick={{

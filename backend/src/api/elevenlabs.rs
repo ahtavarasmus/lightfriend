@@ -495,7 +495,7 @@ pub async fn handle_create_item_voice(
     };
 
     // Parse due_time (RFC3339) into unix timestamp
-    let next_check_at = payload
+    let due_at = payload
         .due_time
         .as_deref()
         .and_then(crate::proactive::utils::parse_iso_to_timestamp);
@@ -503,8 +503,7 @@ pub async fn handle_create_item_voice(
     let new_item = crate::models::user_models::NewItem {
         user_id,
         summary: summary.clone(),
-        monitor: false,
-        next_check_at,
+        due_at,
         priority: 0,
         source_id: None,
         created_at: now,
@@ -512,7 +511,7 @@ pub async fn handle_create_item_voice(
 
     match state.item_repository.create_item(&new_item) {
         Ok(item_id) => {
-            let confirmation = if next_check_at.is_some() {
+            let confirmation = if due_at.is_some() {
                 "Got it! I'll remind you at the scheduled time."
             } else {
                 "Got it! I've noted that down."
@@ -563,8 +562,8 @@ pub async fn handle_fetch_items_voice(
             json!({
                 "id": item.id.unwrap_or(0),
                 "summary": item.summary,
-                "monitor": item.monitor,
-                "next_check_at": item.next_check_at,
+                "item_type": crate::proactive::utils::parse_summary_tags(&item.summary).item_type,
+                "due_at": item.due_at,
                 "priority": item.priority,
             })
         })

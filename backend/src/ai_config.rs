@@ -15,8 +15,6 @@ pub enum AiProvider {
 pub enum ModelPurpose {
     /// Normal conversation/tasks with tool calling
     Default,
-    /// Vision-only model (no tool calling) - used for Tinfoil two-step
-    VisionOnly,
 }
 
 /// Centralized AI configuration
@@ -79,24 +77,11 @@ impl AiConfig {
     }
 
     /// Get the model name for a provider and purpose
-    ///
-    /// OpenRouter: GPT-4o for everything (supports vision + tools)
-    /// Tinfoil: kimi-k2-5 for everything (supports vision + tools in single call)
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
-            // OpenRouter models
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
-            (AiProvider::OpenRouter, ModelPurpose::VisionOnly) => "openai/gpt-4o-2024-11-20",
-
-            // Tinfoil: single model for all purposes
-            (AiProvider::Tinfoil, _) => "kimi-k2-5",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
         }
-    }
-
-    /// Check if a provider needs two-step vision processing.
-    /// Both providers now support vision + tools in a single call.
-    pub fn needs_two_step_vision(&self, _provider: AiProvider) -> bool {
-        false
     }
 
     /// Create an OpenAI-compatible client for a specific provider
@@ -486,62 +471,340 @@ impl AiConfig {
             .map_err(|e| format!("Failed to deserialize assembled response: {}", e))
     }
 
-    /// Call vision model to describe an image (for two-step processing)
-    /// Returns a text description of the image
-    pub async fn describe_image(
+    /// Take the last ~80 chars of accumulated reasoning, trim to word boundary.
+    fn format_reasoning_snippet(reasoning: &str) -> String {
+        let trimmed = reasoning.trim();
+        let chars: Vec<char> = trimmed.chars().collect();
+        if chars.len() <= 80 {
+            return trimmed.to_string();
+        }
+        let tail: String = chars[chars.len() - 80..].iter().collect();
+        // Find first space to land on a word boundary
+        if let Some(pos) = tail.find(' ') {
+            format!("...{}", &tail[pos + 1..])
+        } else {
+            format!("...{}", tail)
+        }
+    }
+
+    /// Like `chat_completion` but incrementally processes SSE chunks so that
+    /// reasoning tokens (`delta.reasoning` / `delta.reasoning_content`) can be
+    /// forwarded to a caller via `reasoning_tx`.
+    ///
+    /// When `reasoning_tx` is None this delegates to the existing
+    /// `chat_completion` (SMS path - zero behavior change).
+    pub async fn chat_completion_streaming(
         &self,
         provider: AiProvider,
-        image_url: &str,
-        user_text: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        use openai_api_rs::v1::chat_completion::{
-            ChatCompletionMessage, ChatCompletionRequest, Content, ContentType, ImageUrl,
-            ImageUrlType, MessageRole,
+        request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
+        reasoning_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    ) -> Result<
+        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+        openai_api_rs::v1::error::APIError,
+    > {
+        // Fast path: no reasoning channel -> reuse existing method unchanged
+        let reasoning_tx = match reasoning_tx {
+            Some(tx) => tx,
+            None => return self.chat_completion(provider, request).await,
         };
 
-        let model = self.model(provider, ModelPurpose::VisionOnly);
+        use futures::StreamExt;
 
-        // Build prompt based on whether user provided text
-        let prompt = if user_text.trim().is_empty() {
-            "Describe this image in detail. What do you see?".to_string()
-        } else {
-            format!(
-                "The user asks: '{}'\n\nLook at this image and provide information to help answer their question.",
-                user_text
-            )
-        };
+        let url = format!("{}/chat/completions", self.endpoint(provider));
+        let api_key = self.api_key(provider);
 
-        let messages = vec![ChatCompletionMessage {
-            role: MessageRole::user,
-            content: Content::ImageUrl(vec![
-                ImageUrl {
-                    r#type: ContentType::text,
-                    text: Some(prompt),
-                    image_url: None,
-                },
-                ImageUrl {
-                    r#type: ContentType::image_url,
-                    text: None,
-                    image_url: Some(ImageUrlType {
-                        url: image_url.to_string(),
-                    }),
-                },
-            ]),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        }];
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
 
-        let request = ChatCompletionRequest::new(model.to_string(), messages);
+        let mut last_error = String::new();
+        for attempt in 1..=3u32 {
+            let mut body = serde_json::to_value(request).map_err(|e| {
+                openai_api_rs::v1::error::APIError::CustomError {
+                    message: format!("Failed to serialize request: {}", e),
+                }
+            })?;
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("stream".into(), serde_json::json!(true));
+                obj.remove("max_tokens");
+            }
+            Self::sanitize_request_body(&mut body);
 
-        let response = self.chat_completion(provider, &request).await?;
+            let response = client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
 
-        let content = response
-            .choices
-            .first()
-            .and_then(|c| c.message.content.clone())
-            .unwrap_or_else(|| "Unable to describe image".to_string());
+            let status = response.status();
+            if !status.is_success() {
+                let text = response.text().await.unwrap_or_default();
+                last_error = format!("{}: {}", status, text);
+                if attempt < 3 {
+                    tracing::warn!(
+                        "chat_completion_streaming attempt {}/3 failed: {}",
+                        attempt,
+                        last_error
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
+                        .await;
+                    continue;
+                }
+                return Err(openai_api_rs::v1::error::APIError::CustomError {
+                    message: last_error,
+                });
+            }
 
-        Ok(content)
+            // Incremental SSE processing via bytes_stream
+            let mut stream = response.bytes_stream();
+            let mut buf = String::new();
+            let mut reasoning = String::new();
+            let mut content = String::new();
+            let mut role = "assistant".to_string();
+            let mut finish_reason: Option<String> = None;
+            let mut response_id = String::new();
+            let mut response_model = String::new();
+            let mut tool_calls: std::collections::BTreeMap<i64, (String, String, String, String)> =
+                std::collections::BTreeMap::new();
+            let mut has_data = false;
+            let mut last_reasoning_send = std::time::Instant::now();
+            let mut stream_error: Option<String> = None;
+
+            while let Some(chunk_result) = stream.next().await {
+                let bytes = match chunk_result {
+                    Ok(b) => b,
+                    Err(e) => {
+                        stream_error = Some(format!("Stream read error: {}", e));
+                        break;
+                    }
+                };
+                buf.push_str(&String::from_utf8_lossy(&bytes));
+
+                // Process complete lines
+                while let Some(newline_pos) = buf.find('\n') {
+                    let line = buf[..newline_pos].trim().to_string();
+                    buf = buf[newline_pos + 1..].to_string();
+
+                    let data = match line.strip_prefix("data: ") {
+                        Some(d) if d.trim() == "[DONE]" => continue,
+                        Some(d) => d.to_string(),
+                        None => continue,
+                    };
+
+                    let chunk: serde_json::Value = match serde_json::from_str(&data) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    has_data = true;
+
+                    if chunk.get("error").is_some() {
+                        stream_error = Some(format!("Streaming error: {}", data));
+                        break;
+                    }
+
+                    if response_id.is_empty() {
+                        if let Some(id) = chunk.get("id").and_then(|v| v.as_str()) {
+                            response_id = id.to_string();
+                        }
+                    }
+                    if response_model.is_empty() {
+                        if let Some(model) = chunk.get("model").and_then(|v| v.as_str()) {
+                            response_model = model.to_string();
+                        }
+                    }
+
+                    let choices = match chunk.get("choices").and_then(|v| v.as_array()) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+
+                    for choice in choices {
+                        if let Some(delta) = choice.get("delta") {
+                            if let Some(r) = delta.get("role").and_then(|v| v.as_str()) {
+                                role = r.to_string();
+                            }
+                            if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
+                                content.push_str(c);
+                            }
+                            // Capture reasoning tokens (kimi uses "reasoning" or "reasoning_content")
+                            if let Some(r) = delta
+                                .get("reasoning")
+                                .or_else(|| delta.get("reasoning_content"))
+                                .and_then(|v| v.as_str())
+                            {
+                                reasoning.push_str(r);
+                            }
+                            if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                                for tc in tcs {
+                                    let idx = tc.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+                                    let entry = tool_calls.entry(idx).or_insert_with(|| {
+                                        (
+                                            String::new(),
+                                            "function".to_string(),
+                                            String::new(),
+                                            String::new(),
+                                        )
+                                    });
+                                    if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                                        if entry.0.is_empty() {
+                                            entry.0 = id.to_string();
+                                        }
+                                    }
+                                    if let Some(t) = tc.get("type").and_then(|v| v.as_str()) {
+                                        entry.1 = t.to_string();
+                                    }
+                                    if let Some(func) = tc.get("function") {
+                                        if let Some(name) =
+                                            func.get("name").and_then(|v| v.as_str())
+                                        {
+                                            if entry.2.is_empty() {
+                                                entry.2 = name.to_string();
+                                            }
+                                        }
+                                        if let Some(args) =
+                                            func.get("arguments").and_then(|v| v.as_str())
+                                        {
+                                            entry.3.push_str(args);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(fr) = choice.get("finish_reason").and_then(|v| v.as_str()) {
+                            finish_reason = Some(fr.to_string());
+                        }
+                    }
+                }
+
+                // Throttled reasoning send: every ~1.5 seconds
+                if !reasoning.is_empty()
+                    && last_reasoning_send.elapsed() >= std::time::Duration::from_millis(1500)
+                {
+                    let snippet = Self::format_reasoning_snippet(&reasoning);
+                    let _ = reasoning_tx.try_send(snippet);
+                    last_reasoning_send = std::time::Instant::now();
+                }
+
+                if stream_error.is_some() {
+                    break;
+                }
+            }
+
+            // Final reasoning send after stream ends (catch any unsent reasoning)
+            if !reasoning.is_empty() {
+                let snippet = Self::format_reasoning_snippet(&reasoning);
+                let _ = reasoning_tx.try_send(snippet);
+            }
+
+            if let Some(err) = stream_error {
+                last_error = err;
+                if attempt < 3 {
+                    tracing::warn!(
+                        "chat_completion_streaming attempt {}/3 failed: {}",
+                        attempt,
+                        last_error
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
+                        .await;
+                    continue;
+                }
+                return Err(openai_api_rs::v1::error::APIError::CustomError {
+                    message: last_error,
+                });
+            }
+
+            if !has_data {
+                last_error = "No data received from streaming response".to_string();
+                if attempt < 3 {
+                    tracing::warn!("chat_completion_streaming attempt {}/3: no data", attempt,);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
+                        .await;
+                    continue;
+                }
+                return Err(openai_api_rs::v1::error::APIError::CustomError {
+                    message: last_error,
+                });
+            }
+
+            // Strip Kimi K2.5 tool-call markers that leak into content text
+            if let Some(pos) = content.find("<|tool_calls_section_begin|>") {
+                content.truncate(pos);
+            }
+            let content = content.trim().to_string();
+
+            // Build assembled response JSON
+            let message_content = if content.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!(content)
+            };
+
+            let mut message = serde_json::json!({
+                "role": role,
+                "content": message_content,
+            });
+
+            if !tool_calls.is_empty() {
+                let tc_array: Vec<serde_json::Value> = tool_calls
+                    .into_iter()
+                    .map(|(_, (id, tc_type, name, args))| {
+                        serde_json::json!({
+                            "id": id,
+                            "type": tc_type,
+                            "function": {
+                                "name": name,
+                                "arguments": args
+                            }
+                        })
+                    })
+                    .collect();
+                message
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("tool_calls".into(), serde_json::json!(tc_array));
+            }
+
+            let mut json = serde_json::json!({
+                "id": if response_id.is_empty() { "chatcmpl-stream".to_string() } else { response_id },
+                "object": "chat.completion",
+                "created": 0,
+                "model": if response_model.is_empty() { "unknown".to_string() } else { response_model },
+                "choices": [{
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": finish_reason,
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                }
+            });
+
+            Self::inject_missing_fields(&mut json);
+
+            // Log full reasoning for prompt improvement analysis
+            if !reasoning.is_empty() {
+                tracing::info!(
+                    reasoning_chars = reasoning.len(),
+                    "\n=== MODEL REASONING ({} chars) ===\n{}\n=== END REASONING ===",
+                    reasoning.len(),
+                    reasoning
+                );
+            }
+
+            return serde_json::from_value(json).map_err(|e| {
+                openai_api_rs::v1::error::APIError::CustomError {
+                    message: format!("Failed to parse streaming response: {}", e),
+                }
+            });
+        }
+
+        Err(openai_api_rs::v1::error::APIError::CustomError {
+            message: format!("All 3 attempts failed: {}", last_error),
+        })
     }
 }

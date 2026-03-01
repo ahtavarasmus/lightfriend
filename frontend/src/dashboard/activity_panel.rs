@@ -212,7 +212,7 @@ const ACTIVITY_STYLES: &str = r#"
     background: rgba(255,255,255,0.06);
     color: #888;
 }
-.upcoming-item-monitor {
+.upcoming-item-tracking {
     color: #7eb2ff !important;
 }
 .upcoming-item-notify {
@@ -573,13 +573,12 @@ fn render_upcoming_entry(
     on_item_click: &Option<Callback<UpcomingItem>>,
     on_item_delete: &Option<Callback<i32>>,
 ) -> Html {
-    let (is_digest, time_display, description, item_type, monitor, notify, sources, item_id, timestamp) = match entry {
+    let (is_digest, time_display, description, item_type, notify, sources, item_id, timestamp) = match entry {
         UpcomingEntry::Item(t) => (
             false,
             t.time_display.clone(),
             t.description.clone(),
             t.item_type.clone(),
-            t.monitor,
             t.notify.clone(),
             t.sources_display.clone(),
             t.item_id,
@@ -590,13 +589,13 @@ fn render_upcoming_entry(
             d.time_display.clone(),
             format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
             Some("recurring".to_string()),
-            false,
             None,
             None,
             d.item_id,
             d.timestamp,
         ),
     };
+    let is_tracking = item_type.as_deref() == Some("tracking");
 
     // Relative time
     let diff_secs = timestamp as i64 - now_ts;
@@ -637,7 +636,6 @@ fn render_upcoming_entry(
                             date_display: String::new(),
                             relative_display: String::new(),
                             item_type: Some("recurring".to_string()),
-                            monitor: false,
                             notify: None,
                             sources_display: None,
                         };
@@ -678,8 +676,8 @@ fn render_upcoming_entry(
                     } else {
                         html! {}
                     }}
-                    {if monitor {
-                        html! { <span class="upcoming-item-monitor">{"monitoring"}</span> }
+                    {if is_tracking {
+                        html! { <span class="upcoming-item-tracking">{"tracking"}</span> }
                     } else {
                         html! {}
                     }}

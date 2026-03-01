@@ -109,7 +109,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "start_address".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The starting address or location for the directions. Must be a specific, real-world address, landmark, or place name (e.g., '123 Main St, City, State' or 'Eiffel Tower, Paris'). Do not use vague terms like 'home', 'here', 'current location', or placeholders.".to_string()),
+            description: Some("Starting address: a specific real-world address, landmark, or place name (e.g., '123 Main St, City, State' or 'Eiffel Tower, Paris').".to_string()),
             ..Default::default()
         }),
     );
@@ -117,7 +117,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "end_address".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The ending address or location for the directions. Must be a specific, real-world address, landmark, or place name (e.g., '456 Elm St, City, State' or 'Statue of Liberty, New York'). Do not use vague terms like 'home', 'here', 'current location', or placeholders.".to_string()),
+            description: Some("Ending address: a specific real-world address, landmark, or place name (e.g., '456 Elm St, City, State' or 'Statue of Liberty, New York').".to_string()),
             ..Default::default()
         }),
     );
@@ -139,7 +139,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("get_directions"),
-            description: Some(String::from("Fetches step-by-step directions from Google Maps between two addresses or locations, including duration and distance. Use this when the user asks for navigation or route instructions. Always ensure start_address and end_address are specific, real-world locations—never use vague terms like 'home' or placeholders. Defaults to walking if mode is not specified.")),
+            description: Some(String::from("Fetches step-by-step directions from Google Maps between two specific addresses or landmarks, including duration and distance. Defaults to walking if mode is not specified.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
@@ -391,12 +391,7 @@ pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("direct_response"),
             description: Some(String::from(
-                "Use this tool ONLY for simple acknowledgments and conversational responses that don't \
-                require any factual information. Examples: greetings ('Hello!', 'Hi there'), \
-                acknowledgments ('Got it', 'OK', 'Sure'), simple math ('2+2=4'), or responses based \
-                entirely on the current conversation context. Do NOT use this for any factual questions, \
-                definitions, or 'what is X?' questions - use ask_perplexity for those instead. \
-                Do NOT use this for questions about messages, emails, weather, calendar, or tasks."
+                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. Use ask_perplexity for factual questions and other tools for messages, emails, weather, calendar, or tasks."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,

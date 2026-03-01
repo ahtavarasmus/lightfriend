@@ -295,6 +295,11 @@ pub struct ItemEditRequest {
     pub instruction: String,
 }
 
+#[derive(Deserialize)]
+pub struct ItemEditQuery {
+    pub instruction: String,
+}
+
 #[derive(Serialize)]
 pub struct ItemEditResponse {
     pub message: String,
@@ -370,13 +375,14 @@ pub async fn edit_item_with_ai(
 
     // Format current scheduled time
     let current_time = item
-        .next_check_at
+        .due_at
         .and_then(|nca| chrono::DateTime::from_timestamp(nca as i64, 0))
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "Not scheduled".to_string());
 
-    let item_type = if item.monitor {
-        "monitor (watches incoming data)"
+    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+    let item_type = if tags.item_type.as_deref() == Some("tracking") {
+        "tracking (watches incoming data)"
     } else {
         "scheduled item"
     };
@@ -486,7 +492,7 @@ TIME RULES:
                 let new_ts = local_dt.timestamp() as i32;
                 state
                     .item_repository
-                    .update_next_check_at(item_id, Some(new_ts))
+                    .update_due_at(item_id, Some(new_ts))
                     .map_err(|e| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -523,4 +529,211 @@ TIME RULES:
             success: false,
         }))
     }
+}
+
+/// SSE streaming version of edit_item_with_ai - sends status updates so the UI doesn't appear stuck.
+pub async fn edit_item_with_ai_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(item_id): Path<i32>,
+    axum::extract::Query(request): axum::extract::Query<ItemEditQuery>,
+) -> axum::response::sse::Sse<
+    impl futures::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use axum::response::sse::Event;
+
+    let stream = async_stream::stream! {
+        yield Ok(Event::default().data(
+            json!({"step": "thinking", "message": "Thinking..."}).to_string(),
+        ));
+
+        // Get the item and verify ownership
+        let item = match state.item_repository.get_item(item_id, auth_user.user_id) {
+            Ok(Some(item)) => item,
+            Ok(None) => {
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "Item not found"}).to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": format!("Database error: {}", e)}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        // Build context
+        let ctx = match crate::context::ContextBuilder::for_user(&state, auth_user.user_id)
+            .with_user_context()
+            .build()
+            .await
+        {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::error!("Failed to build context: {}", e);
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "AI service unavailable"}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        let user_tz_str = ctx.timezone.as_ref()
+            .map(|tz| tz.tz_str.clone())
+            .unwrap_or_else(|| "UTC".to_string());
+        let formatted_now = ctx.timezone.as_ref()
+            .map(|tz| tz.formatted_now.clone())
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
+
+        let current_time = item.due_at
+            .and_then(|nca| chrono::DateTime::from_timestamp(nca as i64, 0))
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "Not scheduled".to_string());
+
+        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+        let item_type = if tags.item_type.as_deref() == Some("tracking") {
+            "tracking (watches incoming data)"
+        } else {
+            "scheduled item"
+        };
+
+        let system_prompt = format!(
+            r#"You are editing an item tracked by an AI assistant.
+
+CURRENT ITEM:
+- Type: {}
+- Summary: {}
+- Scheduled time: {} (timezone: {})
+
+USER'S EDIT REQUEST: "{}"
+
+Return ONLY valid JSON (no markdown, no code blocks):
+{{
+  "new_trigger_time": "YYYY-MM-DDTHH:MM:SS" or null,
+  "new_summary": "updated summary text" or null,
+  "explanation": "Brief explanation"
+}}
+
+RULES:
+- new_trigger_time: Only set if user wants to change the scheduled time
+- new_summary: Only set if user wants to change what the item does/tracks
+- explanation: Always provide a brief explanation of the change
+- Return null for unchanged fields
+
+TIME RULES:
+- Calculate actual datetime for "tomorrow", "9am", "in 2 hours", etc.
+- Timezone: {}
+- Current time: {}
+- Return null if no time change"#,
+            item_type, item.summary, current_time, user_tz_str,
+            request.instruction, user_tz_str, formatted_now
+        );
+
+        yield Ok(Event::default().data(
+            json!({"step": "thinking", "message": "Editing item..."}).to_string(),
+        ));
+
+        use openai_api_rs::v1::chat_completion::{
+            ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
+        };
+
+        let messages = vec![ChatCompletionMessage {
+            role: MessageRole::user,
+            content: Content::Text(system_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+
+        let ai_request = ChatCompletionRequest::new(ctx.model.clone(), messages).temperature(0.1);
+
+        let response = match ctx.client.chat_completion(ai_request).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("AI request failed: {}", e);
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": format!("AI request failed: {}", e)}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        let ai_response = match response.choices.first().and_then(|c| c.message.content.clone()) {
+            Some(text) => text,
+            None => {
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "No response from AI"}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        tracing::debug!("AI response for item edit (stream): {}", ai_response);
+
+        let cleaned_response = ai_response
+            .trim()
+            .strip_prefix("```json")
+            .or_else(|| ai_response.trim().strip_prefix("```"))
+            .unwrap_or(&ai_response)
+            .trim()
+            .strip_suffix("```")
+            .unwrap_or(&ai_response)
+            .trim();
+
+        let edit_result: AiItemEditResult = match serde_json::from_str(cleaned_response) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Failed to parse AI response: {} - Response was: {}", e, cleaned_response);
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "Failed to understand edit instruction. Please try rephrasing."}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        let mut changes_made = false;
+
+        if let Some(new_time_str) = &edit_result.new_trigger_time {
+            let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
+            if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S") {
+                use chrono::TimeZone;
+                if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
+                    let new_ts = local_dt.timestamp() as i32;
+                    if let Err(e) = state.item_repository.update_due_at(item_id, Some(new_ts)) {
+                        yield Ok(Event::default().data(
+                            json!({"step": "error", "message": format!("Failed to update time: {}", e)}).to_string(),
+                        ));
+                        return;
+                    }
+                    changes_made = true;
+                }
+            }
+        }
+
+        if let Some(new_summary) = &edit_result.new_summary {
+            if let Err(e) = state.item_repository.update_summary(item_id, new_summary) {
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": format!("Failed to update summary: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            changes_made = true;
+        }
+
+        let message = if changes_made {
+            edit_result.explanation
+        } else {
+            "No changes were made. Please clarify what you'd like to change.".to_string()
+        };
+
+        yield Ok(Event::default().data(
+            json!({"step": "complete", "message": message}).to_string(),
+        ));
+    };
+
+    axum::response::sse::Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
+    )
 }

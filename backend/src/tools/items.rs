@@ -50,18 +50,7 @@ impl ToolHandler for ListTrackedItemsHandler {
 
         let mut result = format!("{} item(s):\n", items.len());
         for item in &items {
-            let kind_tag = if item.monitor {
-                " [monitor]".to_string()
-            } else {
-                String::new()
-            };
-
-            result.push_str(&format!(
-                "- [{}] {}{}\n",
-                item.id.unwrap_or(0),
-                item.summary,
-                kind_tag,
-            ));
+            result.push_str(&format!("- [{}] {}\n", item.id.unwrap_or(0), item.summary,));
         }
 
         Ok(ToolResult::Answer(result))

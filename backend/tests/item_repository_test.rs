@@ -1,6 +1,6 @@
 //! Unit tests for ItemRepository.
 //!
-//! Tests CRUD operations, dedup, triggered items query, monitor items query,
+//! Tests CRUD operations, dedup, triggered items query, tracking items query,
 //! dashboard ordering, snooze, complete, reschedule, bulk update, and cleanup.
 
 use backend::models::user_models::NewItem;
@@ -26,7 +26,6 @@ fn test_create_and_read_item() {
     assert_eq!(item.user_id, user.id);
     assert_eq!(item.summary, "Buy groceries");
     assert_eq!(item.priority, 0);
-    assert!(!item.monitor);
 }
 
 #[test]
@@ -72,7 +71,7 @@ fn test_item_exists_by_source() {
 }
 
 // =============================================================================
-// Triggered Items Query (next_check_at)
+// Triggered Items Query (due_at)
 // =============================================================================
 
 #[test]
@@ -92,7 +91,7 @@ fn test_get_triggered_items() {
         &TestItemParams::scheduled_reminder(user.id, "Future reminder", T + 3600),
     );
 
-    // Item with no next_check_at - should NOT trigger
+    // Item with no due_at - should NOT trigger
     create_test_item(&state, &TestItemParams::reminder(user.id, "No schedule"));
 
     let triggered = state.item_repository.get_triggered_items(T).unwrap();
@@ -101,30 +100,30 @@ fn test_get_triggered_items() {
 }
 
 // =============================================================================
-// Monitor Items Query (monitor = true)
+// Tracking Items Query ([type:tracking] in summary)
 // =============================================================================
 
 #[test]
-fn test_get_monitor_items() {
+fn test_get_tracking_items() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Monitor item (monitor = true)
+    // Tracking item (has [type:tracking] tag)
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Watch for AWS invoices"),
+        &TestItemParams::tracking(user.id, "Watch for AWS invoices"),
     );
 
-    // Non-monitor item
+    // Non-tracking item
     create_test_item(
         &state,
         &TestItemParams::reminder(user.id, "Just a reminder"),
     );
 
-    let monitors = state.item_repository.get_monitor_items(user.id).unwrap();
-    assert_eq!(monitors.len(), 1);
-    assert_eq!(monitors[0].summary, "Watch for AWS invoices");
-    assert!(monitors[0].monitor);
+    let tracking = state.item_repository.get_tracking_items(user.id).unwrap();
+    assert_eq!(tracking.len(), 1);
+    assert!(tracking[0].summary.contains("Watch for AWS invoices"));
+    assert!(tracking[0].summary.contains("[type:tracking]"));
 }
 
 // =============================================================================
@@ -157,7 +156,7 @@ fn test_dashboard_items_ordered_by_priority() {
 }
 
 // =============================================================================
-// Snooze (update next_check_at to future)
+// Snooze (update due_at to future)
 // =============================================================================
 
 #[test]
@@ -178,7 +177,7 @@ fn test_snooze_item() {
     // Snooze to future
     let updated = state
         .item_repository
-        .update_next_check_at(item_id, Some(T + 3600))
+        .update_due_at(item_id, Some(T + 3600))
         .unwrap();
     assert!(updated);
 
@@ -250,7 +249,7 @@ fn test_delete_item_requires_ownership() {
 }
 
 // =============================================================================
-// Reschedule (update next_check_at for recurring)
+// Reschedule (update due_at for recurring)
 // =============================================================================
 
 #[test]
@@ -272,7 +271,7 @@ fn test_reschedule_recurring_item() {
     let tomorrow = T + 86400;
     state
         .item_repository
-        .update_next_check_at(item_id, Some(tomorrow))
+        .update_due_at(item_id, Some(tomorrow))
         .unwrap();
 
     // No longer fires now
@@ -320,7 +319,7 @@ fn test_update_item_bulk() {
         .unwrap()
         .unwrap();
     assert_eq!(item.summary, "Updated summary with context");
-    assert_eq!(item.next_check_at, Some(T + 3600));
+    assert_eq!(item.due_at, Some(T + 3600));
     assert_eq!(item.priority, 2);
 }
 
@@ -337,8 +336,7 @@ fn test_delete_old_items() {
     let old_item = NewItem {
         user_id: user.id,
         summary: "Old item".to_string(),
-        monitor: false,
-        next_check_at: None,
+        due_at: None,
         priority: 0,
         source_id: None,
         created_at: T - 86400 * 30, // 30 days ago
@@ -460,8 +458,7 @@ fn test_item_limit_enforcement() {
     let result = state.item_repository.create_item(&NewItem {
         user_id: user.id,
         summary: "Item 101".to_string(),
-        monitor: false,
-        next_check_at: None,
+        due_at: None,
         priority: 0,
         source_id: None,
         created_at: T,
@@ -470,46 +467,46 @@ fn test_item_limit_enforcement() {
 }
 
 #[test]
-fn test_monitor_with_next_check_at_triggers() {
+fn test_tracking_with_due_at_triggers() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Monitor with next_check_at in the past should appear in triggered items
+    // Tracking item with due_at in the past should appear in triggered items
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Watch for invoices").with_next_check_at(T - 60),
+        &TestItemParams::tracking(user.id, "Watch for invoices").with_due_at(T - 60),
     );
 
-    // Monitor without next_check_at should NOT trigger
+    // Tracking without due_at should NOT trigger
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Watch for messages"),
+        &TestItemParams::tracking(user.id, "Watch for messages"),
     );
 
     let triggered = state.item_repository.get_triggered_items(T).unwrap();
     assert_eq!(triggered.len(), 1);
-    assert_eq!(triggered[0].summary, "Watch for invoices");
-    assert!(triggered[0].monitor);
+    assert!(triggered[0].summary.contains("Watch for invoices"));
+    assert!(triggered[0].summary.contains("[type:tracking]"));
 }
 
 #[test]
-fn test_monitor_survives_update() {
+fn test_tracking_survives_update() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Watch for package delivery"),
+        &TestItemParams::tracking(user.id, "Watch for package delivery"),
     );
     let item_id = item.id.unwrap();
 
-    // Update via update_item (as apply_monitor_lifecycle would)
+    // Update via update_item
     state
         .item_repository
         .update_item(
             item_id,
             user.id,
-            "Package shipped - tracking #12345",
+            "[type:tracking] Package shipped - tracking #12345",
             Some(T + 2 * 86400),
             1,
         )
@@ -521,24 +518,27 @@ fn test_monitor_survives_update() {
         .get_item(item_id, user.id)
         .unwrap()
         .unwrap();
-    assert_eq!(updated.summary, "Package shipped - tracking #12345");
-    assert_eq!(updated.next_check_at, Some(T + 2 * 86400));
+    assert_eq!(
+        updated.summary,
+        "[type:tracking] Package shipped - tracking #12345"
+    );
+    assert_eq!(updated.due_at, Some(T + 2 * 86400));
     assert_eq!(updated.priority, 1);
 
-    // Still shows as a monitor
-    let monitors = state.item_repository.get_monitor_items(user.id).unwrap();
-    assert_eq!(monitors.len(), 1);
-    assert_eq!(monitors[0].id, Some(item_id));
+    // Still shows as a tracking item
+    let tracking = state.item_repository.get_tracking_items(user.id).unwrap();
+    assert_eq!(tracking.len(), 1);
+    assert_eq!(tracking[0].id, Some(item_id));
 }
 
 #[test]
-fn test_monitor_escalation() {
+fn test_tracking_escalation() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Invoice $500 due Feb 28").with_priority(0),
+        &TestItemParams::tracking(user.id, "Invoice $500 due Feb 28").with_priority(0),
     );
     let item_id = item.id.unwrap();
 
@@ -563,22 +563,21 @@ fn test_monitor_escalation() {
 }
 
 #[test]
-fn test_monitor_resolution_deletes() {
+fn test_tracking_resolution_deletes() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Watch for payment confirmation")
-            .with_next_check_at(T - 60),
+        &TestItemParams::tracking(user.id, "Watch for payment confirmation").with_due_at(T - 60),
     );
     let item_id = item.id.unwrap();
 
-    // Should appear in monitors and triggered
+    // Should appear in tracking items and triggered
     assert_eq!(
         state
             .item_repository
-            .get_monitor_items(user.id)
+            .get_tracking_items(user.id)
             .unwrap()
             .len(),
         1
@@ -595,7 +594,7 @@ fn test_monitor_resolution_deletes() {
     assert_eq!(
         state
             .item_repository
-            .get_monitor_items(user.id)
+            .get_tracking_items(user.id)
             .unwrap()
             .len(),
         0
@@ -607,27 +606,27 @@ fn test_monitor_resolution_deletes() {
 }
 
 #[test]
-fn test_multi_user_monitor_isolation() {
+fn test_multi_user_tracking_isolation() {
     let state = create_test_state();
     let user_a = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let user_b = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
 
     create_test_item(
         &state,
-        &TestItemParams::monitor(user_a.id, "User A monitor"),
+        &TestItemParams::tracking(user_a.id, "User A tracking"),
     );
     create_test_item(
         &state,
-        &TestItemParams::monitor(user_b.id, "User B monitor"),
+        &TestItemParams::tracking(user_b.id, "User B tracking"),
     );
 
-    // Each user only sees their own monitors
-    let a_monitors = state.item_repository.get_monitor_items(user_a.id).unwrap();
-    let b_monitors = state.item_repository.get_monitor_items(user_b.id).unwrap();
-    assert_eq!(a_monitors.len(), 1);
-    assert_eq!(a_monitors[0].summary, "User A monitor");
-    assert_eq!(b_monitors.len(), 1);
-    assert_eq!(b_monitors[0].summary, "User B monitor");
+    // Each user only sees their own tracking items
+    let a_tracking = state.item_repository.get_tracking_items(user_a.id).unwrap();
+    let b_tracking = state.item_repository.get_tracking_items(user_b.id).unwrap();
+    assert_eq!(a_tracking.len(), 1);
+    assert!(a_tracking[0].summary.contains("User A tracking"));
+    assert_eq!(b_tracking.len(), 1);
+    assert!(b_tracking[0].summary.contains("User B tracking"));
 }
 
 #[test]
@@ -673,7 +672,7 @@ fn test_mixed_items_dashboard() {
     // Create monitors and non-monitors with different priorities
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Background monitor").with_priority(0),
+        &TestItemParams::tracking(user.id, "Background tracking").with_priority(0),
     );
     create_test_item(
         &state,
@@ -697,57 +696,64 @@ fn test_mixed_items_dashboard() {
     assert!(items[1].priority >= items[2].priority);
     assert!(items[2].priority >= items[3].priority);
 
-    // One monitor and three non-monitors
-    let monitor_count = items.iter().filter(|i| i.monitor).count();
-    let non_monitor_count = items.iter().filter(|i| !i.monitor).count();
-    assert_eq!(monitor_count, 1);
-    assert_eq!(non_monitor_count, 3);
+    // One tracking item and three non-tracking
+    let tracking_count = items
+        .iter()
+        .filter(|i| i.summary.contains("[type:tracking]"))
+        .count();
+    let non_tracking_count = items
+        .iter()
+        .filter(|i| !i.summary.contains("[type:tracking]"))
+        .count();
+    assert_eq!(tracking_count, 1);
+    assert_eq!(non_tracking_count, 3);
 }
 
 #[test]
-fn test_stale_monitor_cleanup() {
+fn test_stale_tracking_cleanup() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    // Stale monitor: next_check_at >7 days ago
+    // Stale tracking: due_at >7 days ago
     let stale = NewItem {
         user_id: user.id,
-        summary: "Old invoice".to_string(),
-        monitor: true,
-        next_check_at: Some(T - 8 * 86400), // 8 days ago
+        summary: "[type:tracking] Old invoice".to_string(),
+        due_at: Some(T - 8 * 86400), // 8 days ago
         priority: 0,
         source_id: None,
         created_at: T - 10 * 86400,
     };
     state.item_repository.create_item(&stale).unwrap();
 
-    // Active monitor: next_check_at in the future (being actively checked)
+    // Active tracking: due_at in the future
     let active = NewItem {
         user_id: user.id,
-        summary: "Active tracking".to_string(),
-        monitor: true,
-        next_check_at: Some(T + 86400), // Future check scheduled
+        summary: "[type:tracking] Active tracking".to_string(),
+        due_at: Some(T + 86400), // Future deadline
         priority: 1,
         source_id: None,
         created_at: T - 10 * 86400,
     };
     state.item_repository.create_item(&active).unwrap();
 
-    // Match-only monitor: no next_check_at (should not be cleaned up)
+    // Tracking without due_at (should not be cleaned up)
     create_test_item(
         &state,
-        &TestItemParams::monitor(user.id, "Match-only monitor"),
+        &TestItemParams::tracking(user.id, "Match-only tracking"),
     );
 
     assert_eq!(get_user_items(&state, user.id).len(), 3);
 
     // Cleanup should only remove the stale one
-    let deleted = state.item_repository.delete_stale_monitors(T).unwrap();
+    let deleted = state
+        .item_repository
+        .delete_expired_tracking_items(T)
+        .unwrap();
     assert_eq!(deleted, 1);
 
     let remaining = get_user_items(&state, user.id);
     assert_eq!(remaining.len(), 2);
     let summaries: Vec<&str> = remaining.iter().map(|i| i.summary.as_str()).collect();
-    assert!(summaries.contains(&"Active tracking"));
-    assert!(summaries.contains(&"Match-only monitor"));
+    assert!(summaries.iter().any(|s| s.contains("Active tracking")));
+    assert!(summaries.iter().any(|s| s.contains("Match-only tracking")));
 }

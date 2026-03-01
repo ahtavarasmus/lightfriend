@@ -151,8 +151,8 @@ pub async fn test_fetch_messages(
                     i,
                     msg.room_name,
                     msg.sender,
-                    if msg.content.len() > 30 {
-                        format!("{}...", &msg.content[..30])
+                    if msg.content.chars().count() > 30 {
+                        format!("{}...", msg.content.chars().take(30).collect::<String>())
                     } else {
                         msg.content.clone()
                     }

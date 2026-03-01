@@ -816,8 +816,11 @@ async fn fetch_events_from_calendar(
             "Failed to parse response for calendar {}: {}. Response: {}",
             calendar_id,
             e,
-            if response_text.len() > 1000 {
-                format!("{}... (truncated)", &response_text[..1000])
+            if response_text.chars().count() > 1000 {
+                format!(
+                    "{}... (truncated)",
+                    response_text.chars().take(1000).collect::<String>()
+                )
             } else {
                 response_text.clone()
             }

@@ -30,9 +30,7 @@ pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::To
         function: types::Function {
             name: String::from("search_chat_contacts"),
             description: Some(String::from(
-                "Searches to check if specific contacts, rooms, groups, or channels exist on the specified platform by name or keyword. \
-                Use this only when the user asks to search, find, or check for the existence of contacts/people/groups/channels on Telegram, WhatsApp or Signal. \
-                Do not use this for searching messages within a chat; use the separate message search tool for that."
+                "Searches for contacts, groups, or channels on a messaging platform by name.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -79,10 +77,7 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         function: types::Function {
             name: String::from("fetch_chat_messages"),
             description: Some(String::from(
-                "Fetches messages from a specific contact or group. \
-                Use this when the user asks about messages from a specific person (e.g., 'has Mom messaged me?', 'messages from John'). \
-                Platform is optional—if omitted and the contact has a profile, will search all their linked platforms and return from the most recently active one. \
-                Do not use if no specific chat is mentioned—use fetch_recent_messages instead."
+                "Fetches messages from a specific contact or group. Supports contact profile nicknames. If platform is omitted, searches all linked platforms."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,

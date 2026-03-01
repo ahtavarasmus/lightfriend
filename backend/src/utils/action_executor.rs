@@ -898,8 +898,8 @@ pub async fn execute_action_spec(
             tracing::warn!("Failed to generate task notification: {}", e);
             // Fallback: use source data summary or action result
             if !source_data.is_empty() && source_data.len() > 20 {
-                let preview_len = source_data.len().min(150);
-                format!("Update: {}", &source_data[..preview_len])
+                let preview: String = source_data.chars().take(150).collect();
+                format!("Update: {}", preview)
             } else {
                 action_result.clone()
             }
@@ -926,8 +926,11 @@ pub async fn execute_action_spec(
     tracing::info!(
         "Task execution completed for user {}: {}",
         user_id,
-        if notification_message.len() > 100 {
-            format!("{}...", &notification_message[..100])
+        if notification_message.chars().count() > 100 {
+            format!(
+                "{}...",
+                notification_message.chars().take(100).collect::<String>()
+            )
         } else {
             notification_message.clone()
         }

@@ -46,12 +46,11 @@ pub struct QuietModeInfo {
 #[derive(Serialize)]
 pub struct AttentionItem {
     pub id: i32,
-    pub item_type: String, // "monitor", "tracked_item"
+    pub item_type: String, // "tracking", "tracked_item"
     pub summary: String,
     pub description: String,
     pub priority: i32,
-    pub monitor: bool,
-    pub next_check_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
@@ -84,7 +83,6 @@ pub struct UpcomingItem {
     pub relative_display: String, // "in 5 days"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_type: Option<String>, // "oneshot", "tracking", "recurring"
-    pub monitor: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify: Option<String>, // "call", "sms"
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,15 +160,11 @@ pub async fn get_dashboard_summary(
         // All items go into the unified attention list
         // Parse tags and strip tag line from description
         let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-        let item_type = if item.monitor {
-            "monitor"
-        } else {
-            match tags.item_type.as_deref() {
-                Some("tracking") => "tracking",
-                Some("recurring") => "recurring",
-                Some("oneshot") => "oneshot",
-                _ => "tracked_item", // legacy items without [type:X] tag
-            }
+        let item_type = match tags.item_type.as_deref() {
+            Some("tracking") => "tracking",
+            Some("recurring") => "recurring",
+            Some("oneshot") => "oneshot",
+            _ => "tracked_item", // legacy items without [type:X] tag
         };
         let description = item
             .summary
@@ -179,9 +173,9 @@ pub async fn get_dashboard_summary(
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Format time/relative display from next_check_at
-        let time_display = item.next_check_at.map(|nca| format_time_display(nca, &tz));
-        let relative_display = item.next_check_at.map(|nca| {
+        // Format time/relative display from due_at
+        let time_display = item.due_at.map(|nca| format_time_display(nca, &tz));
+        let relative_display = item.due_at.map(|nca| {
             if nca <= now_ts {
                 "overdue".to_string()
             } else {
@@ -204,8 +198,7 @@ pub async fn get_dashboard_summary(
             summary: item.summary.clone(),
             description,
             priority: item.priority,
-            monitor: item.monitor,
-            next_check_at: item.next_check_at,
+            due_at: item.due_at,
             source: item.source_id.clone(),
             source_id: item.source_id.clone(),
             notify: tags.notify,
@@ -216,8 +209,8 @@ pub async fn get_dashboard_summary(
         });
     }
 
-    // Sort by next_check_at (soonest first, items without it sort last)
-    attention_items.sort_by(|a, b| match (a.next_check_at, b.next_check_at) {
+    // Sort by due_at (soonest first, items without it sort last)
+    attention_items.sort_by(|a, b| match (a.due_at, b.due_at) {
         (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
@@ -270,9 +263,8 @@ fn find_next_scheduled_item(
 ) -> Option<ScheduledItem> {
     items
         .iter()
-        .filter(|item| !item.monitor)
         .filter_map(|item| {
-            item.next_check_at
+            item.due_at
                 .filter(|&nca| nca > now_ts)
                 .map(|nca| (item, nca))
         })
@@ -292,9 +284,8 @@ fn find_upcoming_items(
 ) -> Vec<UpcomingItem> {
     let mut upcoming: Vec<UpcomingItem> = items
         .iter()
-        .filter(|item| !item.monitor)
         .filter_map(|item| {
-            item.next_check_at
+            item.due_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
                 .map(|nca| {
                     let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
@@ -317,7 +308,6 @@ fn find_upcoming_items(
                         date_display: format_date_display(nca, tz),
                         relative_display: format_relative_days(nca, now_ts, tz),
                         item_type: tags.item_type,
-                        monitor: item.monitor,
                         notify: tags.notify,
                         sources_display,
                     }
@@ -337,9 +327,9 @@ fn find_upcoming_digest_items(
 ) -> Vec<UpcomingDigest> {
     let mut digests: Vec<UpcomingDigest> = items
         .iter()
-        .filter(|item| !item.monitor && item.summary.starts_with("Daily digest"))
+        .filter(|item| item.summary.starts_with("Daily digest"))
         .filter_map(|item| {
-            item.next_check_at
+            item.due_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
                 .map(|nca| UpcomingDigest {
                     item_id: item.id,
@@ -367,9 +357,8 @@ fn find_items_beyond(
 
     let mut beyond: Vec<UpcomingItem> = items
         .iter()
-        .filter(|item| !item.monitor)
         .filter_map(|item| {
-            item.next_check_at
+            item.due_at
                 .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
                 .map(|nca| {
                     let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
@@ -392,7 +381,6 @@ fn find_items_beyond(
                         date_display: format_date_display(nca, tz),
                         relative_display: format_relative_days(nca, now_ts, tz),
                         item_type: tags.item_type,
-                        monitor: item.monitor,
                         notify: tags.notify,
                         sources_display,
                     }
@@ -427,8 +415,8 @@ fn find_next_digest_item(
 ) -> Option<NextDigestInfo> {
     let earliest_nca = items
         .iter()
-        .filter(|item| !item.monitor && item.summary.starts_with("Daily digest"))
-        .filter_map(|item| item.next_check_at.filter(|&nca| nca > now_ts))
+        .filter(|item| item.summary.starts_with("Daily digest"))
+        .filter_map(|item| item.due_at.filter(|&nca| nca > now_ts))
         .min()?;
 
     let time_display = format_relative_time(earliest_nca, now_ts, tz);
@@ -667,8 +655,7 @@ fn calculate_sun_times_from_coords(
 pub struct ItemResponse {
     pub id: i32,
     pub summary: String,
-    pub monitor: bool,
-    pub next_check_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub priority: i32,
     pub source_id: Option<String>,
     pub created_at: i32,
@@ -689,8 +676,7 @@ fn item_to_response(item: crate::models::user_models::Item) -> ItemResponse {
     ItemResponse {
         id: item.id.unwrap_or(0),
         summary: item.summary,
-        monitor: item.monitor,
-        next_check_at: item.next_check_at,
+        due_at: item.due_at,
         priority: item.priority,
         source_id: item.source_id,
         created_at: item.created_at,
@@ -754,7 +740,7 @@ pub async fn get_item_detail(
         .unwrap_or(chrono_tz::UTC);
     let now_ts = chrono::Utc::now().timestamp() as i32;
 
-    let trigger_ts = item.next_check_at.unwrap_or(item.created_at);
+    let trigger_ts = item.due_at.unwrap_or(item.created_at);
 
     // Parse structured tags from summary and extract clean description
     let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
@@ -780,14 +766,13 @@ pub async fn get_item_detail(
         "relative_display": format_relative_days(trigger_ts, now_ts, &tz),
         "description": description,
         "item_type": tags.item_type,
-        "monitor": item.monitor,
         "notify": tags.notify,
         "sources_display": sources_display,
     })))
 }
 
 /// POST /api/items/{id}/snooze
-/// Snoozes an item by setting next_check_at to a future time.
+/// Snoozes an item by setting due_at to a future time.
 pub async fn snooze_item(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -820,7 +805,7 @@ pub async fn snooze_item(
 
     state
         .item_repository
-        .update_next_check_at(item.id.unwrap_or(0), Some(snooze_until))
+        .update_due_at(item.id.unwrap_or(0), Some(snooze_until))
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

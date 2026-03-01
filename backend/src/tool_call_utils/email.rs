@@ -48,7 +48,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("fetch_specific_email"),
-            description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about emails from a specific person (e.g., 'has Mom emailed me?', 'emails from Boss') or about a particular topic. Supports contact profile nicknames. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
+            description: Some(String::from("Search and fetch a specific email by person or topic. Supports contact profile nicknames. Returns full message body for the most relevant match.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(specific_email_properties),
@@ -90,11 +90,17 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_email"),
-            description: Some(String::from("Sends an email IMMEDIATELY to the specified recipient using the user's email account. Use this when the user asks to send a new email RIGHT NOW. IMPORTANT: If the user specifies a future time (e.g. 'at 5pm email...', 'tomorrow morning send an email...'), do NOT call this tool - use create_item instead to schedule it. This tool executes immediately and cannot be scheduled.")),
+            description: Some(String::from(
+                "Sends an email immediately. For future-scheduled emails, use create_item instead.",
+            )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![String::from("to"), String::from("subject"), String::from("body")]),
+                required: Some(vec![
+                    String::from("to"),
+                    String::from("subject"),
+                    String::from("body"),
+                ]),
             },
         },
     }

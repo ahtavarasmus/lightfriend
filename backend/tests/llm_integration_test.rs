@@ -42,7 +42,7 @@ fn create_llm_test_state() -> Arc<AppState> {
 }
 
 /// Create a test user with location, timezone, and autopilot plan set.
-/// Autopilot is needed so monitor items pass the plan gate.
+/// Autopilot is needed so tracking items pass the plan gate.
 fn setup_user_with_location(state: &Arc<AppState>) -> User {
     let params = TestUserParams::finland_user(100.0, 100.0);
     let user = create_test_user(state, &params);
@@ -60,11 +60,14 @@ fn setup_user_with_location(state: &Arc<AppState>) -> User {
         .update_timezone(user.id, "Europe/Helsinki")
         .expect("Failed to update timezone");
 
-    // Set autopilot plan so monitor items are allowed
+    // Set autopilot plan so tracking items are allowed
     set_plan_type(state, user.id, "autopilot");
 
     user
 }
+
+/// Max time for a single LLM round-trip (includes tool calls, retries, and follow-up)
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Send a message through the full SMS processing pipeline (with real LLM, no Twilio send)
 async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioResponse {
@@ -82,9 +85,45 @@ async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioR
         skip_twilio_send: true,
         mock_llm_response: None,
         status_tx: None,
+        mock_tool_responses: None,
     };
 
-    let (_status, _headers, axum::Json(response)) = process_sms(state, payload, options).await;
+    let (_status, _headers, axum::Json(response)) =
+        tokio::time::timeout(SEND_TIMEOUT, process_sms(state, payload, options))
+            .await
+            .unwrap_or_else(|_| panic!("send_message timed out after {}s", SEND_TIMEOUT.as_secs()));
+    response
+}
+
+/// Send a message with mock tool responses. Tool calls matching keys in the map
+/// return the mock value instead of executing the real handler.
+async fn send_message_with_mocks(
+    state: &Arc<AppState>,
+    user: &User,
+    body: &str,
+    mocks: std::collections::HashMap<String, String>,
+) -> TwilioResponse {
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+15551234567".to_string(),
+        body: body.to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+        message_sid: format!("SM_test_{}", uuid::Uuid::new_v4()),
+    };
+
+    let options = ProcessSmsOptions {
+        skip_twilio_send: true,
+        mock_llm_response: None,
+        status_tx: None,
+        mock_tool_responses: Some(mocks),
+    };
+
+    let (_status, _headers, axum::Json(response)) =
+        tokio::time::timeout(SEND_TIMEOUT, process_sms(state, payload, options))
+            .await
+            .unwrap_or_else(|_| panic!("send_message timed out after {}s", SEND_TIMEOUT.as_secs()));
     response
 }
 
@@ -110,7 +149,7 @@ async fn send_message_with_retry(body: &str) -> (Arc<AppState>, User, TwilioResp
     last_response.unwrap()
 }
 
-/// Assert that an item was created with monitor=false and next_check_at set
+/// Assert that an item was created with no [type:tracking] tag and due_at set
 fn assert_reminder_item(
     state: &Arc<AppState>,
     user: &User,
@@ -129,12 +168,12 @@ fn assert_reminder_item(
 
     let item = &items[0];
     assert!(
-        !item.monitor,
-        "Expected monitor=false for a reminder, got monitor=true"
+        !item.summary.contains("[type:tracking]"),
+        "Expected no [type:tracking] tag for a reminder"
     );
     assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set for a reminder, got None"
+        item.due_at.is_some(),
+        "Expected due_at to be set for a reminder, got None"
     );
 
     let summary_lower = item.summary.to_lowercase();
@@ -148,15 +187,15 @@ fn assert_reminder_item(
     }
 }
 
-/// Assert that an item was created with monitor=true.
-/// `expect_next_check_at`: whether next_check_at should be set (time-bounded monitors)
-/// or absent (open-ended monitors).
+/// Assert that an item was created with [type:tracking] tag present.
+/// `expect_due_at`: whether due_at should be set (time-bounded tracking items)
+/// or absent (open-ended tracking items).
 fn assert_monitor_item(
     state: &Arc<AppState>,
     user: &User,
     response: &TwilioResponse,
     expected_summary_words: &[&str],
-    expect_next_check_at: bool,
+    expect_due_at: bool,
 ) {
     assert!(
         response.created_item_id.is_some(),
@@ -170,21 +209,22 @@ fn assert_monitor_item(
 
     let item = &items[0];
     assert!(
-        item.monitor,
-        "Expected monitor=true for a monitor item, got monitor=false"
+        item.summary.contains("[type:tracking]"),
+        "Expected [type:tracking] tag for a tracking item, got: {}",
+        item.summary
     );
 
-    if expect_next_check_at {
+    if expect_due_at {
         assert!(
-            item.next_check_at.is_some(),
-            "Expected next_check_at to be set for a time-bounded monitor, got None. Summary: {}",
+            item.due_at.is_some(),
+            "Expected due_at to be set for a time-bounded tracking item, got None. Summary: {}",
             item.summary
         );
     } else {
         assert!(
-            item.next_check_at.is_none(),
-            "Expected next_check_at to be None for an open-ended monitor, got {:?}. Summary: {}",
-            item.next_check_at,
+            item.due_at.is_none(),
+            "Expected due_at to be None for an open-ended tracking item, got {:?}. Summary: {}",
+            item.due_at,
             item.summary
         );
     }
@@ -214,10 +254,10 @@ fn assert_no_item(response: &TwilioResponse) {
     );
 }
 
-/// Assert next_check_at is approximately `expected_offset_secs` from now.
+/// Assert due_at is approximately `expected_offset_secs` from now.
 /// Uses asymmetric tolerance: early_tolerance allows the LLM to round down slightly,
 /// late_tolerance is tighter because being late is usually worse than being early.
-fn assert_next_check_at_approx(
+fn assert_due_at_approx(
     state: &Arc<AppState>,
     user: &User,
     expected_offset_secs: i64,
@@ -226,7 +266,7 @@ fn assert_next_check_at_approx(
 ) {
     let items = get_user_items(state, user.id);
     let item = &items[0];
-    let check_at = item.next_check_at.expect("next_check_at should be set") as i64;
+    let check_at = item.due_at.expect("due_at should be set") as i64;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -236,7 +276,7 @@ fn assert_next_check_at_approx(
     // diff < 0 means early, diff > 0 means late
     assert!(
         diff > -early_tolerance_secs && diff < late_tolerance_secs,
-        "next_check_at is off by {}s (negative=early, positive=late). \
+        "due_at is off by {}s (negative=early, positive=late). \
          check_at={}, expected={}, tolerance: -{}/+{}s",
         diff,
         check_at,
@@ -247,7 +287,7 @@ fn assert_next_check_at_approx(
 }
 
 // =============================================================================
-// 1. Scheduled reminders (monitor=false)
+// 1. Scheduled reminders (oneshot type)
 // =============================================================================
 
 #[tokio::test]
@@ -269,7 +309,7 @@ async fn test_llm_relative_time_reminder() {
 
     // "in 3 hours" for an oven check: LLM might round to the nearest 15 min,
     // but being late on an oven is bad. Allow 15 min early, 10 min late.
-    assert_next_check_at_approx(&state, &user, 3 * 3600, 15 * 60, 10 * 60);
+    assert_due_at_approx(&state, &user, 3 * 3600, 15 * 60, 10 * 60);
 }
 
 #[tokio::test]
@@ -320,7 +360,7 @@ async fn test_llm_call_me_reminder() {
 }
 
 // =============================================================================
-// 2. Monitors (monitor=true)
+// 2. Tracking items (tracking type)
 // =============================================================================
 
 #[tokio::test]
@@ -345,7 +385,7 @@ async fn test_llm_messaging_monitor() {
 #[tokio::test]
 #[ignore]
 async fn test_llm_time_bounded_monitor() {
-    // Has a deadline: "by Friday" - should have next_check_at set
+    // Has a deadline: "by Friday" - should have due_at set
     let (state, user, response) = send_message_with_retry(
         "watch my email for a shipping confirmation from Amazon, I need it by Friday",
     )
@@ -450,12 +490,12 @@ async fn test_llm_future_message_creates_item() {
 
     let item = &items[0];
     assert!(
-        !item.monitor,
-        "Expected monitor=false for a scheduled future action"
+        !item.summary.contains("[type:tracking]"),
+        "Expected no [type:tracking] tag for a scheduled future action"
     );
     assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at set for a future action"
+        item.due_at.is_some(),
+        "Expected due_at set for a future action"
     );
 }
 
@@ -476,12 +516,12 @@ async fn test_llm_future_email_creates_item() {
 
     let item = &items[0];
     assert!(
-        !item.monitor,
-        "Expected monitor=false for a scheduled future action"
+        !item.summary.contains("[type:tracking]"),
+        "Expected no [type:tracking] tag for a scheduled future action"
     );
     assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at set for a future action"
+        item.due_at.is_some(),
+        "Expected due_at set for a future action"
     );
 }
 
@@ -582,4 +622,321 @@ async fn test_llm_spanish_question_no_item() {
 
     let response = send_message(&state, &user, "que hora es?").await;
     assert_no_item(&response);
+}
+
+// =============================================================================
+// Tracking creation tests (C1-C10): verify tags are set correctly
+// =============================================================================
+
+/// Assert that a tracking item was created with specific tags on the first line of its summary.
+/// Each tag is a (key, value) pair, e.g. ("platform", "email") checks for "[platform:email]".
+fn assert_tracking_tags(
+    state: &Arc<AppState>,
+    user: &User,
+    response: &TwilioResponse,
+    expected_tags: &[(&str, &str)],
+) {
+    assert!(
+        response.created_item_id.is_some(),
+        "Expected a tracking item to be created after {} retries. Response: {}",
+        MAX_RETRIES,
+        response.message
+    );
+
+    let items = get_user_items(state, user.id);
+    assert!(!items.is_empty(), "Expected at least one item in DB");
+
+    let item = &items[0];
+    assert!(
+        item.summary.contains("[type:tracking]"),
+        "Expected [type:tracking] tag. Got summary: {}",
+        item.summary
+    );
+
+    let first_line = item.summary.lines().next().unwrap_or("");
+    for (key, value) in expected_tags {
+        let tag = format!("[{}:{}]", key, value);
+        assert!(
+            first_line.to_lowercase().contains(&tag.to_lowercase()),
+            "Expected tag {} on first line. First line: {}. Full summary: {}",
+            tag,
+            first_line,
+            item.summary
+        );
+    }
+}
+
+// C1: Email from person with topic
+#[tokio::test]
+#[ignore]
+async fn test_c1_email_from_person_with_topic() {
+    let (state, user, response) =
+        send_message_with_retry("let me know if I get an email from my boss about the budget")
+            .await;
+
+    assert_tracking_tags(
+        &state,
+        &user,
+        &response,
+        &[
+            ("platform", "email"),
+            ("sender", "boss"),
+            ("topic", "budget"),
+        ],
+    );
+
+    let items = get_user_items(&state, user.id);
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C2: WhatsApp scope:any
+#[tokio::test]
+#[ignore]
+async fn test_c2_whatsapp_scope_any() {
+    let (state, user, response) =
+        send_message_with_retry("tell me whenever mom texts me on WhatsApp").await;
+
+    assert_tracking_tags(
+        &state,
+        &user,
+        &response,
+        &[
+            ("platform", "whatsapp"),
+            ("sender", "mom"),
+            ("scope", "any"),
+        ],
+    );
+
+    let items = get_user_items(&state, user.id);
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C3: Topic-only tracking
+#[tokio::test]
+#[ignore]
+async fn test_c3_topic_only_tracking() {
+    let (state, user, response) =
+        send_message_with_retry("notify me if anyone mentions the hackathon").await;
+
+    assert_tracking_tags(&state, &user, &response, &[("topic", "hackathon")]);
+
+    let items = get_user_items(&state, user.id);
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C4: Implicit platform from context
+#[tokio::test]
+#[ignore]
+async fn test_c4_implicit_platform_email() {
+    let (state, user, response) =
+        send_message_with_retry("watch for a shipping confirmation email from Amazon").await;
+
+    assert_tracking_tags(
+        &state,
+        &user,
+        &response,
+        &[("platform", "email"), ("sender", "Amazon")],
+    );
+
+    // Should NOT have platform:any since user said "email"
+    let items = get_user_items(&state, user.id);
+    let first_line = items[0].summary.lines().next().unwrap_or("");
+    assert!(
+        !first_line.to_lowercase().contains("[platform:any]"),
+        "C4: Should infer platform:email, not platform:any. First line: {}",
+        first_line
+    );
+
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C5: Deadline extraction - due_at should be set and in the future
+#[tokio::test]
+#[ignore]
+async fn test_c5_deadline_extraction() {
+    let (state, user, response) =
+        send_message_with_retry("watch my email for reply from John, need it by Friday").await;
+
+    assert_tracking_tags(
+        &state,
+        &user,
+        &response,
+        &[("platform", "email"), ("sender", "John")],
+    );
+
+    let items = get_user_items(&state, user.id);
+    let item = &items[0];
+    assert!(
+        item.due_at.is_some(),
+        "C5: 'by Friday' should set due_at. Got None. Summary: {}",
+        item.summary
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+    assert!(
+        item.due_at.unwrap() > now,
+        "C5: due_at should be in the future. Got: {}, now: {}",
+        item.due_at.unwrap(),
+        now
+    );
+
+    eprintln!("  Summary: {}", item.summary);
+    eprintln!("  due_at: {:?}", item.due_at);
+}
+
+// C6: Fetch source for internet data
+#[tokio::test]
+#[ignore]
+async fn test_c6_fetch_internet() {
+    let (state, user, response) = send_message_with_retry("track if Bitcoin hits $100k").await;
+
+    assert!(
+        response.created_item_id.is_some(),
+        "C6: Expected item created. Response: {}",
+        response.message
+    );
+
+    let items = get_user_items(&state, user.id);
+    let first_line = items[0].summary.lines().next().unwrap_or("");
+    assert!(
+        first_line.to_lowercase().contains("[fetch:internet]"),
+        "C6: Bitcoin tracking should have [fetch:internet]. First line: {}",
+        first_line
+    );
+
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C7: Call notification type
+#[tokio::test]
+#[ignore]
+async fn test_c7_call_notification_type() {
+    let (state, user, response) =
+        send_message_with_retry("call me when my package arrives from Amazon").await;
+
+    assert!(
+        response.created_item_id.is_some(),
+        "C7: Expected item created. Response: {}",
+        response.message
+    );
+
+    let items = get_user_items(&state, user.id);
+    let first_line = items[0].summary.lines().next().unwrap_or("");
+    assert!(
+        first_line.contains("[notify:call]"),
+        "C7: 'call me when' should produce [notify:call]. First line: {}",
+        first_line
+    );
+    assert_eq!(
+        items[0].priority, 2,
+        "C7: Call items should have priority 2, got: {}",
+        items[0].priority
+    );
+
+    eprintln!("  Summary: {}", items[0].summary);
+}
+
+// C8: Recurring not tracking - daily digest should be recurring
+#[tokio::test]
+#[ignore]
+async fn test_c8_recurring_not_tracking() {
+    let (state, user, response) =
+        send_message_with_retry("give me a daily morning briefing with my emails and calendar")
+            .await;
+
+    assert!(
+        response.created_item_id.is_some(),
+        "C8: Expected item created. Response: {}",
+        response.message
+    );
+
+    let items = get_user_items(&state, user.id);
+    let summary = &items[0].summary;
+    assert!(
+        summary.contains("[type:recurring]"),
+        "C8: Daily briefing should be [type:recurring], got: {}",
+        summary
+    );
+    assert!(
+        !summary.contains("[type:tracking]"),
+        "C8: Should NOT be [type:tracking]. Got: {}",
+        summary
+    );
+
+    // Should have fetch sources
+    let first_line = summary.lines().next().unwrap_or("");
+    assert!(
+        first_line.to_lowercase().contains("[fetch:"),
+        "C8: Should have fetch sources for email/calendar. First line: {}",
+        first_line
+    );
+
+    eprintln!("  Summary: {}", summary);
+}
+
+// C9: Tracking not recurring - one-time watch
+#[tokio::test]
+#[ignore]
+async fn test_c9_tracking_not_recurring() {
+    let (state, user, response) =
+        send_message_with_retry("let me know when I get an email from John").await;
+
+    assert!(
+        response.created_item_id.is_some(),
+        "C9: Expected item created. Response: {}",
+        response.message
+    );
+
+    let items = get_user_items(&state, user.id);
+    let summary = &items[0].summary;
+    assert!(
+        summary.contains("[type:tracking]"),
+        "C9: 'let me know when' should be [type:tracking], got: {}",
+        summary
+    );
+    assert!(
+        !summary.contains("[type:recurring]"),
+        "C9: Should NOT be [type:recurring]. Got: {}",
+        summary
+    );
+
+    eprintln!("  Summary: {}", summary);
+}
+
+// C10: Multilingual - Finnish tracking request
+#[tokio::test]
+#[ignore]
+async fn test_c10_multilingual_finnish() {
+    let (state, user, response) =
+        send_message_with_retry("kerro mulle kun aiti laittaa viestin").await;
+
+    assert!(
+        response.created_item_id.is_some(),
+        "C10: Expected item created. Response: {}",
+        response.message
+    );
+
+    let items = get_user_items(&state, user.id);
+    let summary = &items[0].summary;
+    assert!(
+        summary.contains("[type:tracking]"),
+        "C10: Finnish tracking request should create [type:tracking]. Got: {}",
+        summary
+    );
+
+    // Sender tag should reference mom/aiti
+    let first_line = summary.lines().next().unwrap_or("").to_lowercase();
+    assert!(
+        first_line.contains("[sender:")
+            && (first_line.contains("mom")
+                || first_line.contains("aiti")
+                || first_line.contains("äiti")
+                || first_line.contains("mother")),
+        "C10: Should have sender tag with mom/aiti/äiti/mother. First line: {}",
+        first_line
+    );
+
+    eprintln!("  Summary: {}", summary);
 }

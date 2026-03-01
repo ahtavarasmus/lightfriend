@@ -4,7 +4,7 @@
 //! - Creates silent tracking items for actionable messages (invoices, deliveries, questions, etc.)
 //! - Skips casual chat, greetings, acknowledgements
 //! - Deduplicates by topic within the same room
-//! - Sets correct item fields (monitor=true, priority=0, next_check_at, source_id, tags)
+//! - Sets correct item fields ([type:tracking] tag, priority=0, due_at, source_id)
 //!
 //! All LLM tests are gated with `#[ignore]` because they cost real API tokens.
 //! Run explicitly with: `cargo test --test message_trackable_test -- --ignored --test-threads=1`
@@ -165,10 +165,10 @@ fn assert_tracking_item(items: &[Item], expected_summary_words: &[&str]) {
 
     let item = &items[0];
 
-    // Must be a monitor with priority 0 (silent)
+    // Must be a tracking item with priority 0 (silent)
     assert!(
-        item.monitor,
-        "Expected monitor=true, got false. Summary: {}",
+        item.summary.contains("[type:tracking]"),
+        "Expected [type:tracking] tag in summary, got: {}",
         item.summary
     );
     assert_eq!(
@@ -177,10 +177,10 @@ fn assert_tracking_item(items: &[Item], expected_summary_words: &[&str]) {
         item.priority, item.summary
     );
 
-    // Must have next_check_at set
+    // Must have due_at set
     assert!(
-        item.next_check_at.is_some(),
-        "Expected next_check_at to be set, got None. Summary: {}",
+        item.due_at.is_some(),
+        "Expected due_at to be set, got None. Summary: {}",
         item.summary
     );
 
@@ -244,9 +244,9 @@ fn assert_no_item(items: &[Item], message: &str) {
     );
 }
 
-/// Assert next_check_at is in the future and within a reasonable range.
-fn assert_next_check_at_in_range(item: &Item, min_offset_secs: i64, max_offset_secs: i64) {
-    let check_at = item.next_check_at.expect("next_check_at should be set") as i64;
+/// Assert due_at is in the future and within a reasonable range.
+fn assert_due_at_in_range(item: &Item, min_offset_secs: i64, max_offset_secs: i64) {
+    let check_at = item.due_at.expect("due_at should be set") as i64;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -255,7 +255,7 @@ fn assert_next_check_at_in_range(item: &Item, min_offset_secs: i64, max_offset_s
     let offset = check_at - now;
     assert!(
         offset >= min_offset_secs && offset <= max_offset_secs,
-        "next_check_at offset is {}s, expected between {}s and {}s. check_at={}, now={}",
+        "due_at offset is {}s, expected between {}s and {}s. check_at={}, now={}",
         offset,
         min_offset_secs,
         max_offset_secs,
@@ -513,8 +513,11 @@ async fn test_item_fields_correct() {
     assert_eq!(items.len(), 1, "Expected exactly 1 item");
     let item = &items[0];
 
-    // monitor=true, priority=0
-    assert!(item.monitor, "Should be monitor=true");
+    // tracking item, priority=0
+    assert!(
+        item.summary.contains("[type:tracking]"),
+        "Should have [type:tracking] tag"
+    );
     assert_eq!(item.priority, 0, "Should be priority 0 (silent)");
 
     // source_id format: msg_whatsapp_{room_id}_{topic}
@@ -551,8 +554,8 @@ async fn test_item_fields_correct() {
         "Expected description on second line of summary"
     );
 
-    // next_check_at should be set and in reasonable range (1 hour to 30 days)
-    assert_next_check_at_in_range(item, 3600, 30 * 86400);
+    // due_at should be set and in reasonable range (1 hour to 30 days)
+    assert_due_at_in_range(item, 3600, 30 * 86400);
 
     // Verify the item is retrievable by source_id (dedup works)
     let exists = state
@@ -835,12 +838,12 @@ async fn test_dedup_same_topic_different_rooms() {
 }
 
 // =============================================================================
-// 6. next_check_at timing
+// 6. due_at timing
 // =============================================================================
 
 #[tokio::test]
 #[ignore]
-async fn test_next_check_at_urgent_item() {
+async fn test_due_at_urgent_item() {
     // Overdue invoice - should have a near-term check (within 1-3 days)
     let (_, _, items) = check_message_expect_item(
         "whatsapp",
@@ -851,12 +854,12 @@ async fn test_next_check_at_urgent_item() {
 
     assert!(!items.is_empty(), "Urgent invoice should create item");
     // Urgent: expect check within 1 hour to 3 days
-    assert_next_check_at_in_range(&items[0], 3600, 3 * 86400);
+    assert_due_at_in_range(&items[0], 3600, 3 * 86400);
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_next_check_at_non_urgent_item() {
+async fn test_due_at_non_urgent_item() {
     // Package in transit, no rush - should have a longer check window
     let (_, _, items) = check_message_expect_item(
         "whatsapp",
@@ -866,6 +869,6 @@ async fn test_next_check_at_non_urgent_item() {
     .await;
 
     assert!(!items.is_empty(), "Delivery message should create item");
-    // Non-urgent: expect check in 2 days to 14 days
-    assert_next_check_at_in_range(&items[0], 2 * 86400, 14 * 86400);
+    // Non-urgent: expect check in 5 days to 14 days (minimum default is 5 days)
+    assert_due_at_in_range(&items[0], 5 * 86400, 14 * 86400);
 }

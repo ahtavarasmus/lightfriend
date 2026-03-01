@@ -1,6 +1,6 @@
 use crate::UserCoreOps;
 
-/// Unified item creation tool for scheduled reminders and message monitoring.
+/// Unified item creation tool for scheduled reminders and tracking items.
 /// Uses structured params (enums, not freeform) so behavioral decisions are deterministic.
 pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
@@ -13,11 +13,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Item lifecycle type:\n\
-                - 'oneshot': fire once, notify, delete. For simple reminders, one-shot monitors.\n\
-                - 'recurring': fire, notify, auto-reschedule via repeat pattern. Summary never changes.\n\
-                - 'tracking': AI-managed background item. AI decides when to surface, reschedule, or update summary.\n\
-                  Example: 'track this package delivery', 'watch Bitcoin price and tell me when it hits 100k'."
+                "oneshot: fire once then delete. recurring: scheduled repeating report, always notifies. tracking: watches for a condition, only notifies when condition is met."
                     .to_string(),
             ),
             enum_values: Some(vec![
@@ -34,10 +30,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "How to notify the user when this item fires:\n\
-                - 'sms': send an SMS (default for most items)\n\
-                - 'call': phone call (for wake-up alarms, urgent alerts)\n\
-                - 'silent': no notification (background tracking only)"
+                "How to notify: sms (default), call (wake-ups, urgent), silent (background only)."
                     .to_string(),
             ),
             enum_values: Some(vec![
@@ -54,9 +47,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Repeat pattern for recurring items. Required when item_type='recurring'.\n\
-                Formats: 'daily HH:MM', 'weekdays HH:MM', 'weekly DAY HH:MM'\n\
-                Examples: 'daily 09:00', 'weekdays 08:30', 'weekly Monday 09:00'"
+                "Required for recurring items. Format: 'daily HH:MM', 'weekdays HH:MM', 'weekly DAY HH:MM'."
                     .to_string(),
             ),
             ..Default::default()
@@ -68,16 +59,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "REQUIRED when the item needs to check/summarize external data at trigger time.\n\
-                Without this tag the system CANNOT fetch the data - the item will fire with no context.\n\
-                Available sources: email, chat, calendar, weather, items\n\
-                - 'email' - email summaries, email checks\n\
-                - 'chat' - WhatsApp, Telegram, Signal, or any messaging platform summaries\n\
-                - 'calendar' - calendar event summaries\n\
-                - 'weather' - weather checks\n\
-                - 'items' - tracked item status updates\n\
-                Examples: 'email,chat,calendar,items' for full digest. 'chat' for WhatsApp-only summary.\n\
-                Only omit for pure reminders that need no external data (e.g. 'remind me to call mom')."
+                "Data sources to poll, or 'none'. For recurring: what data to include in reports. For tracking external data (prices, weather, news): set to 'internet'. Sources: email, chat, calendar, weather, items, internet, none."
                     .to_string(),
             ),
             ..Default::default()
@@ -89,16 +71,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Natural language description of what to remind or watch for.\n\
-                RULES:\n\
-                - Use third person: 'the user', never 'you' or 'me'\n\
-                - Include all relevant context: names, times, locations, what to watch for\n\n\
-                EXAMPLES:\n\
-                - 'Remind the user to call mom.'\n\
-                - 'Summarize recent emails, messages, calendar events, and tracked items for the user.'\n\
-                - 'Check weather in Tampere. If below freezing, remind the user to warm up the car. If not, no notification needed.'\n\
-                - 'Watch for emails from mom.'\n\
-                - 'Watch for messages from John about the project.'"
+                "What to remind or watch for. Use third person ('the user'). Include all relevant context from the user's request."
                     .to_string(),
             ),
             ..Default::default()
@@ -106,45 +79,34 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
     );
 
     properties.insert(
-        "monitor".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some(
-                "true to watch incoming emails/messages for matches, false if item only fires at next_check_at."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-
-    properties.insert(
-        "next_check_at".to_string(),
+        "due_at".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "ISO datetime 'YYYY-MM-DDTHH:MM' in the user's timezone. ALWAYS REQUIRED.\n\
-                For reminders (monitor=false): when to fire.\n\
-                For monitors (monitor=true): safety-net review/expiration date. If user doesn't specify one,\n\
-                infer a reasonable default:\n\
-                - General 'notify me when X messages': 2 weeks\n\
-                - Time-bounded events (flights, deliveries, payments): match the event timeframe\n\
-                - Ongoing watches (price drops, job postings): 1 month\n\
-                At this date, the item fires as a check-in: 'still want to watch for X?'"
+                "ISO datetime YYYY-MM-DDTHH:MM in user's timezone. Required for oneshot (trigger time). Optional for tracking (expiration deadline, defaults to 30 days). Optional for recurring (auto-computed from repeat pattern). For actions ('do X at 3pm') use exact time. For events ('meeting at 3pm') set before: 5min same-location, 45min appointments, 60min travel. Explicit time overrides ('remind at 1pm about 2pm meeting' = 13:00). Include actual event time in description."
                     .to_string(),
             ),
             ..Default::default()
         }),
     );
 
-    // Monitor-specific tag params (optional, for monitor=true items)
     properties.insert(
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "For monitors: which platform to watch. Options: email, whatsapp, telegram, signal, chat (any chat), any"
+                "Platform to match incoming messages against. Set 'none' for oneshot/recurring or data tracking via fetch."
                     .to_string(),
             ),
+            enum_values: Some(vec![
+                "email".to_string(),
+                "whatsapp".to_string(),
+                "telegram".to_string(),
+                "signal".to_string(),
+                "chat".to_string(),
+                "any".to_string(),
+                "none".to_string(),
+            ]),
             ..Default::default()
         }),
     );
@@ -154,7 +116,8 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "For monitors: person/entity name to watch for, or 'any'.".to_string(),
+                "Person or entity name to match incoming messages against, or 'any'. Set 'none' for oneshot/recurring or data tracking via fetch."
+                    .to_string(),
             ),
             ..Default::default()
         }),
@@ -165,18 +128,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "For monitors: key topic words to match. Omit if using scope='any'.".to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-
-    properties.insert(
-        "scope".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "For monitors: set to 'any' to match ANY message from the sender (skips topic check)."
+                "Topic keywords to match incoming messages, or 'any' to match all messages from sender regardless of content. Set 'none' for oneshot/recurring or data tracking via fetch."
                     .to_string(),
             ),
             ..Default::default()
@@ -188,26 +140,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("create_item"),
             description: Some(String::from(
-                "Creates a tracked item: a scheduled reminder, recurring digest, background tracker, or a monitor for incoming messages.\n\n\
-                ITEM TYPES:\n\
-                - oneshot: fire once, notify, delete (simple reminders, one-shot monitors)\n\
-                - recurring: fire, notify, auto-reschedule (daily digests, recurring reminders). Requires 'repeat' param.\n\
-                - tracking: AI-managed. AI decides when to surface, reschedule, or update (package tracking, price watches)\n\n\
-                EXAMPLES:\n\
-                - 'remind me to call mom at 10pm' ->\n\
-                    item_type='oneshot', notify='sms', description='Remind the user to call mom.', monitor=false, next_check_at='2026-02-28T22:00'\n\
-                - 'call me at midnight' ->\n\
-                    item_type='oneshot', notify='call', description='Scheduled check-in for the user.', monitor=false, next_check_at='2026-02-29T00:00'\n\
-                - 'every morning at 9am summarize my messages and email' ->\n\
-                    item_type='recurring', notify='sms', repeat='daily 09:00', fetch='email,chat,calendar,items', description='Summarize recent emails, messages, calendar events, and tracked items.', monitor=false, next_check_at='2026-02-25T09:00'\n\
-                - 'every morning at 8am give me a summary of my whatsapp messages' ->\n\
-                    item_type='recurring', notify='sms', repeat='daily 08:00', fetch='chat', description='Summarize WhatsApp messages from last night for the user.', monitor=false, next_check_at='2026-02-25T08:00'\n\
-                - 'let me know if mom emails' ->\n\
-                    item_type='oneshot', notify='sms', description='Watch for emails from mom.', monitor=true, platform='email', sender='mom', scope='any', next_check_at='2026-03-09T09:00'\n\
-                - 'call me when John messages about the project' ->\n\
-                    item_type='oneshot', notify='call', description='Watch for messages from John about the project.', monitor=true, platform='chat', sender='John', topic='project', next_check_at='2026-03-09T09:00'\n\
-                - 'track my Amazon package delivery' ->\n\
-                    item_type='tracking', notify='sms', description='Track Amazon package delivery. Notify user when shipped or delivered.', monitor=true, platform='email', sender='Amazon', topic='shipping delivery', next_check_at='2026-03-07T09:00'",
+                "Create a scheduled item for reminders, recurring reports, or monitoring. Use for anything that should happen on a schedule (daily briefings, weekly summaries, periodic checks) or trigger on a condition (notify when X happens). Tracking items have two modes: message tracking (set platform/sender/topic to filter incoming messages) or data tracking (set fetch to poll external sources like internet, and platform/sender/topic to 'none').",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -216,8 +149,10 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
                     String::from("item_type"),
                     String::from("notify"),
                     String::from("description"),
-                    String::from("monitor"),
-                    String::from("next_check_at"),
+                    String::from("fetch"),
+                    String::from("platform"),
+                    String::from("sender"),
+                    String::from("topic"),
                 ]),
             },
         },
@@ -235,21 +170,19 @@ pub struct CreateItemArgs {
     pub item_type: String,
     pub notify: String,
     pub description: String,
-    pub monitor: bool,
-    pub next_check_at: String,
+    #[serde(default)]
+    pub due_at: Option<String>,
     #[serde(default)]
     pub repeat: Option<String>,
     #[serde(default)]
     pub fetch: Option<String>,
-    // Monitor tag params
+    // Tracking tag params
     #[serde(default)]
     pub platform: Option<String>,
     #[serde(default)]
     pub sender: Option<String>,
     #[serde(default)]
     pub topic: Option<String>,
-    #[serde(default)]
-    pub scope: Option<String>,
 }
 
 /// Result from handle_create_item containing the confirmation message and item ID
@@ -265,11 +198,32 @@ pub async fn handle_create_item(
 ) -> Result<CreateItemResult, Box<dyn Error>> {
     let mut args: CreateItemArgs = serde_json::from_str(args)?;
 
-    // Gate monitor items to Autopilot/BYOT plans only
-    if args.monitor {
+    // Normalize "none" values to None (params are required in schema but "none" means not applicable)
+    if args.fetch.as_deref() == Some("none") {
+        args.fetch = None;
+    }
+    if args.platform.as_deref() == Some("none") {
+        args.platform = None;
+    }
+    if args.sender.as_deref() == Some("none") {
+        args.sender = None;
+    }
+    if args.topic.as_deref() == Some("none") {
+        args.topic = None;
+    }
+
+    // Gate tracking items to Autopilot/BYOT plans only
+    if args.item_type == "tracking" {
         let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
         if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
-            return Err("Monitoring items is an Autopilot plan feature. Upgrade to Autopilot to have Lightfriend automatically watch your messages for updates on this item.".into());
+            return Err("Tracking items is an Autopilot plan feature. Upgrade to Autopilot to have Lightfriend automatically watch for updates on this item.".into());
+        }
+
+        // Tracking items must have a data source: either fetch or communication filters
+        let has_fetch = args.fetch.as_ref().is_some_and(|f| !f.trim().is_empty());
+        let has_filters = args.platform.is_some() || args.sender.is_some() || args.topic.is_some();
+        if !has_fetch && !has_filters {
+            return Err("Tracking items need a data source. Set fetch (e.g. internet, email) or platform/sender/topic filters.".into());
         }
     }
 
@@ -278,17 +232,42 @@ pub async fn handle_create_item(
         .unwrap()
         .as_secs() as i32;
 
-    // Parse next_check_at (always required)
     let user_info = state
         .user_core
         .get_user_info(user_id)
         .map_err(|e| format!("Failed to get user info: {:?}", e))?;
     let tz_str = user_info.timezone.unwrap_or_else(|| "UTC".to_string());
     let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
-    let ts = parse_datetime_to_timestamp(&args.next_check_at, &tz)?;
 
-    // Auto-infer fetch sources if AI omitted them for a non-monitor summary/digest item
-    if args.fetch.is_none() && !args.monitor {
+    // Parse due_at: required for oneshot/tracking, optional for recurring (computed from repeat)
+    let ts = if let Some(ref due_at) = args.due_at {
+        parse_datetime_to_timestamp(due_at, &tz)?
+    } else if args.item_type == "recurring" {
+        if let Some(ref repeat) = args.repeat {
+            let tags = crate::proactive::utils::ParsedTags {
+                repeat: Some(repeat.clone()),
+                ..Default::default()
+            };
+            let next = crate::proactive::utils::compute_next_check_at(&tags, &tz_str)
+                .ok_or("Could not compute first due_at from repeat pattern")?;
+            parse_datetime_to_timestamp(&next, &tz)?
+        } else {
+            return Err("Recurring items need a repeat pattern.".into());
+        }
+    } else if args.item_type == "tracking" {
+        // Tracking without explicit deadline: default to 30 days from now
+        let default_expiry = chrono::Utc::now().with_timezone(&tz) + chrono::Duration::days(30);
+        parse_datetime_to_timestamp(&default_expiry.format("%Y-%m-%dT%H:%M").to_string(), &tz)?
+    } else {
+        let user_now = chrono::Utc::now().with_timezone(&tz);
+        return Err(format!(
+            "due_at is required for oneshot items. Current time in user timezone: {}. Provide due_at as YYYY-MM-DDTHH:MM.",
+            user_now.format("%Y-%m-%dT%H:%M")
+        ).into());
+    };
+
+    // Auto-infer fetch sources if AI omitted them for a non-tracking summary/digest item
+    if args.fetch.is_none() && args.item_type != "tracking" {
         let lower = args.description.to_lowercase();
         let is_summary = lower.contains("summarize")
             || lower.contains("summary")
@@ -321,6 +300,17 @@ pub async fn handle_create_item(
             if lower.contains("tracked item") || lower.contains("tracked things") {
                 sources.push("items");
             }
+            if lower.contains("price")
+                || lower.contains("stock")
+                || lower.contains("bitcoin")
+                || lower.contains("btc")
+                || lower.contains("crypto")
+                || lower.contains("market")
+                || lower.contains("news")
+                || lower.contains("score")
+            {
+                sources.push("internet");
+            }
             if !sources.is_empty() {
                 tracing::info!(
                     "Auto-inferred fetch sources [{}] from description: {}",
@@ -345,8 +335,7 @@ pub async fn handle_create_item(
     let new_item = crate::models::user_models::NewItem {
         user_id,
         summary: summary.clone(),
-        monitor: args.monitor,
-        next_check_at: Some(ts),
+        due_at: Some(ts),
         priority,
         source_id: None,
         created_at: now,
@@ -357,10 +346,25 @@ pub async fn handle_create_item(
         .create_item(&new_item)
         .map_err(|e| format!("Failed to create item: {:?}", e))?;
 
-    let confirmation = if !args.monitor {
-        format!("Got it! I'll remind you: {}", args.description)
-    } else {
-        format!("Got it! I'll watch for: {}", args.description)
+    let time_label = {
+        use chrono::TimeZone;
+        chrono::Utc
+            .timestamp_opt(ts as i64, 0)
+            .single()
+            .map(|t| t.with_timezone(&tz).format("%b %d %I:%M%p").to_string())
+            .unwrap_or_default()
+    };
+
+    let confirmation = match args.item_type.as_str() {
+        "tracking" => format!("Tracking: {} (expires {})", args.description, time_label),
+        "recurring" => {
+            let repeat = args.repeat.as_deref().unwrap_or("scheduled");
+            format!(
+                "Scheduled {}: {} (next: {})",
+                repeat, args.description, time_label
+            )
+        }
+        _ => format!("Reminder set for {}: {}", time_label, args.description),
     };
 
     Ok(CreateItemResult {
@@ -371,7 +375,7 @@ pub async fn handle_create_item(
 
 /// Build summary string from structured CreateItemArgs.
 /// Format: "[type:X] [notify:Y] [optional tags...]\nDescription text"
-fn build_summary_from_params(args: &CreateItemArgs) -> String {
+pub fn build_summary_from_params(args: &CreateItemArgs) -> String {
     let mut tags = Vec::new();
 
     tags.push(format!("[type:{}]", args.item_type));
@@ -384,18 +388,23 @@ fn build_summary_from_params(args: &CreateItemArgs) -> String {
         tags.push(format!("[fetch:{}]", fetch));
     }
 
-    // Monitor tags
+    // Tracking tags (skip "none" values - means not applicable)
     if let Some(ref platform) = args.platform {
-        tags.push(format!("[platform:{}]", platform));
+        if platform != "none" {
+            tags.push(format!("[platform:{}]", platform));
+        }
     }
     if let Some(ref sender) = args.sender {
-        tags.push(format!("[sender:{}]", sender));
+        if sender != "none" {
+            tags.push(format!("[sender:{}]", sender));
+        }
     }
     if let Some(ref topic) = args.topic {
-        tags.push(format!("[topic:{}]", topic));
-    }
-    if let Some(ref scope) = args.scope {
-        tags.push(format!("[scope:{}]", scope));
+        if topic.to_lowercase() == "any" {
+            tags.push("[scope:any]".to_string());
+        } else if topic != "none" {
+            tags.push(format!("[topic:{}]", topic));
+        }
     }
 
     format!("{}\n{}", tags.join(" "), args.description)

@@ -72,22 +72,22 @@ impl ItemRepository {
             .optional()
     }
 
-    /// Get items where next_check_at <= now (scheduler hot path, no LLM).
+    /// Get items where due_at <= now (scheduler hot path, no LLM).
     pub fn get_triggered_items(&self, now: i32) -> Result<Vec<Item>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         items::table
-            .filter(items::next_check_at.is_not_null())
-            .filter(items::next_check_at.le(now))
+            .filter(items::due_at.is_not_null())
+            .filter(items::due_at.le(now))
             .load::<Item>(&mut conn)
     }
 
-    /// Get monitor items (monitor = true) for email/message matching.
-    pub fn get_monitor_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        items::table
-            .filter(items::user_id.eq(user_id))
-            .filter(items::monitor.eq(true))
-            .load::<Item>(&mut conn)
+    /// Get tracking items for a user (summary contains [type:tracking]).
+    pub fn get_tracking_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
+        let all = self.get_items(user_id)?;
+        Ok(all
+            .into_iter()
+            .filter(|item| item.summary.contains("[type:tracking]"))
+            .collect())
     }
 
     /// Get all items for dashboard display, ordered by priority desc, created_at desc.
@@ -161,15 +161,11 @@ impl ItemRepository {
         })
     }
 
-    /// Update next_check_at (snooze or reschedule).
-    pub fn update_next_check_at(
-        &self,
-        id: i32,
-        next_check_at: Option<i32>,
-    ) -> Result<bool, DieselError> {
+    /// Update due_at (snooze or reschedule).
+    pub fn update_due_at(&self, id: i32, due_at: Option<i32>) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let count = diesel::update(items::table.filter(items::id.eq(id)))
-            .set(items::next_check_at.eq(next_check_at))
+            .set(items::due_at.eq(due_at))
             .execute(&mut conn)?;
         Ok(count > 0)
     }
@@ -192,13 +188,13 @@ impl ItemRepository {
         Ok(count > 0)
     }
 
-    /// Bulk update after LLM processing: summary, next_check_at, priority.
+    /// Bulk update after LLM processing: summary, due_at, priority.
     pub fn update_item(
         &self,
         id: i32,
         user_id: i32,
         summary: &str,
-        next_check_at: Option<i32>,
+        due_at: Option<i32>,
         priority: i32,
     ) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -209,7 +205,7 @@ impl ItemRepository {
         )
         .set((
             items::summary.eq(summary),
-            items::next_check_at.eq(next_check_at),
+            items::due_at.eq(due_at),
             items::priority.eq(priority),
         ))
         .execute(&mut conn)?;
@@ -283,16 +279,15 @@ impl ItemRepository {
         Ok(count)
     }
 
-    /// Auto-expire stale monitors: monitors with next_check_at >7 days in the past.
-    /// They are stale and should be cleaned up.
-    pub fn delete_stale_monitors(&self, now: i32) -> Result<usize, DieselError> {
+    /// Auto-expire tracking items with due_at >7 days in the past.
+    pub fn delete_expired_tracking_items(&self, now: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let cutoff = now - (7 * 86400); // 7 days ago
         let count = diesel::delete(
             items::table
-                .filter(items::monitor.eq(true))
-                .filter(items::next_check_at.is_not_null())
-                .filter(items::next_check_at.lt(cutoff)),
+                .filter(items::summary.like("%[type:tracking]%"))
+                .filter(items::due_at.is_not_null())
+                .filter(items::due_at.lt(cutoff)),
         )
         .execute(&mut conn)?;
         Ok(count)

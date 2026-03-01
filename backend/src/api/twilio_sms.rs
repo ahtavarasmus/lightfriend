@@ -198,6 +198,7 @@ pub struct TextBeeWebhookPayload {
 #[derive(Debug, Clone)]
 pub enum ChatStatus {
     Thinking,
+    Reasoning { snippet: String },
     ToolCall { name: String },
     Retrying { attempt: u32, max: u32 },
     RetryingFollowup { attempt: u32, max: u32 },
@@ -212,6 +213,8 @@ pub struct ProcessSmsOptions {
     pub mock_llm_response: Option<openai_api_rs::v1::chat_completion::ChatCompletionResponse>,
     /// Optional channel for streaming status updates to callers (e.g. SSE endpoint)
     pub status_tx: Option<tokio::sync::mpsc::Sender<ChatStatus>>,
+    /// Mock tool responses: when a tool name matches a key, return the value instead of executing.
+    pub mock_tool_responses: Option<std::collections::HashMap<String, String>>,
 }
 
 impl ProcessSmsOptions {
@@ -226,6 +229,7 @@ impl ProcessSmsOptions {
             skip_twilio_send: true,
             mock_llm_response: None,
             status_tx: None,
+            mock_tool_responses: None,
         }
     }
 
@@ -235,6 +239,7 @@ impl ProcessSmsOptions {
             skip_twilio_send: true,
             mock_llm_response: None,
             status_tx: Some(tx),
+            mock_tool_responses: None,
         }
     }
 
@@ -246,6 +251,7 @@ impl ProcessSmsOptions {
             skip_twilio_send: true,
             mock_llm_response: Some(mock_response),
             status_tx: None,
+            mock_tool_responses: None,
         }
     }
 
@@ -748,47 +754,33 @@ pub async fn process_sms(
     let offset = &tz.offset_string;
     let contacts_info = ctx.contacts_prompt_fragment.as_deref().unwrap_or("");
     let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
+    let cancel_hint = if options.skip_twilio_send {
+        ""
+    } else {
+        " User can reply 'cancel' to stop."
+    };
 
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 480 characters) while being accurate and helpful. Characters are expensive - be succinct! When listing items (emails, events, tasks), just use numbers and content directly without repeating labels like 'Subject:', 'Event:', etc. Example: 'Emails: 1. Meeting reminder (10am) 2. Invoice from John (9am)' NOT 'Emails: 1. Subject: Meeting reminder (10am) 2. Subject: Invoice from John (9am)'. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.{contacts_info}
+        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! When listing items, use numbers directly: '1. Meeting reminder (10am) 2. Invoice from John'. Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront. For calendar events, pass through tool output exactly as received.{contacts_info}
 
-### Tool Usage Guidelines:
-- Provide all relevant details in the response immediately.
-- Tools that involve sending or creating something, add the content to be sent into a queue which are automatically sent after 60 seconds unless user replies 'cancel'.
-- Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
-- When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
-- CRITICAL: Never make up, guess, or extrapolate information you don't have. If tool results only cover partial data (e.g., weather forecast only until a certain time), clearly state what data you have and what timeframe it covers. Do not invent data beyond what the tools returned.
+### Tool Usage:
+- Use tools to fetch information directly (users may only have a dumbphone).
+- Send/create tools queue content for 60 seconds.{cancel_hint}
+- State only what tool results returned. Note any gaps in data coverage.
 
-### Questions vs Items:
-- If the user is ASKING A QUESTION about an event or topic (e.g. 'I have a dentist appointment tomorrow, what should I bring?', 'what's the weather like this weekend?'), answer the question directly using tools like ask_perplexity. Do NOT create an item.
-- Only create an item when the user explicitly requests a reminder, scheduled action, or monitoring (e.g. 'remind me', 'text me at', 'notify me when', 'at 5pm do X').
+### Behavior:
+- Recurring patterns (daily, every, weekly) mean the user wants an automated schedule - create a recurring item immediately, don't do the task manually this one time.
+- Time-specific requests (at Xpm, remind me, notify me when) are scheduling requests - create items.
 
-### Event Reminder Timing:
-- When the user mentions an event at a specific time, set next_check_at BEFORE the event so the reminder is useful:
-  - 'meeting at 2pm' -> next_check_at 1:55 PM (5 min before - same-location event)
-  - 'dinner at restaurant at 7pm' -> next_check_at 6:00 PM (60 min before - travel needed)
-  - 'doctor appointment at 3pm' -> next_check_at 2:15 PM (45 min before - appointment)
-- If the user gives an explicit reminder time, use it exactly: 'remind me at 1pm about my 2pm meeting' -> next_check_at 1:00 PM
-- Always include the actual event time in the reminder message so the user knows when it starts.
+### Date and Time:
+- User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
+- Relative times: compute exactly (14:30 + 'in 3 hours' = 17:30).
+- Display: 12-hour AM/PM, 'today'/'tomorrow'/date. Default range: now to 24h ahead.
+- 'Today' = 00:00-23:59 today. 'Tomorrow' = 00:00-23:59 tomorrow. 'This week' = remaining days. 'Next week' = Mon-Sun.
 
-### Date and Time Handling:
-- Always work with times in the user's timezone: {} with offset {}.
-- When user mentions times without dates, assume they mean the nearest future occurrence.
-- RELATIVE TIMES: For 'in X hours/minutes', compute the exact next_check_at by adding X to the current time. Example: if current time is 14:30 and user says 'in 3 hours', next_check_at must be 17:30 (not an approximation).
-- For displaying times to users:
-  - Use 12-hour format with AM/PM (e.g., '2:30 PM')
-  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')
-  - Show full date only when it's not today/tomorrow
-- If no specific time is mentioned, use current time to 24 hours ahead.
-- For queries about:
-  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone
-  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone
-  - 'This week': Use remaining days of current week
-  - 'Next week': Use Monday to Sunday of next week
-
-Never use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
         tool_calls: None,
         tool_call_id: None,
     }];
@@ -855,7 +847,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
     }
 
     let provider = ctx.provider;
-    let needs_two_step = state.ai_config.needs_two_step_vision(provider);
 
     // Handle image if present
     let mut image_url = None;
@@ -870,103 +861,31 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
             tracing::debug!("setting image_url var to: {:#?}", image_url);
 
-            // For providers that need two-step vision (e.g., Tinfoil):
-            // Step 1: Call vision model to describe image
-            // Step 2: Add description as text for tool-calling model
-            if needs_two_step {
-                tracing::info!(
-                    "Using two-step vision for {:?} provider (user {})",
-                    provider,
-                    user.id
-                );
+            // Build content parts for vision: text (if any) + image
+            let mut content_parts = vec![];
 
-                match state
-                    .ai_config
-                    .describe_image(provider, media_url, &processed_body)
-                    .await
-                {
-                    Ok(description) => {
-                        tracing::info!(
-                            "Got vision description: {}",
-                            &description[..description.len().min(100)]
-                        );
-
-                        // Build the message with image description + user's question
-                        let combined_content = if processed_body.trim().is_empty() {
-                            format!("[Image description: {}]", description)
-                        } else {
-                            format!(
-                                "[Image description: {}]\n\nUser's question: {}",
-                                description, processed_body
-                            )
-                        };
-
-                        chat_messages.push(ChatMessage {
-                            role: "user".to_string(),
-                            content: chat_completion::Content::Text(combined_content),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Vision description failed, falling back to direct image: {}",
-                            e
-                        );
-                        // Fall back to direct image if vision description fails
-                        let mut content_parts = vec![];
-                        if !processed_body.trim().is_empty() {
-                            content_parts.push(chat_completion::ImageUrl {
-                                r#type: chat_completion::ContentType::text,
-                                text: Some(processed_body.clone()),
-                                image_url: None,
-                            });
-                        }
-                        content_parts.push(chat_completion::ImageUrl {
-                            r#type: chat_completion::ContentType::image_url,
-                            text: None,
-                            image_url: Some(chat_completion::ImageUrlType {
-                                url: media_url.clone(),
-                            }),
-                        });
-                        chat_messages.push(ChatMessage {
-                            role: "user".to_string(),
-                            content: chat_completion::Content::ImageUrl(content_parts),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        });
-                    }
-                }
-            } else {
-                // Provider supports vision + tools together (e.g., OpenRouter GPT-4o)
-                // Build content parts for vision: text (if any) + image
-                let mut content_parts = vec![];
-
-                // Add text part first if there's accompanying text
-                if !processed_body.trim().is_empty() {
-                    content_parts.push(chat_completion::ImageUrl {
-                        r#type: chat_completion::ContentType::text,
-                        text: Some(processed_body.clone()),
-                        image_url: None,
-                    });
-                }
-
-                // Add image part
+            if !processed_body.trim().is_empty() {
                 content_parts.push(chat_completion::ImageUrl {
-                    r#type: chat_completion::ContentType::image_url,
-                    text: None,
-                    image_url: Some(chat_completion::ImageUrlType {
-                        url: media_url.clone(),
-                    }),
-                });
-
-                chat_messages.push(ChatMessage {
-                    role: "user".to_string(),
-                    content: chat_completion::Content::ImageUrl(content_parts),
-                    tool_calls: None,
-                    tool_call_id: None,
+                    r#type: chat_completion::ContentType::text,
+                    text: Some(processed_body.clone()),
+                    image_url: None,
                 });
             }
+
+            content_parts.push(chat_completion::ImageUrl {
+                r#type: chat_completion::ContentType::image_url,
+                text: None,
+                image_url: Some(chat_completion::ImageUrlType {
+                    url: media_url.clone(),
+                }),
+            });
+
+            chat_messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: chat_completion::Content::ImageUrl(content_parts),
+                tool_calls: None,
+                tool_call_id: None,
+            });
         } else {
             // Add regular text message if no image
             chat_messages.push(ChatMessage {
@@ -1008,6 +927,22 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         })
         .collect();
 
+    // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
+    // Only created for the web chat SSE path (when status_tx exists).
+    let reasoning_tx: Option<tokio::sync::mpsc::Sender<String>> =
+        if let Some(ref status_tx) = options.status_tx {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(32);
+            let status_tx = status_tx.clone();
+            tokio::spawn(async move {
+                while let Some(snippet) = rx.recv().await {
+                    let _ = status_tx.send(ChatStatus::Reasoning { snippet }).await;
+                }
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
     // Use mock response if provided (for testing), otherwise call real LLM with retry
     let result = if let Some(mock_response) = options.mock_llm_response.take() {
         tracing::debug!("Using mock LLM response for testing");
@@ -1026,7 +961,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             .tools(tools.clone())
             .tool_choice(chat_completion::ToolChoiceType::Required);
 
-            match ctx.client.chat_completion(request).await {
+            match state
+                .ai_config
+                .chat_completion_streaming(ctx.provider, &request, reasoning_tx.clone())
+                .await
+            {
                 Ok(result) => {
                     attempt_result = Some(result);
                     break;
@@ -1161,6 +1100,15 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                         .into_response();
                     }
                 };
+
+                // Mock tool responses for testing
+                if let Some(ref mock_map) = options.mock_tool_responses {
+                    if let Some(mock_result) = mock_map.get(name) {
+                        tracing::debug!("Using mock response for tool: {}", name);
+                        tool_answers.insert(tool_call_id, mock_result.clone());
+                        continue;
+                    }
+                }
 
                 // Handle MCP tool calls (dynamic, per-user)
                 if crate::tool_call_utils::mcp::is_mcp_tool(name) {
@@ -1303,7 +1251,11 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     follow_up_messages.clone(),
                 );
 
-                match ctx.client.chat_completion(follow_up_req).await {
+                match state
+                    .ai_config
+                    .chat_completion_streaming(ctx.provider, &follow_up_req, reasoning_tx.clone())
+                    .await
+                {
                     Ok(result) => {
                         followup_result = Some(result);
                         break;

@@ -37,7 +37,7 @@ bcrypt = "0.10"
 jsonwebtoken = "8.1"
 totp-rs = { version = "5.6", features = ["qr", "otpauth", "gen_secret"] }
 rand = "0.8.5"
-reqwest = { version = "0.12", features = ["multipart", "json"] }
+reqwest = { version = "0.12", features = ["multipart", "json", "stream"] }
 base64 = "0.21.7"
 sentry = "0.36.0"
 openai-api-rs = "5.2.6"
