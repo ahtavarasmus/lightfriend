@@ -534,27 +534,30 @@ pub async fn register(
 pub async fn refresh_token(
     State(_state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
+    body: Option<Json<serde_json::Value>>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let refresh_token = match headers.get("cookie") {
-        Some(cookie_header) => {
-            let cookies = cookie_header.to_str().unwrap_or("");
-            cookies
-                .split(';')
-                .find(|c| c.trim().starts_with("refresh_token="))
-                .and_then(|c| c.split('=').nth(1))
-                .map(|t| t.to_string())
-                .ok_or((
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Missing refresh token"})),
-                ))?
-        }
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Missing cookies"})),
-            ));
-        }
-    };
+    // Try refresh token from JSON body first (mobile), then cookies (web)
+    let refresh_token = body
+        .as_ref()
+        .and_then(|b| b.get("refresh_token"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            headers
+                .get("cookie")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|cookies| {
+                    cookies
+                        .split(';')
+                        .find(|c| c.trim().starts_with("refresh_token="))
+                        .and_then(|c| c.split('=').nth(1))
+                        .map(|t| t.to_string())
+                })
+        })
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Missing refresh token"})),
+        ))?;
 
     // Validate refresh token
     let validation = Validation::default();
@@ -632,9 +635,14 @@ pub fn generate_tokens_and_response(
         )
     })?;
 
-    // Create response with HttpOnly cookies
+    // Create response with tokens in body + HttpOnly cookies
     let mut response = Response::new(axum::body::Body::from(
-        Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string(),
+        Json(json!({
+            "message": "Tokens generated",
+            "token": access_token.clone(),
+            "refresh_token": refresh_token.clone()
+        }))
+        .to_string(),
     ));
     // Don't use Secure flag in development (HTTP), only in production (HTTPS)
     // Use SameSite=None for Tauri cross-origin requests, SameSite=Lax for web
