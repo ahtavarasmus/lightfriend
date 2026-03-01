@@ -696,7 +696,7 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                         task.condition.as_deref(),
                         task.notification_type.as_deref(),
                     );
-                    vec![(summary, priority, None)]
+                    vec![(summary, priority, Some(now + 30 * 86400))]
                 } else if task.is_permanent == Some(1) {
                     let items = build_recurring_task_summary(
                         &task.action,

@@ -7,8 +7,8 @@
 //! - Full migration integration tests (using real DB)
 
 use backend::jobs::scheduler::{
-    build_digest_migration_summary, build_digest_task_summary, build_monitor_task_summary,
-    build_oneshot_task_summary, build_quiet_mode_summary, build_recurring_task_summary,
+    build_digest_migration_summary, build_digest_task_summary, build_oneshot_task_summary,
+    build_quiet_mode_summary, build_recurring_task_summary, build_tracking_task_summary,
     map_sources_to_fetch, weekday_number_to_name,
 };
 use backend::proactive::utils::parse_summary_tags;
@@ -19,7 +19,7 @@ use backend::proactive::utils::parse_summary_tags;
 
 #[test]
 fn test_digest_task_produces_tagged_summary() {
-    let (summary, _monitor, priority) =
+    let (summary, priority) =
         build_digest_task_summary(Some("sms"), Some("09:00"), Some("email,whatsapp,calendar"));
 
     assert!(summary.starts_with("[type:recurring]"));
@@ -33,7 +33,7 @@ fn test_digest_task_produces_tagged_summary() {
 
 #[test]
 fn test_digest_task_call_notification() {
-    let (summary, _, priority) = build_digest_task_summary(Some("call"), Some("08:00"), None);
+    let (summary, priority) = build_digest_task_summary(Some("call"), Some("08:00"), None);
 
     assert!(summary.contains("[notify:call]"));
     assert_eq!(priority, 2);
@@ -42,18 +42,17 @@ fn test_digest_task_call_notification() {
 #[test]
 fn test_digest_task_defaults() {
     // No notification type, no time, no sources - should use defaults
-    let (summary, monitor, priority) = build_digest_task_summary(None, None, None);
+    let (summary, priority) = build_digest_task_summary(None, None, None);
 
     assert!(summary.contains("[notify:sms]"));
     assert!(summary.contains("[repeat:daily 08:00]"));
     assert!(summary.contains("[fetch:email,chat,calendar,items]"));
-    assert!(!monitor);
     assert_eq!(priority, 1);
 }
 
 #[test]
 fn test_monitor_task_produces_tagged_summary() {
-    let (summary, monitor, priority) = build_monitor_task_summary(
+    let (summary, priority) = build_tracking_task_summary(
         "recurring_email_check",
         Some("package delivery updates"),
         Some("sms"),
@@ -64,17 +63,15 @@ fn test_monitor_task_produces_tagged_summary() {
     assert!(summary.contains("[platform:email]"));
     assert!(summary.contains("[sender:any]"));
     assert!(summary.contains("[topic:package delivery updates]"));
-    assert!(monitor);
     assert_eq!(priority, 1);
 }
 
 #[test]
 fn test_monitor_task_messaging_platform() {
-    let (summary, monitor, _) =
-        build_monitor_task_summary("recurring_messaging_check", Some("stock alerts"), None);
+    let (summary, _) =
+        build_tracking_task_summary("recurring_messaging_check", Some("stock alerts"), None);
 
     assert!(summary.contains("[platform:chat]"));
-    assert!(monitor);
 }
 
 #[test]
@@ -83,12 +80,11 @@ fn test_recurring_reminder_produces_tagged_summary() {
         build_recurring_task_summary("Take medication", Some("daily"), Some("09:00"), Some("sms"));
 
     assert_eq!(items.len(), 1);
-    let (summary, monitor, priority) = &items[0];
+    let (summary, priority) = &items[0];
     assert!(summary.contains("[type:recurring]"));
     assert!(summary.contains("[notify:sms]"));
     assert!(summary.contains("[repeat:daily 09:00]"));
     assert!(summary.contains("Take medication"));
-    assert!(!monitor);
     assert_eq!(*priority, 1);
 }
 
@@ -102,7 +98,7 @@ fn test_recurring_weekly_single_day() {
     );
 
     assert_eq!(items.len(), 1);
-    let (summary, _, _) = &items[0];
+    let (summary, _) = &items[0];
     assert!(summary.contains("[repeat:weekly Monday 10:00]"));
 }
 
@@ -133,18 +129,17 @@ fn test_recurring_weekdays_shortcut() {
 
 #[test]
 fn test_oneshot_reminder_produces_tagged_summary() {
-    let (summary, monitor, priority) = build_oneshot_task_summary("Call the dentist", Some("sms"));
+    let (summary, priority) = build_oneshot_task_summary("Call the dentist", Some("sms"));
 
     assert!(summary.contains("[type:oneshot]"));
     assert!(summary.contains("[notify:sms]"));
     assert!(summary.contains("Call the dentist"));
-    assert!(!monitor);
     assert_eq!(priority, 1);
 }
 
 #[test]
 fn test_oneshot_call_notification() {
-    let (summary, _, priority) = build_oneshot_task_summary("Urgent meeting", Some("call"));
+    let (summary, priority) = build_oneshot_task_summary("Urgent meeting", Some("call"));
 
     assert!(summary.contains("[notify:call]"));
     assert_eq!(priority, 2);
@@ -152,12 +147,11 @@ fn test_oneshot_call_notification() {
 
 #[test]
 fn test_quiet_mode_produces_tagged_summary() {
-    let (summary, monitor, priority) = build_quiet_mode_summary();
+    let (summary, priority) = build_quiet_mode_summary();
 
     assert!(summary.contains("[type:oneshot]"));
     assert!(summary.contains("[notify:silent]"));
     assert!(summary.contains("Quiet mode"));
-    assert!(!monitor);
     assert_eq!(priority, 0);
 }
 
@@ -167,7 +161,7 @@ fn test_quiet_mode_produces_tagged_summary() {
 
 #[test]
 fn test_migrated_digest_summary_parseable() {
-    let (summary, _, _) = build_digest_task_summary(
+    let (summary, _) = build_digest_task_summary(
         Some("sms"),
         Some("09:00"),
         Some("email,whatsapp,telegram,calendar"),
@@ -183,7 +177,7 @@ fn test_migrated_digest_summary_parseable() {
 
 #[test]
 fn test_migrated_monitor_summary_parseable() {
-    let (summary, _, _) = build_monitor_task_summary(
+    let (summary, _) = build_tracking_task_summary(
         "recurring_email_check",
         Some("shipping notifications"),
         Some("sms"),
@@ -207,7 +201,7 @@ fn test_migrated_recurring_summary_parseable() {
         Some("sms"),
     );
 
-    let (summary, _, _) = &items[0];
+    let (summary, _) = &items[0];
     let tags = parse_summary_tags(summary);
     assert!(tags.has_tags);
     assert_eq!(tags.item_type.as_deref(), Some("recurring"));
@@ -216,7 +210,7 @@ fn test_migrated_recurring_summary_parseable() {
 
 #[test]
 fn test_migrated_oneshot_summary_parseable() {
-    let (summary, _, _) = build_oneshot_task_summary("Pick up dry cleaning", Some("sms"));
+    let (summary, _) = build_oneshot_task_summary("Pick up dry cleaning", Some("sms"));
 
     let tags = parse_summary_tags(&summary);
     assert!(tags.has_tags);
@@ -226,7 +220,7 @@ fn test_migrated_oneshot_summary_parseable() {
 
 #[test]
 fn test_migrated_quiet_mode_parseable() {
-    let (summary, _, _) = build_quiet_mode_summary();
+    let (summary, _) = build_quiet_mode_summary();
 
     let tags = parse_summary_tags(&summary);
     assert!(tags.has_tags);
@@ -249,19 +243,19 @@ fn test_digest_migration_has_fetch_tags() {
 #[test]
 fn test_notification_type_maps_to_priority() {
     // "call" -> priority 2
-    let (_, _, p_call) = build_oneshot_task_summary("test", Some("call"));
+    let (_, p_call) = build_oneshot_task_summary("test", Some("call"));
     assert_eq!(p_call, 2);
 
     // "sms" -> priority 1
-    let (_, _, p_sms) = build_oneshot_task_summary("test", Some("sms"));
+    let (_, p_sms) = build_oneshot_task_summary("test", Some("sms"));
     assert_eq!(p_sms, 1);
 
     // None -> priority 1 (defaults to sms)
-    let (_, _, p_none) = build_oneshot_task_summary("test", None);
+    let (_, p_none) = build_oneshot_task_summary("test", None);
     assert_eq!(p_none, 1);
 
     // quiet mode -> priority 0
-    let (_, _, p_quiet) = build_quiet_mode_summary();
+    let (_, p_quiet) = build_quiet_mode_summary();
     assert_eq!(p_quiet, 0);
 }
 
@@ -371,7 +365,7 @@ async fn test_full_digest_migration() {
         assert!(tags.repeat.is_some());
         assert!(!tags.fetch.is_empty());
         assert_eq!(item.priority, 1);
-        assert!(!item.monitor);
+        assert!(!item.summary.contains("[type:tracking]"));
     }
 
     // Verify digest settings were cleared
@@ -400,6 +394,10 @@ async fn test_full_task_migration_digest_task() {
     assert!(tags.repeat.as_deref().unwrap().contains("daily"));
     assert!(!tags.fetch.is_empty());
     assert_eq!(items[0].priority, 1);
+    assert!(
+        items[0].due_at.is_some(),
+        "Migrated digest must have due_at so it fires on schedule"
+    );
 }
 
 #[tokio::test]
@@ -429,7 +427,12 @@ async fn test_full_task_migration_monitor_task() {
     let tags = parse_summary_tags(&items[0].summary);
     assert_eq!(tags.item_type.as_deref(), Some("tracking"));
     assert_eq!(tags.platform.as_deref(), Some("email"));
-    assert!(items[0].monitor);
+    assert!(items[0].summary.contains("[type:tracking]"));
+    // Tracking items must have a due_at (30-day default expiration)
+    assert!(
+        items[0].due_at.is_some(),
+        "Migrated tracking items must have due_at set so they match incoming messages"
+    );
 }
 
 #[tokio::test]
@@ -453,6 +456,12 @@ async fn test_full_task_migration_oneshot() {
     let tags = parse_summary_tags(&items[0].summary);
     assert_eq!(tags.item_type.as_deref(), Some("oneshot"));
     assert!(items[0].summary.contains("Call mom"));
+    // due_at must match the original trigger timestamp exactly
+    assert_eq!(
+        items[0].due_at,
+        Some(now + 3600),
+        "Oneshot due_at must preserve exact trigger time"
+    );
 }
 
 #[tokio::test]
@@ -479,6 +488,11 @@ async fn test_full_task_migration_quiet_mode() {
     assert_eq!(tags.item_type.as_deref(), Some("oneshot"));
     assert_eq!(tags.notify.as_deref(), Some("silent"));
     assert_eq!(items[0].priority, 0);
+    assert_eq!(
+        items[0].due_at,
+        Some(now + 7200),
+        "Quiet mode due_at must match original end_time"
+    );
 }
 
 #[tokio::test]
