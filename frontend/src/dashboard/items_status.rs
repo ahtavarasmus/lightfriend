@@ -404,6 +404,90 @@ const ITEMS_STATUS_STYLES: &str = r#"
     border-radius: 8px;
     pointer-events: none;
 }
+
+/* --- Items info header --- */
+.items-header {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.15rem;
+}
+.items-header-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.items-info-btn {
+    background: transparent;
+    border: none;
+    color: #555;
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+    transition: color 0.2s;
+}
+.items-info-btn:hover {
+    color: #7EB2FF;
+}
+.items-info-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+.items-info-box {
+    background: #1e1e2f;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 1.25rem;
+    max-width: 420px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    color: #ddd;
+}
+.items-info-box h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+    color: #fff;
+}
+.items-info-box h4 {
+    margin: 0.75rem 0 0.25rem 0;
+    font-size: 0.85rem;
+    color: #7EB2FF;
+}
+.items-info-box p {
+    font-size: 0.78rem;
+    color: #aaa;
+    margin: 0.15rem 0;
+    line-height: 1.45;
+}
+.items-info-box strong {
+    color: #ccc;
+}
+.items-info-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 0.75rem 0;
+}
+.items-info-close {
+    display: block;
+    margin: 1rem auto 0;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #999;
+    padding: 0.35rem 1.25rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+.items-info-close:hover {
+    color: #ccc;
+}
 "#;
 
 // -- Platform info --
@@ -787,6 +871,7 @@ pub struct ItemsStatusProps {
 #[function_component(ItemsStatusSection)]
 pub fn items_status_section(props: &ItemsStatusProps) -> Html {
     let show_all = use_state(|| false);
+    let show_info = use_state(|| false);
 
     // Build contextual suggestions based on what the user already has
     let suggestions = build_suggestions(&props.items);
@@ -875,10 +960,68 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
         html! {}
     };
 
+    let on_info_open = {
+        let show_info = show_info.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            show_info.set(true);
+        })
+    };
+    let on_info_close = {
+        let show_info = show_info.clone();
+        Callback::from(move |_: MouseEvent| {
+            show_info.set(false);
+        })
+    };
+    let stop_prop = Callback::from(|e: MouseEvent| { e.stop_propagation(); });
+
+    let info_modal = if *show_info {
+        html! {
+            <div class="items-info-overlay" onclick={on_info_close.clone()}>
+                <div class="items-info-box" onclick={stop_prop}>
+                    <h3>{"Items"}</h3>
+                    <p>{"Items are things Lightfriend keeps track of for you. Create them by texting a request like \"remind me\" or \"watch for\"."}</p>
+
+                    <div class="items-info-divider"></div>
+
+                    <h4>{"Reminder (oneshot)"}</h4>
+                    <p>{"Fires once at the scheduled time, sends you a text or call, then deletes itself."}</p>
+                    <p><strong>{"Example: "}</strong>{"\"Remind me to call the dentist at 3pm\""}</p>
+
+                    <h4>{"Scheduled report (recurring)"}</h4>
+                    <p>{"Runs on a repeating schedule - daily, weekdays, or weekly. Pulls fresh data from your connected sources (email, messages, calendar) and sends a summary."}</p>
+                    <p><strong>{"Example: "}</strong>{"\"Every morning at 8am summarize my emails and calendar\""}</p>
+
+                    <h4>{"Tracking"}</h4>
+                    <p>{"Watches your incoming messages or external data for a specific condition. Only notifies you when there's a match - stays silent otherwise. Expires after 30 days."}</p>
+                    <p><strong>{"Example: "}</strong>{"\"Let me know when mom emails about the trip\""}</p>
+
+                    <div class="items-info-divider"></div>
+
+                    <h4>{"Delivery"}</h4>
+                    <p><strong>{"SMS: "}</strong>{"default - concise text message."}</p>
+                    <p><strong>{"Call: "}</strong>{"phone call for urgent or wake-up items."}</p>
+                    <p><strong>{"Silent: "}</strong>{"no notification, background only."}</p>
+
+                    <button class="items-info-close" onclick={on_info_close}>{"Close"}</button>
+                </div>
+            </div>
+        }
+    } else {
+        html! {}
+    };
+
     html! {
         <>
         <style>{ITEMS_STATUS_STYLES}</style>
+        {info_modal}
         <div class="items-status">
+            <div class="items-header">
+                <span class="items-header-label">{"Items"}</span>
+                <button class="items-info-btn" onclick={on_info_open}>
+                    <i class="fa-solid fa-circle-info"></i>
+                </button>
+            </div>
             { for visible.iter().map(|item| {
                 let on_click = props.on_item_click.clone();
                 let click_item: AttentionItem = (***item).clone();
