@@ -168,7 +168,7 @@ async fn handle_client_message(state: &Arc<AppState>, user_id: i32, text: &str) 
                             "message": response.message,
                             "credits_charged": response.credits_charged,
                             "media": response.media,
-                            "created_task_id": response.created_task_id,
+                            "created_task_id": response.created_item_id,
                         }),
                     );
                 }

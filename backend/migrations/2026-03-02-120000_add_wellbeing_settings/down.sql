@@ -1,0 +1,1 @@
+-- SQLite doesn't support DROP COLUMN directly, but Diesel handles this

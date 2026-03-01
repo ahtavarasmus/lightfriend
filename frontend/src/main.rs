@@ -62,6 +62,11 @@ mod dashboard {
     pub mod contact_avatar_row;
     pub mod items_status;
     pub mod emoji_utils;
+    pub mod dumbphone_mode;
+    pub mod daily_checkin;
+    pub mod notification_calmer;
+    pub mod wellbeing_points;
+    pub mod wellbeing_stats;
 }
 mod proactive {
     pub mod contact_profiles;
