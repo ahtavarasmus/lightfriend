@@ -97,6 +97,7 @@ async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioR
 
 /// Send a message with mock tool responses. Tool calls matching keys in the map
 /// return the mock value instead of executing the real handler.
+#[allow(dead_code)]
 async fn send_message_with_mocks(
     state: &Arc<AppState>,
     user: &User,
