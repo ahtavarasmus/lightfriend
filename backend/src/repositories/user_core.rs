@@ -96,6 +96,10 @@ pub trait UserCoreOps: Send + Sync {
     fn update_phone_service_active(&self, user_id: i32, active: bool) -> Result<(), DieselError>;
     fn get_phone_service_active(&self, user_id: i32) -> Result<bool, DieselError>;
 
+    // Auto-create items
+    fn update_auto_create_items(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
+    fn get_auto_create_items(&self, user_id: i32) -> Result<bool, DieselError>;
+
     // Notification settings
     fn get_default_notification_mode(&self, user_id: i32) -> Result<String, DieselError>;
     fn set_default_notification_mode(&self, user_id: i32, mode: &str) -> Result<(), DieselError>;
@@ -846,6 +850,27 @@ impl UserCoreOps for UserCore {
         Ok(result)
     }
 
+    fn update_auto_create_items(&self, user_id: i32, value: bool) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::auto_create_items.eq(value))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    fn get_auto_create_items(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        self.ensure_user_settings_exist(user_id)?;
+        let result = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::auto_create_items)
+            .first::<bool>(&mut conn)?;
+        Ok(result)
+    }
+
     fn update_llm_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1187,8 +1212,7 @@ impl UserCoreOps for UserCore {
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary: "Quiet mode.".to_string(),
-                monitor: false,
-                next_check_at: end_time,
+                due_at: end_time,
                 priority: 0,
                 source_id: Some("quiet_mode".to_string()),
                 created_at: now,
@@ -1217,7 +1241,7 @@ impl UserCoreOps for UserCore {
             .load::<crate::models::user_models::Item>(&mut conn)?;
 
         for item in &quiet_items {
-            match item.next_check_at {
+            match item.due_at {
                 None => {
                     // Indefinite quiet mode
                     return Ok(Some(0));
@@ -1273,8 +1297,7 @@ impl UserCoreOps for UserCore {
         let new_item = crate::models::user_models::NewItem {
             user_id,
             summary,
-            monitor: false,
-            next_check_at: Some(until),
+            due_at: Some(until),
             priority: 0,
             source_id: Some("quiet_mode".to_string()),
             created_at: now,
@@ -1314,7 +1337,7 @@ impl UserCoreOps for UserCore {
 
         let mut active = Vec::new();
         for item in all_items {
-            match item.next_check_at {
+            match item.due_at {
                 None => {
                     // Indefinite - always active
                     active.push(item);

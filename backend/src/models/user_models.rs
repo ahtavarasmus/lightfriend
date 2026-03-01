@@ -566,6 +566,7 @@ pub struct UserSettings {
     pub phone_contact_notification_mode: Option<String>, // "critical", "digest", or "ignore" - for phone contacts without a profile
     pub phone_contact_notification_type: Option<String>, // "sms" or "call" - notification type for phone contacts
     pub phone_contact_notify_on_call: i32, // 1 = notify on incoming calls from phone contacts, 0 = don't
+    pub auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
 }
 
 #[derive(Insertable)]
@@ -921,8 +922,7 @@ pub struct Item {
     pub id: Option<i32>,
     pub user_id: i32,
     pub summary: String,
-    pub monitor: bool,
-    pub next_check_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub priority: i32,
     pub source_id: Option<String>,
     pub created_at: i32,
@@ -933,8 +933,7 @@ pub struct Item {
 pub struct NewItem {
     pub user_id: i32,
     pub summary: String,
-    pub monitor: bool,
-    pub next_check_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub priority: i32,
     pub source_id: Option<String>,
     pub created_at: i32,

@@ -86,49 +86,49 @@ pub fn build_digest_migration_summary(
 }
 
 /// Build a tagged summary for a digest task (from tasks table).
-/// Returns (summary, monitor, priority).
+/// Returns (summary, priority).
 pub fn build_digest_task_summary(
     notification_type: Option<&str>,
     recurrence_time: Option<&str>,
     sources: Option<&str>,
-) -> (String, bool, i32) {
+) -> (String, i32) {
     let time = recurrence_time.unwrap_or("08:00");
-    let (summary, priority) = build_digest_migration_summary(time, notification_type, sources);
-    (summary, false, priority)
+    build_digest_migration_summary(time, notification_type, sources)
 }
 
-/// Build a tagged summary for a monitor task.
-/// Returns (summary, monitor, priority).
-pub fn build_monitor_task_summary(
+/// Build a tagged summary for a tracking task (from tasks table).
+/// Returns (summary, priority).
+pub fn build_tracking_task_summary(
     trigger: &str,
     condition: Option<&str>,
     notification_type: Option<&str>,
-) -> (String, bool, i32) {
+) -> (String, i32) {
     let platform = if trigger.starts_with("recurring_email") {
         "email"
     } else {
         "chat"
     };
+    let fetch = if platform == "email" { "email" } else { "chat" };
     let (notify_tag, priority) = match notification_type {
         Some("call") => ("call", 2),
         _ => ("sms", 1),
     };
     let condition_text = condition.unwrap_or("any matching content");
     let tags = format!(
-        "[type:tracking] [notify:{}] [platform:{}] [sender:any] [topic:{}]",
-        notify_tag, platform, condition_text
+        "[type:tracking] [notify:{}] [fetch:{}] [platform:{}] [sender:any] [topic:{}]",
+        notify_tag, fetch, platform, condition_text
     );
-    (format!("{}\n{}", tags, condition_text), true, priority)
+    (format!("{}\n{}", tags, condition_text), priority)
 }
 
 /// Build a tagged summary for a recurring (non-digest) task.
-/// Returns a Vec of (summary, monitor, priority) - multiple items if weekly with multiple days.
+/// Returns a Vec of (summary, priority) - multiple items if weekly with multiple days.
 pub fn build_recurring_task_summary(
     action: &str,
     recurrence_rule: Option<&str>,
     recurrence_time: Option<&str>,
     notification_type: Option<&str>,
-) -> Vec<(String, bool, i32)> {
+) -> Vec<(String, i32)> {
     let rule = recurrence_rule.unwrap_or("daily");
     let time = normalize_time(recurrence_time.unwrap_or("08:00"));
     let (notify_tag, priority) = match notification_type {
@@ -141,7 +141,7 @@ pub fn build_recurring_task_summary(
             "[type:recurring] [notify:{}] [repeat:daily {}]",
             notify_tag, time
         );
-        return vec![(format!("{}\n{}", tags, action), false, priority)];
+        return vec![(format!("{}\n{}", tags, action), priority)];
     }
 
     if rule.starts_with("weekly:") {
@@ -157,7 +157,7 @@ pub fn build_recurring_task_summary(
                 "[type:recurring] [notify:{}] [repeat:weekdays {}]",
                 notify_tag, time
             );
-            return vec![(format!("{}\n{}", tags, action), false, priority)];
+            return vec![(format!("{}\n{}", tags, action), priority)];
         }
 
         // Otherwise create one item per day
@@ -169,7 +169,7 @@ pub fn build_recurring_task_summary(
                         "[type:recurring] [notify:{}] [repeat:weekly {} {}]",
                         notify_tag, name, time
                     );
-                    (format!("{}\n{}", tags, action), false, priority)
+                    (format!("{}\n{}", tags, action), priority)
                 })
             })
             .collect();
@@ -180,29 +180,26 @@ pub fn build_recurring_task_summary(
         "[type:recurring] [notify:{}] [repeat:daily {}]",
         notify_tag, time
     );
-    vec![(format!("{}\n{}", tags, action), false, priority)]
+    vec![(format!("{}\n{}", tags, action), priority)]
 }
 
 /// Build a tagged summary for a one-shot reminder.
-/// Returns (summary, monitor, priority).
-pub fn build_oneshot_task_summary(
-    action: &str,
-    notification_type: Option<&str>,
-) -> (String, bool, i32) {
+/// Returns (summary, priority).
+pub fn build_oneshot_task_summary(action: &str, notification_type: Option<&str>) -> (String, i32) {
     let (notify_tag, priority) = match notification_type {
         Some("call") => ("call", 2),
         _ => ("sms", 1),
     };
     let tags = format!("[type:oneshot] [notify:{}]", notify_tag);
-    (format!("{}\n{}", tags, action), false, priority)
+    (format!("{}\n{}", tags, action), priority)
 }
 
 /// Build a tagged summary for a quiet mode task.
-/// Returns (summary, monitor, priority).
-pub fn build_quiet_mode_summary() -> (String, bool, i32) {
+/// Returns (summary, priority).
+pub fn build_quiet_mode_summary() -> (String, i32) {
     let tags = "[type:oneshot] [notify:silent]";
     let description = "Quiet mode - suppress notifications until end time.";
-    (format!("{}\n{}", tags, description), false, 0)
+    (format!("{}\n{}", tags, description), 0)
 }
 
 /// Normalize a time string to "HH:MM" format.
@@ -343,8 +340,7 @@ pub async fn check_all_bridges_health(
                 let new_item = crate::models::user_models::NewItem {
                     user_id,
                     summary: format!("System: {} bridge disconnected.", bridge_name),
-                    monitor: false,
-                    next_check_at: None,
+                    due_at: None,
                     priority: 1,
                     source_id: None,
                     created_at: current_time,
@@ -518,8 +514,7 @@ pub async fn migrate_digests_to_items(state: &Arc<AppState>) {
                 Some(crate::models::user_models::NewItem {
                     user_id,
                     summary,
-                    monitor: false,
-                    next_check_at: Some(trigger_ts),
+                    due_at: Some(trigger_ts),
                     priority,
                     source_id: None,
                     created_at: current_ts,
@@ -676,10 +671,10 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
             }
 
             // Build items based on task type
-            // Each branch produces a Vec of (summary, monitor, priority, next_check_at)
-            let items_to_create: Vec<(String, bool, i32, Option<i32>)> =
+            // Each branch produces a Vec of (summary, priority, due_at)
+            let items_to_create: Vec<(String, i32, Option<i32>)> =
                 if task.action == "generate_digest" {
-                    let (summary, monitor, priority) = build_digest_task_summary(
+                    let (summary, priority) = build_digest_task_summary(
                         task.notification_type.as_deref(),
                         task.recurrence_time.as_deref(),
                         task.sources.as_deref(),
@@ -688,20 +683,20 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                         .user_repository
                         .calculate_next_trigger_public(task, &user_tz)
                         .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                    vec![(summary, monitor, priority, next_ts)]
+                    vec![(summary, priority, next_ts)]
                 } else if task.action.contains("quiet_mode") {
                     let end = task.end_time.unwrap_or(now + 3600);
-                    let (summary, monitor, priority) = build_quiet_mode_summary();
-                    vec![(summary, monitor, priority, Some(end))]
+                    let (summary, priority) = build_quiet_mode_summary();
+                    vec![(summary, priority, Some(end))]
                 } else if task.trigger.starts_with("recurring_email")
                     || task.trigger.starts_with("recurring_messaging")
                 {
-                    let (summary, monitor, priority) = build_monitor_task_summary(
+                    let (summary, priority) = build_tracking_task_summary(
                         &task.trigger,
                         task.condition.as_deref(),
                         task.notification_type.as_deref(),
                     );
-                    vec![(summary, monitor, priority, None)]
+                    vec![(summary, priority, None)]
                 } else if task.is_permanent == Some(1) {
                     let items = build_recurring_task_summary(
                         &task.action,
@@ -713,23 +708,19 @@ pub async fn migrate_tasks_to_items(state: &Arc<AppState>) {
                         .user_repository
                         .calculate_next_trigger_public(task, &user_tz)
                         .and_then(|t| t.strip_prefix("once_").and_then(|s| s.parse::<i32>().ok()));
-                    items
-                        .into_iter()
-                        .map(|(s, m, p)| (s, m, p, next_ts))
-                        .collect()
+                    items.into_iter().map(|(s, p)| (s, p, next_ts)).collect()
                 } else {
-                    let (summary, monitor, priority) =
+                    let (summary, priority) =
                         build_oneshot_task_summary(&task.action, task.notification_type.as_deref());
-                    vec![(summary, monitor, priority, trigger_ts)]
+                    vec![(summary, priority, trigger_ts)]
                 };
 
             let mut all_ok = true;
-            for (summary, is_monitor, priority, next_check_at) in &items_to_create {
+            for (summary, priority, due_at) in &items_to_create {
                 let new_item = crate::models::user_models::NewItem {
                     user_id,
                     summary: summary.clone(),
-                    monitor: *is_monitor,
-                    next_check_at: *next_check_at,
+                    due_at: *due_at,
                     priority: *priority,
                     source_id: None,
                     created_at: task.created_at,
@@ -908,12 +899,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             Vec::new()
                                         }
                                     };
+                                    // Check if user has auto_create_items enabled
+                                    let auto_create_items = state.user_core.get_auto_create_items(user.id).unwrap_or(false);
+
                                     // Mark emails as processed and format them for importance checking
                                     let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
                                         // Auto-detect trackable items (invoices, shipments, deadlines)
                                         // Runs for every email - spawned in background to avoid blocking
-                                        {
+                                        if auto_create_items {
                                             let state_clone = state.clone();
                                             let user_id = user.id;
                                             let email_uid = email.id.clone();
@@ -987,25 +981,28 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             email.body.as_deref().unwrap_or("No content")
                                         );
 
-                                        // Check monitor items (kind = "monitor") for email matches
-                                        let monitor_items = match state.item_repository.get_monitor_items(user.id) {
-                                            Ok(items) => items,
-                                            Err(e) => {
-                                                tracing::error!("Failed to get monitor items for user {}: {}", user.id, e);
-                                                Vec::new()
-                                            }
-                                        };
-                                        if !monitor_items.is_empty() {
+                                        // Check tracking items with email fetch for email matches
+                                        let tracking_items = state.item_repository.get_tracking_items(user.id).unwrap_or_default();
+                                        let now_ts = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs() as i32;
+                                        let email_tracking: Vec<_> = tracking_items.into_iter().filter(|item| {
+                                            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                                            tags.fetch.contains(&"email".to_string())
+                                                && item.due_at.is_some_and(|d| d > now_ts)
+                                        }).collect();
+                                        if !email_tracking.is_empty() {
                                             // Extract data from Result immediately to drop non-Send Box<dyn Error>
                                             let maybe_match: Option<crate::models::user_models::Item> =
                                                 crate::proactive::utils::check_item_monitor_match(
                                                     &state,
                                                     user.id,
                                                     &email_content,
-                                                    &monitor_items,
+                                                    &email_tracking,
                                                 ).await.ok().flatten().and_then(|resp| {
                                                     let item_id = resp.task_id.unwrap_or(0);
-                                                    monitor_items.iter().find(|i| i.id == Some(item_id)).cloned()
+                                                    email_tracking.iter().find(|i| i.id == Some(item_id)).cloned()
                                                 });
                                             if let Some(matched_item) = maybe_match {
                                                 let item_id = matched_item.id.unwrap_or(0);
@@ -1021,7 +1018,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         ).await;
                                                     }
                                                     Err(e) => {
-                                                        tracing::error!("Failed to process monitor match for item {}: {}", item_id, e);
+                                                        tracing::error!("Failed to process tracking match for item {}: {}", item_id, e);
                                                         crate::proactive::utils::send_notification(
                                                             &state, user.id, &matched_item.summary,
                                                             "item_sms".to_string(),
@@ -1138,7 +1135,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 .unwrap_or(true)
                             {
                                 tracing::debug!(
-                                    "User {} does not have monitoring enabled",
+                                    "User {} does not have proactive agent enabled",
                                     user.id
                                 );
                                 continue;
@@ -1383,7 +1380,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add bridge health check job to scheduler");
 
-    // Triggered items - runs every minute to process items whose next_check_at has passed
+    // Triggered items - runs every minute to process items whose due_at has passed
     let state_clone = Arc::clone(&state);
     let triggered_items_job = Job::new_async("0 */1 * * * *", move |_, _| {
         let state = state_clone.clone();
@@ -1404,15 +1401,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         let item_clone = item.clone();
 
                         // Mark as running BEFORE spawning to prevent duplicate execution
-                        // on the next cron tick (set next_check_at far in the future temporarily)
+                        // on the next cron tick (set due_at far in the future temporarily)
                         let _ = state
                             .item_repository
-                            .update_next_check_at(item_id, Some(now + 86400));
+                            .update_due_at(item_id, Some(now + 86400));
 
                         tokio::spawn(async move {
                             debug!(
-                                "Processing triggered item {} (monitor={}) for user {}: {}",
-                                item_id, item_clone.monitor, user_id, item_clone.summary
+                                "Processing triggered item {} for user {}: {}",
+                                item_id, user_id, item_clone.summary
                             );
 
                             // Unified path for all items: time fired, no matched message
@@ -1462,6 +1459,100 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(triggered_items_job)
         .await
         .expect("Failed to add triggered items job to scheduler");
+
+    // Tracking interval job - runs every hour to process tracking items with internet/weather/calendar/items fetch
+    let state_clone = Arc::clone(&state);
+    let tracking_interval_job = Job::new_async("0 0 */1 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running hourly tracking interval check...");
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            // Get all users with auto features
+            let users = match state.user_core.get_all_users() {
+                Ok(users) => users,
+                Err(e) => {
+                    error!("Failed to get users for tracking interval: {}", e);
+                    return;
+                }
+            };
+
+            for user in &users {
+                let user_plan = state.user_repository.get_plan_type(user.id).unwrap_or(None);
+                if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+                    continue;
+                }
+
+                let tracking_items = state
+                    .item_repository
+                    .get_tracking_items(user.id)
+                    .unwrap_or_default();
+                // Filter to items with non-email/chat fetch sources that haven't expired,
+                // OR email/chat-only items within 2 days of their deadline (pre-deadline check)
+                let interval_items: Vec<_> = tracking_items
+                    .into_iter()
+                    .filter(|item| {
+                        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                        let has_interval_fetch = tags.fetch.iter().any(|f| {
+                            matches!(f.as_str(), "internet" | "weather" | "calendar" | "items")
+                        });
+                        let only_realtime = tags
+                            .fetch
+                            .iter()
+                            .all(|f| matches!(f.as_str(), "email" | "chat"));
+                        let near_deadline =
+                            item.due_at.is_some_and(|d| d > now && d - now <= 2 * 86400);
+
+                        // Include: interval fetch items (not expired), OR email/chat items near deadline
+                        (has_interval_fetch
+                            && !only_realtime
+                            && item.due_at.is_some_and(|d| d > now))
+                            || (only_realtime && near_deadline)
+                    })
+                    .collect();
+
+                for item in interval_items {
+                    let item_id = item.id.unwrap_or(0);
+                    let user_id = item.user_id;
+                    let priority = item.priority;
+                    let state = state.clone();
+
+                    tokio::spawn(async move {
+                        let result = crate::proactive::utils::process_triggered_item(
+                            &state, user_id, &item, None,
+                        )
+                        .await
+                        .map_err(|e| e.to_string());
+
+                        match result {
+                            Ok(response) => {
+                                crate::proactive::utils::handle_triggered_item_result(
+                                    &state, user_id, item_id, priority, &response,
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to process tracking interval item {}: {}",
+                                    item_id,
+                                    e
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        })
+    })
+    .expect("Failed to create tracking interval job");
+
+    sched
+        .add(tracking_interval_job)
+        .await
+        .expect("Failed to add tracking interval job to scheduler");
 
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);
@@ -1540,23 +1631,26 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
             }
 
-            // Auto-expire stale monitors (due_at >7 days past, no next_check_at)
-            let monitor_now = std::time::SystemTime::now()
+            // Auto-expire tracking items with due_at >7 days past
+            let cleanup_now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32;
 
-            match state.item_repository.delete_stale_monitors(monitor_now) {
+            match state
+                .item_repository
+                .delete_expired_tracking_items(cleanup_now)
+            {
                 Ok(count) => {
                     if count > 0 {
-                        debug!("Auto-expired {} stale monitors", count);
+                        debug!("Auto-expired {} stale tracking items", count);
                     }
                 }
-                Err(e) => error!("Failed to auto-expire stale monitors: {}", e),
+                Err(e) => error!("Failed to auto-expire tracking items: {}", e),
             }
 
             // Expire stale "ongoing" call records (no webhook received after 1 hour)
-            let call_cutoff = monitor_now - 3600;
+            let call_cutoff = cleanup_now - 3600;
             match state
                 .user_repository
                 .expire_stale_ongoing_calls(call_cutoff)

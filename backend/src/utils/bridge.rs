@@ -1409,8 +1409,7 @@ pub async fn handle_bridge_message(
             let new_item = crate::models::user_models::NewItem {
                 user_id,
                 summary: format!("System: {} bridge disconnected.", bridge_name),
-                monitor: false,
-                next_check_at: None,
+                due_at: None,
                 priority: 1,
                 source_id: None,
                 created_at: current_time,
@@ -1700,28 +1699,36 @@ pub async fn handle_bridge_message(
         room_name.as_str(),
         content
     );
-    let monitor_items = match state.item_repository.get_monitor_items(user_id) {
-        Ok(items) => items,
-        Err(e) => {
-            tracing::error!("Failed to get monitor items for user {}: {}", user_id, e);
-            Vec::new()
-        }
-    };
-    if !monitor_items.is_empty() {
+    let tracking_items = state
+        .item_repository
+        .get_tracking_items(user_id)
+        .unwrap_or_default();
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+    let chat_tracking: Vec<_> = tracking_items
+        .into_iter()
+        .filter(|item| {
+            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+            tags.fetch.contains(&"chat".to_string()) && item.due_at.is_some_and(|d| d > now_ts)
+        })
+        .collect();
+    if !chat_tracking.is_empty() {
         // Extract data from Result immediately to drop non-Send Box<dyn Error> before any .await
         let maybe_match: Option<crate::models::user_models::Item> =
             crate::proactive::utils::check_item_monitor_match(
                 &state,
                 user_id,
                 &message_context,
-                &monitor_items,
+                &chat_tracking,
             )
             .await
             .ok()
             .flatten()
             .and_then(|resp| {
                 let item_id = resp.task_id.unwrap_or(0);
-                monitor_items
+                chat_tracking
                     .iter()
                     .find(|i| i.id == Some(item_id))
                     .cloned()
@@ -1749,7 +1756,7 @@ pub async fn handle_bridge_message(
                 }
                 Err(e) => {
                     tracing::error!(
-                        "Failed to process monitor match for item {}: {}",
+                        "Failed to process tracking match for item {}: {}",
                         item_id,
                         e
                     );
@@ -1769,6 +1776,10 @@ pub async fn handle_bridge_message(
     }
 
     // Auto-create tracking items from actionable messages (non-blocking)
+    if state
+        .user_core
+        .get_auto_create_items(user_id)
+        .unwrap_or(false)
     {
         let state_clone = state.clone();
         let service_clone = service.clone();

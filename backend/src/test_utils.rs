@@ -916,6 +916,14 @@ pub mod mock_user_core {
                 .unwrap_or(&true))
         }
 
+        fn update_auto_create_items(&self, _user_id: i32, _value: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_auto_create_items(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(false)
+        }
+
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {
             Ok("critical".to_string())
         }
@@ -1247,8 +1255,7 @@ pub mod mock_user_core {
                     id: Some(now), // use timestamp as fake id
                     user_id,
                     summary: "Quiet mode.".to_string(),
-                    monitor: false,
-                    next_check_at: end_time,
+                    due_at: end_time,
                     priority: 0,
                     source_id: Some("quiet_mode".to_string()),
                     created_at: now,
@@ -1306,8 +1313,7 @@ pub mod mock_user_core {
                 id: Some(id),
                 user_id,
                 summary,
-                monitor: false,
-                next_check_at: Some(until),
+                due_at: Some(until),
                 priority: 0,
                 source_id: Some("quiet_mode".to_string()),
                 created_at: now,
@@ -1341,7 +1347,7 @@ pub mod mock_user_core {
             // Filter out expired
             let active: Vec<_> = items
                 .into_iter()
-                .filter(|item| match item.next_check_at {
+                .filter(|item| match item.due_at {
                     None => true,
                     Some(ts) => ts > now,
                 })
@@ -1583,8 +1589,7 @@ pub fn get_user_tasks(
 pub struct TestItemParams {
     pub user_id: i32,
     pub summary: String,
-    pub monitor: bool,
-    pub next_check_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub priority: i32,
     pub source_id: Option<String>,
 }
@@ -1595,20 +1600,18 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            monitor: false,
-            next_check_at: None,
+            due_at: None,
             priority: 0,
             source_id: None,
         }
     }
 
-    /// Scheduled reminder (fires at next_check_at)
+    /// Scheduled reminder (fires at due_at)
     pub fn scheduled_reminder(user_id: i32, summary: &str, trigger_at: i32) -> Self {
         Self {
             user_id,
             summary: summary.to_string(),
-            monitor: false,
-            next_check_at: Some(trigger_at),
+            due_at: Some(trigger_at),
             priority: 0,
             source_id: None,
         }
@@ -1619,20 +1622,24 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            monitor: false,
-            next_check_at: Some(trigger_at),
+            due_at: Some(trigger_at),
             priority: 0,
             source_id: None,
         }
     }
 
-    /// Monitor item (matches against incoming data)
-    pub fn monitor(user_id: i32, summary: &str) -> Self {
+    /// Tracking item (matches against incoming data)
+    pub fn tracking(user_id: i32, summary: &str) -> Self {
+        // Prepend [type:tracking] tag if not already present
+        let tagged_summary = if summary.contains("[type:tracking]") {
+            summary.to_string()
+        } else {
+            format!("[type:tracking] {}", summary)
+        };
         Self {
             user_id,
-            summary: summary.to_string(),
-            monitor: true,
-            next_check_at: None,
+            summary: tagged_summary,
+            due_at: None,
             priority: 0,
             source_id: None,
         }
@@ -1643,8 +1650,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            monitor: false,
-            next_check_at: None,
+            due_at: None,
             priority: 1,
             source_id: None,
         }
@@ -1655,8 +1661,7 @@ impl TestItemParams {
         Self {
             user_id,
             summary: summary.to_string(),
-            monitor: false,
-            next_check_at: None,
+            due_at: None,
             priority: 0,
             source_id: Some(source_id.to_string()),
         }
@@ -1667,18 +1672,13 @@ impl TestItemParams {
         self
     }
 
-    pub fn with_next_check_at(mut self, ts: i32) -> Self {
-        self.next_check_at = Some(ts);
+    pub fn with_due_at(mut self, ts: i32) -> Self {
+        self.due_at = Some(ts);
         self
     }
 
     pub fn with_source_id(mut self, source_id: &str) -> Self {
         self.source_id = Some(source_id.to_string());
-        self
-    }
-
-    pub fn with_monitor(mut self, monitor: bool) -> Self {
-        self.monitor = monitor;
         self
     }
 }
@@ -1698,8 +1698,7 @@ pub fn create_test_item(
     let new_item = NewItem {
         user_id: params.user_id,
         summary: params.summary.clone(),
-        monitor: params.monitor,
-        next_check_at: params.next_check_at,
+        due_at: params.due_at,
         priority: params.priority,
         source_id: params.source_id.clone(),
         created_at: now,

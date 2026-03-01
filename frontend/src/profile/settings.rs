@@ -240,6 +240,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let notification_type = use_state(|| (*user_profile).notification_type.clone().or(Some("sms".to_string())));
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let feature_updates = use_state(|| (*user_profile).notify);
+    let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
@@ -261,6 +262,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let save_context_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
+    let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
@@ -290,6 +292,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let timezone = timezone.clone();
         let timezone_auto = timezone_auto.clone();
         let phone_service_active = phone_service_active.clone();
+        let auto_create_items = auto_create_items.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
@@ -310,6 +313,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             timezone.set(props_profile.timezone.clone().unwrap_or_else(|| String::from("UTC")));
             timezone_auto.set(props_profile.timezone_auto.unwrap_or(true));
             phone_service_active.set(props_profile.phone_service_active.unwrap_or(true));
+            auto_create_items.set(props_profile.auto_create_items.unwrap_or(false));
             agent_language.set(props_profile.agent_language.clone());
             notification_type.set(props_profile.notification_type.clone());
             location.set(props_profile.location.clone().unwrap_or_default());
@@ -1064,6 +1068,53 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
                         profile.notify = new_val;
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    // Auto-create items toggle handler
+    let on_auto_create_items_toggle = {
+        let auto_create_items = auto_create_items.clone();
+        let save_state = auto_create_items_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let new_val = input.checked();
+            auto_create_items.set(new_val);
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "auto_create_items".to_string(),
+                    value: serde_json::Value::Bool(new_val),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.auto_create_items = Some(new_val);
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -2146,6 +2197,31 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         <option value="0" selected={*save_context == 0}>{"No history"}</option>
                     </select>
                     {render_save_indicator(&*save_context_save_state)}
+                </div>
+            </div>
+
+            // Auto-create items field
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Auto-create Items"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Automatically detect and create trackable items (invoices, shipments, deadlines) from your emails and messages."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <label class="custom-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={*auto_create_items}
+                            onchange={on_auto_create_items_toggle.clone()}
+                        />
+                        <span class="checkmark"></span>
+                        {if *auto_create_items { "Enabled" } else { "Disabled" }}
+                    </label>
+                    {render_save_indicator(&*auto_create_items_save_state)}
                 </div>
             </div>
 

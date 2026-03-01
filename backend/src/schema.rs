@@ -180,8 +180,7 @@ diesel::table! {
         id -> Nullable<Integer>,
         user_id -> Integer,
         summary -> Text,
-        monitor -> Bool,
-        next_check_at -> Nullable<Integer>,
+        due_at -> Nullable<Integer>,
         priority -> Integer,
         source_id -> Nullable<Text>,
         created_at -> Integer,
@@ -447,6 +446,7 @@ diesel::table! {
         phone_contact_notification_mode -> Nullable<Text>,
         phone_contact_notification_type -> Nullable<Text>,
         phone_contact_notify_on_call -> Integer,
+        auto_create_items -> Bool,
     }
 }
 

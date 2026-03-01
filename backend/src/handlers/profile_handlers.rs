@@ -108,6 +108,7 @@ pub struct ProfileResponse {
     plan_type: Option<String>,    // "assistant", "autopilot", or "byot"
     phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
+    auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
     has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
@@ -323,6 +324,7 @@ pub async fn get_profile(
                 plan_type: user.plan_type,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
+                auto_create_items: user_settings.auto_create_items,
                 has_any_connection,
             }))
         }
@@ -694,6 +696,23 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_phone_service_active(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "auto_create_items" => {
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "auto_create_items must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_auto_create_items(user_id, value)
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1521,7 +1540,7 @@ fn parse_rule_info_from_item(
     let rule_type = tags.quiet?;
 
     let until_display = item
-        .next_check_at
+        .due_at
         .map(|ts| format_quiet_until_display(ts, user_id, state));
 
     Some(QuietRuleInfo {
@@ -1530,7 +1549,7 @@ fn parse_rule_info_from_item(
         platform: tags.platform,
         sender: tags.sender,
         topic: tags.topic,
-        until: item.next_check_at,
+        until: item.due_at,
         until_display,
     })
 }
@@ -2116,6 +2135,11 @@ pub async fn web_chat_stream(
                                 serde_json::json!({"step": "tool_call", "message": display}).to_string(),
                             ));
                         }
+                        Some(ChatStatus::Reasoning { snippet }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "reasoning", "message": snippet}).to_string(),
+                            ));
+                        }
                         Some(ChatStatus::Retrying { attempt, max }) => {
                             yield Ok(axum::response::sse::Event::default().data(
                                 serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
@@ -2134,10 +2158,13 @@ pub async fn web_chat_stream(
                     }
                 }
                 result = &mut process_handle => {
+                    // Small yield to let bridge tasks flush final events
+                    tokio::task::yield_now().await;
                     // process_sms task completed before channel drained - drain remaining
                     while let Ok(status) = status_rx.try_recv() {
                         let msg = match status {
                             ChatStatus::Thinking => serde_json::json!({"step": "thinking", "message": "Thinking..."}),
+                            ChatStatus::Reasoning { snippet } => serde_json::json!({"step": "reasoning", "message": snippet}),
                             ChatStatus::ToolCall { name } => serde_json::json!({"step": "tool_call", "message": format!("Using {}...", name.replace('_', " "))}),
                             ChatStatus::Retrying { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
                             ChatStatus::RetryingFollowup { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
