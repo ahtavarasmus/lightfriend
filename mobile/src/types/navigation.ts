@@ -12,6 +12,7 @@ export type AuthStackParamList = {
 export type TabParamList = {
   index: undefined;
   connections: undefined;
+  wellness: undefined;
   settings: undefined;
   billing: undefined;
 };

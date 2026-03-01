@@ -12,6 +12,11 @@ use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
 use super::items_status::ItemsStatusSection;
+use super::dumbphone_mode::DumbphoneMode;
+use super::daily_checkin::DailyCheckin;
+use super::notification_calmer::NotificationCalmer;
+use super::wellbeing_points::WellbeingPoints;
+use super::wellbeing_stats::WellbeingStats;
 
 const DASHBOARD_STYLES: &str = r#"
 .peace-dashboard {
@@ -934,6 +939,16 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     <span>{"People"}</span>
                 </div>
                 <ContactAvatarRow />
+
+                // Wellbeing section
+                <div class="section-label">
+                    <span>{"Wellbeing"}</span>
+                </div>
+                <DumbphoneMode />
+                <DailyCheckin />
+                <NotificationCalmer />
+                <WellbeingPoints />
+                <WellbeingStats />
 
                 <div class="peace-separator"></div>
             </div>

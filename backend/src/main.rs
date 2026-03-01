@@ -24,7 +24,7 @@ use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
     api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
     SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
-    WebauthnRepository,
+    WebauthnRepository, WellbeingRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
@@ -32,7 +32,7 @@ use handlers::{
     imap_handlers, instagram_auth, instagram_handlers, messenger_auth, messenger_handlers,
     profile_handlers, refund_handlers, self_host_handlers, signal_auth, signal_handlers,
     stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth,
-    whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
+    wellbeing_handlers, whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -224,6 +224,7 @@ async fn main() {
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pool.clone()));
+    let wellbeing_repository = Arc::new(WellbeingRepository::new(pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -356,6 +357,7 @@ async fn main() {
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        wellbeing_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -1304,6 +1306,29 @@ async fn main() {
             "/api/mcp/test",
             post(handlers::mcp_handlers::test_url_connection),
         )
+        // Wellbeing routes
+        .route(
+            "/api/wellbeing/dumbphone",
+            get(wellbeing_handlers::get_dumbphone).post(wellbeing_handlers::set_dumbphone),
+        )
+        .route(
+            "/api/wellbeing/checkin/today",
+            get(wellbeing_handlers::get_today_checkin),
+        )
+        .route(
+            "/api/wellbeing/checkin",
+            post(wellbeing_handlers::create_checkin),
+        )
+        .route(
+            "/api/wellbeing/checkin/history",
+            get(wellbeing_handlers::get_checkin_history),
+        )
+        .route(
+            "/api/wellbeing/calmer",
+            get(wellbeing_handlers::get_calmer).post(wellbeing_handlers::set_calmer),
+        )
+        .route("/api/wellbeing/points", get(wellbeing_handlers::get_points))
+        .route("/api/wellbeing/stats", get(wellbeing_handlers::get_stats))
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     // WebSocket route - auth handled by AuthUser extractor (reads cookie)
     let ws_routes = Router::new().route("/api/ws", get(handlers::ws_handler::ws_handler));
