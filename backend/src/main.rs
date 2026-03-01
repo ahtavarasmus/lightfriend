@@ -941,6 +941,10 @@ async fn main() {
             get(youtube::get_subscription_feed),
         )
         .route("/api/youtube/search", get(youtube::search_youtube))
+        .route(
+            "/api/youtube/channel/{channel_id}/videos",
+            get(youtube::get_channel_videos),
+        )
         .route("/api/youtube/video", get(youtube::get_video_details))
         .route(
             "/api/youtube/subscribe",
@@ -1184,6 +1188,10 @@ async fn main() {
         .route(
             "/api/items/{id}/edit-ai",
             post(filter_handlers::edit_item_with_ai),
+        )
+        .route(
+            "/api/items/{id}/edit-ai-stream",
+            get(filter_handlers::edit_item_with_ai_stream),
         )
         .route(
             "/api/filters/monitored-contacts",

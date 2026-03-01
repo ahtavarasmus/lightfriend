@@ -11,7 +11,14 @@ use super::timeline_view::{UpcomingItem, UpcomingDigest};
 use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::contact_avatar_row::ContactAvatarRow;
 use super::quiet_mode::QuietModeStatus;
-use super::items_status::ItemsStatusSection;
+use super::items_status::{ItemsStatusSection, digest_sources};
+
+fn format_date_from_ts(ts: i32) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ts as f64 * 1000.0));
+    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let month = months.get(date.get_month() as usize).unwrap_or(&"");
+    format!("{} {}", month, date.get_date())
+}
 
 const DASHBOARD_STYLES: &str = r#"
 .peace-dashboard {
@@ -98,7 +105,7 @@ const DASHBOARD_STYLES: &str = r#"
     background: rgba(255,255,255,0.08);
     color: #aaa;
 }
-.item-detail-monitor {
+.item-detail-tracking {
     color: #7eb2ff !important;
 }
 .item-detail-notify {
@@ -297,9 +304,7 @@ struct AttentionItemResponse {
     #[serde(default)]
     priority: i32,
     #[serde(default)]
-    monitor: bool,
-    #[serde(default)]
-    next_check_at: Option<i32>,
+    due_at: Option<i32>,
     source: Option<String>,
     #[serde(default)]
     source_id: Option<String>,
@@ -334,8 +339,6 @@ struct UpcomingItemResponse {
     relative_display: String,
     #[serde(default)]
     item_type: Option<String>,
-    #[serde(default)]
-    monitor: bool,
     #[serde(default)]
     notify: Option<String>,
     #[serde(default)]
@@ -583,8 +586,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     summary: item.summary.clone(),
                     description: item.description.clone(),
                     priority: item.priority,
-                    monitor: item.monitor,
-                    next_check_at: item.next_check_at,
+                    due_at: item.due_at,
                     source: item.source.clone(),
                     source_id: item.source_id.clone(),
                     notify: item.notify.clone(),
@@ -612,7 +614,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     date_display: t.date_display.clone(),
                     relative_display: t.relative_display.clone(),
                     item_type: t.item_type.clone(),
-                    monitor: t.monitor,
                     notify: t.notify.clone(),
                     sources_display: t.sources_display.clone(),
                 })
@@ -656,7 +657,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 date_display: String::new(),
                                 relative_display: String::new(),
                                 item_type: Some("recurring".to_string()),
-                                monitor: false,
                                 notify: None,
                                 sources_display: None,
                             };
@@ -789,9 +789,62 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
+    // Listen for onboarding prefill events
+    {
+        let prefill_chat = prefill_chat.clone();
+        use_effect_with_deps(
+            move |_| {
+                use wasm_bindgen::closure::Closure;
+                use wasm_bindgen::JsCast;
+
+                let callback = Closure::wrap(Box::new(move |e: web_sys::CustomEvent| {
+                    if let Some(detail) = e.detail().as_string() {
+                        prefill_chat.set(Some(detail));
+                    }
+                }) as Box<dyn Fn(web_sys::CustomEvent)>);
+
+                if let Some(window) = web_sys::window() {
+                    let _ = window.add_event_listener_with_callback(
+                        "lightfriend-prefill-chat",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                }
+
+                let cleanup_callback = callback;
+                move || {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.remove_event_listener_with_callback(
+                            "lightfriend-prefill-chat",
+                            cleanup_callback.as_ref().unchecked_ref(),
+                        );
+                    }
+                }
+            },
+            (),
+        );
+    }
+
     // Callback for usage changes (refresh summary after chat)
     let on_usage_change = fetch_summary.clone();
 
+    // Callback for clicking items in ItemsStatusSection - open edit modal
+    let on_item_status_click = {
+        let selected_item = selected_item.clone();
+        Callback::from(move |item: AttentionItem| {
+            let sources = digest_sources(&item.summary, &item.description);
+            selected_item.set(Some(UpcomingItem {
+                item_id: Some(item.id),
+                timestamp: item.due_at.unwrap_or(0),
+                time_display: item.time_display.clone().unwrap_or_default(),
+                description: item.description.clone(),
+                date_display: item.due_at.map(format_date_from_ts).unwrap_or_default(),
+                relative_display: item.relative_display.clone().unwrap_or_default(),
+                item_type: Some(item.item_type.clone()),
+                notify: item.notify.clone(),
+                sources_display: sources,
+            }));
+        })
+    };
 
     // Callback for when an item is created via chat - show preview below chatbox
     let on_item_created = {
@@ -817,7 +870,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                     date_display: data["date_display"].as_str().unwrap_or("").to_string(),
                                     relative_display: data["relative_display"].as_str().unwrap_or("").to_string(),
                                     item_type: data["item_type"].as_str().map(|s| s.to_string()),
-                                    monitor: data["monitor"].as_bool().unwrap_or(false),
                                     notify: data["notify"].as_str().map(|s| s.to_string()),
                                     sources_display: data["sources_display"].as_str().map(|s| s.to_string()),
                                 };
@@ -884,7 +936,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     if let Some(item) = (*selected_item).as_ref() {
                         <div class="item-detail-bar">
                             <div class="item-detail-info">
-                                <div class="item-detail-time">{&item.time_display}</div>
+                                <div class="item-detail-time">{
+                                    if item.date_display.is_empty() {
+                                        item.time_display.clone()
+                                    } else {
+                                        format!("{} - {}", item.time_display, item.date_display)
+                                    }
+                                }</div>
                                 if let Some(ref src) = item.sources_display {
                                     <div class="item-detail-source">{format!("Check: {}", src)}</div>
                                     if src.to_lowercase().contains("weather") {
@@ -893,12 +951,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 }
                                 <div class="item-detail-meta">
                                     {if let Some(ref t) = item.item_type {
-                                        html! { <span class="item-detail-type">{t}</span> }
-                                    } else {
-                                        html! {}
-                                    }}
-                                    {if item.monitor {
-                                        html! { <span class="item-detail-monitor">{"monitoring"}</span> }
+                                        html! { <span class={if t == "tracking" { "item-detail-tracking" } else { "item-detail-type" }}>{t}</span> }
                                     } else {
                                         html! {}
                                     }}
@@ -911,7 +964,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 <div class="item-detail-desc">
                                     {super::emoji_utils::emojify_description(&item.description)}
                                 </div>
-                                <div class="item-detail-note">{"You'll be notified when this runs"}</div>
                             </div>
                             <button class="item-btn-delete" onclick={on_delete_item}>{"Delete"}</button>
                             <button class="item-btn-close" onclick={on_item_modal_close.clone()}>{"x"}</button>
@@ -921,12 +973,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
             // Main dashboard content - blurred when item focused
             <div class={if selected_item.is_some() { "peace-main item-focused" } else { "peace-main" }}>
-                // Items status: urgent cards, monitor group, and status line
+                // Items status: urgent cards, tracking group, and status line
                 <ItemsStatusSection
                     items={attention_items.clone()}
                     total_tracked_count={total_tracked_count}
                     on_dismiss={on_dismiss_item.clone()}
                     on_digest_prefill={Some(on_digest_prefill)}
+                    on_item_click={Some(on_item_status_click)}
                 />
 
                 // People section with contact avatars

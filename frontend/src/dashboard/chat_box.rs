@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::utils::api::Api;
 use crate::dashboard::media_panel::{MediaPanel, MediaItem, extract_video_id};
 use crate::dashboard::tesla_quick_panel::TeslaQuickPanel;
-use crate::dashboard::youtube_quick_panel::YouTubeQuickPanel;
+use crate::dashboard::youtube_quick_panel::{YouTubeQuickPanel, YtBrowseState};
 use super::timeline_view::UpcomingItem;
 
 // @mention system - available mentions
@@ -278,7 +278,7 @@ const CHAT_STYLES: &str = r#"
     background: rgba(255,255,255,0.08);
     color: #aaa;
 }
-.item-preview-monitor {
+.item-preview-tracking {
     color: #7eb2ff !important;
 }
 .item-preview-notify {
@@ -377,6 +377,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
 
     // @mention system state
     let active_mention = use_state(|| None::<String>);
+
+    // YouTube browse state - persists across panel mount/unmount cycles
+    let yt_browse_state: UseStateHandle<Option<YtBrowseState>> = use_state(|| None);
 
     // Update call duration every second when call is active
     {
@@ -536,16 +539,40 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             chat_error.set(None);
             chat_input.set(String::new());
 
-            // Use SSE streaming for text-only messages (no image, not item edit)
-            let use_sse = !is_item_edit && image_file.is_none();
+            // Use SSE streaming for text-only messages and item edits (POST only for image uploads)
+            let use_sse = is_item_edit || image_file.is_none();
 
             if use_sse {
-                // SSE streaming path
+                // SSE streaming path - wrapped in spawn_local for pre-flight auth refresh
+                let chat_status = chat_status.clone();
+                let chat_bot_reply = chat_bot_reply.clone();
+                let chat_loading = chat_loading.clone();
+                let chat_error = chat_error.clone();
+                let refetch_usage = refetch_usage.clone();
+                let detected_media = detected_media.clone();
+                let media_playing = media_playing.clone();
+                let on_item_created = on_item_created.clone();
+                let focused_item_sse = focused_item.clone();
+                spawn_local(async move {
                 use wasm_bindgen::JsCast;
                 use wasm_bindgen::closure::Closure;
 
+                // Pre-flight: ensure auth tokens are fresh before SSE connection
+                let _ = crate::utils::api::Api::get("/api/auth/status").send().await;
+
                 let encoded_msg = js_sys::encode_uri_component(&message).as_string().unwrap_or_default();
-                let url = format!("{}/api/chat/web-stream?message={}", crate::config::get_backend_url(), encoded_msg);
+                let url = if let Some(ref item) = focused_item_sse {
+                    if let Some(id) = item.item_id {
+                        format!("{}/api/items/{}/edit-ai-stream?instruction={}", crate::config::get_backend_url(), id, encoded_msg)
+                    } else {
+                        // No item ID - can't edit
+                        chat_error.set(Some("Item has no ID".to_string()));
+                        chat_loading.set(false);
+                        return;
+                    }
+                } else {
+                    format!("{}/api/chat/web-stream?message={}", crate::config::get_backend_url(), encoded_msg)
+                };
 
                 let mut init = web_sys::EventSourceInit::new();
                 init.set_with_credentials(true);
@@ -608,7 +635,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
                             let step = data["step"].as_str().unwrap_or("");
                             match step {
-                                "thinking" | "tool_call" | "retry" => {
+                                "thinking" | "tool_call" | "retry" | "reasoning" => {
                                     if let Some(msg) = data["message"].as_str() {
                                         chat_status_msg.set(msg.to_string());
                                     }
@@ -681,21 +708,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
 
                 es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
                 onerror.forget();
+                }); // end spawn_local for SSE path
             } else {
-                // POST path for image uploads and item edits
+                // POST path for image uploads
                 spawn_local(async move {
-                    let result = if let Some(item) = &focused_item {
-                        // Item edit mode - call edit endpoint
-                        if let Some(id) = item.item_id {
-                            Api::post(&format!("/api/items/{}/edit-ai", id))
-                                .json(&json!({ "instruction": message }))
-                                .unwrap()
-                                .send()
-                                .await
-                        } else {
-                            Err(gloo_net::Error::GlooError("Item has no ID".to_string()))
-                        }
-                    } else if let Some(file) = image_file {
+                    let result = if let Some(file) = image_file {
                         // Send with image
                         let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
                         if let Ok(buffer) = array_buffer {
@@ -735,51 +752,34 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 match response.json::<Value>().await {
                                     Ok(data) => {
                                         let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                        chat_bot_reply.set(Some(reply));
+                                        refetch_usage.emit(());
 
-                                        // For item edits, show the response and refresh
-                                        if focused_item.is_some() {
-                                            chat_bot_reply.set(Some(reply));
-
-                                            if let Some(window) = web_sys::window() {
-                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                                let _ = window.dispatch_event(&event);
+                                        if let Some(media_arr) = data["media"].as_array() {
+                                            let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
+                                                Some(MediaItem {
+                                                    platform: m["platform"].as_str()?.to_string(),
+                                                    video_id: m["video_id"].as_str()?.to_string(),
+                                                    title: m["title"].as_str().unwrap_or("").to_string(),
+                                                    thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
+                                                    duration: m["duration"].as_str().map(|s| s.to_string()),
+                                                    channel: m["channel"].as_str().map(|s| s.to_string()),
+                                                    original_url: None,
+                                                })
+                                            }).collect();
+                                            if !media_items.is_empty() {
+                                                detected_media.set(media_items);
+                                                media_playing.set(false);
                                             }
-                                            let chat_input_ref = chat_input_ref.clone();
-                                            gloo_timers::callback::Timeout::new(100, move || {
-                                                if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
-                                                    let _ = input.focus();
-                                                }
-                                            }).forget();
-                                        } else {
-                                            chat_bot_reply.set(Some(reply));
-                                            refetch_usage.emit(());
+                                        }
 
-                                            if let Some(media_arr) = data["media"].as_array() {
-                                                let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
-                                                    Some(MediaItem {
-                                                        platform: m["platform"].as_str()?.to_string(),
-                                                        video_id: m["video_id"].as_str()?.to_string(),
-                                                        title: m["title"].as_str().unwrap_or("").to_string(),
-                                                        thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
-                                                        duration: m["duration"].as_str().map(|s| s.to_string()),
-                                                        channel: m["channel"].as_str().map(|s| s.to_string()),
-                                                        original_url: None,
-                                                    })
-                                                }).collect();
-                                                if !media_items.is_empty() {
-                                                    detected_media.set(media_items);
-                                                    media_playing.set(false);
-                                                }
-                                            }
+                                        if let Some(item_id) = data["created_item_id"].as_i64() {
+                                            on_item_created.emit(item_id as i32);
+                                        }
 
-                                            if let Some(item_id) = data["created_item_id"].as_i64() {
-                                                on_item_created.emit(item_id as i32);
-                                            }
-
-                                            if let Some(window) = web_sys::window() {
-                                                let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                                let _ = window.dispatch_event(&event);
-                                            }
+                                        if let Some(window) = web_sys::window() {
+                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                            let _ = window.dispatch_event(&event);
                                         }
                                     }
                                     Err(_) => {
@@ -1359,7 +1359,19 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     active_mention.set(None);
                                 })
                             };
-                            html! { <YouTubeQuickPanel on_close={on_close} on_video_select={on_video_select} /> }
+                            let yt_initial = (*yt_browse_state).clone();
+                        let on_yt_state_change = {
+                            let yt_browse_state = yt_browse_state.clone();
+                            Callback::from(move |state: YtBrowseState| {
+                                yt_browse_state.set(Some(state));
+                            })
+                        };
+                        html! { <YouTubeQuickPanel
+                            on_close={on_close}
+                            on_video_select={on_video_select}
+                            initial_state={yt_initial}
+                            on_state_change={on_yt_state_change}
+                        /> }
                         }
                         // Future: Some("calendar") => html! { <CalendarPanel on_close={...} /> }
                         _ => html! {}
@@ -1389,12 +1401,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     </div>
                                     <div class="item-preview-meta">
                                         {if let Some(ref t) = item.item_type {
-                                            html! { <span class="item-preview-type">{t}</span> }
-                                        } else {
-                                            html! {}
-                                        }}
-                                        {if item.monitor {
-                                            html! { <span class="item-preview-monitor">{"monitoring"}</span> }
+                                            let class = if t == "tracking" { "item-preview-tracking" } else { "item-preview-type" };
+                                            html! { <span class={class}>{t}</span> }
                                         } else {
                                             html! {}
                                         }}

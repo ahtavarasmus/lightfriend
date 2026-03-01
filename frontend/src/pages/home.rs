@@ -4,6 +4,7 @@ use crate::Route;
 use crate::utils::api::Api;
 use web_sys::window;
 use serde::Deserialize;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
@@ -292,47 +293,131 @@ pub fn Home() -> Html {
                                 max-width: 500px;
                                 text-align: center;
                             }
+                            .onboarding-cards {
+                                display: flex;
+                                flex-direction: column;
+                                gap: 0.75rem;
+                                margin-bottom: 1rem;
+                            }
+                            .onboarding-card {
+                                background: rgba(255, 255, 255, 0.05);
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                                border-radius: 12px;
+                                padding: 1rem 1.25rem;
+                                cursor: pointer;
+                                text-align: left;
+                                transition: background 0.2s, border-color 0.2s;
+                            }
+                            .onboarding-card:hover {
+                                background: rgba(30, 144, 255, 0.1);
+                                border-color: rgba(30, 144, 255, 0.4);
+                            }
+                            .onboarding-card-title {
+                                color: #fff;
+                                font-weight: 600;
+                                font-size: 1rem;
+                                margin-bottom: 0.25rem;
+                            }
+                            .onboarding-card-subtitle {
+                                color: rgba(255, 255, 255, 0.5);
+                                font-size: 0.85rem;
+                            }
+                            .onboarding-dismiss-link {
+                                color: rgba(255, 255, 255, 0.35);
+                                font-size: 0.8rem;
+                                cursor: pointer;
+                                border: none;
+                                background: none;
+                                padding: 0;
+                            }
+                            .onboarding-dismiss-link:hover {
+                                color: rgba(255, 255, 255, 0.6);
+                            }
                         "#}
                     </style>
                     // First-time subscriber onboarding overlay
                     {
                         if *show_onboarding {
+                            let dismiss = on_dismiss_onboarding.clone();
+                            let on_briefing = {
+                                let dismiss = on_dismiss_onboarding.clone();
+                                Callback::from(move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    if let Some(window) = web_sys::window() {
+                                        let mut init = web_sys::CustomEventInit::new();
+                                        init.detail(&wasm_bindgen::JsValue::from_str(
+                                            "Give me a daily digest every morning at 8am covering emails, messages, and calendar"
+                                        ));
+                                        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-prefill-chat", &init) {
+                                            let _ = window.dispatch_event(&event);
+                                        }
+                                    }
+                                    dismiss.emit(e);
+                                })
+                            };
+                            let on_track = {
+                                let dismiss = on_dismiss_onboarding.clone();
+                                Callback::from(move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    if let Some(window) = web_sys::window() {
+                                        let mut init = web_sys::CustomEventInit::new();
+                                        init.detail(&wasm_bindgen::JsValue::from_str(
+                                            "Watch my email for shipping and delivery updates"
+                                        ));
+                                        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-prefill-chat", &init) {
+                                            let _ = window.dispatch_event(&event);
+                                        }
+                                    }
+                                    dismiss.emit(e);
+                                })
+                            };
+                            let on_chat = {
+                                let dismiss = on_dismiss_onboarding.clone();
+                                Callback::from(move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    dismiss.emit(e);
+                                    // Focus the chat input after a tick
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            &wasm_bindgen::closure::Closure::once_into_js(|| {
+                                                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                                                    if let Some(input) = doc.query_selector(".chat-input-field").ok().flatten() {
+                                                        if let Some(el) = input.dyn_ref::<web_sys::HtmlElement>() {
+                                                            let _ = el.focus();
+                                                        }
+                                                    }
+                                                }
+                                            }).unchecked_ref(),
+                                            100,
+                                        );
+                                    }
+                                })
+                            };
                             html! {
-                                <div class="onboarding-overlay" onclick={on_dismiss_onboarding.clone()}>
+                                <div class="onboarding-overlay" onclick={dismiss}>
                                     <div class="onboarding-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                        <h2 style="margin: 0 0 1rem 0; font-size: 1.5rem; background: linear-gradient(45deg, #fff, #7EB2FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                                        <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem; background: linear-gradient(45deg, #fff, #7EB2FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                                             {"Welcome to Lightfriend!"}
                                         </h2>
-                                        <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 1.25rem;">
-                                            {"Here's how to get started:"}
+                                        <p style="color: rgba(255, 255, 255, 0.5); margin-bottom: 1.25rem; font-size: 0.9rem;">
+                                            {"Pick something to try:"}
                                         </p>
-                                        <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; text-align: left;">
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Connect your services"}</strong>
-                                                {" - Link your calendar, email, or messaging apps"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Ask anything"}</strong>
-                                                {" - Use the web chat or send an SMS to your Lightfriend number"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Explore your tools"}</strong>
-                                                {" - Check out the tools available to your assistant"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Set up notifications"}</strong>
-                                                {" - Configure how you want to be alerted"}
-                                            </li>
-                                        </ul>
-                                        <button
-                                            onclick={on_dismiss_onboarding.clone()}
-                                            style="background: linear-gradient(135deg, #1E90FF, #4169E1); border: none; color: white; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s;"
-                                        >
-                                            {"Got it!"}
+                                        <div class="onboarding-cards">
+                                            <div class="onboarding-card" onclick={on_briefing}>
+                                                <div class="onboarding-card-title">{"Set up a morning briefing"}</div>
+                                                <div class="onboarding-card-subtitle">{"Get a daily digest of emails, messages, and calendar"}</div>
+                                            </div>
+                                            <div class="onboarding-card" onclick={on_track}>
+                                                <div class="onboarding-card-title">{"Track something"}</div>
+                                                <div class="onboarding-card-subtitle">{"Watch for deliveries, deadlines, or important messages"}</div>
+                                            </div>
+                                            <div class="onboarding-card" onclick={on_chat}>
+                                                <div class="onboarding-card-title">{"Just start chatting"}</div>
+                                                <div class="onboarding-card-subtitle">{"Ask anything - weather, web search, reminders, and more"}</div>
+                                            </div>
+                                        </div>
+                                        <button class="onboarding-dismiss-link" onclick={on_dismiss_onboarding.clone()}>
+                                            {"I'll explore on my own"}
                                         </button>
                                     </div>
                                 </div>
