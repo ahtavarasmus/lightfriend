@@ -772,6 +772,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
     // Chat prefill state (for digest suggestion hint)
     let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
+    let people_info_seq = use_state(|| 0u32);
 
     // Digest prefill callback - pre-fills chatbox with prompt from digest creator
     let on_digest_prefill = {
@@ -985,8 +986,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 // People section with contact avatars
                 <div class="section-label">
                     <span>{"People"}</span>
+                    <button class="info-icon-btn" onclick={{
+                        let people_info_seq = people_info_seq.clone();
+                        Callback::from(move |e: MouseEvent| {
+                            e.stop_propagation();
+                            people_info_seq.set(*people_info_seq + 1);
+                        })
+                    }}>
+                        <i class="fa-solid fa-circle-info"></i>
+                    </button>
                 </div>
-                <ContactAvatarRow />
+                <ContactAvatarRow open_info_seq={*people_info_seq} />
 
                 <div class="peace-separator"></div>
             </div>

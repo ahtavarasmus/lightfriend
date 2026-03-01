@@ -723,10 +723,14 @@ enum ModalType {
 // ---------------------------------------------------------------------------
 
 #[derive(Properties, PartialEq, Clone)]
-pub struct ContactAvatarRowProps {}
+pub struct ContactAvatarRowProps {
+    /// Increment to open the PeopleInfo modal from the parent.
+    #[prop_or_default]
+    pub open_info_seq: u32,
+}
 
 #[function_component(ContactAvatarRow)]
-pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
+pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let profiles = use_state(|| Vec::<ContactProfile>::new());
     let default_mode = use_state(|| "critical".to_string());
     let default_noti_type = use_state(|| "sms".to_string());
@@ -735,6 +739,18 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
     let modal = use_state(|| None::<ModalType>);
     let error_msg = use_state(|| None::<String>);
     let saving = use_state(|| false);
+
+    // Open info modal when parent increments the sequence counter
+    {
+        let modal = modal.clone();
+        let seq = props.open_info_seq;
+        use_effect_with_deps(move |s: &u32| {
+            if *s > 0 {
+                modal.set(Some(ModalType::PeopleInfo));
+            }
+            || ()
+        }, seq);
+    }
 
     // Modal form state
     let form_nickname = use_state(|| String::new());
@@ -3767,15 +3783,6 @@ pub fn contact_avatar_row(_props: &ContactAvatarRowProps) -> Html {
                 <div class="people-figures-outer">
                     <div class="people-figures-wrap">
                         <div class="people-figures">
-                            <button class="avatar-row-info-btn" style="margin-bottom: 0.25rem;" onclick={{
-                                let modal = modal.clone();
-                                Callback::from(move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    modal.set(Some(ModalType::PeopleInfo));
-                                })
-                            }}>
-                                <i class="fa-solid fa-circle-info"></i>
-                            </button>
                             {profile_figures}
                             {render_phone_contact_figure}
                             {render_unknown_figure}
