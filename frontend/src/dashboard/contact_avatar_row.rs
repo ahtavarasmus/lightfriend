@@ -563,7 +563,7 @@ struct PlatformInfo {
 const PLATFORMS: [PlatformInfo; 4] = [
     PlatformInfo { key: "whatsapp", icon: "fa-brands fa-whatsapp", color: "#25D366", label: "WhatsApp" },
     PlatformInfo { key: "telegram", icon: "fa-brands fa-telegram", color: "#0088CC", label: "Telegram" },
-    PlatformInfo { key: "signal", icon: "fa-solid fa-comment-dots", color: "#3A76F1", label: "Signal" },
+    PlatformInfo { key: "signal", icon: "fa-brands fa-signal-messenger", color: "#3A76F1", label: "Signal" },
     PlatformInfo { key: "email", icon: "fa-solid fa-envelope", color: "#7EB2FF", label: "Email" },
 ];
 

@@ -505,7 +505,7 @@ fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
             "whatsapp" => return PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", icon: "fa-brands fa-whatsapp" },
             "email" => return PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" },
             "telegram" => return PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" },
-            "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-solid fa-comment-dots" },
+            "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" },
             "messenger" => return PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" },
             "instagram" => return PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", icon: "fa-brands fa-instagram" },
             "internet" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
@@ -523,7 +523,7 @@ fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
     } else if lower.contains("telegram") {
         PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" }
     } else if lower.contains("signal") {
-        PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-solid fa-comment-dots" }
+        PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" }
     } else if lower.contains("messenger") {
         PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" }
     } else if lower.contains("instagram") {
