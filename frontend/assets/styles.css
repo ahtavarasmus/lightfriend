@@ -127,7 +127,7 @@ body {
 .nav-logo {
     color: white;
     text-decoration: none;
-    font-size: 2.8rem;
+    font-size: 1.5rem;
     font-weight: 600;
     background: linear-gradient(45deg, #fff, #7EB2FF);
     -webkit-background-clip: text;
@@ -143,6 +143,9 @@ body {
     -webkit-text-fill-color: initial;
 }
 
+.nav-landing .nav-logo {
+    font-size: 2.8rem;
+}
 .nav-logo:hover {
     opacity: 0.8;
 }

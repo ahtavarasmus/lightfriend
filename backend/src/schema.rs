@@ -113,19 +113,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    digests (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        time -> Text,
-        tools -> Text,
-        tool_params -> Nullable<Text>,
-        enabled -> Integer,
-        last_sent_at -> Nullable<Integer>,
-        created_at -> Integer,
-    }
-}
-
-diesel::table! {
     disabled_alert_types (id) {
         id -> Nullable<Integer>,
         alert_type -> Text,
@@ -545,7 +532,6 @@ diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(contact_profile_exceptions -> contact_profiles (profile_id));
 diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
-diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(items -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
@@ -573,7 +559,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     conversations,
     country_availability,
     critical_categories,
-    digests,
     disabled_alert_types,
     email_judgments,
     google_calendar,

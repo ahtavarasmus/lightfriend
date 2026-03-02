@@ -500,7 +500,7 @@ pub fn nav(props: &NavProps) -> Html {
         }, ());
     }
     html! {
-        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"))}>
+        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"), (*auth_state == AuthState::LoggedOut).then(|| "nav-landing"))}>
             <div class="nav-content">
                 <div class="nav-left">
                     <Link<Route> to={Route::Home} classes="nav-logo">
