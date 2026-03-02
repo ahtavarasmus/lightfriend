@@ -5,6 +5,7 @@ use web_sys::{Request, RequestInit, window, Response};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use serde_json::Value;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[derive(Clone, PartialEq)]
 enum FeatureStatus {
@@ -28,6 +29,13 @@ struct CountryFeatureAvailability {
 
 #[function_component(SupportedCountries)]
 pub fn supported_countries() -> Html {
+    use_seo(SeoMeta {
+        title: "Supported Countries \u{2013} Lightfriend AI Dumbphone Assistant",
+        description: "See which countries Lightfriend supports. Available in 40+ countries including US, UK, EU, Australia, and Asia-Pacific. SMS, voice, and messaging app support.",
+        canonical: "https://lightfriend.ai/supported-countries",
+        og_type: "website",
+    });
+
     let countries = use_state(|| {
         let mut map: HashMap<String, CountryFeatureAvailability> = HashMap::new();
         map.insert("United States".to_string(), CountryFeatureAvailability {

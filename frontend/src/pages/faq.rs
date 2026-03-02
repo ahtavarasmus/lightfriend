@@ -3,6 +3,7 @@ use web_sys::MouseEvent;
 use yew::{Children, Properties};
 use gloo_timers::callback::Timeout;
 use wasm_bindgen::prelude::*;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[derive(Clone, PartialEq)]
 struct ChatMessage {
@@ -92,6 +93,13 @@ fn faq_item(props: &FaqItemProps) -> Html {
 
 #[function_component(Faq)]
 pub fn faq() -> Html {
+    use_seo(SeoMeta {
+        title: "FAQ \u{2013} Lightfriend AI Assistant for Dumbphones",
+        description: "Frequently asked questions about Lightfriend. Learn how to use WhatsApp, Telegram, Signal, and email on your dumbphone via SMS and voice calls.",
+        canonical: "https://lightfriend.ai/faq",
+        og_type: "website",
+    });
+
     let chat_messages = use_state(|| Vec::<ChatMessage>::new());
     let is_typing = use_state(|| false);
     let current_demo_index = use_state(|| 0);
@@ -106,6 +114,101 @@ pub fn faq() -> Html {
                 || ()
             },
             (), // Empty dependencies array means this effect runs only once on mount
+        );
+    }
+
+    // Inject FAQPage structured data for SEO
+    {
+        use_effect_with_deps(
+            move |_| {
+                let cleanup_id = "faq-schema-ld";
+                if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                    let script = document.create_element("script").unwrap();
+                    script.set_attribute("type", "application/ld+json").ok();
+                    script.set_attribute("id", cleanup_id).ok();
+                    script.set_text_content(Some(r#"{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What problem does Lightfriend solve?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It gives you access to WhatsApp, Telegram, Signal, email, calendar, web search, GPS directions, and more via simple SMS and voice calls - no apps or smartphone needed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which countries are supported?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Lightfriend offers full service in the US, Canada, UK, Finland, Netherlands, and Australia with local phone numbers. Notification-only mode is available in 30+ countries across Europe and Asia-Pacific. Other countries can use Bring Your Own Twilio number."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Will I be charged extra for replying to messages?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "If you're in a country without a local Lightfriend number, replying may incur international SMS rates from your carrier. You can choose which country's number to use in settings to minimize costs. Most value comes from receiving notifications which doesn't require replies."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I try the service before signing up?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes! The FAQ page includes an interactive demo chat where you can try common requests like checking WhatsApp messages, weather, emails, calendar, web search, photo translation, and QR code scanning."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why choose a dumbphone?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Choosing a dumbphone lets you take back control of your attention. Instead of fighting addictive apps and notifications designed to hijack your focus, you can step away while still having AI-powered access to essential services."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Where can I buy a dumbphone?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Lightfriend works with any basic phone. Start with whatever simple phone you have. For recommendations, visit dumbphones.org. Popular choices include the Light Phone 2 and 3, which offer hotspot, navigation, and camera features."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I handle 2FA authentication without a smartphone?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Options include the Step Two Mac app for authenticator codes, YubiKey hardware security keys, and physical code calculator devices from banks. These replace smartphone-based 2FA apps."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does LightFriend protect my data?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Data is kept minimal, secure, and private. No call recordings. Messages can be optionally stored (encrypted at rest) with up to 10 recent exchanges for context. All sensitive credentials are encrypted. Data is never sold or shared with third parties. The code is open source for self-hosting."
+      }
+    }
+  ]
+}"#));
+                    if let Some(head) = document.head() {
+                        head.append_child(&script).ok();
+                    }
+                }
+                move || {
+                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                        if let Ok(Some(el)) = document.query_selector(&format!("#{}", cleanup_id)) {
+                            el.remove();
+                        }
+                    }
+                }
+            },
+            (),
         );
     }
 

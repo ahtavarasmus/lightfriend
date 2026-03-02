@@ -16,6 +16,7 @@ mod utils {
     pub mod api;
     pub mod webauthn;
     pub mod elevenlabs_web;
+    pub mod seo;
 }
 mod profile {
     pub mod stripe;
@@ -294,9 +295,16 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
 }
 use serde_json::Value;
 use std::collections::HashMap;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
+    use_seo(SeoMeta {
+        title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
+        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, calendar, and more. Available in 40+ countries.",
+        canonical: "https://lightfriend.ai/pricing",
+        og_type: "website",
+    });
     let profile_data = use_state(|| None::<UserProfile>);
     let selected_country = use_state(|| "US".to_string());
     let country_name = use_state(|| String::new());
@@ -468,6 +476,8 @@ pub struct NavProps {
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { auth_state } = props;
+    let route = use_route::<Route>();
+    let is_pricing = matches!(route, Some(Route::Pricing));
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
@@ -490,19 +500,45 @@ pub fn nav(props: &NavProps) -> Html {
         }, ());
     }
     html! {
-        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
+        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"))}>
             <div class="nav-content">
-                <Link<Route> to={Route::Home} classes="nav-logo">
-                    {"lightfriend"}
-                </Link<Route>>
+                <div class="nav-left">
+                    <Link<Route> to={Route::Home} classes="nav-logo">
+                        {"lightfriend"}
+                    </Link<Route>>
+                    if is_pricing {
+                        <Link<Route> to={Route::Home} classes="nav-back-button">
+                            <i class="fa-solid fa-arrow-left"></i>
+                        </Link<Route>>
+                    }
+                </div>
                 <div class="nav-right">
                     {
                         match auth_state {
                             AuthState::LoggedOut => html! {
                                 <>
-                                    <Link<Route> to={Route::Pricing} classes="nav-link">
-                                        {"Pricing"}
-                                    </Link<Route>>
+                                    <div class="nav-trust-badges">
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-brands fa-github"></i>
+                                            <span>{"Open Source"}</span>
+                                        </div>
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-solid fa-shield-halved"></i>
+                                            <span>{"EU Hosted"}</span>
+                                        </div>
+                                        <div class="nav-trust-badge">
+                                            <i class="fa-solid fa-lock"></i>
+                                            <span>{"Encrypted"}</span>
+                                        </div>
+                                    </div>
+                                    if !is_pricing {
+                                        <Link<Route> to={Route::Pricing} classes="nav-link">
+                                            {"Pricing"}
+                                        </Link<Route>>
+                                    }
+                                    <a href="mailto:support@lightfriend.ai" class="nav-link">
+                                        {"Support"}
+                                    </a>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
                                         {"Login"}
                                     </Link<Route>>

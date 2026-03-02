@@ -1,9 +1,16 @@
 use yew::prelude::*;
 use yew_router::components::Link;
 use crate::Route;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(Blog)]
 pub fn blog() -> Html {
+    use_seo(SeoMeta {
+        title: "Blog \u{2013} Lightfriend Guides & Minimalist Living Tips",
+        description: "Guides, tips, and insights on minimalist living with a dumbphone. Learn how to switch to a Light Phone, read more, and stay connected without a smartphone.",
+        canonical: "https://lightfriend.ai/blog",
+        og_type: "website",
+    });
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(

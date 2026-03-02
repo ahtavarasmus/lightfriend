@@ -1,0 +1,26 @@
+# Lightfriend
+
+> AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls — no apps, no smartphone required.
+
+Lightfriend bridges the gap between minimalist dumbphones and essential digital services. Users interact entirely through SMS text messages and voice calls from any phone.
+
+## Docs
+
+- [How It Works](https://lightfriend.ai/faq): FAQ covering features, setup, privacy, and compatible phones
+- [Pricing](https://lightfriend.ai/pricing): Plans from $19/month (Assistant) and $29/month (Autopilot)
+- [Supported Countries](https://lightfriend.ai/supported-countries): 40+ countries with local or notification-only numbers
+- [Bring Your Own Number](https://lightfriend.ai/bring-own-number): Use your own Twilio number in unsupported countries
+
+## Blog
+
+- [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Add WhatsApp to Light Phone 3 via Lightfriend
+- [How to Switch to a Dumbphone](https://lightfriend.ai/how-to-switch-to-dumbphone): Complete guide for the dumbphone lifestyle
+- [How to Read More Accidentally](https://lightfriend.ai/how-to-read-more-accidentally): How removing smartphone distractions leads to reading more
+
+## Optional
+
+- [Privacy Policy](https://lightfriend.ai/privacy): Data handling and privacy practices
+- [Terms of Service](https://lightfriend.ai/terms): Terms and conditions
+- [Changelog](https://lightfriend.ai/updates): Recent feature updates and improvements
+- [Full LLM Documentation](https://lightfriend.ai/llms-full.txt): Comprehensive product documentation for AI systems
+- [Source Code](https://github.com/ahtavarasmus/lightfriend): Open source under GNU AGPLv3

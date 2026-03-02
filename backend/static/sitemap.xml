@@ -2,50 +2,92 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
         <loc>https://lightfriend.ai</loc>
-        <lastmod>2025-07-10</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>weekly</changefreq>
-        <priority>1.0</priority>
-    </url>
-    <url>
-        <loc>https://lightfriend.ai/updates</loc>
-        <lastmod>2025-08-16</lastmod>
-        <changefreq>daily</changefreq>
         <priority>1.0</priority>
     </url>
     <url>
         <loc>https://lightfriend.ai/pricing</loc>
-        <lastmod>2025-07-10</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>weekly</changefreq>
-        <priority>1.0</priority>
+        <priority>0.9</priority>
     </url>
     <url>
         <loc>https://lightfriend.ai/faq</loc>
-        <lastmod>2025-07-10</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.9</priority>
     </url>
     <url>
-        <loc>https://lightfriend.ai/register</loc>
-        <lastmod>2025-07-10</lastmod>
+        <loc>https://lightfriend.ai/blog</loc>
+        <lastmod>2026-02-27</lastmod>
+        <changefreq>weekly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/updates</loc>
+        <lastmod>2026-02-27</lastmod>
+        <changefreq>daily</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/supported-countries</loc>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>monthly</changefreq>
-        <priority>0.9</priority>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/light-phone-3-whatsapp-guide</loc>
+        <lastmod>2025-08-13</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/how-to-switch-to-dumbphone</loc>
+        <lastmod>2025-08-19</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/how-to-read-more-accidentally</loc>
+        <lastmod>2025-08-21</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.7</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/bring-own-number</loc>
+        <lastmod>2026-02-27</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.7</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/register</loc>
+        <lastmod>2026-02-27</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.7</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/llms.txt</loc>
+        <lastmod>2026-02-27</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.5</priority>
     </url>
     <url>
         <loc>https://lightfriend.ai/login</loc>
-        <lastmod>2025-07-10</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>monthly</changefreq>
-        <priority>0.9</priority>
+        <priority>0.6</priority>
     </url>
     <url>
         <loc>https://lightfriend.ai/terms</loc>
-        <lastmod>2025-03-27</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>monthly</changefreq>
-        <priority>0.8</priority>
+        <priority>0.4</priority>
     </url>
     <url>
         <loc>https://lightfriend.ai/privacy</loc>
-        <lastmod>2025-03-27</lastmod>
+        <lastmod>2026-02-27</lastmod>
         <changefreq>monthly</changefreq>
-        <priority>0.8</priority>
+        <priority>0.4</priority>
     </url>
 </urlset>
