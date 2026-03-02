@@ -136,40 +136,46 @@ pub async fn require_admin(
     Ok(next.run(request).await)
 }
 
-pub async fn require_auth(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
-    // Extract token from cookies
-    let cookie_header = request
-        .headers()
-        .get(axum::http::header::COOKIE)
-        .and_then(|header| header.to_str().ok());
+/// Extract token from either Authorization: Bearer header or access_token cookie.
+/// Bearer header takes priority (used by mobile clients).
+fn extract_token_from_request(headers: &axum::http::HeaderMap) -> Option<String> {
+    // Try Authorization: Bearer header first (mobile clients)
+    if let Some(auth_header) = headers.get(axum::http::header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                return Some(token.to_string());
+            }
+        }
+    }
 
-    let token = if let Some(cookies) = cookie_header {
-        // Parse cookies to find access_token
-        cookies
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
+    // Fall back to cookie (web clients)
+    if let Some(cookie_header) = headers.get(axum::http::header::COOKIE) {
+        if let Ok(cookies) = cookie_header.to_str() {
+            if let Some(token) = cookies.split(';').map(|s| s.trim()).find_map(|cookie| {
+                let parts: Vec<&str> = cookie.splitn(2, '=').collect();
+                if parts.len() == 2 && parts[0] == "access_token" {
+                    Some(parts[1].to_string())
                 } else {
                     None
                 }
-            })
-            .ok_or(AuthError {
-                status: StatusCode::UNAUTHORIZED,
-                message: "No authorization token provided".to_string(),
-            })?
-    } else {
-        return Err(AuthError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "No authorization token provided".to_string(),
-        });
-    };
+            }) {
+                return Some(token);
+            }
+        }
+    }
+
+    None
+}
+
+pub async fn require_auth(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
+    let token = extract_token_from_request(request.headers()).ok_or(AuthError {
+        status: StatusCode::UNAUTHORIZED,
+        message: "No authorization token provided".to_string(),
+    })?;
 
     // Validate the token
     decode::<Claims>(
-        token,
+        &token,
         &DecodingKey::from_secret(
             std::env::var("JWT_SECRET_KEY")
                 .expect("JWT_SECRET_KEY must be set in environment")
@@ -208,46 +214,18 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Extract the token from cookies
-        // Note: header names are case-insensitive in HTTP
-        let cookie_header = parts
-            .headers
-            .get(axum::http::header::COOKIE)
-            .and_then(|header| header.to_str().ok())
-            .ok_or_else(|| {
-                tracing::debug!("No cookie header found");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
-
-        tracing::debug!("Cookie header: {}", cookie_header);
-
-        // Parse cookies to find access_token
-        let token = cookie_header
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                tracing::debug!("No access_token found in cookies");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
+        // Extract token from Bearer header or cookie
+        let token = extract_token_from_request(&parts.headers).ok_or_else(|| {
+            tracing::debug!("No access token found in Bearer header or cookies");
+            AuthError {
+                status: StatusCode::UNAUTHORIZED,
+                message: "No authorization token provided".to_string(),
+            }
+        })?;
 
         // Decode the token
         let claims = decode::<Claims>(
-            token,
+            &token,
             &DecodingKey::from_secret(
                 std::env::var("JWT_SECRET_KEY")
                     .expect("JWT_SECRET_KEY must be set in environment")

@@ -647,8 +647,9 @@ pub fn generate_tokens_and_response(
     })?;
 
     // Create response with HttpOnly cookies
+    // Include both tokens in JSON body for mobile clients that can't use cookies
     let mut response = Response::new(axum::body::Body::from(
-        Json(json!({"message": "Tokens generated", "token": access_token.clone()})).to_string(),
+        Json(json!({"message": "Tokens generated", "token": access_token.clone(), "refresh_token": refresh_token.clone()})).to_string(),
     ));
     // Don't use Secure flag in development (HTTP), only in production (HTTPS)
     // Use SameSite=Lax to allow cookies on redirects (Strict blocks them)

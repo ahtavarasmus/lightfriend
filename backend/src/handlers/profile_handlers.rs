@@ -2519,3 +2519,44 @@ pub async fn web_chat_with_image(
         ))
     }
 }
+
+#[derive(Deserialize)]
+pub struct RegisterPushTokenRequest {
+    pub platform: String,
+    pub token: String,
+}
+
+pub async fn register_push_token(
+    State(state): State<Arc<crate::AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    Json(payload): Json<RegisterPushTokenRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::schema::push_tokens;
+    use diesel::prelude::*;
+
+    let conn = &mut state.db_pool.get().map_err(|e| {
+        tracing::error!("Failed to get DB connection: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database error"})),
+        )
+    })?;
+
+    // Upsert: insert or ignore if token already exists for this user
+    diesel::insert_or_ignore_into(push_tokens::table)
+        .values((
+            push_tokens::user_id.eq(auth_user.user_id),
+            push_tokens::platform.eq(&payload.platform),
+            push_tokens::token.eq(&payload.token),
+        ))
+        .execute(conn)
+        .map_err(|e| {
+            tracing::error!("Failed to register push token: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to register push token"})),
+            )
+        })?;
+
+    Ok(Json(json!({"message": "Push token registered"})))
+}

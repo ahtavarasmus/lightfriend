@@ -113,19 +113,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    digests (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        time -> Text,
-        tools -> Text,
-        tool_params -> Nullable<Text>,
-        enabled -> Integer,
-        last_sent_at -> Nullable<Integer>,
-        created_at -> Integer,
-    }
-}
-
-diesel::table! {
     disabled_alert_types (id) {
         id -> Nullable<Integer>,
         alert_type -> Text,
@@ -245,6 +232,16 @@ diesel::table! {
         user_id -> Integer,
         email_uid -> Text,
         processed_at -> Integer,
+    }
+}
+
+diesel::table! {
+    push_tokens (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        platform -> Text,
+        token -> Text,
+        created_at -> Integer,
     }
 }
 
@@ -551,13 +548,13 @@ diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(contact_profile_exceptions -> contact_profiles (profile_id));
 diesel::joinable!(contact_profiles -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
-diesel::joinable!(digests -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(mcp_servers -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
+diesel::joinable!(push_tokens -> users (user_id));
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
@@ -579,7 +576,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     conversations,
     country_availability,
     critical_categories,
-    digests,
     disabled_alert_types,
     email_judgments,
     google_calendar,
@@ -590,6 +586,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     message_status_log,
     priority_senders,
     processed_emails,
+    push_tokens,
     refund_info,
     site_metrics,
     subaccounts,

@@ -789,6 +789,10 @@ async fn main() {
             "/api/profile/get_nearby_places",
             get(profile_handlers::get_nearby_places),
         )
+        .route(
+            "/api/profile/push-token",
+            post(profile_handlers::register_push_token),
+        )
         .route("/api/chat/web", post(profile_handlers::web_chat))
         .route(
             "/api/chat/web-with-image",
