@@ -1,7 +1,14 @@
 use yew::prelude::*;
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(Changelog)]
 pub fn changelog() -> Html {
+    use_seo(SeoMeta {
+        title: "Changelog \u{2013} Lightfriend Updates & New Features",
+        description: "See what's new in Lightfriend. Latest updates, bug fixes, and new features for the AI dumbphone assistant.",
+        canonical: "https://lightfriend.ai/updates",
+        og_type: "website",
+    });
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(

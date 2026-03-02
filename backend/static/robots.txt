@@ -1,4 +1,34 @@
+# Lightfriend - AI Assistant for Dumbphones
+# https://lightfriend.ai
+
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /admin
+Disallow: /billing
+Disallow: /set-password
+Disallow: /subscription-success
+
+# AI Search Engines - explicitly allowed
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# Sitemap
 Sitemap: https://lightfriend.ai/sitemap.xml
+
+# AI-readable documentation
+# See https://lightfriend.ai/llms.txt for AI-readable content
+# See https://lightfriend.ai/.well-known/llms.txt (alternate location)
+# See https://lightfriend.ai/llms-full.txt for comprehensive AI-readable content

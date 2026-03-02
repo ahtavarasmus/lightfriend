@@ -1,11 +1,16 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
 use crate::Route;
-
-
+use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(PrivacyPolicy)]
 pub fn privacy_policy() -> Html {
+    use_seo(SeoMeta {
+        title: "Privacy Policy \u{2013} Lightfriend",
+        description: "How Lightfriend protects your data. AES-256 encryption, no data selling, GDPR compliant. Learn about our privacy practices for the AI dumbphone assistant.",
+        canonical: "https://lightfriend.ai/privacy",
+        og_type: "website",
+    });
     html! {
         <div class="legal-content privacy-policy">
             <h1>{"Privacy Policy"}</h1>
@@ -193,6 +198,12 @@ pub fn privacy_policy() -> Html {
 
 #[function_component(TermsAndConditions)]
 pub fn terms_and_conditions() -> Html {
+    use_seo(SeoMeta {
+        title: "Terms and Conditions \u{2013} Lightfriend",
+        description: "Terms and conditions for using Lightfriend AI assistant service. Service terms, data handling, and user agreements.",
+        canonical: "https://lightfriend.ai/terms",
+        og_type: "website",
+    });
     html! {
         <div class="legal-content terms-and-conditions">
             <h1>{"lightfriend Terms and Conditions"}</h1>
