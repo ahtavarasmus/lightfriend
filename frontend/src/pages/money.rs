@@ -1956,14 +1956,16 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     if props.selected_country == "US" || props.selected_country == "CA" {
                         // US/CA: Show Assistant and Autopilot plans
                         let assistant_features = vec![
+                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
                             Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
                             Feature { text: "Daily digests".to_string(), sub_items: vec![] },
                             Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Buy more credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
                             Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
+                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
                             Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
@@ -2053,14 +2055,16 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         let is_notification_only = is_notification_only_country(&props.selected_country);
 
                         let assistant_features = vec![
+                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
                             Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
                             Feature { text: "Daily digests".to_string(), sub_items: vec![] },
                             Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Buy more credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
                             Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
+                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
                             Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
