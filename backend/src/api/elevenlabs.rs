@@ -460,12 +460,24 @@ pub async fn fetch_assistant(
 
 /// POST /api/call/items/create?user_id=X
 /// Creates an item from the ElevenLabs voice agent.
-/// Accepts the legacy {title, description?, due_time?} schema from the agent config.
+/// Accepts the full CreateItemArgs schema for all item types.
 #[derive(Deserialize)]
 pub struct CreateItemVoicePayload {
-    pub title: String,
-    pub description: Option<String>,
-    pub due_time: Option<String>,
+    pub item_type: String,
+    pub notify: String,
+    pub description: String,
+    #[serde(default)]
+    pub due_at: Option<String>,
+    #[serde(default)]
+    pub repeat: Option<String>,
+    #[serde(default)]
+    pub fetch: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub topic: Option<String>,
 }
 
 pub async fn handle_create_item_voice(
@@ -488,21 +500,59 @@ pub async fn handle_create_item_voice(
         .unwrap()
         .as_secs() as i32;
 
-    // Build summary from title + optional description
-    let summary = match &payload.description {
-        Some(desc) if !desc.is_empty() => format!("{} - {}", payload.title, desc),
-        _ => payload.title.clone(),
+    // Normalize "none" values to None
+    let item_type = if payload.item_type == "none" {
+        "task".to_string()
+    } else {
+        payload.item_type
     };
+    let notify = if payload.notify == "none" {
+        "silent".to_string()
+    } else {
+        payload.notify
+    };
+    let repeat = payload.repeat.filter(|r| r != "none");
+    let fetch = payload.fetch.filter(|f| f != "none");
+    let platform = payload.platform.filter(|p| p != "none");
+    let sender = payload.sender.filter(|s| s != "none");
+    let topic = payload.topic.filter(|t| t != "none");
 
-    // Parse due_time (RFC3339) into unix timestamp
+    // Build summary with tags: [type:X] [notify:Y] [repeat:Z] [fetch:A] [platform:B] [sender:C] [topic:D]\nDescription
+    let mut tags = Vec::new();
+    tags.push(format!("[type:{}]", item_type));
+    tags.push(format!("[notify:{}]", notify));
+
+    if let Some(ref r) = repeat {
+        tags.push(format!("[repeat:{}]", r));
+    }
+    if let Some(ref f) = fetch {
+        tags.push(format!("[fetch:{}]", f));
+    }
+    if let Some(ref p) = platform {
+        tags.push(format!("[platform:{}]", p));
+    }
+    if let Some(ref s) = sender {
+        tags.push(format!("[sender:{}]", s));
+    }
+    if let Some(ref t) = topic {
+        if t.to_lowercase() == "any" {
+            tags.push("[scope:any]".to_string());
+        } else {
+            tags.push(format!("[topic:{}]", t));
+        }
+    }
+
+    let summary = format!("{}\n{}", tags.join(" "), payload.description);
+
+    // Parse due_at (RFC3339/ISO) into unix timestamp
     let due_at = payload
-        .due_time
+        .due_at
         .as_deref()
         .and_then(crate::proactive::utils::parse_iso_to_timestamp);
 
     let new_item = crate::models::user_models::NewItem {
         user_id,
-        summary: summary.clone(),
+        summary,
         due_at,
         priority: 0,
         source_id: None,

@@ -32,10 +32,7 @@ pub fn Home() -> Html {
             .unwrap_or(false)
     });
 
-    // First-time subscriber onboarding overlay
-    let show_onboarding = use_state(|| false);
-
-    // Trigger to force profile refresh (incremented when subscription changes)
+    // Trigger to force profile refresh (increments when subscription changes)
     let refresh_trigger = use_state(|| 0u32);
 
     // Check for OAuth success parameters and URL query params
@@ -92,7 +89,6 @@ pub fn Home() -> Html {
         let user_verified = user_verified.clone();
         let error = error.clone();
         let auth_status = auth_status.clone();
-        let show_onboarding = show_onboarding.clone();
         let refresh_trigger_dep = *refresh_trigger;
 
         use_effect_with_deps(
@@ -101,7 +97,6 @@ pub fn Home() -> Html {
                 let user_verified = user_verified.clone();
                 let error = error.clone();
                 let auth_status = auth_status.clone();
-                let show_onboarding = show_onboarding.clone();
 
                 spawn_local(async move {
                     let result = Api::get("/api/profile").send().await;
@@ -118,10 +113,6 @@ pub fn Home() -> Html {
                                     user_verified.set(profile.verified);
                                     profile_data.set(Some(profile.clone()));
                                     error.set(None);
-                                    // Show onboarding for subscribers who haven't connected any services yet
-                                    if profile.sub_tier.is_some() && !profile.has_any_connection {
-                                        show_onboarding.set(true);
-                                    }
                                 }
                                 Err(e) => {
                                     gloo_console::log!("Failed to parse profile data:", format!("{:?}", e));
@@ -198,13 +189,6 @@ pub fn Home() -> Html {
                 })
             };
 
-            let on_dismiss_onboarding = {
-                let show_onboarding = show_onboarding.clone();
-                Callback::from(move |_: MouseEvent| {
-                    show_onboarding.set(false);
-                })
-            };
-
             let on_profile_update = {
                 let profile_data = profile_data.clone();
                 Callback::from(move |updated_profile: UserProfile| {
@@ -273,159 +257,8 @@ pub fn Home() -> Html {
                             .legal-links {
                                 margin-top: 0.5rem;
                             }
-                            .onboarding-overlay {
-                                position: fixed;
-                                top: 0;
-                                left: 0;
-                                right: 0;
-                                bottom: 0;
-                                background: rgba(0, 0, 0, 0.8);
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                z-index: 1000;
-                            }
-                            .onboarding-modal {
-                                background: rgba(30, 30, 30, 0.95);
-                                border: 1px solid rgba(30, 144, 255, 0.3);
-                                border-radius: 16px;
-                                padding: 2rem;
-                                max-width: 500px;
-                                text-align: center;
-                            }
-                            .onboarding-cards {
-                                display: flex;
-                                flex-direction: column;
-                                gap: 0.75rem;
-                                margin-bottom: 1rem;
-                            }
-                            .onboarding-card {
-                                background: rgba(255, 255, 255, 0.05);
-                                border: 1px solid rgba(255, 255, 255, 0.1);
-                                border-radius: 12px;
-                                padding: 1rem 1.25rem;
-                                cursor: pointer;
-                                text-align: left;
-                                transition: background 0.2s, border-color 0.2s;
-                            }
-                            .onboarding-card:hover {
-                                background: rgba(30, 144, 255, 0.1);
-                                border-color: rgba(30, 144, 255, 0.4);
-                            }
-                            .onboarding-card-title {
-                                color: #fff;
-                                font-weight: 600;
-                                font-size: 1rem;
-                                margin-bottom: 0.25rem;
-                            }
-                            .onboarding-card-subtitle {
-                                color: rgba(255, 255, 255, 0.5);
-                                font-size: 0.85rem;
-                            }
-                            .onboarding-dismiss-link {
-                                color: rgba(255, 255, 255, 0.35);
-                                font-size: 0.8rem;
-                                cursor: pointer;
-                                border: none;
-                                background: none;
-                                padding: 0;
-                            }
-                            .onboarding-dismiss-link:hover {
-                                color: rgba(255, 255, 255, 0.6);
-                            }
                         "#}
                     </style>
-                    // First-time subscriber onboarding overlay
-                    {
-                        if *show_onboarding {
-                            let dismiss = on_dismiss_onboarding.clone();
-                            let on_briefing = {
-                                let dismiss = on_dismiss_onboarding.clone();
-                                Callback::from(move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    if let Some(window) = web_sys::window() {
-                                        let mut init = web_sys::CustomEventInit::new();
-                                        init.detail(&wasm_bindgen::JsValue::from_str(
-                                            "Give me a daily digest every morning at 8am covering emails, messages, and calendar"
-                                        ));
-                                        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-prefill-chat", &init) {
-                                            let _ = window.dispatch_event(&event);
-                                        }
-                                    }
-                                    dismiss.emit(e);
-                                })
-                            };
-                            let on_track = {
-                                let dismiss = on_dismiss_onboarding.clone();
-                                Callback::from(move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    if let Some(window) = web_sys::window() {
-                                        let mut init = web_sys::CustomEventInit::new();
-                                        init.detail(&wasm_bindgen::JsValue::from_str(
-                                            "Watch my email for shipping and delivery updates"
-                                        ));
-                                        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-prefill-chat", &init) {
-                                            let _ = window.dispatch_event(&event);
-                                        }
-                                    }
-                                    dismiss.emit(e);
-                                })
-                            };
-                            let on_chat = {
-                                let dismiss = on_dismiss_onboarding.clone();
-                                Callback::from(move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    dismiss.emit(e);
-                                    // Focus the chat input after a tick
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                            &wasm_bindgen::closure::Closure::once_into_js(|| {
-                                                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                                                    if let Some(input) = doc.query_selector(".chat-input-field").ok().flatten() {
-                                                        if let Some(el) = input.dyn_ref::<web_sys::HtmlElement>() {
-                                                            let _ = el.focus();
-                                                        }
-                                                    }
-                                                }
-                                            }).unchecked_ref(),
-                                            100,
-                                        );
-                                    }
-                                })
-                            };
-                            html! {
-                                <div class="onboarding-overlay" onclick={dismiss}>
-                                    <div class="onboarding-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                        <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem; background: linear-gradient(45deg, #fff, #7EB2FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                                            {"Welcome to Lightfriend!"}
-                                        </h2>
-                                        <p style="color: rgba(255, 255, 255, 0.5); margin-bottom: 1.25rem; font-size: 0.9rem;">
-                                            {"Pick something to try:"}
-                                        </p>
-                                        <div class="onboarding-cards">
-                                            <div class="onboarding-card" onclick={on_briefing}>
-                                                <div class="onboarding-card-title">{"Set up a morning briefing"}</div>
-                                                <div class="onboarding-card-subtitle">{"Get a daily digest of emails, messages, and calendar"}</div>
-                                            </div>
-                                            <div class="onboarding-card" onclick={on_track}>
-                                                <div class="onboarding-card-title">{"Track something"}</div>
-                                                <div class="onboarding-card-subtitle">{"Watch for deliveries, deadlines, or important messages"}</div>
-                                            </div>
-                                            <div class="onboarding-card" onclick={on_chat}>
-                                                <div class="onboarding-card-title">{"Just start chatting"}</div>
-                                                <div class="onboarding-card-subtitle">{"Ask anything - weather, web search, reminders, and more"}</div>
-                                            </div>
-                                        </div>
-                                        <button class="onboarding-dismiss-link" onclick={on_dismiss_onboarding.clone()}>
-                                            {"I'll explore on my own"}
-                                        </button>
-                                    </div>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
                     <div class="dashboard-container">
                         <h1 class="panel-title">{"Dashboard"}</h1>
                         // 2FA banner

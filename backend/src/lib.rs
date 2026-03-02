@@ -78,6 +78,7 @@ pub mod tool_call_utils {
     pub mod utils;
     pub mod youtube;
 }
+pub mod cli;
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;

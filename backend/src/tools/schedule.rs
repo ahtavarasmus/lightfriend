@@ -47,10 +47,7 @@ impl ToolHandler for CreateItemHandler {
             }),
             Err(e) => {
                 tracing::error!("Failed to create item after retry: {}", e);
-                Ok(ToolResult::Answer(format!(
-                    "Sorry, I couldn't create the item: {}",
-                    e
-                )))
+                Err(format!("Sorry, I couldn't create the item: {}", e))
             }
         }
     }

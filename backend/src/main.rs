@@ -7,7 +7,6 @@ use axum::{
 use dashmap::DashMap;
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::SqliteConnection;
-use dotenvy::dotenv;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -166,7 +165,16 @@ async fn bootstrap_admin_if_needed(
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    // Check for CLI commands first
+    match backend::cli::run_cli().await {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("CLI error: {}", e);
+            std::process::exit(1);
+        }
+    }
+
     let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
         release: sentry::release_name!(),
         ..Default::default()

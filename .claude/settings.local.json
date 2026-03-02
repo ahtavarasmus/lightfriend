@@ -175,7 +175,14 @@
       "Bash(docker compose:*)",
       "Bash(docker exec:*)",
       "Bash(git commit:*)",
-      "Bash(trash:*)"
+      "Bash(trash:*)",
+      "Bash(echo === $migration ===:*)",
+      "Bash(for file in /Users/ahtavarasmus/Developer/sites/lf-dashboard-revamp/backend/src/tools/*.rs)",
+      "Bash(do grep -A 1 'fn name' \"$file\")",
+      "Bash(/Users/ahtavarasmus/.cargo/bin/wasm-bindgen:*)",
+      "Bash(kill 81747:*)",
+      "Bash(rg:*)",
+      "Bash(kill %1:*)"
     ],
     "deny": [
       "Read(.env)",

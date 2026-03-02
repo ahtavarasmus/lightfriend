@@ -1166,6 +1166,19 @@ pub async fn update_profile(
     let old_country = get_country_code_from_phone(&current_user.phone_number);
     let old_credits_left = current_user.credits_left;
 
+    // Check for duplicate phone number (unless user is keeping their current phone)
+    if !update_req.phone_number.is_empty() && update_req.phone_number != current_user.phone_number {
+        if let Ok(Some(_)) = state
+            .user_core
+            .find_by_phone_number(&update_req.phone_number)
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({"error": "This phone number is already in use by another account"})),
+            ));
+        }
+    }
+
     match state.user_core.update_profile(UpdateProfileParams {
         user_id: auth_user.user_id,
         email: &update_req.email,

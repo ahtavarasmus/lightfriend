@@ -1161,10 +1161,17 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                         }
                         Err(e) => {
                             log_tool_error(user.id, name, "execution", "handler_error", &e);
-                            tool_answers.insert(
-                                tool_call_id,
-                                tool_error_messages::INTERNAL_ERROR.to_string(),
-                            );
+                            let error_msg = e.to_string();
+                            let user_facing_msg = if error_msg.contains("plan")
+                                || error_msg.contains("feature")
+                                || error_msg.contains("upgrade")
+                                || error_msg.contains("Autopilot")
+                            {
+                                error_msg
+                            } else {
+                                tool_error_messages::INTERNAL_ERROR.to_string()
+                            };
+                            tool_answers.insert(tool_call_id, user_facing_msg);
                         }
                     },
                     None => {
