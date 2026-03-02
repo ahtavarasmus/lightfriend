@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::Json;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -29,9 +30,7 @@ pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::To
         function: types::Function {
             name: String::from("search_chat_contacts"),
             description: Some(String::from(
-                "Searches to check if specific contacts, rooms, groups, or channels exist on the specified platform by name or keyword. \
-                Use this only when the user asks to search, find, or check for the existence of contacts/people/groups/channels on Telegram, WhatsApp or Signal. \
-                Do not use this for searching messages within a chat; use the separate message search tool for that."
+                "Searches for contacts, groups, or channels on a messaging platform by name.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -78,10 +77,7 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         function: types::Function {
             name: String::from("fetch_chat_messages"),
             description: Some(String::from(
-                "Fetches messages from a specific contact or group. \
-                Use this when the user asks about messages from a specific person (e.g., 'has Mom messaged me?', 'messages from John'). \
-                Platform is optional—if omitted and the contact has a profile, will search all their linked platforms and return from the most recently active one. \
-                Do not use if no specific chat is mentioned—use fetch_recent_messages instead."
+                "Fetches messages from a specific contact or group. Supports contact profile nicknames. If platform is omitted, searches all linked platforms."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -109,7 +105,7 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z'). Default to 24 hours before now if unspecified.".to_string()),
+            description: Some("Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T00:00'). Default to 24 hours before now if unspecified.".to_string()),
             ..Default::default()
         }),
     );
@@ -166,9 +162,10 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
             name: String::from("send_chat_message"),
             description:
                 Some(String::from(
-                    "Sends a message to a specific chat on the specified platform. \
-                    Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
-                    This tool will fuzzy search for the chat_name, add the message to the sending queue and unless user replies cancel the message will be sent after 60 seconds.
+                    "Sends a message to a specific chat on the specified platform IMMEDIATELY. \
+                    Use this when the user asks to send a message RIGHT NOW to a contact or group on Telegram, WhatsApp or Signal. \
+                    IMPORTANT: If the user specifies a future time (e.g. 'at 5pm text...', 'in 2 hours send...'), do NOT call this tool - use create_item instead to schedule it. This tool executes immediately and cannot be scheduled. \
+                    This tool will fuzzy search for the chat_name, add the message to the sending queue and unless user replies cancel the message will be sent after 60 seconds. \
                     Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content, recipient and platform before calling the tool."
                 )),
             parameters: types::FunctionParameters {
@@ -230,7 +227,7 @@ pub async fn handle_send_chat_message(
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             Json(TwilioResponse {
                 message: error_msg.to_string(),
-                created_task_id: None,
+                created_item_id: None,
             }),
         ));
     }
@@ -251,7 +248,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -312,7 +309,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -339,12 +336,7 @@ pub async fn handle_send_chat_message(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -353,7 +345,7 @@ pub async fn handle_send_chat_message(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -414,7 +406,7 @@ pub async fn handle_send_chat_message(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(TwilioResponse {
             message: "Message queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }
@@ -664,8 +656,6 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
     }
 }
 
-use chrono::DateTime;
-
 #[derive(Deserialize)]
 struct FetchRecentMessagesArgs {
     platform: String,
@@ -691,14 +681,22 @@ pub async fn handle_fetch_recent_messages(
         .map(|c| c.to_uppercase().collect::<String>())
         .unwrap_or_default()
         + &args.platform[1..];
-    // Parse the RFC3339 timestamps into Unix timestamps
-    let start_time = match DateTime::parse_from_rfc3339(&args.start) {
-        Ok(dt) => dt.timestamp(),
-        Err(e) => {
-            eprintln!("Failed to parse start time: {}", e);
-            return "Invalid start time format. Please use RFC3339 format.".to_string();
+    // Look up user timezone and parse datetime to UTC timestamp
+    let user_tz = match state.user_core.get_user_info(user_id) {
+        Ok(info) => {
+            let tz_str = info.timezone.unwrap_or_else(|| "UTC".to_string());
+            tz_str.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC)
         }
+        Err(_) => chrono_tz::UTC,
     };
+    let start_time =
+        match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&args.start, &user_tz) {
+            Ok(dt) => dt.timestamp(),
+            Err(e) => {
+                eprintln!("Failed to parse start time: {}", e);
+                return "Invalid start time format.".to_string();
+            }
+        };
     match crate::utils::bridge::fetch_bridge_messages(
         &args.platform,
         state,

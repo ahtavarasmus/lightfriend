@@ -291,7 +291,6 @@ pub fn connect(props: &ConnectProps) -> Html {
             "weather" => html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> },
             "directions" => html! { <div class="builtin-detail"><p>{"Step-by-step navigation and travel time estimates between locations."}</p></div> },
             "photo" => html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> },
-            "tasks" => html! { <div class="builtin-detail"><p>{"Create reminders and scheduled tasks via natural language."}</p></div> },
             "sms_calls" => html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> },
             _ => html! {},
         }
@@ -409,15 +408,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                             })}
                         >
                             <i class="fa-solid fa-camera"></i>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "tasks") { "selected" } else { "" })}
-                            title="Tasks - Create reminders and scheduled tasks"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("tasks".to_string()) { None } else { Some("tasks".to_string()) });
-                            })}
-                        >
-                            <i class="fa-solid fa-tasks"></i>
                         </button>
                         <button
                             class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "sms_calls") { "selected" } else { "" })}

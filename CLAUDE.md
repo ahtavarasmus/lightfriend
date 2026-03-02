@@ -47,6 +47,10 @@ See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
 **Database:** SQLite + Diesel 2.1 with 129 migrations in `backend/migrations/`
 
+## Testing - IMPORTANT
+
+**ALL tests go in `backend/tests/` - NEVER use inline `#[cfg(test)] mod tests` blocks inside source files.** Integration tests live in `backend/tests/<module>_test.rs`. If a function is private and needs testing, either test it through the public API or make it `pub` so the test file can access it.
+
 ## Key Patterns
 
 **Repository Pattern:** Always use repositories for data access, never raw Diesel queries in handlers.

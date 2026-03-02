@@ -29,11 +29,6 @@ async fn geocode_location(location: &str) -> Option<(f64, f64)> {
     Some((lat, lon))
 }
 
-#[derive(Deserialize)]
-pub struct ProactiveAgentEnabledRequest {
-    enabled: bool,
-}
-
 #[derive(Serialize)]
 pub struct ProactiveAgentEnabledResponse {
     enabled: bool,
@@ -110,9 +105,10 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,    // "monitor" or "digest"
+    plan_type: Option<String>,    // "assistant", "autopilot", or "byot"
     phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
+    auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
     has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
@@ -328,6 +324,7 @@ pub async fn get_profile(
                 plan_type: user.plan_type,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
+                auto_create_items: user_settings.auto_create_items,
                 has_any_connection,
             }))
         }
@@ -649,13 +646,11 @@ pub async fn patch_profile_field(
                     Json(json!({"error": "notification_type must be a string"})),
                 )
             })?;
-            let allowed_types = ["sms", "call", "call_sms"];
+            let allowed_types = ["sms", "call"];
             if !allowed_types.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "Invalid notification type. Must be 'sms', 'call', or 'call_sms'"}),
-                    ),
+                    Json(json!({"error": "Invalid notification type. Must be 'sms' or 'call'"})),
                 ));
             }
             state
@@ -708,29 +703,27 @@ pub async fn patch_profile_field(
                     )
                 })?;
         }
-        "llm_provider" => {
-            let value = request.value.as_str().ok_or_else(|| {
+        "auto_create_items" => {
+            let value = request.value.as_bool().ok_or_else(|| {
                 (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "llm_provider must be a string"})),
+                    Json(json!({"error": "auto_create_items must be a boolean"})),
                 )
             })?;
-            // Validate the value is either "openai" or "tinfoil"
-            if value != "openai" && value != "tinfoil" {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "llm_provider must be 'openai' or 'tinfoil'"})),
-                ));
-            }
             state
                 .user_core
-                .update_llm_provider(user_id, value)
+                .update_auto_create_items(user_id, value)
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
                     )
                 })?;
+        }
+        "llm_provider" => {
+            // No-op: Tinfoil is now the sole provider. Accept silently for
+            // backward compatibility with older frontends.
+            tracing::debug!("llm_provider change ignored - Tinfoil is sole provider");
         }
         "preferred_number" => {
             let value = request.value.as_str().ok_or_else(|| {
@@ -807,78 +800,24 @@ pub async fn patch_profile_field(
     Ok(Json(json!({"success": true})))
 }
 
-/// Recalculate credits_left when user changes phone country
-/// Uses proportional transfer: preserves the percentage of monthly allowance remaining
+/// Recalculate credits_left when user changes phone country.
+/// With unified credit budget (25.0 for all countries), credits survive country changes unchanged.
 async fn recalculate_credits_for_country_change(
-    state: &Arc<AppState>,
+    _state: &Arc<AppState>,
     user_id: i32,
     old_country: Option<&str>,
     new_country: Option<&str>,
     old_credits_left: f32,
-    plan_type: Option<&str>,
+    _plan_type: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use crate::api::twilio_pricing::get_euro_country_pricing;
-
-    // Determine plan messages (40 for monitor, 120 for digest)
-    let plan_messages: f32 = match plan_type {
-        Some("digest") => 120.0,
-        _ => 40.0, // monitor or default
-    };
-
-    // Check if country is US/CA
-    let is_us_ca = |c: Option<&str>| matches!(c, Some("US") | Some("CA"));
-
-    // Get max credits for a country
-    // US/CA: always 400 messages (hosted plan)
-    // Euro: credits_left is € value = plan_messages × regular_message_price
-    let get_max_credits = async |country: Option<&str>| -> f32 {
-        if is_us_ca(country) {
-            // US/CA: always 400 messages (hosted plan)
-            400.0
-        } else if let Some(c) = country {
-            // Euro: € value based on SMS pricing (regular_message_price already includes segments × margin)
-            if let Ok(pricing) = get_euro_country_pricing(state, c).await {
-                return plan_messages * pricing.regular_message_price;
-            }
-            // Fallback: €0.39 per message (same as stripe_handlers.rs)
-            plan_messages * 0.39
-        } else {
-            // Unknown country fallback
-            plan_messages * 0.39
-        }
-    };
-
-    let old_max = get_max_credits(old_country).await;
-    let new_max = get_max_credits(new_country).await;
-
-    if old_max <= 0.0 || new_max <= 0.0 {
-        tracing::warn!("Invalid max credits: old={}, new={}", old_max, new_max);
-        return Ok(());
-    }
-
-    // Calculate ratio of remaining allowance (capped at 1.0)
-    let ratio = (old_credits_left / old_max).min(1.0);
-
-    // Apply ratio to new country's max
-    let new_credits_left = new_max * ratio;
-
+    // Budget is 25.0 for all countries - no recalculation needed
     tracing::info!(
-        "Credit recalculation: user={}, old_country={:?}, new_country={:?}, \
-         old_credits={:.2}, old_max={:.2}, ratio={:.2}, new_credits={:.2}",
+        "Country change for user {}: {:?} -> {:?}, credits_left={:.2} (unchanged)",
         user_id,
         old_country,
         new_country,
-        old_credits_left,
-        old_max,
-        ratio,
-        new_credits_left
+        old_credits_left
     );
-
-    // Update credits_left
-    state
-        .user_repository
-        .update_user_credits_left(user_id, new_credits_left)?;
-
     Ok(())
 }
 
@@ -1227,6 +1166,19 @@ pub async fn update_profile(
     let old_country = get_country_code_from_phone(&current_user.phone_number);
     let old_credits_left = current_user.credits_left;
 
+    // Check for duplicate phone number (unless user is keeping their current phone)
+    if !update_req.phone_number.is_empty() && update_req.phone_number != current_user.phone_number {
+        if let Ok(Some(_)) = state
+            .user_core
+            .find_by_phone_number(&update_req.phone_number)
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({"error": "This phone number is already in use by another account"})),
+            ));
+        }
+    }
+
     match state.user_core.update_profile(UpdateProfileParams {
         user_id: auth_user.user_id,
         email: &update_req.email,
@@ -1539,31 +1491,6 @@ pub async fn get_critical_settings(
     }
 }
 
-pub async fn update_proactive_agent_on(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<ProactiveAgentEnabledRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Update critical enabled setting
-    match state
-        .user_core
-        .update_proactive_agent_on(auth_user.user_id, request.enabled)
-    {
-        Ok(_) => Ok(Json(json!({
-            "message": "Proactive notifications setting updated successfully"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to update proactive notifications setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": format!("Failed to update proactive notifications setting: {}", e)}),
-                ),
-            ))
-        }
-    }
-}
-
 pub async fn get_proactive_agent_on(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -1586,11 +1513,58 @@ pub struct QuietModeStatus {
     pub is_quiet: bool,
     pub until: Option<i32>,
     pub until_display: Option<String>,
+    pub rules: Vec<QuietRuleInfo>,
+}
+
+#[derive(Serialize)]
+pub struct QuietRuleInfo {
+    pub id: i32,
+    pub rule_type: String,
+    pub platform: Option<String>,
+    pub sender: Option<String>,
+    pub topic: Option<String>,
+    pub until: Option<i32>,
+    pub until_display: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct SetQuietModeRequest {
     pub until: Option<i32>, // None = disable quiet mode, 0 = indefinite, timestamp = until
+}
+
+#[derive(Deserialize)]
+pub struct AddQuietRuleRequest {
+    pub until: i32,
+    pub rule_type: String, // "suppress" or "allow"
+    pub platform: Option<String>,
+    pub sender: Option<String>,
+    pub topic: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Parse quiet rule info from an item's tagged summary.
+fn parse_rule_info_from_item(
+    item: &crate::models::user_models::Item,
+    user_id: i32,
+    state: &Arc<AppState>,
+) -> Option<QuietRuleInfo> {
+    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+    // Only return items that have a [quiet:...] tag (not backward-compat global items)
+    let rule_type = tags.quiet?;
+
+    let until_display = item
+        .due_at
+        .map(|ts| format_quiet_until_display(ts, user_id, state));
+
+    Some(QuietRuleInfo {
+        id: item.id.unwrap_or(0),
+        rule_type,
+        platform: tags.platform,
+        sender: tags.sender,
+        topic: tags.topic,
+        until: item.due_at,
+        until_display,
+    })
 }
 
 /// GET /api/profile/quiet-mode
@@ -1621,10 +1595,23 @@ pub async fn get_quiet_mode(
                 }
             };
 
+            // Get quiet rules
+            let rules = match state.user_core.get_quiet_rules(auth_user.user_id) {
+                Ok(items) => items
+                    .iter()
+                    .filter_map(|item| parse_rule_info_from_item(item, auth_user.user_id, &state))
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+
+            // is_quiet should also be true if there are active rules
+            let effective_quiet = is_quiet || !rules.is_empty();
+
             Ok(Json(QuietModeStatus {
-                is_quiet,
+                is_quiet: effective_quiet,
                 until: if is_quiet { quiet_until } else { None },
                 until_display,
+                rules,
             }))
         }
         Err(e) => {
@@ -1660,6 +1647,59 @@ pub async fn set_quiet_mode(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to set quiet mode: {}", e)})),
+            ))
+        }
+    }
+}
+
+/// POST /api/profile/quiet-rules
+pub async fn add_quiet_rule(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<AddQuietRuleRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if request.rule_type != "suppress" && request.rule_type != "allow" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "rule_type must be 'suppress' or 'allow'"})),
+        ));
+    }
+
+    let description = request.description.as_deref().unwrap_or("Quiet rule");
+
+    match state.user_core.add_quiet_rule(
+        auth_user.user_id,
+        request.until,
+        &request.rule_type,
+        request.platform.as_deref(),
+        request.sender.as_deref(),
+        request.topic.as_deref(),
+        description,
+    ) {
+        Ok(rule_id) => Ok(Json(json!({ "id": rule_id, "message": "Rule added" }))),
+        Err(e) => {
+            tracing::error!("Failed to add quiet rule: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to add quiet rule: {}", e)})),
+            ))
+        }
+    }
+}
+
+/// DELETE /api/profile/quiet-rules
+pub async fn delete_quiet_rules(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Delete all quiet_mode items (rules + global). This is the same as disabling quiet mode.
+    match state.user_core.set_quiet_mode(auth_user.user_id, None) {
+        Ok(_) => Ok(Json(json!({ "message": "All quiet rules cleared" }))),
+        Err(e) => {
+            tracing::error!("Failed to clear quiet rules: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to clear quiet rules: {}", e)})),
             ))
         }
     }
@@ -1787,9 +1827,9 @@ pub struct WebChatResponse {
     pub credits_charged: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<MediaResult>>,
-    /// ID of task created during this chat (if any) - for auto-showing task preview
+    /// ID of item created during this chat (if any) - for auto-showing item preview
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_task_id: Option<i32>,
+    pub created_item_id: Option<i32>,
 }
 
 pub async fn web_chat(
@@ -1953,7 +1993,7 @@ pub async fn web_chat(
             message,
             credits_charged: charged_amount,
             media,
-            created_task_id: response.created_task_id,
+            created_item_id: response.created_item_id,
         }))
     } else {
         // No refund - credits are consumed on attempt
@@ -1965,6 +2005,262 @@ pub async fn web_chat(
             })),
         ))
     }
+}
+
+/// SSE streaming web chat endpoint.
+/// Streams status updates (thinking, tool calls, retries) then the final response.
+pub async fn web_chat_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    axum::extract::Query(request): axum::extract::Query<WebChatRequest>,
+) -> axum::response::sse::Sse<
+    impl futures::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use crate::api::twilio_sms::{ChatStatus, ProcessSmsOptions};
+
+    let stream = async_stream::stream! {
+        // --- Auth & credit checks (same as web_chat) ---
+        let user = match state.user_core.find_by_id(auth_user.user_id) {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": "User not found"}).to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Database error: {}", e)}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        if user.sub_tier.is_none() {
+            yield Ok(axum::response::sse::Event::default().data(
+                serde_json::json!({"step": "error", "message": "Please subscribe to use the web chat feature"}).to_string(),
+            ));
+            return;
+        }
+
+        let is_us_or_ca = user.phone_number.starts_with("+1");
+        let (credits_left_cost, credits_cost) = if is_us_or_ca {
+            (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+        } else {
+            (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
+        };
+
+        let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+        if !has_credits {
+            yield Ok(axum::response::sse::Event::default().data(
+                serde_json::json!({"step": "error", "message": "Insufficient credits. Please add more credits to continue."}).to_string(),
+            ));
+            return;
+        }
+
+        // Deduct credits
+        let charged_amount = if user.credits_left >= credits_left_cost {
+            let new_credits_left = user.credits_left - credits_left_cost;
+            if let Err(e) = state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left) {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            credits_left_cost
+        } else {
+            let new_credits = user.credits - credits_cost;
+            if let Err(e) = state.user_repository.update_user_credits(auth_user.user_id, new_credits) {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            credits_cost
+        };
+
+        let _ = state.user_repository.log_usage(crate::repositories::user_repository::LogUsageParams {
+            user_id: auth_user.user_id,
+            sid: None,
+            activity_type: "web_chat".to_string(),
+            credits: Some(charged_amount),
+            time_consumed: None,
+            success: Some(true),
+            reason: None,
+            status: None,
+            recharge_threshold_timestamp: None,
+            zero_credits_timestamp: None,
+        });
+
+        // Send initial thinking status
+        yield Ok(axum::response::sse::Event::default().data(
+            serde_json::json!({"step": "thinking", "message": "Thinking..."}).to_string(),
+        ));
+
+        // Create status channel
+        let (status_tx, mut status_rx) = tokio::sync::mpsc::channel::<ChatStatus>(32);
+
+        // Create mock Twilio payload
+        let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+            from: user.phone_number.clone(),
+            to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+            body: request.message.clone(),
+            num_media: None,
+            media_url0: None,
+            media_content_type0: None,
+            message_sid: "".to_string(),
+        };
+
+        // Spawn process_sms as a task
+        let state_clone = state.clone();
+        let mut process_handle = tokio::spawn(async move {
+            crate::api::twilio_sms::process_sms(
+                &state_clone,
+                mock_payload,
+                ProcessSmsOptions::web_chat_streaming(status_tx),
+            )
+            .await
+        });
+
+        // Stream status updates from the channel until process_sms completes
+        #[allow(unused_assignments)]
+        let mut task_result = None;
+        loop {
+            tokio::select! {
+                status = status_rx.recv() => {
+                    match status {
+                        Some(ChatStatus::Thinking) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "thinking", "message": "Thinking..."}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::ToolCall { name }) => {
+                            let display = match name.as_str() {
+                                "get_calendar_events" | "create_calendar_event" => "Checking calendar...".to_string(),
+                                "ask_perplexity" => "Searching the web...".to_string(),
+                                "create_task" => "Creating item...".to_string(),
+                                "send_sms" | "send_email" => "Preparing message...".to_string(),
+                                "fetch_tracked_items" => "Checking items...".to_string(),
+                                "direct_response" => "Responding...".to_string(),
+                                other => format!("Using {}...", other.replace('_', " ")),
+                            };
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "tool_call", "message": display}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::Reasoning { snippet }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "reasoning", "message": snippet}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::Retrying { attempt, max }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                            ));
+                        }
+                        Some(ChatStatus::RetryingFollowup { attempt, max }) => {
+                            yield Ok(axum::response::sse::Event::default().data(
+                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                            ));
+                        }
+                        None => {
+                            // Channel closed - process_sms dropped the sender, task is finishing
+                            task_result = Some(process_handle.await);
+                            break;
+                        }
+                    }
+                }
+                result = &mut process_handle => {
+                    // Small yield to let bridge tasks flush final events
+                    tokio::task::yield_now().await;
+                    // process_sms task completed before channel drained - drain remaining
+                    while let Ok(status) = status_rx.try_recv() {
+                        let msg = match status {
+                            ChatStatus::Thinking => serde_json::json!({"step": "thinking", "message": "Thinking..."}),
+                            ChatStatus::Reasoning { snippet } => serde_json::json!({"step": "reasoning", "message": snippet}),
+                            ChatStatus::ToolCall { name } => serde_json::json!({"step": "tool_call", "message": format!("Using {}...", name.replace('_', " "))}),
+                            ChatStatus::Retrying { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
+                            ChatStatus::RetryingFollowup { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
+                        };
+                        yield Ok(axum::response::sse::Event::default().data(msg.to_string()));
+                    }
+                    task_result = Some(result);
+                    break;
+                }
+            }
+        }
+
+        // Send the final complete/error event
+        let final_result = match task_result {
+            Some(Ok(r)) => Ok(r),
+            Some(Err(e)) => Err(format!("Task panicked: {}", e)),
+            None => Err("Task did not produce a result".to_string()),
+        };
+        match final_result {
+            Ok((status, _, response)) => {
+                if status == StatusCode::OK {
+                    // Extract media results (same as web_chat)
+                    let mut message = response.message.clone();
+                    let mut media: Option<Vec<MediaResult>> = None;
+
+                    if let Some(start_idx) = message.find("[MEDIA_RESULTS]") {
+                        if let Some(end_idx) = message.find("[/MEDIA_RESULTS]") {
+                            let json_str = &message[start_idx + 15..end_idx];
+                            if let Ok(youtube_result) = serde_json::from_str::<
+                                crate::tool_call_utils::youtube::YouTubeToolResult,
+                            >(json_str) {
+                                let video_count = youtube_result.videos.len();
+                                media = Some(
+                                    youtube_result.videos.into_iter().map(|v| MediaResult {
+                                        platform: "youtube".to_string(),
+                                        video_id: v.video_id,
+                                        title: v.title,
+                                        thumbnail: v.thumbnail,
+                                        duration: v.duration,
+                                        channel: Some(v.channel),
+                                    }).collect(),
+                                );
+                                message = format!(
+                                    "Here are {} video{} I found:",
+                                    video_count,
+                                    if video_count == 1 { "" } else { "s" }
+                                );
+                            }
+                        }
+                    }
+
+                    let mut event_data = serde_json::json!({
+                        "step": "complete",
+                        "message": message,
+                        "credits_charged": charged_amount,
+                    });
+                    if let Some(media) = media {
+                        event_data["media"] = serde_json::to_value(media).unwrap_or_default();
+                    }
+                    if let Some(item_id) = response.created_item_id {
+                        event_data["created_item_id"] = serde_json::json!(item_id);
+                    }
+
+                    yield Ok(axum::response::sse::Event::default().data(event_data.to_string()));
+                } else {
+                    yield Ok(axum::response::sse::Event::default().data(
+                        serde_json::json!({"step": "error", "message": "Failed to process message"}).to_string(),
+                    ));
+                }
+            }
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": format!("Processing error: {}", e)}).to_string(),
+                ));
+            }
+        }
+    };
+
+    axum::response::sse::Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    )
 }
 
 // On-demand "What's new?" digest endpoint
@@ -2205,7 +2501,7 @@ pub async fn get_instant_digest(
             message: "Nothing new since your last check!".to_string(),
             credits_charged: charged_amount,
             media: None,
-            created_task_id: None,
+            created_item_id: None,
         }));
     }
 
@@ -2272,7 +2568,7 @@ pub async fn get_instant_digest(
         message: digest_message,
         credits_charged: charged_amount,
         media: None,
-        created_task_id: None,
+        created_item_id: None,
     }))
 }
 
@@ -2506,7 +2802,7 @@ pub async fn web_chat_with_image(
             message,
             credits_charged: charged_amount,
             media,
-            created_task_id: response.created_task_id,
+            created_item_id: response.created_item_id,
         }))
     } else {
         // No refund - credits are consumed on attempt

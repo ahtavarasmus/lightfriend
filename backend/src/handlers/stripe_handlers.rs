@@ -28,87 +28,8 @@ pub struct BuyCreditsRequest {
 #[derive(Deserialize)]
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
-    /// For euro countries: "monitor" (€29/40 msgs) or "digest" (€49/120 msgs)
+    /// "assistant" or "autopilot"
     pub plan_type: Option<String>,
-}
-
-/// Calculate euro credit allocation for Monitor/Digest plans based on user's country pricing.
-///
-/// Uses dynamic Twilio pricing when available, falls back to €0.39/message otherwise.
-/// Sends admin email notification when fallback pricing is used.
-///
-/// # Arguments
-/// * `state` - Application state for database/pricing access
-/// * `country_code` - User's phone number country code (e.g., "FI", "DE")
-/// * `message_count` - Number of messages the plan includes (40 for Monitor, 120 for Digest)
-/// * `plan_name` - Plan name for logging ("Monitor" or "Digest")
-///
-/// # Returns
-/// The euro value to allocate as credits_left (message_count × price_per_message)
-async fn calculate_euro_credit_allocation(
-    state: &Arc<AppState>,
-    country_code: &str,
-    message_count: f32,
-    plan_name: &str,
-) -> f32 {
-    use crate::api::twilio_pricing::get_euro_country_pricing;
-
-    // Fallback price: €0.39 per regular message (0.10 × 3 segments × 1.3 margin)
-    const FALLBACK_REGULAR_MSG_PRICE: f32 = 0.39;
-
-    match get_euro_country_pricing(state, country_code).await {
-        Ok(pricing) => {
-            let allocation = message_count * pricing.regular_message_price;
-            tracing::info!(
-                "{} plan credit allocation for {}: {} messages × €{:.3}/msg = €{:.2}",
-                plan_name,
-                country_code,
-                message_count,
-                pricing.regular_message_price,
-                allocation
-            );
-            allocation
-        }
-        Err(e) => {
-            let fallback_allocation = message_count * FALLBACK_REGULAR_MSG_PRICE;
-            tracing::warn!(
-                "Failed to get pricing for {}, using fallback: {} - allocating €{:.2}",
-                country_code,
-                e,
-                fallback_allocation
-            );
-
-            // Send admin notification about fallback usage
-            let subject = format!("Pricing Fallback Used - {} Plan", plan_name);
-            let message = format!(
-                "Dynamic Twilio pricing lookup failed for country '{}' during {} plan subscription.\n\n\
-                Error: {}\n\n\
-                Fallback pricing used: €{:.2}/message\n\
-                Allocated credits: €{:.2} (~{} messages)\n\n\
-                Consider checking:\n\
-                1. Twilio pricing API availability\n\
-                2. Country code validity\n\
-                3. Network connectivity",
-                country_code, plan_name, e, FALLBACK_REGULAR_MSG_PRICE, fallback_allocation, message_count as i32
-            );
-
-            // Spawn email notification (don't block the webhook)
-            let state_clone = state.clone();
-            tokio::spawn(async move {
-                if let Err(e) = crate::utils::notification_utils::send_admin_alert(
-                    &state_clone,
-                    &subject,
-                    &message,
-                )
-                .await
-                {
-                    tracing::error!("Failed to send admin alert about pricing fallback: {}", e);
-                }
-            });
-
-            fallback_allocation
-        }
-    }
 }
 
 /// Idempotent subscription setup. Safe to call multiple times.
@@ -118,7 +39,7 @@ async fn setup_user_subscription(
     user_id: i32,
     price_id: &str,
     current_period_end: i64,
-    phone_country: Option<&str>,
+    _phone_country: Option<&str>,
 ) -> Result<(), String> {
     // Idempotency: skip if billing date already matches this period
     if let Ok(Some(existing)) = state.user_core.get_next_billing_date(user_id) {
@@ -146,19 +67,14 @@ async fn setup_user_subscription(
         );
     }
 
-    // Set plan_type
-    use crate::utils::country::{
-        is_byot_plan_price, is_digest_plan_price, is_legacy_euro_plan_price, is_monitor_plan_price,
-    };
-    // Manual override: user 12 was subscribed with wrong price ID, force BYOT
-    let plan_type = if user_id == 12 {
-        "byot"
-    } else if is_digest_plan_price(price_id) {
-        "digest"
-    } else if is_byot_plan_price(price_id) {
+    // Set plan_type based on price ID
+    use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
+    let plan_type = if is_assistant_plan_price(price_id) {
+        "assistant"
+    } else if is_byot_plan_price(price_id) || user_id == 12 {
         "byot"
     } else {
-        "monitor" // includes legacy sentinel price IDs
+        "autopilot" // any legacy/unknown price ID -> autopilot
     };
     if let Err(e) = state
         .user_repository
@@ -167,37 +83,13 @@ async fn setup_user_subscription(
         tracing::error!("Failed to set plan_type for user {}: {}", user_id, e);
     }
 
-    // Calculate credits based on tier and country
+    // Calculate credits: fixed budget for all hosted plans, all countries
+    use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
     let credits: f32 = if sub_info.tier == "tier 2" {
-        let country = match phone_country {
-            Some(c) => c,
-            None => {
-                tracing::warn!(
-                    "No phone country for user {}, using FI as fallback for credit calculation",
-                    user_id
-                );
-                "FI"
-            }
-        };
-        if user_id == 12 {
-            0.0 // Manual override: BYOT user on wrong price ID
-        } else if country == "US" || country == "CA" {
-            400.0
-        } else if is_monitor_plan_price(price_id) || is_legacy_euro_plan_price(price_id) {
-            // Legacy sentinel price IDs (€19) get same credits as Monitor plan (40 messages)
-            calculate_euro_credit_allocation(state, country, 40.0, "Monitor").await
-        } else if is_digest_plan_price(price_id) {
-            calculate_euro_credit_allocation(state, country, 120.0, "Digest").await
-        } else if is_byot_plan_price(price_id) {
-            0.0 // BYOT users pay as they go
+        if is_byot_plan_price(price_id) {
+            0.0 // BYOT users pay Twilio directly
         } else {
-            // Unknown price ID - log warning but give Monitor credits as fallback
-            tracing::warn!(
-                "Unknown price_id {} for user {}, giving Monitor credits as fallback",
-                price_id,
-                user_id
-            );
-            calculate_euro_credit_allocation(state, country, 40.0, "Monitor").await
+            MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
         }
     } else {
         0.0
@@ -238,13 +130,13 @@ async fn setup_user_subscription(
     Ok(())
 }
 
-/// Check if user is eligible for automatic upgrade refund when switching from Monitor/BYOT to Digest.
+/// Check if user is eligible for automatic upgrade refund when switching from Assistant/BYOT to Autopilot.
 /// Returns Some((payment_intent_id, amount_cents)) if eligible, None otherwise.
 ///
 /// Eligibility criteria:
-/// - Old subscription was Monitor or BYOT
+/// - Old subscription was Assistant or BYOT
 /// - Within 7 days of last payment on old subscription
-/// - For Monitor users: usage < 30%
+/// - For Assistant users: usage < 30%
 /// - For BYOT users: no usage check needed
 async fn check_upgrade_refund_eligibility(
     client: &Client,
@@ -253,7 +145,7 @@ async fn check_upgrade_refund_eligibility(
     old_subscription: &stripe::Subscription,
 ) -> Option<(String, i64)> {
     use crate::handlers::refund_handlers::get_max_credits_left;
-    use crate::utils::country::{is_byot_plan_price, is_monitor_plan_price};
+    use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
 
     // Get old price ID
     let old_price_id = old_subscription
@@ -264,11 +156,11 @@ async fn check_upgrade_refund_eligibility(
         .map(|p| p.id.to_string())?;
 
     let was_byot = is_byot_plan_price(&old_price_id);
-    let was_monitor = is_monitor_plan_price(&old_price_id);
+    let was_assistant = is_assistant_plan_price(&old_price_id);
 
-    if !was_byot && !was_monitor {
+    if !was_byot && !was_assistant {
         tracing::debug!(
-            "Old subscription was not Monitor or BYOT, not eligible for upgrade refund"
+            "Old subscription was not Assistant or BYOT, not eligible for upgrade refund"
         );
         return None;
     }
@@ -300,10 +192,10 @@ async fn check_upgrade_refund_eligibility(
         return None;
     }
 
-    // For Monitor users, check credit usage
-    if was_monitor {
+    // For Assistant users, check credit usage
+    if was_assistant {
         let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
-        let max_credits = get_max_credits_left(state, country.as_deref(), Some("monitor")).await;
+        let max_credits = get_max_credits_left(state, country.as_deref(), Some("assistant")).await;
         let credits_used = max_credits - user.credits_left;
         let usage_percent = if max_credits > 0.0 {
             (credits_used / max_credits * 100.0).max(0.0)
@@ -313,14 +205,14 @@ async fn check_upgrade_refund_eligibility(
 
         if usage_percent >= 30.0 {
             tracing::info!(
-                "User {} not eligible for upgrade refund: Monitor usage {:.1}% >= 30%",
+                "User {} not eligible for upgrade refund: Assistant usage {:.1}% >= 30%",
                 user.id,
                 usage_percent
             );
             return None;
         }
         tracing::debug!(
-            "Monitor user {} usage {:.1}% < 30%, eligible for refund",
+            "Assistant user {} usage {:.1}% < 30%, eligible for refund",
             user.id,
             usage_percent
         );
@@ -438,17 +330,18 @@ pub async fn create_unified_subscription_checkout(
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
-                std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
-                    .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
-            } else {
-                // Non-US/CA countries: Monitor, Digest, or BYOT plan
                 match body.plan_type.as_deref() {
-                    Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
-                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
-                    Some("byot") => std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_BYOT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
-                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"), // Default to Monitor
+                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
+                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
+                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
+                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
+                }
+            } else {
+                match body.plan_type.as_deref() {
+                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
+                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
+                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
+                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
                 }
             }
         }
@@ -545,7 +438,7 @@ pub async fn create_unified_subscription_checkout(
 pub struct GuestCheckoutBody {
     pub subscription_type: SubscriptionType,
     pub selected_country: String,
-    /// For euro countries: "monitor" (€29/40 msgs) or "digest" (€49/120 msgs)
+    /// "assistant" or "autopilot"
     pub plan_type: Option<String>,
 }
 
@@ -572,21 +465,22 @@ pub async fn create_guest_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     let country = body.selected_country.as_str();
 
-    // Select price ID based on subscription type and country
+    // Select price ID based on subscription type, country, and plan choice
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
-                std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
-                    .expect("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US not set")
-            } else {
-                // Non-US/CA countries: use monitor, digest, or byot plan based on selection
                 match body.plan_type.as_deref() {
-                    Some("digest") => std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID")
-                        .expect("STRIPE_DIGEST_PLAN_PRICE_ID not set"),
-                    Some("byot") => std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_BYOT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID")
-                        .expect("STRIPE_MONITOR_PLAN_PRICE_ID not set"),
+                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
+                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
+                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
+                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
+                }
+            } else {
+                match body.plan_type.as_deref() {
+                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
+                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
+                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
+                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
                 }
             }
         }
@@ -789,19 +683,19 @@ pub async fn create_checkout_session(
     let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
 
     if !is_us_ca {
-        // Check if user is on Digest plan (only Digest plan users can buy overage credits)
-        if user.plan_type.as_deref() != Some("digest") {
+        // Only hosted-credit plans (assistant, autopilot) can buy more credits; BYOT cannot
+        if !crate::utils::plan_features::uses_hosted_credits(user.plan_type.as_deref()) {
             tracing::info!(
-                "User {} attempted to buy credits but is not on Digest plan (plan_type={:?})",
+                "User {} attempted to buy credits but plan_type={:?} does not use hosted credits",
                 user_id,
                 user.plan_type
             );
             return Err((
                 StatusCode::FORBIDDEN,
                 Json(json!({
-                    "error": "Credit top-ups are only available on the Digest plan",
+                    "error": "Credit top-ups are not available on your current plan",
                     "upgrade_required": true,
-                    "message": "Upgrade to Digest for €49/month to get 120 credits and the ability to purchase additional credits when needed."
+                    "message": "Subscribe to a hosted plan to purchase additional credits."
                 })),
             ));
         }
@@ -998,7 +892,20 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
         };
     }
 
-    // Check for new Monitor and Digest plans (tier 2)
+    // Check for new Assistant and Autopilot plans (tier 2)
+    for env_var in [
+        "STRIPE_ASSISTANT_PLAN_PRICE_ID",
+        "STRIPE_ASSISTANT_PLAN_PRICE_ID_US",
+        "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
+        "STRIPE_AUTOPILOT_PLAN_PRICE_ID_US",
+    ] {
+        if price_id == std::env::var(env_var).unwrap_or_default() {
+            info.tier = "tier 2";
+            return info;
+        }
+    }
+
+    // Legacy Monitor and Digest plans (tier 2)
     if price_id == std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID").unwrap_or_default() {
         info.tier = "tier 2";
         return info;
@@ -1156,8 +1063,6 @@ pub async fn stripe_webhook(
 
                 // Cancel existing subscriptions when a new one is created
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
-                    use crate::utils::country::is_digest_plan_price;
-
                     let existing_subscriptions = stripe::Subscription::list(
                         &client,
                         &stripe::ListSubscriptions {
@@ -1177,8 +1082,9 @@ pub async fn stripe_webhook(
 
                     for existing_sub in existing_subscriptions.data.iter() {
                         if existing_sub.id != subscription.id {
-                            // Check if upgrading to Digest and eligible for automatic refund
-                            if is_digest_plan_price(&price_id) {
+                            // Check if upgrading and eligible for automatic refund
+                            // (any plan change can trigger a refund check)
+                            {
                                 // Get user for credit usage check
                                 if let Ok(Some(user)) = state
                                     .user_repository

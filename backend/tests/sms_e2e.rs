@@ -6,11 +6,11 @@
 //! - ProcessSmsOptions: Verifies production, web_chat, and test_with_mock modes
 //! - Database integration: Tests credit deduction with real in-memory database
 //!
-//! Credit deduction logic by country (from utils/usage.rs):
-//! - US/CA (+1): credits_left = message COUNT (1 per message)
-//! - Finland (+358): credits_left = EURO value with segment pricing
-//! - UK (+44): credits_left = EURO value with segment pricing
-//! - Germany (+49): notification-only, dynamic Twilio pricing
+//! Credit deduction model (unified credits):
+//! - All users get 25.0 credits monthly (MONTHLY_CREDIT_BUDGET)
+//! - SMS: credits deducted at Twilio status callback (actual price * 1.3 margin)
+//! - Voice/web: credits deducted at ElevenLabs callback
+//! - Pre-send check: just verifies credits > 0 for SMS events
 
 use axum::http::StatusCode;
 use backend::api::twilio_sms::{process_sms, ProcessSmsOptions, TwilioWebhookPayload};
@@ -19,7 +19,7 @@ use backend::test_utils::{
     create_test_state, create_test_user, deactivate_phone_service, get_total_credits,
     set_byot_credentials, MockLlmResponse, TestUserParams,
 };
-use backend::utils::usage::deduct_user_credits;
+use backend::utils::usage::deduct_from_twilio_price;
 use backend::UserCoreOps;
 
 #[test]
@@ -81,15 +81,13 @@ fn test_germany_user_params_has_correct_phone_format() {
 fn test_process_sms_options_default_is_production() {
     let options = ProcessSmsOptions::default();
     assert!(!options.skip_twilio_send);
-    assert!(!options.skip_credit_deduction);
     assert!(options.mock_llm_response.is_none());
 }
 
 #[test]
-fn test_process_sms_options_web_chat_skips_twilio_and_credits() {
+fn test_process_sms_options_web_chat_skips_twilio() {
     let options = ProcessSmsOptions::web_chat();
     assert!(options.skip_twilio_send);
-    assert!(options.skip_credit_deduction);
     assert!(options.mock_llm_response.is_none());
 }
 
@@ -98,67 +96,69 @@ fn test_process_sms_options_test_with_mock() {
     let mock = MockLlmResponse::with_direct_response("Test");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
     assert!(options.skip_twilio_send);
-    assert!(!options.skip_credit_deduction); // Should still deduct credits for testing
     assert!(options.mock_llm_response.is_some());
 }
 
 // ============================================================
-// Database Integration Tests - Credit Deduction
+// Database Integration Tests - Callback Credit Deduction
 // ============================================================
+// SMS credits are deducted at Twilio status callback via deduct_from_twilio_price(),
+// not at send time. These tests verify the callback deduction logic.
 
 #[test]
-fn test_us_user_message_deducts_one_credit_left() {
+fn test_callback_deduction_from_credits_left() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
     let user = create_test_user(&state, &params);
 
-    // Verify initial state
     assert_eq!(user.credits_left, 10.0);
     assert_eq!(user.credits, 5.0);
 
-    // Deduct credits for a message
-    deduct_user_credits(&state, user.id, "message", None).unwrap();
+    // Simulate Twilio callback with $0.0075 price (typical US SMS)
+    let cost = deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
 
-    // Verify: US user loses 1 from credits_left (message count)
+    // Expected: $0.0075 * 1.3 margin = $0.00975
+    assert!(cost > 0.0, "Should have deducted some credits");
+
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0); // Deducted 1
-    assert_eq!(updated.credits, 5.0); // Unchanged
+    assert!(
+        updated.credits_left < 10.0,
+        "credits_left should be deducted"
+    );
+    assert_eq!(updated.credits, 5.0); // Unchanged (credits_left used first)
 }
 
 #[test]
-fn test_credits_fallback_when_credits_left_exhausted() {
+fn test_callback_deduction_fallback_when_credits_left_exhausted() {
     let state = create_test_state();
-    // User with no credits_left, only credits
     let params = TestUserParams::us_user(0.0, 5.0);
     let user = create_test_user(&state, &params);
 
-    // Verify initial state
     assert_eq!(user.credits_left, 0.0);
     assert_eq!(user.credits, 5.0);
 
-    // Deduct credits for a message - should fall back to credits
-    deduct_user_credits(&state, user.id, "message", None).unwrap();
+    // Simulate Twilio callback - should fall back to credits pool
+    let cost = deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
+    assert!(cost > 0.0);
 
-    // Verify: Falls back to credits (deducts $0.075 for US)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert_eq!(updated.credits_left, 0.0); // Still 0
-    assert!(updated.credits < 5.0, "credits should be deducted"); // Should have deducted
+    assert!(updated.credits < 5.0, "credits should be deducted");
 }
 
 #[test]
-fn test_finland_user_message_deducts_euro_amount() {
+fn test_callback_deduction_finland_user() {
     let state = create_test_state();
     let params = TestUserParams::finland_user(5.0, 2.5);
     let user = create_test_user(&state, &params);
 
-    // Verify initial state
     assert_eq!(user.credits_left, 5.0);
     assert_eq!(user.credits, 2.5);
 
-    // Deduct credits for a message
-    deduct_user_credits(&state, user.id, "message", None).unwrap();
+    // Simulate Twilio callback with typical Finland SMS price
+    let cost = deduct_from_twilio_price(&state, user.id, 0.06).unwrap();
+    assert!(cost > 0.0);
 
-    // Verify: Finland user loses euro amount from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert!(
         updated.credits_left < 5.0,
@@ -168,15 +168,15 @@ fn test_finland_user_message_deducts_euro_amount() {
 }
 
 #[test]
-fn test_uk_user_message_deducts_euro_amount() {
+fn test_callback_deduction_uk_user() {
     let state = create_test_state();
     let params = TestUserParams::uk_user(5.0, 2.5);
     let user = create_test_user(&state, &params);
 
-    // Deduct credits for a message
-    deduct_user_credits(&state, user.id, "message", None).unwrap();
+    // Simulate Twilio callback with typical UK SMS price
+    let cost = deduct_from_twilio_price(&state, user.id, 0.04).unwrap();
+    assert!(cost > 0.0);
 
-    // Verify: UK user loses euro amount from credits_left
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert!(
         updated.credits_left < 5.0,
@@ -186,15 +186,15 @@ fn test_uk_user_message_deducts_euro_amount() {
 }
 
 #[test]
-fn test_germany_user_message_deducts_euro_amount() {
+fn test_callback_deduction_germany_user() {
     let state = create_test_state();
     let params = TestUserParams::germany_user(5.0, 2.5);
     let user = create_test_user(&state, &params);
 
-    // Deduct credits for a message
-    deduct_user_credits(&state, user.id, "message", None).unwrap();
+    // Simulate Twilio callback with typical Germany SMS price
+    let cost = deduct_from_twilio_price(&state, user.id, 0.07).unwrap();
+    assert!(cost > 0.0);
 
-    // Verify: Germany user loses euro amount (notification-only country)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert!(
         updated.credits_left < 5.0,
@@ -238,9 +238,9 @@ async fn test_process_sms_us_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify credit deduction: US user loses 1 from credits_left
+    // SMS credits are deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0); // Deducted 1
+    assert_eq!(updated.credits_left, 10.0); // Unchanged at send time
     assert_eq!(updated.credits, 5.0); // Unchanged
 }
 
@@ -267,13 +267,10 @@ async fn test_process_sms_finland_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: Finland user loses euro amount from credits_left
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted"
-    );
-    assert_eq!(updated.credits, 2.5); // credits unchanged
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 #[tokio::test]
@@ -299,12 +296,10 @@ async fn test_process_sms_uk_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted"
-    );
-    assert_eq!(updated.credits, 2.5);
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 #[tokio::test]
@@ -330,12 +325,10 @@ async fn test_process_sms_germany_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted"
-    );
-    assert_eq!(updated.credits, 2.5);
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 #[tokio::test]
@@ -362,10 +355,10 @@ async fn test_process_sms_credits_fallback_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: Falls back to credits
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert_eq!(updated.credits_left, 0.0); // Still 0
-    assert!(updated.credits < 5.0, "credits should be deducted");
+    assert_eq!(updated.credits, 5.0); // Unchanged at send time
 }
 
 #[tokio::test]
@@ -559,9 +552,9 @@ async fn test_process_sms_empty_message_body() {
     // Empty message should still be processed
     assert_eq!(status, StatusCode::OK);
 
-    // Credits should be deducted
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0);
+    assert_eq!(updated.credits_left, 10.0); // Unchanged at send time
 }
 
 #[tokio::test]
@@ -669,9 +662,9 @@ async fn test_process_sms_uppercase_cancel() {
 // ============================================================
 
 #[tokio::test]
-async fn test_process_sms_exactly_enough_credits() {
+async fn test_process_sms_low_credits_still_processes() {
     let state = create_test_state();
-    // US user with exactly 1.0 credits_left (minimum for a message)
+    // User with low credits_left - SMS pre-check only requires > 0.01
     let params = TestUserParams::us_user(1.0, 0.0);
     let user = create_test_user(&state, &params);
 
@@ -692,15 +685,15 @@ async fn test_process_sms_exactly_enough_credits() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Should end at exactly 0.0
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 0.0);
+    assert_eq!(updated.credits_left, 1.0); // Unchanged at send time
 }
 
 #[tokio::test]
-async fn test_process_sms_fractional_credits_rejected() {
+async fn test_process_sms_fractional_credits_accepted() {
     let state = create_test_state();
-    // US user with 0.5 credits_left (needs 1.0 for message)
+    // User with 0.5 credits_left - SMS pre-check only requires > 0.01
     let params = TestUserParams::us_user(0.5, 0.0);
     let user = create_test_user(&state, &params);
 
@@ -714,15 +707,15 @@ async fn test_process_sms_fractional_credits_rejected() {
         media_content_type0: None,
     };
 
-    let mock = MockLlmResponse::with_direct_response("Should not be called");
+    let mock = MockLlmResponse::with_direct_response("Hello there!");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
 
     let (status, _headers, _response) = process_sms(&state, payload, options).await;
 
-    // Should be rejected - insufficient credits
-    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    // Should succeed - SMS only requires credits > 0.01
+    assert_eq!(status, StatusCode::OK);
 
-    // Credits unchanged
+    // Credits unchanged at send time (deducted at callback)
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert_eq!(updated.credits_left, 0.5);
 }
@@ -780,9 +773,9 @@ async fn test_process_sms_with_image_attachment() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Credits should be deducted
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert_eq!(updated.credits_left, 9.0);
+    assert_eq!(updated.credits_left, 10.0); // Unchanged at send time
 }
 
 #[tokio::test]
@@ -1131,14 +1124,12 @@ async fn test_contract_response_fits_sms() {
     assert_sms_deliverable(&response.message);
 }
 
-/// Contract B.1: Successful message charges user
+/// Contract B.1: Successful message + callback charges user
 #[tokio::test]
 async fn test_contract_successful_message_charges_user() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
     let user = create_test_user(&state, &params);
-
-    let before_credits = get_total_credits(&state, user.id);
 
     let payload = TwilioWebhookPayload {
         from: user.phone_number.clone(),
@@ -1157,6 +1148,13 @@ async fn test_contract_successful_message_charges_user() {
 
     assert_eq!(status, StatusCode::OK);
 
+    // No deduction at send time
+    let mid_credits = get_total_credits(&state, user.id);
+    assert_not_charged(15.0, mid_credits); // 10.0 + 5.0 unchanged
+
+    // Simulate Twilio callback - this is where deduction happens
+    let before_credits = get_total_credits(&state, user.id);
+    deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
     let after_credits = get_total_credits(&state, user.id);
     assert_charged(before_credits, after_credits);
 }
@@ -1297,12 +1295,9 @@ async fn test_process_sms_canada_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: Canada user (like US) uses count-based credits
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 10.0,
-        "credits_left should be deducted for Canada user"
-    );
+    assert_eq!(updated.credits_left, 10.0); // Unchanged at send time
 }
 
 #[tokio::test]
@@ -1328,13 +1323,10 @@ async fn test_process_sms_netherlands_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: Netherlands user uses euro segment pricing
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted for Netherlands user"
-    );
-    assert_eq!(updated.credits, 2.5); // credits unchanged
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 #[tokio::test]
@@ -1360,13 +1352,10 @@ async fn test_process_sms_australia_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: Australia user uses euro segment pricing
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted for Australia user"
-    );
-    assert_eq!(updated.credits, 2.5);
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 #[tokio::test]
@@ -1392,13 +1381,10 @@ async fn test_process_sms_france_user_full_flow() {
 
     assert_eq!(status, StatusCode::OK);
 
-    // Verify: France user (notification-only) uses euro pricing
+    // SMS credits deducted at Twilio callback, not at send time
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
-    assert!(
-        updated.credits_left < 5.0,
-        "credits_left should be deducted for France user"
-    );
-    assert_eq!(updated.credits, 2.5);
+    assert_eq!(updated.credits_left, 5.0); // Unchanged at send time
+    assert_eq!(updated.credits, 2.5); // Unchanged
 }
 
 // ============================================================

@@ -4,6 +4,7 @@ use crate::Route;
 use crate::utils::api::Api;
 use web_sys::window;
 use serde::Deserialize;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
@@ -31,10 +32,7 @@ pub fn Home() -> Html {
             .unwrap_or(false)
     });
 
-    // First-time subscriber onboarding overlay
-    let show_onboarding = use_state(|| false);
-
-    // Trigger to force profile refresh (incremented when subscription changes)
+    // Trigger to force profile refresh (increments when subscription changes)
     let refresh_trigger = use_state(|| 0u32);
 
     // Check for OAuth success parameters and URL query params
@@ -91,7 +89,6 @@ pub fn Home() -> Html {
         let user_verified = user_verified.clone();
         let error = error.clone();
         let auth_status = auth_status.clone();
-        let show_onboarding = show_onboarding.clone();
         let refresh_trigger_dep = *refresh_trigger;
 
         use_effect_with_deps(
@@ -100,7 +97,6 @@ pub fn Home() -> Html {
                 let user_verified = user_verified.clone();
                 let error = error.clone();
                 let auth_status = auth_status.clone();
-                let show_onboarding = show_onboarding.clone();
 
                 spawn_local(async move {
                     let result = Api::get("/api/profile").send().await;
@@ -117,10 +113,6 @@ pub fn Home() -> Html {
                                     user_verified.set(profile.verified);
                                     profile_data.set(Some(profile.clone()));
                                     error.set(None);
-                                    // Show onboarding for subscribers who haven't connected any services yet
-                                    if profile.sub_tier.is_some() && !profile.has_any_connection {
-                                        show_onboarding.set(true);
-                                    }
                                 }
                                 Err(e) => {
                                     gloo_console::log!("Failed to parse profile data:", format!("{:?}", e));
@@ -197,13 +189,6 @@ pub fn Home() -> Html {
                 })
             };
 
-            let on_dismiss_onboarding = {
-                let show_onboarding = show_onboarding.clone();
-                Callback::from(move |_: MouseEvent| {
-                    show_onboarding.set(false);
-                })
-            };
-
             let on_profile_update = {
                 let profile_data = profile_data.clone();
                 Callback::from(move |updated_profile: UserProfile| {
@@ -272,75 +257,8 @@ pub fn Home() -> Html {
                             .legal-links {
                                 margin-top: 0.5rem;
                             }
-                            .onboarding-overlay {
-                                position: fixed;
-                                top: 0;
-                                left: 0;
-                                right: 0;
-                                bottom: 0;
-                                background: rgba(0, 0, 0, 0.8);
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                z-index: 1000;
-                            }
-                            .onboarding-modal {
-                                background: rgba(30, 30, 30, 0.95);
-                                border: 1px solid rgba(30, 144, 255, 0.3);
-                                border-radius: 16px;
-                                padding: 2rem;
-                                max-width: 500px;
-                                text-align: center;
-                            }
                         "#}
                     </style>
-                    // First-time subscriber onboarding overlay
-                    {
-                        if *show_onboarding {
-                            html! {
-                                <div class="onboarding-overlay" onclick={on_dismiss_onboarding.clone()}>
-                                    <div class="onboarding-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                        <h2 style="margin: 0 0 1rem 0; font-size: 1.5rem; background: linear-gradient(45deg, #fff, #7EB2FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                                            {"Welcome to Lightfriend!"}
-                                        </h2>
-                                        <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 1.25rem;">
-                                            {"Here's how to get started:"}
-                                        </p>
-                                        <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; text-align: left;">
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Connect your services"}</strong>
-                                                {" - Link your calendar, email, or messaging apps"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Ask anything"}</strong>
-                                                {" - Use the web chat or send an SMS to your Lightfriend number"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); margin-bottom: 0.75rem; padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Explore your tools"}</strong>
-                                                {" - Check out the tools available to your assistant"}
-                                            </li>
-                                            <li style="color: rgba(255, 255, 255, 0.7); padding-left: 1.5rem; position: relative;">
-                                                <span style="position: absolute; left: 0; color: #1E90FF;">{"*"}</span>
-                                                <strong style="color: #fff;">{"Set up notifications"}</strong>
-                                                {" - Configure how you want to be alerted"}
-                                            </li>
-                                        </ul>
-                                        <button
-                                            onclick={on_dismiss_onboarding.clone()}
-                                            style="background: linear-gradient(135deg, #1E90FF, #4169E1); border: none; color: white; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s;"
-                                        >
-                                            {"Got it!"}
-                                        </button>
-                                    </div>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
                     <div class="dashboard-container">
                         <h1 class="panel-title">{"Dashboard"}</h1>
                         // 2FA banner

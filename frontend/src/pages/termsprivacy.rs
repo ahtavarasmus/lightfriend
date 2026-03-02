@@ -19,7 +19,7 @@ pub fn privacy_policy() -> Html {
                     <li>{"User-provided profile information (for AI assistant personalization)"}</li>
                     <li>{"Access tokens used to access the integrations you setup"}</li>
                     <li>{"Location coordinates (latitude/longitude) for calculating sunrise/sunset times"}</li>
-                    <li>{"AI-generated triage items (attention summaries, suggested actions, priority levels)"}</li>
+                    <li>{"AI-generated attention items (attention summaries, suggested actions, priority levels)"}</li>
                     <li>{"MCP server configuration data (server URLs, authentication tokens)"}</li>
                 </ul>
             </section>
@@ -63,9 +63,9 @@ pub fn privacy_policy() -> Html {
                     <li>{"Personalize responses based on your profile information"}</li>
                     <li>{"Provide context-aware assistance during calls"}</li>
                     <li>{"Improve service quality"}</li>
-                    <li>{"Automatically generate triage items that flag messages and events needing your attention"}</li>
-                    <li>{"Triage items include AI-generated summaries, suggested actions, reasoning, and contextual data"}</li>
-                    <li>{"Triage items are stored until dismissed, actioned, or expired"}</li>
+                    <li>{"Automatically generate attention items that flag messages and events needing your attention"}</li>
+                    <li>{"Attention items include AI-generated summaries, suggested actions, reasoning, and contextual data"}</li>
+                    <li>{"Attention items are stored until dismissed, actioned, or expired"}</li>
                 </ul>
             </section>
 

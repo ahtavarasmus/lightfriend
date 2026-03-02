@@ -13,6 +13,9 @@ wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "HtmlSelectElement",
+    "HtmlTextAreaElement",
+    "HtmlElement",
+    "CssStyleDeclaration",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
     "Document",
@@ -35,9 +38,13 @@ web-sys = { version = "0.3", features = [
     "DataTransfer",
     "Storage",
     "EventSource",
+    "EventSourceInit",
     "MessageEvent",
     "CustomEvent",
+    "CustomEventInit",
     "EventTarget",
+    "DomRect",
+    "NodeList",
 ] }
 js-sys = "0.3"
 gloo-net = "0.2"

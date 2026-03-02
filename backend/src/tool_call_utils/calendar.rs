@@ -17,7 +17,7 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+                "Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T00:00')".to_string(),
             ),
             ..Default::default()
         }),
@@ -27,7 +27,8 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string(),
+                "End time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-16T23:59')"
+                    .to_string(),
             ),
             ..Default::default()
         }),
@@ -38,7 +39,7 @@ pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::To
         function: types::Function {
             name: String::from("fetch_calendar_events"),
             description: Some(String::from(
-                "Fetches the user's calendar events for the specified time frame, or defaults to today if no time frame is provided. If the current time is after 6 PM in the user's timezone (assumed PDT unless specified), also include tomorrow's events when no time frame is given. CRITICAL: Return the tool's output EXACTLY as received, with NO additional text, NO numbering, NO markdown formatting (no **, -, etc.), NO HTML, and NO modifications. The tool formats events as 'summary: HH:MM AM/PM - HH:MM AM/PM date' for timed events or 'summary: All day, date' for all-day events, joined by '|'. Example output: 'Meeting: 1:00 PM - 2:00 PM today|Vacation: All day, Jun 16 - Jun 17'. DO NOT add 'Today's events:', numbering, bullet points, or any other text or formatting. Pass through the raw event list exactly as provided. Never use markdown formatting like **, -, or other special characters for formatting."
+                "Fetches calendar events for the specified time frame (defaults to today, or today+tomorrow after 6 PM). Returns pre-formatted plain text - pass through to user exactly as received."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -67,7 +68,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string(),
+                "Start time as 'YYYY-MM-DDTHH:MM' in the user's timezone (e.g., '2026-03-23T14:30')".to_string(),
             ),
             ..Default::default()
         }),
@@ -84,10 +85,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         "description".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Optional description of the event. Do not add unless user asks specifically."
-                    .to_string(),
-            ),
+            description: Some("Optional event description.".to_string()),
             ..Default::default()
         }),
     );
@@ -107,7 +105,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_calendar_event"),
-            description: Some(String::from("Creates a new Google Calendar event. ONLY use this when the user explicitly asks to add something to their Google Calendar (e.g. 'add to my calendar', 'create a calendar event'). Do NOT use this for generic 'add task' or 'remind me' requests - use create_task instead. Invoke this tool immediately without extra confirmation if the user has explicitly provided the required parameters (summary, start_time, and duration_minutes). If any required parameters are missing or unclear, ask the user for clarification in a follow-up response, then call the tool once the information is obtained. Only include optional parameters like description or add_notification if the user specifies them.")),
+            description: Some(String::from("Creates a Google Calendar event. For reminders and tasks, use create_item instead.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(calendar_event_properties),
@@ -136,8 +134,34 @@ pub async fn handle_fetch_calendar_events(
         }
     };
 
+    // Look up user timezone and convert to RFC3339 for the calendar API
+    let user_tz = match state.user_core.get_user_info(user_id) {
+        Ok(info) => {
+            let tz_str = info.timezone.unwrap_or_else(|| "UTC".to_string());
+            tz_str.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC)
+        }
+        Err(_) => chrono_tz::UTC,
+    };
+
+    let start_utc =
+        match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&c.start, &user_tz) {
+            Ok(dt) => dt.to_rfc3339(),
+            Err(e) => {
+                eprintln!("Failed to parse start time: {}", e);
+                return "Invalid start time format.".to_string();
+            }
+        };
+    let end_utc = match crate::tool_call_utils::utils::parse_user_datetime_to_utc(&c.end, &user_tz)
+    {
+        Ok(dt) => dt.to_rfc3339(),
+        Err(e) => {
+            eprintln!("Failed to parse end time: {}", e);
+            return "Invalid end time format.".to_string();
+        }
+    };
+
     match crate::handlers::google_calendar::handle_calendar_fetching(
-        state, user_id, &c.start, &c.end,
+        state, user_id, &start_utc, &end_utc,
     )
     .await
     {
@@ -282,20 +306,20 @@ pub async fn handle_create_calendar_event(
 
     let user_info = state.user_core.get_user_info(user_id)?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
-
-    // Parse the start time
-    let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-    // Convert to user's timezone
     let user_tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
-    let local_time = start_time.with_timezone(&user_tz);
+
+    // Parse the start time (accepts user-timezone naive or RFC3339)
+    let start_time_utc =
+        crate::tool_call_utils::utils::parse_user_datetime_to_utc(&args.start_time, &user_tz)?;
+
+    // Convert to user's timezone for display
+    let local_time = start_time_utc.with_timezone(&user_tz);
 
     // Format the date and time
     let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
     // Create the event directly
     let event_request = crate::handlers::google_calendar::CreateEventRequest {
-        start_time: start_time.with_timezone(&chrono::Utc),
+        start_time: start_time_utc,
         duration_minutes,
         summary: args.summary.clone(),
         description: args.description.clone(),
@@ -328,7 +352,7 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: success_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ))
         }
@@ -353,7 +377,7 @@ pub async fn handle_create_calendar_event(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ))
         }

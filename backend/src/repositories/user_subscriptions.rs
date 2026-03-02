@@ -144,7 +144,7 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    /// Update the user's plan type ("monitor", "digest", or None for US/CA)
+    /// Update the user's plan type ("assistant", "autopilot", "byot", or None)
     pub fn update_plan_type(
         &self,
         user_id: i32,
@@ -155,6 +155,15 @@ impl crate::repositories::user_repository::UserRepository {
             .set(users::plan_type.eq(plan_type))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    /// Get the user's plan type
+    pub fn get_plan_type(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        users::table
+            .find(user_id)
+            .select(users::plan_type)
+            .first::<Option<String>>(&mut conn)
     }
 
     // Check if user has a specific subscription tier and has messages left

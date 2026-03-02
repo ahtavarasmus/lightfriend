@@ -82,6 +82,8 @@ pub struct QuietModeStatus {
     pub is_quiet: bool,
     pub until: Option<i32>,
     pub until_display: Option<String>,
+    #[serde(default)]
+    pub rule_count: i32,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -210,6 +212,7 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
                 is_quiet: until.is_some(),
                 until,
                 until_display: Some(optimistic_display.to_string()),
+                rule_count: status.rule_count,
             };
             status.set(optimistic_status);
 
@@ -278,8 +281,12 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
     };
 
     let (btn_class, icon, label) = if status.is_quiet {
-        let display = status.until_display.clone()
+        let mut display = status.until_display.clone()
             .unwrap_or_else(|| compute_display_text(status.until));
+        if status.rule_count > 0 {
+            display = format!("{} (+ {} rule{})", display, status.rule_count,
+                if status.rule_count == 1 { "" } else { "s" });
+        }
         ("quiet-mode-btn quiet", "fa-solid fa-bell-slash", display)
     } else {
         ("quiet-mode-btn active", "fa-solid fa-bell", "Active".to_string())

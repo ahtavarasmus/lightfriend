@@ -11,9 +11,9 @@
 //! 4. Generate notification message using AI
 //! 5. Send notification via SMS/call
 
-use crate::tool_call_utils::utils::create_openai_client_for_user;
+use crate::context::ContextBuilder;
+use crate::models::user_models::ContactProfile;
 use crate::AppState;
-use crate::ModelPurpose;
 use crate::UserCoreOps;
 use openai_api_rs::v1::chat_completion;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,110 @@ impl StructuredAction {
             _ => self.tool.clone(),
         }
     }
+}
+
+/// Context about who triggered a task, used to determine sender trust.
+pub enum SenderContext<'a> {
+    /// Time-triggered task with no external sender - always trusted.
+    TimeBased,
+    /// Triggered by an incoming email.
+    Email {
+        from_email: &'a str,
+        from_display: &'a str,
+    },
+    /// Triggered by an incoming messaging platform message.
+    Messaging {
+        service: &'a str,
+        room_id: &'a str,
+        room_name: &'a str,
+    },
+}
+
+/// Check if the sender is trusted by matching against the user's contact profiles.
+///
+/// - Time-based tasks are always trusted (no external sender).
+/// - Email senders are trusted if their address matches a contact profile's email_addresses.
+/// - Messaging senders are trusted if the room_id or chat name matches a contact profile.
+pub fn is_sender_trusted(state: &Arc<AppState>, user_id: i32, sender: &SenderContext) -> bool {
+    match sender {
+        SenderContext::TimeBased => true,
+        SenderContext::Email {
+            from_email,
+            from_display,
+        } => {
+            let profiles = state
+                .user_repository
+                .get_contact_profiles(user_id)
+                .unwrap_or_default();
+            let from_email_lower = from_email.to_lowercase();
+            let from_display_lower = from_display.to_lowercase();
+            match_email_sender(&profiles, &from_email_lower, &from_display_lower)
+        }
+        SenderContext::Messaging {
+            service,
+            room_id,
+            room_name,
+        } => {
+            let profiles = state
+                .user_repository
+                .get_contact_profiles(user_id)
+                .unwrap_or_default();
+            let chat_name = crate::utils::bridge::remove_bridge_suffix(room_name);
+            match_messaging_sender(&profiles, service, room_id, &chat_name)
+        }
+    }
+}
+
+/// Check if an email sender matches any contact profile's email addresses.
+fn match_email_sender(
+    profiles: &[ContactProfile],
+    from_email_lower: &str,
+    from_display_lower: &str,
+) -> bool {
+    profiles.iter().any(|p| {
+        if let Some(ref emails) = p.email_addresses {
+            emails.split(',').any(|e| {
+                let e = e.trim().to_lowercase();
+                !e.is_empty() && (from_email_lower.contains(&e) || from_display_lower.contains(&e))
+            })
+        } else {
+            false
+        }
+    })
+}
+
+/// Check if a messaging sender matches any contact profile by room_id or chat name.
+fn match_messaging_sender(
+    profiles: &[ContactProfile],
+    service: &str,
+    room_id: &str,
+    chat_name: &str,
+) -> bool {
+    let chat_lower = chat_name.to_lowercase();
+    profiles.iter().any(|p| {
+        // Try room_id match first (stable identifier)
+        let profile_room_id = match service {
+            "whatsapp" => p.whatsapp_room_id.as_deref(),
+            "telegram" => p.telegram_room_id.as_deref(),
+            "signal" => p.signal_room_id.as_deref(),
+            _ => None,
+        };
+        if profile_room_id == Some(room_id) {
+            return true;
+        }
+        // Fall back to display name matching
+        match service {
+            "whatsapp" => p.whatsapp_chat.as_ref(),
+            "telegram" => p.telegram_chat.as_ref(),
+            "signal" => p.signal_chat.as_ref(),
+            _ => None,
+        }
+        .map(|c| {
+            let c_lower = crate::utils::bridge::remove_bridge_suffix(c).to_lowercase();
+            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
+        })
+        .unwrap_or(false)
+    })
 }
 
 /// Result of executing a task's action
@@ -314,21 +418,30 @@ pub fn parse_action_structured(action: &str) -> StructuredAction {
     }
 }
 
-/// Execute a single tool call directly (without AI) from a StructuredAction
+/// Execute a single tool call directly (without AI) from a StructuredAction.
+///
+/// For API-calling tools (tesla, weather, email, chat), actually performs the action.
+/// For non-API tools (reminder, digest) or unknown/natural-language actions,
+/// passes data through to the unified notification step.
 async fn execute_direct_tool(
     state: &Arc<AppState>,
     user_id: i32,
     action: &StructuredAction,
     source_data: &str,
+    sender_trusted: bool,
 ) -> Result<String, String> {
+    // Block restricted tools for untrusted senders (no matching contact profile).
+    // Restriction is declared per-tool via ToolHandler::is_restricted() in the registry.
+    if !sender_trusted && state.tool_registry.is_restricted(&action.tool) {
+        return Err(format!(
+            "Action '{}' blocked: sender not in contact profiles",
+            action.tool
+        ));
+    }
+
     let params = action.params.as_ref();
 
     match action.tool.as_str() {
-        "generate_digest" => {
-            crate::tool_call_utils::management::handle_generate_digest(state, user_id, source_data)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "control_tesla" => {
             let command = params
                 .and_then(|p| p.get("command"))
@@ -353,6 +466,36 @@ async fn execute_direct_tool(
             crate::tool_call_utils::calendar::handle_fetch_calendar_events(state, user_id, "{}")
                 .await,
         ),
+        "send_email" => {
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|e| e.to_string())?
+                .ok_or("User not found")?;
+            let args_str = serde_json::to_string(params.unwrap_or(&serde_json::json!({}))).unwrap();
+            match crate::tool_call_utils::email::handle_send_email(state, user_id, &args_str, &user)
+                .await
+            {
+                Ok((_, _, axum::Json(resp))) => Ok(resp.message),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "send_chat_message" => {
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|e| e.to_string())?
+                .ok_or("User not found")?;
+            let args_str = serde_json::to_string(params.unwrap_or(&serde_json::json!({}))).unwrap();
+            match crate::tool_call_utils::bridge::handle_send_chat_message(
+                state, user_id, &args_str, &user, None,
+            )
+            .await
+            {
+                Ok((_, _, axum::Json(resp))) => Ok(resp.message),
+                Err(e) => Err(e.to_string()),
+            }
+        }
         "send_reminder" => {
             let message = params
                 .and_then(|p| p.get("message"))
@@ -360,27 +503,34 @@ async fn execute_direct_tool(
                 .unwrap_or("Reminder");
             Ok(message.to_string())
         }
-        "" => {
-            // Empty action - just return source data summary
+        _ => {
+            // No tool to execute, natural language action, or generate_digest.
+            // Pass source data through to the unified notification step.
             if source_data.is_empty() {
                 Ok("No source data available.".to_string())
             } else {
                 Ok(source_data.to_string())
             }
         }
-        _ => Err(format!("Unknown action tool: {}", action.tool)),
     }
 }
 
-/// Generate a notification message based on task results
-async fn generate_notification_message(
+/// Generate a unified notification message for any task type.
+///
+/// This single function handles all notification formatting:
+/// - Digest actions: produces a detailed summary grouped by platform
+/// - API actions (tesla, weather): briefly describes what happened
+/// - Reminders: states the reminder clearly
+/// - Uses user's timezone for relative timestamps
+async fn generate_task_notification(
     state: &Arc<AppState>,
     user_id: i32,
+    action: &StructuredAction,
     source_data: &str,
-    condition: Option<&str>,
     action_result: &str,
+    condition: Option<&str>,
 ) -> Result<String, String> {
-    // If action result looks like a digest, use it directly
+    // If action result already looks like a formatted digest, use it directly
     if action_result.len() > 50
         && (action_result.contains("WhatsApp:")
             || action_result.contains("Email:")
@@ -389,27 +539,82 @@ async fn generate_notification_message(
         return Ok(action_result.to_string());
     }
 
-    let (_client, provider) = create_openai_client_for_user(state, user_id)
-        .map_err(|e| format!("Failed to create AI client: {}", e))?;
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await
+        .map_err(|e| format!("Failed to build context: {}", e))?;
 
-    let system_prompt = r#"You are generating a brief SMS notification (max 160 chars) for the user.
-Based on the task results, create a concise, friendly message.
-- Be specific about what happened
-- Include key details (who, what)
+    let tz_str = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.tz_str.as_str())
+        .unwrap_or("UTC");
+    let formatted_now = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.formatted_now.as_str())
+        .unwrap_or("unknown");
+
+    // Build the action description
+    let action_desc = if action.tool.is_empty() {
+        String::new()
+    } else {
+        let params_str = action
+            .params
+            .as_ref()
+            .map(|p| format!(" {}", p))
+            .unwrap_or_default();
+        format!("Task action: {}{}\n", action.tool, params_str)
+    };
+
+    // Build source/result sections - only include if meaningful
+    let source_section = if !source_data.is_empty() {
+        format!("Source data:\n{}\n\n", source_data)
+    } else {
+        String::new()
+    };
+
+    let result_section = if action_result != source_data && !action_result.is_empty() {
+        format!("Action result:\n{}\n\n", action_result)
+    } else {
+        String::new()
+    };
+
+    let condition_section = match condition {
+        Some(c) if !c.is_empty() => format!("Condition matched: {}\n", c),
+        _ => String::new(),
+    };
+
+    let system_prompt = format!(
+        r#"You are generating an SMS notification for a scheduled task.
+
+{}User timezone: {}
+Current time: {}
+{}
+Generate a concise, informative SMS notification.
 - Plain text only, no markdown or emojis
-- Return ONLY the notification text, nothing else"#;
-
-    let user_content = format!(
-        "Task completed. Generate notification:\n\nAction result: {}\n\nSource data summary: {}\n\nCondition matched: {}",
-        action_result,
-        if source_data.len() > 500 { &source_data[..500] } else { source_data },
-        condition.unwrap_or("none")
+- Maximum 480 characters
+- If the action involves summarizing/digesting data, provide a detailed summary grouped by platform
+- If the action is a completed task (tesla, weather), briefly describe what happened
+- If the action is a reminder, state the reminder clearly
+- Use relative timestamps in the user's timezone (today 3pm, yesterday 8am)
+- Put important items first
+- Return ONLY the notification text, nothing else"#,
+        action_desc, tz_str, formatted_now, condition_section
     );
+
+    let user_content = format!("{}{}", source_section, result_section);
+    let user_content = if user_content.trim().is_empty() {
+        format!("Action result: {}", action_result)
+    } else {
+        user_content
+    };
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(system_prompt.to_string()),
+            content: chat_completion::Content::Text(system_prompt),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -423,27 +628,25 @@ Based on the task results, create a concise, friendly message.
         },
     ];
 
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages);
 
-    let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
-
-    match state.ai_config.chat_completion(provider, &request).await {
+    match ctx.client.chat_completion(request).await {
         Ok(result) => Ok(result
             .choices
             .first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_else(|| action_result.to_string())),
         Err(e) => {
-            tracing::warn!("Failed to generate notification: {}", e);
+            tracing::warn!("Failed to generate task notification: {}", e);
             Ok(action_result.to_string())
         }
     }
 }
 
-/// Evaluate if condition matches source data
+/// Evaluate if condition matches source data.
+///
+/// Binary gate: does the source data satisfy the given condition?
+/// Uses ContextBuilder for user's LLM provider preference and timezone context.
 async fn evaluate_condition(
     state: &Arc<AppState>,
     user_id: i32,
@@ -454,15 +657,35 @@ async fn evaluate_condition(
         return Ok(false);
     }
 
-    let (_client, provider) = create_openai_client_for_user(state, user_id)
-        .map_err(|e| format!("Failed to create AI client: {}", e))?;
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await
+        .map_err(|e| format!("Failed to build context: {}", e))?;
 
-    let system_prompt = r#"You are evaluating if source data matches a condition.
+    let tz_str = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.tz_str.as_str())
+        .unwrap_or("UTC");
+    let formatted_now = ctx
+        .timezone
+        .as_ref()
+        .map(|tz| tz.formatted_now.as_str())
+        .unwrap_or("unknown");
+
+    let system_prompt = format!(
+        r#"You are evaluating if source data matches a condition.
+User timezone: {}
+Current time: {}
+
 Return JSON with:
 - "matches": true/false
 - "reason": brief explanation (max 50 chars)
 
-Be strict - only return true if there's a clear match."#;
+Be strict - only return true if there's a clear match."#,
+        tz_str, formatted_now
+    );
 
     let user_content = format!(
         "Condition to check: \"{}\"\n\nSource data:\n{}",
@@ -472,7 +695,7 @@ Be strict - only return true if there's a clear match."#;
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(system_prompt.to_string()),
+            content: chat_completion::Content::Text(system_prompt),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -486,14 +709,9 @@ Be strict - only return true if there's a clear match."#;
         },
     ];
 
-    let model = state
-        .ai_config
-        .model(provider, ModelPurpose::Default)
-        .to_string();
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages);
 
-    let request = chat_completion::ChatCompletionRequest::new(model, messages).max_tokens(100);
-
-    match state.ai_config.chat_completion(provider, &request).await {
+    match ctx.client.chat_completion(request).await {
         Ok(result) => {
             let content = result
                 .choices
@@ -540,6 +758,7 @@ Be strict - only return true if there's a clear match."#;
 ///
 /// Lookback hours are calculated automatically based on the last completed task
 /// of the same action type for this user, capped at 24 hours.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_action_spec(
     state: &Arc<AppState>,
     user_id: i32,
@@ -548,6 +767,7 @@ pub async fn execute_action_spec(
     _trigger_context: Option<&str>, // Reserved for future use with recurring tasks
     sources: Option<&str>,
     condition: Option<&str>,
+    sender_trusted: bool,
 ) -> ActionResult {
     tracing::debug!(
         "Executing task for user {}: action={}, sources={:?}, condition={:?}",
@@ -617,8 +837,10 @@ pub async fn execute_action_spec(
                     tracing::debug!("Condition matched for user {}: {}", user_id, cond);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to evaluate condition: {}", e);
-                    // Continue anyway on evaluation error
+                    tracing::warn!("Failed to evaluate condition, skipping action: {}", e);
+                    return ActionResult::Skipped {
+                        reason: format!("Condition evaluation failed: {}", e),
+                    };
                 }
             }
         }
@@ -627,7 +849,15 @@ pub async fn execute_action_spec(
     // Step 3: Parse and execute action (continue even on failure)
     let structured = parse_action_structured(action_spec);
     let mut action_failed = false;
-    let action_result = match execute_direct_tool(state, user_id, &structured, &source_data).await {
+    let action_result = match execute_direct_tool(
+        state,
+        user_id,
+        &structured,
+        &source_data,
+        sender_trusted,
+    )
+    .await
+    {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Action execution failed for user {}: {}", user_id, e);
@@ -652,24 +882,26 @@ pub async fn execute_action_spec(
         }
     };
 
-    // Step 4: Generate notification message (with fallbacks)
-    let notification_message = if structured.tool == "generate_digest" && !action_failed {
-        // Digest already formatted, use directly
-        action_result.clone()
-    } else {
-        match generate_notification_message(state, user_id, &source_data, condition, &action_result)
-            .await
-        {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::warn!("Failed to generate notification message: {}", e);
-                // Fallback: use source data summary or action result
-                if !source_data.is_empty() && source_data.len() > 20 {
-                    let preview_len = source_data.len().min(150);
-                    format!("Digest: {}", &source_data[..preview_len])
-                } else {
-                    action_result.clone()
-                }
+    // Step 4: Generate notification message (unified for all action types)
+    let notification_message = match generate_task_notification(
+        state,
+        user_id,
+        &structured,
+        &source_data,
+        &action_result,
+        condition,
+    )
+    .await
+    {
+        Ok(msg) => msg,
+        Err(e) => {
+            tracing::warn!("Failed to generate task notification: {}", e);
+            // Fallback: use source data summary or action result
+            if !source_data.is_empty() && source_data.len() > 20 {
+                let preview: String = source_data.chars().take(150).collect();
+                format!("Update: {}", preview)
+            } else {
+                action_result.clone()
             }
         }
     };
@@ -694,8 +926,11 @@ pub async fn execute_action_spec(
     tracing::info!(
         "Task execution completed for user {}: {}",
         user_id,
-        if notification_message.len() > 100 {
-            format!("{}...", &notification_message[..100])
+        if notification_message.chars().count() > 100 {
+            format!(
+                "{}...",
+                notification_message.chars().take(100).collect::<String>()
+            )
         } else {
             notification_message.clone()
         }
@@ -712,76 +947,4 @@ pub async fn execute_action_spec(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_structured_json_format() {
-        let action = r#"{"tool":"send_reminder","params":{"message":"Call mom"}}"#;
-        let result = parse_action_structured(action);
-        assert_eq!(result.tool, "send_reminder");
-        let msg = result.params.unwrap();
-        assert_eq!(msg["message"], "Call mom");
-    }
-
-    #[test]
-    fn test_parse_structured_old_format() {
-        let result = parse_action_structured("send_reminder(Call mom)");
-        assert_eq!(result.tool, "send_reminder");
-        let params = result.params.unwrap();
-        assert_eq!(params["message"], "Call mom");
-    }
-
-    #[test]
-    fn test_parse_structured_old_tesla() {
-        let result = parse_action_structured("control_tesla(climate_on)");
-        assert_eq!(result.tool, "control_tesla");
-        let params = result.params.unwrap();
-        assert_eq!(params["command"], "climate_on");
-    }
-
-    #[test]
-    fn test_parse_structured_simple_tool() {
-        let result = parse_action_structured("generate_digest");
-        assert_eq!(result.tool, "generate_digest");
-        assert!(result.params.is_none());
-    }
-
-    #[test]
-    fn test_parse_structured_empty() {
-        let result = parse_action_structured("");
-        assert_eq!(result.tool, "");
-        assert!(result.params.is_none());
-    }
-
-    #[test]
-    fn test_structured_to_action_string() {
-        let action = StructuredAction {
-            tool: "send_reminder".to_string(),
-            params: Some(serde_json::json!({"message": "Call mom"})),
-        };
-        assert_eq!(action.to_action_string(), "send_reminder(Call mom)");
-    }
-
-    #[test]
-    fn test_structured_to_action_string_no_params() {
-        let action = StructuredAction {
-            tool: "generate_digest".to_string(),
-            params: None,
-        };
-        assert_eq!(action.to_action_string(), "generate_digest");
-    }
-
-    #[test]
-    fn test_roundtrip_json_serialize() {
-        let action = StructuredAction {
-            tool: "control_tesla".to_string(),
-            params: Some(serde_json::json!({"command": "climate_on"})),
-        };
-        let json = serde_json::to_string(&action).unwrap();
-        let parsed = parse_action_structured(&json);
-        assert_eq!(parsed.tool, "control_tesla");
-        assert_eq!(parsed.params.unwrap()["command"], "climate_on");
-    }
-}
+// Tests are in tests/action_executor_test.rs

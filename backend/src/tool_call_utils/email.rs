@@ -1,6 +1,5 @@
 use crate::handlers::imap_handlers::ImapError;
 use crate::AppState;
-use crate::ModelPurpose;
 use std::sync::Arc;
 
 pub fn get_fetch_emails_tool() -> openai_api_rs::v1::chat_completion::Tool {
@@ -49,7 +48,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("fetch_specific_email"),
-            description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about emails from a specific person (e.g., 'has Mom emailed me?', 'emails from Boss') or about a particular topic. Supports contact profile nicknames. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
+            description: Some(String::from("Search and fetch a specific email by person or topic. Supports contact profile nicknames. Returns full message body for the most relevant match.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(specific_email_properties),
@@ -91,11 +90,17 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_email"),
-            description: Some(String::from("Sends an email to the specified recipient using the user's email account. Use this when the user asks to send an new email to someone.")),
+            description: Some(String::from(
+                "Sends an email immediately. For future-scheduled emails, use create_item instead.",
+            )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![String::from("to"), String::from("subject"), String::from("body")]),
+                required: Some(vec![
+                    String::from("to"),
+                    String::from("subject"),
+                    String::from("body"),
+                ]),
             },
         },
     }
@@ -191,7 +196,7 @@ pub async fn handle_send_email(
                             "Contact '{}' doesn't have an email address in their profile.",
                             args.to
                         ),
-                        created_task_id: None,
+                        created_item_id: None,
                     }),
                 ));
             }
@@ -202,7 +207,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
-                    created_task_id: None,
+                    created_item_id: None,
                 })
             ));
         }
@@ -220,12 +225,7 @@ pub async fn handle_send_email(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -234,7 +234,7 @@ pub async fn handle_send_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -305,7 +305,7 @@ pub async fn handle_send_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }
@@ -453,7 +453,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: error_msg,
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -477,12 +477,7 @@ pub async fn handle_respond_to_email(
         .await
     {
         Ok(_) => {
-            // Deduct credits for the queued message
-            if let Err(e) =
-                crate::utils::usage::deduct_user_credits(state, user_id, "message", None)
-            {
-                tracing::error!("Failed to deduct user credits: {}", e);
-            }
+            // SMS credits deducted at Twilio status callback
         }
         Err(e) => {
             eprintln!("Failed to send queued message: {}", e);
@@ -491,7 +486,7 @@ pub async fn handle_respond_to_email(
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
                     message: "Failed to send message queue notification".to_string(),
-                    created_task_id: None,
+                    created_item_id: None,
                 }),
             ));
         }
@@ -560,7 +555,7 @@ pub async fn handle_respond_to_email(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(crate::api::twilio_sms::TwilioResponse {
             message: "Email response queued".to_string(),
-            created_task_id: None,
+            created_item_id: None,
         }),
     ))
 }
@@ -570,21 +565,21 @@ pub async fn handle_fetch_specific_email(
     user_id: i32,
     query: &str,
 ) -> String {
-    // Create OpenAI client for email selection (user-based routing)
-    let (_client, provider) =
-        match crate::tool_call_utils::utils::create_openai_client_for_user(state, user_id) {
-            Ok(result) => result,
-            Err(e) => {
-                eprintln!("Failed to create OpenAI client: {}", e);
-                return "Failed to process email search".to_string();
-            }
-        };
+    // Build context for LLM client and contact profiles
+    let ctx = match crate::context::ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Failed to build context: {}", e);
+            return "Failed to process email search".to_string();
+        }
+    };
 
     // Check if query matches a contact profile nickname and get their email addresses
-    let profiles = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default();
+    let profiles = ctx.contact_profiles.as_deref().unwrap_or(&[]);
     let matching_profile = profiles.iter().find(|p| {
         let nickname_lower = p.nickname.to_lowercase();
         let query_lower = query.to_lowercase();
@@ -602,13 +597,10 @@ pub async fn handle_fetch_specific_email(
         query.to_string()
     };
 
-    let state_clone = state.clone();
-    let user_id_clone = user_id;
-
     // Fetch the latest 20 emails with full content
     match crate::handlers::imap_handlers::fetch_emails_imap(
-        &state_clone,
-        user_id_clone,
+        state,
+        user_id,
         true,
         Some(20),
         false,
@@ -635,15 +627,11 @@ pub async fn handle_fetch_specific_email(
                 formatted_emails.push_str(&formatted_email);
             }
 
-            // Use LLM to select the most relevant email (user-based routing)
-            let model = state
-                .ai_config
-                .model(provider, ModelPurpose::Default)
-                .to_string();
+            // Use LLM to select the most relevant email
             match crate::tool_call_utils::utils::select_most_relevant_email(
                 state,
-                provider,
-                model,
+                ctx.provider,
+                ctx.model.clone(),
                 &enhanced_query,
                 &formatted_emails,
             )

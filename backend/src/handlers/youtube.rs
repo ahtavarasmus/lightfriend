@@ -74,7 +74,8 @@ pub struct SearchQuery {
     pub q: String,
     #[serde(rename = "type")]
     pub search_type: Option<String>, // "video", "channel", or "all"
-    pub channel_id: Option<String>, // Filter videos by channel ID
+    pub channel_id: Option<String>,     // Filter videos by channel ID
+    pub video_duration: Option<String>, // "short" (<4min), "medium" (4-20min), "long" (>20min)
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +131,7 @@ pub struct RateVideoRequest {
 async fn fetch_subscription_feed_with_token(
     client: &reqwest::Client,
     access_token: &str,
+    video_duration: Option<&str>,
 ) -> Result<SubscriptionFeedResponse, (u16, String)> {
     // First, get the user's subscriptions
     let subscriptions_response = client
@@ -172,15 +174,21 @@ async fn fetch_subscription_feed_with_token(
 
     // Fetch videos from multiple channels (batch by taking first 10 channels to avoid too many requests)
     for channel_id in channel_ids.iter().take(10) {
+        let mut params: Vec<(&str, &str)> = vec![
+            ("part", "snippet"),
+            ("channelId", channel_id.as_str()),
+            ("order", "date"),
+            ("type", "video"),
+            ("maxResults", "3"),
+        ];
+        let dur_owned: String;
+        if let Some(dur) = video_duration {
+            dur_owned = dur.to_string();
+            params.push(("videoDuration", &dur_owned));
+        }
         let search_response = client
             .get("https://www.googleapis.com/youtube/v3/search")
-            .query(&[
-                ("part", "snippet"),
-                ("channelId", channel_id.as_str()),
-                ("order", "date"),
-                ("type", "video"),
-                ("maxResults", "3"),
-            ])
+            .query(&params)
             .header("Authorization", format!("Bearer {}", access_token))
             .send()
             .await;
@@ -232,10 +240,16 @@ async fn fetch_subscription_feed_with_token(
     Ok(SubscriptionFeedResponse { videos: all_videos })
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SubscriptionFeedQuery {
+    pub video_duration: Option<String>,
+}
+
 /// Fetches recent videos from the user's YouTube subscriptions
 pub async fn get_subscription_feed(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    Query(query): Query<SubscriptionFeedQuery>,
 ) -> Result<Json<SubscriptionFeedResponse>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!(
         "Fetching YouTube subscription feed for user {}",
@@ -262,9 +276,10 @@ pub async fn get_subscription_feed(
         };
 
     let client = reqwest::Client::new();
+    let video_duration = query.video_duration.as_deref();
 
     // Try with current token first
-    match fetch_subscription_feed_with_token(&client, &access_token).await {
+    match fetch_subscription_feed_with_token(&client, &access_token, video_duration).await {
         Ok(response) => Ok(Json(response)),
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
@@ -277,7 +292,13 @@ pub async fn get_subscription_feed(
                 match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
                     Ok(new_token) => {
                         // Retry with new token
-                        match fetch_subscription_feed_with_token(&client, &new_token).await {
+                        match fetch_subscription_feed_with_token(
+                            &client,
+                            &new_token,
+                            video_duration,
+                        )
+                        .await
+                        {
                             Ok(response) => Ok(Json(response)),
                             Err((_, retry_error)) => {
                                 tracing::error!(
@@ -321,6 +342,7 @@ async fn perform_youtube_search(
     query: &str,
     type_param: &str,
     channel_id: Option<&str>,
+    video_duration: Option<&str>,
 ) -> Result<SearchResponse, (u16, String)> {
     let mut query_params = vec![
         ("part", "snippet"),
@@ -334,6 +356,13 @@ async fn perform_youtube_search(
     if let Some(ch_id) = channel_id {
         channel_id_owned = ch_id.to_string();
         query_params.push(("channelId", &channel_id_owned));
+    }
+
+    // Add video duration filter if provided (short/medium/long)
+    let video_duration_owned: String;
+    if let Some(dur) = video_duration {
+        video_duration_owned = dur.to_string();
+        query_params.push(("videoDuration", &video_duration_owned));
     }
 
     let search_response = client
@@ -462,9 +491,19 @@ pub async fn search_youtube(
     };
 
     let channel_id = query.channel_id.as_deref();
+    let video_duration = query.video_duration.as_deref();
 
     // Try with current token first
-    match perform_youtube_search(&client, &access_token, &query.q, type_param, channel_id).await {
+    match perform_youtube_search(
+        &client,
+        &access_token,
+        &query.q,
+        type_param,
+        channel_id,
+        video_duration,
+    )
+    .await
+    {
         Ok(response) => Ok(Json(response)),
         Err((status, error_text)) => {
             // If 401, try to refresh the token and retry
@@ -478,7 +517,12 @@ pub async fn search_youtube(
                     Ok(new_token) => {
                         // Retry with new token
                         match perform_youtube_search(
-                            &client, &new_token, &query.q, type_param, channel_id,
+                            &client,
+                            &new_token,
+                            &query.q,
+                            type_param,
+                            channel_id,
+                            video_duration,
                         )
                         .await
                         {
@@ -509,6 +553,157 @@ pub async fn search_youtube(
                 }
             } else {
                 tracing::error!("YouTube search API error {}: {}", status, error_text);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "YouTube API error"})),
+                ))
+            }
+        }
+    }
+}
+
+/// Helper to fetch channel videos with a given token
+async fn fetch_channel_videos_with_token(
+    client: &reqwest::Client,
+    access_token: &str,
+    channel_id: &str,
+) -> Result<SearchResponse, (u16, String)> {
+    let search_response = client
+        .get("https://www.googleapis.com/youtube/v3/search")
+        .query(&[
+            ("part", "snippet"),
+            ("channelId", channel_id),
+            ("order", "date"),
+            ("type", "video"),
+            ("maxResults", "20"),
+        ])
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| (500, format!("Failed to fetch channel videos: {}", e)))?;
+
+    if !search_response.status().is_success() {
+        let status = search_response.status().as_u16();
+        let error_text = search_response.text().await.unwrap_or_default();
+        return Err((status, error_text));
+    }
+
+    let data: serde_json::Value = search_response
+        .json()
+        .await
+        .map_err(|e| (500, format!("Failed to parse channel videos: {}", e)))?;
+
+    let mut videos = Vec::new();
+    for item in data["items"].as_array().unwrap_or(&vec![]) {
+        let video_id = item["id"]["videoId"].as_str().unwrap_or_default();
+        let snippet = &item["snippet"];
+        videos.push(Video {
+            id: video_id.to_string(),
+            title: snippet["title"].as_str().unwrap_or_default().to_string(),
+            channel: snippet["channelTitle"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            channel_id: snippet["channelId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            thumbnail: snippet["thumbnails"]["medium"]["url"]
+                .as_str()
+                .or_else(|| snippet["thumbnails"]["default"]["url"].as_str())
+                .unwrap_or_default()
+                .to_string(),
+            duration: "".to_string(),
+            published_at: snippet["publishedAt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            view_count: "".to_string(),
+        });
+    }
+
+    Ok(SearchResponse {
+        videos,
+        channels: None,
+    })
+}
+
+/// Get recent videos from a specific channel
+pub async fn get_channel_videos(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(channel_id): Path<String>,
+) -> Result<Json<SearchResponse>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!(
+        "Fetching videos for channel {} for user {}",
+        channel_id,
+        auth_user.user_id
+    );
+
+    let (access_token, refresh_token) =
+        match state.user_repository.get_youtube_tokens(auth_user.user_id) {
+            Ok(Some(tokens)) => tokens,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "YouTube not connected", "youtube_auth_error": true})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("Failed to get YouTube tokens: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to get YouTube tokens"})),
+                ));
+            }
+        };
+
+    let client = reqwest::Client::new();
+
+    match fetch_channel_videos_with_token(&client, &access_token, &channel_id).await {
+        Ok(response) => Ok(Json(response)),
+        Err((status, error_text)) => {
+            if status == 401 {
+                tracing::info!(
+                    "YouTube token expired for channel videos, attempting refresh for user {}",
+                    auth_user.user_id
+                );
+                match refresh_youtube_token(&state, auth_user.user_id, &refresh_token).await {
+                    Ok(new_token) => {
+                        match fetch_channel_videos_with_token(&client, &new_token, &channel_id)
+                            .await
+                        {
+                            Ok(response) => Ok(Json(response)),
+                            Err((_, retry_error)) => {
+                                tracing::error!(
+                                    "YouTube channel videos API error after token refresh: {}",
+                                    retry_error
+                                );
+                                Err((
+                                    StatusCode::FORBIDDEN,
+                                    Json(
+                                        json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                                    ),
+                                ))
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to refresh YouTube token: {}", e);
+                        Err((
+                            StatusCode::FORBIDDEN,
+                            Json(
+                                json!({"error": "YouTube token expired, please reconnect", "youtube_auth_error": true}),
+                            ),
+                        ))
+                    }
+                }
+            } else {
+                tracing::error!(
+                    "YouTube channel videos API error {}: {}",
+                    status,
+                    error_text
+                );
                 Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "YouTube API error"})),

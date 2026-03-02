@@ -37,7 +37,6 @@ mod pages {
     pub mod termsprivacy;
     pub mod faq;
     pub mod supported_countries;
-    pub mod setup_costs;
     pub mod bring_own_number;
     pub mod lightphone3_whatsapp_guide;
     pub mod blog;
@@ -52,7 +51,6 @@ mod dashboard {
     pub mod chat_box;
     pub mod triage_indicator;
     pub mod timeline_view;
-    pub mod dashboard_footer;
     pub mod settings_panel;
     pub mod activity_panel;
     pub mod quiet_mode;
@@ -60,6 +58,8 @@ mod dashboard {
     pub mod tesla_quick_panel;
     pub mod youtube_quick_panel;
     pub mod contact_avatar_row;
+    pub mod items_status;
+    pub mod emoji_utils;
 }
 mod proactive {
     pub mod contact_profiles;

@@ -7,7 +7,6 @@ use axum::{
 use dashmap::DashMap;
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::SqliteConnection;
-use dotenvy::dotenv;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,7 +21,7 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
     SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
     WebauthnRepository,
 };
@@ -166,7 +165,16 @@ async fn bootstrap_admin_if_needed(
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    // Check for CLI commands first
+    match backend::cli::run_cli().await {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("CLI error: {}", e);
+            std::process::exit(1);
+        }
+    }
+
     let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
         release: sentry::release_name!(),
         ..Default::default()
@@ -219,6 +227,7 @@ async fn main() {
     }
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
+    let item_repository = Arc::new(ItemRepository::new(pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
@@ -328,6 +337,7 @@ async fn main() {
         db_pool: pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
+        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: AiConfig::from_env(),
@@ -358,6 +368,7 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        tool_registry: backend::build_tool_registry(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -416,13 +427,10 @@ async fn main() {
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
         .route(
-            "/api/call/task",
-            post(elevenlabs::handle_create_task_tool_call),
+            "/api/call/items/create",
+            post(elevenlabs::handle_create_item_voice),
         )
-        .route(
-            "/api/call/monitoring-status",
-            post(elevenlabs::handle_update_monitoring_status_tool_call),
-        )
+        .route("/api/call/items", get(elevenlabs::handle_fetch_items_voice))
         .route(
             "/api/call/cancel-message",
             get(elevenlabs::handle_cancel_pending_message_tool_call),
@@ -551,7 +559,6 @@ async fn main() {
         );
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
-        .route("/testing", post(auth_handlers::testing_handler))
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route(
             "/api/admin/verify/{user_id}",
@@ -639,10 +646,6 @@ async fn main() {
         .route(
             "/api/admin/alerts/enable/{alert_type}",
             post(admin_handlers::enable_alert_type),
-        )
-        .route(
-            "/api/admin/dashboard/triage/{item_type}/{id}",
-            delete(handlers::dashboard_handlers::dismiss_triage_item),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -771,10 +774,6 @@ async fn main() {
         )
         .route(
             "/api/profile/proactive-agent",
-            post(profile_handlers::update_proactive_agent_on),
-        )
-        .route(
-            "/api/profile/proactive-agent",
             get(profile_handlers::get_proactive_agent_on),
         )
         .route(
@@ -786,10 +785,22 @@ async fn main() {
             post(profile_handlers::set_quiet_mode),
         )
         .route(
+            "/api/profile/quiet-rules",
+            post(profile_handlers::add_quiet_rule),
+        )
+        .route(
+            "/api/profile/quiet-rules",
+            delete(profile_handlers::delete_quiet_rules),
+        )
+        .route(
             "/api/profile/get_nearby_places",
             get(profile_handlers::get_nearby_places),
         )
         .route("/api/chat/web", post(profile_handlers::web_chat))
+        .route(
+            "/api/chat/web-stream",
+            get(profile_handlers::web_chat_stream),
+        )
         .route(
             "/api/chat/web-with-image",
             post(profile_handlers::web_chat_with_image),
@@ -938,6 +949,10 @@ async fn main() {
             get(youtube::get_subscription_feed),
         )
         .route("/api/youtube/search", get(youtube::search_youtube))
+        .route(
+            "/api/youtube/channel/{channel_id}/videos",
+            get(youtube::get_channel_videos),
+        )
         .route("/api/youtube/video", get(youtube::get_video_details))
         .route(
             "/api/youtube/subscribe",
@@ -1177,26 +1192,14 @@ async fn main() {
             "/api/auth/matrix/reset",
             delete(bridge_auth_common::reset_matrix_connection),
         )
-        // Task routes (reminders and message monitoring)
+        // Item edit with AI
         .route(
-            "/api/filters/tasks",
-            get(filter_handlers::get_tasks).post(filter_handlers::create_task),
+            "/api/items/{id}/edit-ai",
+            post(filter_handlers::edit_item_with_ai),
         )
         .route(
-            "/api/filters/task/{task_id}",
-            delete(filter_handlers::cancel_task),
-        )
-        .route(
-            "/api/filters/task/{task_id}/permanence",
-            patch(filter_handlers::set_task_permanence),
-        )
-        .route(
-            "/api/tasks/{task_id}/edit-ai",
-            post(filter_handlers::edit_task_with_ai),
-        )
-        .route(
-            "/api/tasks/{task_id}",
-            get(filter_handlers::get_task).delete(filter_handlers::cancel_task),
+            "/api/items/{id}/edit-ai-stream",
+            get(filter_handlers::edit_item_with_ai_stream),
         )
         .route(
             "/api/filters/monitored-contacts",
@@ -1235,19 +1238,15 @@ async fn main() {
             "/api/dashboard/summary",
             get(dashboard_handlers::get_dashboard_summary),
         )
-        // Triage routes
-        .route("/api/triage", get(dashboard_handlers::get_triage_items))
+        // Item routes
+        .route("/api/items", get(dashboard_handlers::get_items))
         .route(
-            "/api/triage/{id}/execute",
-            post(dashboard_handlers::execute_triage_item),
+            "/api/items/{id}/snooze",
+            post(dashboard_handlers::snooze_item),
         )
         .route(
-            "/api/triage/{id}/snooze",
-            post(dashboard_handlers::snooze_triage_item),
-        )
-        .route(
-            "/api/triage/{id}",
-            delete(dashboard_handlers::dismiss_triage_item_by_id),
+            "/api/items/{id}",
+            get(dashboard_handlers::get_item_detail).delete(dashboard_handlers::dismiss_item),
         )
         // Contact Profiles routes
         .route(

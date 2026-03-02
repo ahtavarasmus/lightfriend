@@ -9,7 +9,9 @@ use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
+use std::net::TcpStream;
 use std::sync::Arc;
+use std::time::Duration;
 
 // ============================================================
 // Pure Functions for Testability
@@ -170,7 +172,7 @@ async fn connect_imap(
     password: &str,
     imap_server: Option<&str>,
     imap_port: Option<u16>,
-) -> Result<Session<TlsStream<std::net::TcpStream>>, Box<dyn Error>> {
+) -> Result<Session<TlsStream<TcpStream>>, Box<dyn Error>> {
     let tls = TlsConnector::builder().build()?;
 
     // Use provided server/port or auto-detect from email domain
@@ -185,7 +187,16 @@ async fn connect_imap(
         email
     );
 
-    let client = imap::connect((server, port), server, &tls)?;
+    // Use TCP connect with timeout to avoid hanging on unreachable servers
+    let tcp_stream = TcpStream::connect_timeout(
+        &format!("{}:{}", server, port).parse()?,
+        Duration::from_secs(15),
+    )?;
+    tcp_stream.set_read_timeout(Some(Duration::from_secs(15)))?;
+    tcp_stream.set_write_timeout(Some(Duration::from_secs(15)))?;
+
+    let tls_stream = tls.connect(server, tcp_stream)?;
+    let client = imap::Client::new(tls_stream);
 
     match client.login(email, password) {
         Ok(session) => Ok(session),
@@ -244,8 +255,8 @@ pub async fn imap_login(
                 e
             );
             Err((
-                StatusCode::UNAUTHORIZED,
-                AxumJson(json!({"error": "Invalid IMAP credentials"})),
+                StatusCode::BAD_REQUEST,
+                AxumJson(json!({"error": format!("IMAP connection failed: {}", e)})),
             ))
         }
     }

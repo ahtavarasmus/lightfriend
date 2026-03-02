@@ -1406,8 +1406,8 @@ pub fn admin_dashboard() -> Html {
                                                                         "plan-badge",
                                                                         match user.plan_type.as_deref() {
                                                                             Some("byot") => "byot",
-                                                                            Some("digest") => "digest",
-                                                                            Some("monitor") => "monitor",
+                                                                            Some("autopilot") => "autopilot",
+                                                                            Some("assistant") => "assistant",
                                                                             _ => "none"
                                                                         }
                                                                     )}>
@@ -1785,12 +1785,12 @@ pub fn admin_dashboard() -> Html {
                                                                                 Callback::from(move |_| {
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    // Cycle: None -> byot -> digest -> monitor -> None
+                                                                                    // Cycle: None -> byot -> autopilot -> assistant -> None
                                                                                     let new_plan = match current_plan.as_deref() {
                                                                                         None => "byot",
-                                                                                        Some("byot") => "digest",
-                                                                                        Some("digest") => "monitor",
-                                                                                        Some("monitor") | _ => "none",
+                                                                                        Some("byot") => "autopilot",
+                                                                                        Some("autopilot") => "assistant",
+                                                                                        Some("assistant") | _ => "none",
                                                                                     };
 
                                                                                     wasm_bindgen_futures::spawn_local(async move {
@@ -1824,9 +1824,9 @@ pub fn admin_dashboard() -> Html {
                                                                         >
                                                                             {match user.plan_type.as_deref() {
                                                                                 None => "Set BYOT",
-                                                                                Some("byot") => "Set Digest",
-                                                                                Some("digest") => "Set Monitor",
-                                                                                Some("monitor") => "Remove Plan",
+                                                                                Some("byot") => "Set Autopilot",
+                                                                                Some("autopilot") => "Set Assistant",
+                                                                                Some("assistant") => "Remove Plan",
                                                                                 _ => "Set BYOT"
                                                                             }}
                                                                         </button>
@@ -2550,13 +2550,13 @@ pub fn admin_dashboard() -> Html {
                         border: 1px solid rgba(156, 39, 176, 0.2);
                     }
 
-                    .plan-badge.digest {
+                    .plan-badge.autopilot {
                         background: rgba(0, 188, 212, 0.1);
                         color: #00BCD4;
                         border: 1px solid rgba(0, 188, 212, 0.2);
                     }
 
-                    .plan-badge.monitor {
+                    .plan-badge.assistant {
                         background: rgba(255, 152, 0, 0.1);
                         color: #FF9800;
                         border: 1px solid rgba(255, 152, 0, 0.2);

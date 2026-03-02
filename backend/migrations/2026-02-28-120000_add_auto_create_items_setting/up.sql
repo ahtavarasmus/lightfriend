@@ -1,0 +1,1 @@
+ALTER TABLE user_settings ADD COLUMN auto_create_items BOOLEAN NOT NULL DEFAULT FALSE;

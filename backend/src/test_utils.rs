@@ -72,6 +72,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 
     let user_core = Arc::new(crate::UserCore::new(pool.clone()));
     let user_repository = Arc::new(crate::UserRepository::new(pool.clone()));
+    let item_repository = Arc::new(crate::ItemRepository::new(pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
         pool.clone(),
     ));
@@ -97,6 +98,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         db_pool: pool,
         user_core,
         user_repository,
+        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
@@ -127,6 +129,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        tool_registry: crate::build_tool_registry(),
     })
 }
 
@@ -342,24 +345,17 @@ impl MockLlmResponse {
     }
 }
 
-/// Phone number prefixes for testing different country pricing
+/// Phone number prefixes for testing different countries
 /// NOTE: These use valid area codes recognized by phonenumber library
+/// All countries use unified credit budget (25.0) with callback-based SMS deduction.
 pub mod test_phone_numbers {
-    /// US phone number (San Francisco 415 area code) - uses credits_left count-based pricing
     pub const US: &str = "+14155551234";
-    /// Canada phone number (Toronto 647 area code) - uses preferred_number or CAN_PHONE
     pub const CANADA: &str = "+16475551234";
-    /// Finland phone number (+358 prefix) - uses euro segment pricing
     pub const FINLAND: &str = "+358401234567";
-    /// UK phone number (+44 prefix) - uses euro segment pricing
     pub const UK: &str = "+447911123456";
-    /// Netherlands phone number (+31 prefix) - uses euro segment pricing
     pub const NETHERLANDS: &str = "+31612345678";
-    /// Australia phone number (+61 prefix) - uses euro segment pricing
     pub const AUSTRALIA: &str = "+61412345678";
-    /// Germany phone number (+49 prefix) - notification-only pricing
     pub const GERMANY: &str = "+4915123456789";
-    /// France phone number (+33 prefix) - notification-only pricing
     pub const FRANCE: &str = "+33612345678";
 }
 
@@ -627,6 +623,7 @@ pub mod mock_user_core {
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
+        pub quiet_rules: Mutex<HashMap<i32, Vec<crate::models::user_models::Item>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -652,6 +649,7 @@ pub mod mock_user_core {
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
                 quiet_mode: Mutex::new(HashMap::new()),
+                quiet_rules: Mutex::new(HashMap::new()),
                 llm_provider: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
@@ -916,6 +914,14 @@ pub mod mock_user_core {
                 .unwrap()
                 .get(&user_id)
                 .unwrap_or(&true))
+        }
+
+        fn update_auto_create_items(&self, _user_id: i32, _value: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_auto_create_items(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(false)
         }
 
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {
@@ -1236,6 +1242,31 @@ pub mod mock_user_core {
         }
 
         fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
+            // Global quiet mode deletes all items including rules
+            self.quiet_rules.lock().unwrap().remove(&user_id);
+            if let Some(ts) = until {
+                // Store as an item in quiet_rules too for get_quiet_rules/check_quiet_with_context
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+                let end_time = if ts == 0 { None } else { Some(ts) };
+                let item = crate::models::user_models::Item {
+                    id: Some(now), // use timestamp as fake id
+                    user_id,
+                    summary: "Quiet mode.".to_string(),
+                    due_at: end_time,
+                    priority: 0,
+                    source_id: Some("quiet_mode".to_string()),
+                    created_at: now,
+                };
+                self.quiet_rules
+                    .lock()
+                    .unwrap()
+                    .entry(user_id)
+                    .or_default()
+                    .push(item);
+            }
             self.quiet_mode.lock().unwrap().insert(user_id, until);
             Ok(())
         }
@@ -1248,6 +1279,129 @@ pub mod mock_user_core {
                 .get(&user_id)
                 .copied()
                 .flatten())
+        }
+
+        fn add_quiet_rule(
+            &self,
+            user_id: i32,
+            until: i32,
+            rule_type: &str,
+            platform: Option<&str>,
+            sender: Option<&str>,
+            topic: Option<&str>,
+            description: &str,
+        ) -> Result<i32, DieselError> {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let mut tags = format!("[quiet:{}]", rule_type);
+            if let Some(p) = platform {
+                tags.push_str(&format!(" [platform:{}]", p));
+            }
+            if let Some(s) = sender {
+                tags.push_str(&format!(" [sender:{}]", s));
+            }
+            if let Some(t) = topic {
+                tags.push_str(&format!(" [topic:{}]", t));
+            }
+            let summary = format!("{}\n{}", tags, description);
+
+            let id = now; // use timestamp as fake id
+            let item = crate::models::user_models::Item {
+                id: Some(id),
+                user_id,
+                summary,
+                due_at: Some(until),
+                priority: 0,
+                source_id: Some("quiet_mode".to_string()),
+                created_at: now,
+            };
+            self.quiet_rules
+                .lock()
+                .unwrap()
+                .entry(user_id)
+                .or_default()
+                .push(item);
+            Ok(id)
+        }
+
+        fn get_quiet_rules(
+            &self,
+            user_id: i32,
+        ) -> Result<Vec<crate::models::user_models::Item>, DieselError> {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let items = self
+                .quiet_rules
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .cloned()
+                .unwrap_or_default();
+
+            // Filter out expired
+            let active: Vec<_> = items
+                .into_iter()
+                .filter(|item| match item.due_at {
+                    None => true,
+                    Some(ts) => ts > now,
+                })
+                .collect();
+            Ok(active)
+        }
+
+        fn check_quiet_with_context(
+            &self,
+            user_id: i32,
+            platform: Option<&str>,
+            sender: Option<&str>,
+            content: Option<&str>,
+        ) -> Result<bool, DieselError> {
+            let items = self.get_quiet_rules(user_id)?;
+
+            if items.is_empty() {
+                return Ok(false);
+            }
+
+            let mut has_global_suppress = false;
+            let mut suppress_rules = Vec::new();
+            let mut allow_rules = Vec::new();
+
+            for item in &items {
+                let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
+                match tags.quiet.as_deref() {
+                    None => has_global_suppress = true,
+                    Some("suppress") => suppress_rules.push(tags),
+                    Some("allow") => allow_rules.push(tags),
+                    _ => {}
+                }
+            }
+
+            if has_global_suppress {
+                return Ok(true);
+            }
+
+            for rule in &suppress_rules {
+                if crate::repositories::user_core::rule_matches(rule, platform, sender, content) {
+                    return Ok(true);
+                }
+            }
+
+            if !allow_rules.is_empty() {
+                let any_match = allow_rules.iter().any(|rule| {
+                    crate::repositories::user_core::rule_matches(rule, platform, sender, content)
+                });
+                if !any_match {
+                    return Ok(true);
+                }
+            }
+
+            Ok(false)
         }
     }
 }
@@ -1415,28 +1569,6 @@ pub fn create_test_task(
         .expect("No tasks found after creation")
 }
 
-/// Set digest settings for a user (for migration testing)
-pub fn set_digest_settings(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-    morning: Option<&str>,
-    day: Option<&str>,
-    evening: Option<&str>,
-) {
-    state
-        .user_core
-        .update_digests(user_id, morning, day, evening)
-        .expect("Failed to set digest settings");
-}
-
-/// Set user timezone
-pub fn set_user_timezone(state: &Arc<crate::AppState>, user_id: i32, tz: &str) {
-    state
-        .user_core
-        .update_timezone(user_id, tz)
-        .expect("Failed to set user timezone");
-}
-
 /// Get all tasks for a user
 pub fn get_user_tasks(
     state: &Arc<crate::AppState>,
@@ -1448,15 +1580,151 @@ pub fn get_user_tasks(
         .expect("Failed to get user tasks")
 }
 
-/// Get user's digest settings
-pub fn get_digest_settings(
+// =============================================================================
+// Item Testing Helpers
+// =============================================================================
+
+/// Builder for test item parameters
+#[derive(Debug, Clone)]
+pub struct TestItemParams {
+    pub user_id: i32,
+    pub summary: String,
+    pub due_at: Option<i32>,
+    pub priority: i32,
+    pub source_id: Option<String>,
+}
+
+impl TestItemParams {
+    /// Simple reminder item
+    pub fn reminder(user_id: i32, summary: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            due_at: None,
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Scheduled reminder (fires at due_at)
+    pub fn scheduled_reminder(user_id: i32, summary: &str, trigger_at: i32) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            due_at: Some(trigger_at),
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Digest item
+    pub fn digest(user_id: i32, summary: &str, trigger_at: i32) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            due_at: Some(trigger_at),
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Tracking item (matches against incoming data)
+    pub fn tracking(user_id: i32, summary: &str) -> Self {
+        // Prepend [type:tracking] tag if not already present
+        let tagged_summary = if summary.contains("[type:tracking]") {
+            summary.to_string()
+        } else {
+            format!("[type:tracking] {}", summary)
+        };
+        Self {
+            user_id,
+            summary: tagged_summary,
+            due_at: None,
+            priority: 0,
+            source_id: None,
+        }
+    }
+
+    /// Alert item (system alerts like bridge disconnect)
+    pub fn alert(user_id: i32, summary: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            due_at: None,
+            priority: 1,
+            source_id: None,
+        }
+    }
+
+    /// Email-sourced item (with source_id for dedup)
+    pub fn from_email(user_id: i32, summary: &str, source_id: &str) -> Self {
+        Self {
+            user_id,
+            summary: summary.to_string(),
+            due_at: None,
+            priority: 0,
+            source_id: Some(source_id.to_string()),
+        }
+    }
+
+    pub fn with_priority(mut self, priority: i32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_due_at(mut self, ts: i32) -> Self {
+        self.due_at = Some(ts);
+        self
+    }
+
+    pub fn with_source_id(mut self, source_id: &str) -> Self {
+        self.source_id = Some(source_id.to_string());
+        self
+    }
+}
+
+/// Create a test item in the database from TestItemParams, returns the item
+pub fn create_test_item(
+    state: &Arc<crate::AppState>,
+    params: &TestItemParams,
+) -> crate::models::user_models::Item {
+    use crate::models::user_models::NewItem;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_item = NewItem {
+        user_id: params.user_id,
+        summary: params.summary.clone(),
+        due_at: params.due_at,
+        priority: params.priority,
+        source_id: params.source_id.clone(),
+        created_at: now,
+    };
+
+    let item_id = state
+        .item_repository
+        .create_item(&new_item)
+        .expect("Failed to create test item");
+
+    state
+        .item_repository
+        .get_item(item_id, params.user_id)
+        .expect("Failed to get test item")
+        .expect("Item not found after creation")
+}
+
+/// Get all items for a user
+pub fn get_user_items(
     state: &Arc<crate::AppState>,
     user_id: i32,
-) -> (Option<String>, Option<String>, Option<String>) {
+) -> Vec<crate::models::user_models::Item> {
     state
-        .user_core
-        .get_digests(user_id)
-        .expect("Failed to get digest settings")
+        .item_repository
+        .get_items(user_id)
+        .expect("Failed to get user items")
 }
 
 #[cfg(test)]
