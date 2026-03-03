@@ -373,11 +373,12 @@ pub async fn edit_item_with_ai(
         .map(|tz| tz.formatted_now.clone())
         .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
 
-    // Format current scheduled time
+    // Format current scheduled time in user's timezone
+    let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
     let current_time = item
         .due_at
         .and_then(|nca| chrono::DateTime::from_timestamp(nca as i64, 0))
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| dt.with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "Not scheduled".to_string());
 
     let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
@@ -399,13 +400,13 @@ USER'S EDIT REQUEST: "{}"
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {{
-  "new_trigger_time": "YYYY-MM-DDTHH:MM:SS" or null,
+  "new_trigger_time": "2025-06-15T14:30:00" or null,
   "new_summary": "updated summary text" or null,
   "explanation": "Brief explanation"
 }}
 
 RULES:
-- new_trigger_time: Only set if user wants to change the scheduled time
+- new_trigger_time: Only set if user wants to change the scheduled time. Use exact format YYYY-MM-DDTHH:MM:SS
 - new_summary: Only set if user wants to change what the item does/tracks
 - explanation: Always provide a brief explanation of the change
 - Return null for unchanged fields
@@ -484,22 +485,28 @@ TIME RULES:
     if let Some(new_time_str) = &edit_result.new_trigger_time {
         let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
 
-        if let Ok(naive_dt) =
-            chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S")
-        {
-            use chrono::TimeZone;
-            if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
-                let new_ts = local_dt.timestamp() as i32;
-                state
-                    .item_repository
-                    .update_due_at(item_id, Some(new_ts))
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": format!("Failed to update time: {}", e)})),
-                        )
-                    })?;
-                changes_made = true;
+        let parsed = chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M"));
+
+        match parsed {
+            Ok(naive_dt) => {
+                use chrono::TimeZone;
+                if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
+                    let new_ts = local_dt.timestamp() as i32;
+                    state
+                        .item_repository
+                        .update_due_at(item_id, Some(new_ts))
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Failed to update time: {}", e)})),
+                            )
+                        })?;
+                    changes_made = true;
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to parse AI time '{}': {}", new_time_str, e);
             }
         }
     }
@@ -587,9 +594,11 @@ pub async fn edit_item_with_ai_stream(
             .map(|tz| tz.formatted_now.clone())
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
 
+        // Format current scheduled time in user's timezone
+        let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
         let current_time = item.due_at
             .and_then(|nca| chrono::DateTime::from_timestamp(nca as i64, 0))
-            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .map(|dt| dt.with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|| "Not scheduled".to_string());
 
         let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
@@ -611,13 +620,13 @@ USER'S EDIT REQUEST: "{}"
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {{
-  "new_trigger_time": "YYYY-MM-DDTHH:MM:SS" or null,
+  "new_trigger_time": "2025-06-15T14:30:00" or null,
   "new_summary": "updated summary text" or null,
   "explanation": "Brief explanation"
 }}
 
 RULES:
-- new_trigger_time: Only set if user wants to change the scheduled time
+- new_trigger_time: Only set if user wants to change the scheduled time. Use exact format YYYY-MM-DDTHH:MM:SS
 - new_summary: Only set if user wants to change what the item does/tracks
 - explanation: Always provide a brief explanation of the change
 - Return null for unchanged fields
@@ -630,10 +639,6 @@ TIME RULES:
             item_type, item.summary, current_time, user_tz_str,
             request.instruction, user_tz_str, formatted_now
         );
-
-        yield Ok(Event::default().data(
-            json!({"step": "thinking", "message": "Editing item..."}).to_string(),
-        ));
 
         use openai_api_rs::v1::chat_completion::{
             ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
@@ -649,12 +654,65 @@ TIME RULES:
 
         let ai_request = ChatCompletionRequest::new(ctx.model.clone(), messages).temperature(0.1);
 
-        let response = match ctx.client.chat_completion(ai_request).await {
-            Ok(r) => r,
-            Err(e) => {
+        // Stream reasoning tokens while the AI processes the edit
+        let (reasoning_tx, mut reasoning_rx) = tokio::sync::mpsc::channel::<String>(32);
+        let provider = ctx.provider;
+        let state_for_ai = state.clone();
+        let mut ai_handle = tokio::spawn(async move {
+            state_for_ai.ai_config.chat_completion_streaming(provider, &ai_request, Some(reasoning_tx)).await
+        });
+
+        #[allow(unused_assignments)]
+        let mut ai_result = None;
+        loop {
+            tokio::select! {
+                snippet = reasoning_rx.recv() => {
+                    match snippet {
+                        Some(text) => {
+                            yield Ok(Event::default().data(
+                                json!({"step": "reasoning", "message": text}).to_string(),
+                            ));
+                        }
+                        None => {
+                            // Channel closed - AI call dropped the sender
+                            ai_result = Some(ai_handle.await);
+                            break;
+                        }
+                    }
+                }
+                result = &mut ai_handle => {
+                    tokio::task::yield_now().await;
+                    // Drain remaining reasoning snippets
+                    while let Ok(text) = reasoning_rx.try_recv() {
+                        yield Ok(Event::default().data(
+                            json!({"step": "reasoning", "message": text}).to_string(),
+                        ));
+                    }
+                    ai_result = Some(result);
+                    break;
+                }
+            }
+        }
+
+        let response = match ai_result {
+            Some(Ok(Ok(r))) => r,
+            Some(Ok(Err(e))) => {
                 tracing::error!("AI request failed: {}", e);
                 yield Ok(Event::default().data(
                     json!({"step": "error", "message": format!("AI request failed: {}", e)}).to_string(),
+                ));
+                return;
+            }
+            Some(Err(e)) => {
+                tracing::error!("AI task panicked: {}", e);
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "AI request failed unexpectedly"}).to_string(),
+                ));
+                return;
+            }
+            None => {
+                yield Ok(Event::default().data(
+                    json!({"step": "error", "message": "AI request failed unexpectedly"}).to_string(),
                 ));
                 return;
             }
@@ -697,17 +755,25 @@ TIME RULES:
 
         if let Some(new_time_str) = &edit_result.new_trigger_time {
             let tz: chrono_tz::Tz = user_tz_str.parse().unwrap_or(chrono_tz::UTC);
-            if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S") {
-                use chrono::TimeZone;
-                if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
-                    let new_ts = local_dt.timestamp() as i32;
-                    if let Err(e) = state.item_repository.update_due_at(item_id, Some(new_ts)) {
-                        yield Ok(Event::default().data(
-                            json!({"step": "error", "message": format!("Failed to update time: {}", e)}).to_string(),
-                        ));
-                        return;
+            let parsed = chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M:%S")
+                .or_else(|_| chrono::NaiveDateTime::parse_from_str(new_time_str, "%Y-%m-%dT%H:%M"));
+
+            match parsed {
+                Ok(naive_dt) => {
+                    use chrono::TimeZone;
+                    if let Some(local_dt) = tz.from_local_datetime(&naive_dt).single() {
+                        let new_ts = local_dt.timestamp() as i32;
+                        if let Err(e) = state.item_repository.update_due_at(item_id, Some(new_ts)) {
+                            yield Ok(Event::default().data(
+                                json!({"step": "error", "message": format!("Failed to update time: {}", e)}).to_string(),
+                            ));
+                            return;
+                        }
+                        changes_made = true;
                     }
-                    changes_made = true;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to parse AI time '{}': {}", new_time_str, e);
                 }
             }
         }
