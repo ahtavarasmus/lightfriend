@@ -59,7 +59,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Data sources to poll, or 'none'. For recurring: what data to include in reports. For tracking external data (prices, weather, news): set to 'internet'. Sources: email, chat, calendar, weather, items, internet, none."
+                "Data sources to poll, or 'none'. For recurring: what data to include in reports. For tracking external data (prices, weather, news): set to 'internet'. Sources: email, chat, weather, items, internet, none."
                     .to_string(),
             ),
             ..Default::default()
@@ -83,7 +83,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "ISO datetime YYYY-MM-DDTHH:MM in user's timezone. Required for oneshot (trigger time). Optional for tracking (expiration deadline, defaults to 30 days). Optional for recurring (auto-computed from repeat pattern). For actions ('do X at 3pm') use exact time. For events ('meeting at 3pm') set before: 5min same-location, 45min appointments, 60min travel. Explicit time overrides ('remind at 1pm about 2pm meeting' = 13:00). Include actual event time in description."
+                "ISO datetime YYYY-MM-DDTHH:MM in user's timezone. For oneshot: trigger time. For recurring: first occurrence (compute from repeat pattern). For tracking: expiration deadline (default 30 days from now). For actions ('do X at 3pm') use exact time. For events ('meeting at 3pm') set before: 5min same-location, 45min appointments, 60min travel. Explicit time overrides ('remind at 1pm about 2pm meeting' = 13:00). Include actual event time in description."
                     .to_string(),
             ),
             ..Default::default()
@@ -149,6 +149,7 @@ pub fn get_create_item_tool() -> openai_api_rs::v1::chat_completion::Tool {
                     String::from("item_type"),
                     String::from("notify"),
                     String::from("description"),
+                    String::from("due_at"),
                     String::from("fetch"),
                     String::from("platform"),
                     String::from("sender"),
@@ -287,9 +288,6 @@ pub async fn handle_create_item(
                 || lower.contains("chat")
             {
                 sources.push("chat");
-            }
-            if lower.contains("calendar") || lower.contains("event") || lower.contains("schedule") {
-                sources.push("calendar");
             }
             if lower.contains("weather")
                 || lower.contains("forecast")
