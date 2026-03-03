@@ -35,7 +35,7 @@ pub enum ToolResult {
     Answer(String),
     /// Tool produced an answer and also created a task
     AnswerWithTask { answer: String, task_id: i32 },
-    /// Tool handled response directly (outgoing tools: send_email, send_chat, create_calendar)
+    /// Tool handled response directly (outgoing tools: send_email, send_chat)
     /// These return early with history already written
     EarlyReturn {
         response: TwilioResponse,

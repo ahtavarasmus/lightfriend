@@ -1,12 +1,12 @@
 services:
-  # PostgreSQL database for Synapse and bridges
+  # PostgreSQL database for bridges
   postgres:
     image: postgres:16-alpine
     container_name: lightfriend-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_MULTIPLE_DATABASES: synapse_db,whatsapp_db,signal_db,messenger_db,instagram_db,telegram_db
+      POSTGRES_MULTIPLE_DATABASES: whatsapp_db,signal_db,telegram_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
@@ -18,37 +18,20 @@ services:
       timeout: 5s
       retries: 5
 
-  # Synapse Matrix homeserver
-  synapse:
-    image: matrixdotorg/synapse:latest
-    container_name: lightfriend-synapse
-    user: "0:0"  # Start as root to fix permissions, then run as synapse
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+  # Tuwunel Matrix homeserver (Rust, uses built-in RocksDB)
+  tuwunel:
+    image: jevolk/tuwunel:latest
+    container_name: lightfriend-tuwunel
     environment:
-      SYNAPSE_SERVER_NAME: localhost
-      SYNAPSE_REPORT_STATS: "no"
-      POSTGRES_USER: synapse_user
-      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD:-synapse_password}
-      POSTGRES_DB: synapse_db
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
     volumes:
-      - synapse_data:/data
-      - ./synapse:/config:ro
-      - ./synapse/docker-entrypoint.sh:/entrypoint.sh:ro
-      - ./bridges:/bridges:ro
+      - tuwunel_data:/var/lib/tuwunel
+      - ./tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
     ports:
       - "8008:8008"
     networks:
       - lightfriend
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8008/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    restart: unless-stopped
 
   # WhatsApp bridge
   mautrix-whatsapp:
@@ -62,8 +45,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      synapse:
-        condition: service_healthy
+      tuwunel:
+        condition: service_started
     restart: unless-stopped
 
   # Signal bridge
@@ -78,40 +61,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      synapse:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Messenger bridge (mautrix-meta)
-  mautrix-messenger:
-    image: dock.mau.dev/mautrix/meta:latest
-    container_name: lightfriend-messenger
-    volumes:
-      - messenger_data:/data
-      - ./bridges/messenger/config.yaml:/data/config.yaml
-    networks:
-      - lightfriend
-    depends_on:
-      postgres:
-        condition: service_healthy
-      synapse:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Instagram bridge (mautrix-meta)
-  mautrix-instagram:
-    image: dock.mau.dev/mautrix/meta:latest
-    container_name: lightfriend-instagram
-    volumes:
-      - instagram_data:/data
-      - ./bridges/instagram/config.yaml:/data/config.yaml
-    networks:
-      - lightfriend
-    depends_on:
-      postgres:
-        condition: service_healthy
-      synapse:
-        condition: service_healthy
+      tuwunel:
+        condition: service_started
     restart: unless-stopped
 
   # Telegram bridge
@@ -126,8 +77,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      synapse:
-        condition: service_healthy
+      tuwunel:
+        condition: service_started
     restart: unless-stopped
 
   # Lightfriend Core (Rust backend + frontend)
@@ -154,24 +105,22 @@ services:
       STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK: ${STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK:-}
       STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU: ${STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU:-}
       STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER: ${STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER:-}
-      STRIPE_DIGEST_PLAN_PRICE_ID: ${STRIPE_DIGEST_PLAN_PRICE_ID:-}
-      STRIPE_MONITOR_PLAN_PRICE_ID: ${STRIPE_MONITOR_PLAN_PRICE_ID:-}
+      STRIPE_ASSISTANT_PLAN_PRICE_ID: ${STRIPE_ASSISTANT_PLAN_PRICE_ID:-}
+      STRIPE_ASSISTANT_PLAN_PRICE_ID_US: ${STRIPE_ASSISTANT_PLAN_PRICE_ID_US:-}
+      STRIPE_AUTOPILOT_PLAN_PRICE_ID: ${STRIPE_AUTOPILOT_PLAN_PRICE_ID:-}
+      STRIPE_AUTOPILOT_PLAN_PRICE_ID_US: ${STRIPE_AUTOPILOT_PLAN_PRICE_ID_US:-}
       STRIPE_BYOT_PLAN_PRICE_ID: ${STRIPE_BYOT_PLAN_PRICE_ID:-}
-      MATRIX_HOMESERVER: http://synapse:8008
-      MATRIX_HOMESERVER_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
+      MATRIX_HOMESERVER: http://tuwunel:8008
+      MATRIX_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
+      MATRIX_REGISTRATION_TOKEN: ${MATRIX_REGISTRATION_TOKEN}
       MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
       WHATSAPP_BRIDGE_BOT: "@whatsappbot:localhost"
       SIGNAL_BRIDGE_BOT: "@signalbot:localhost"
-      MESSENGER_BRIDGE_BOT: "@messengerbot:localhost"
-      INSTAGRAM_BRIDGE_BOT: "@igbot:localhost"
       TELEGRAM_BRIDGE_BOT: "@telegrambot:localhost"
-      GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
-      GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
-      GOOGLE_TASKS_CLIENT_ID: ${GOOGLE_TASKS_CLIENT_ID:-}
-      GOOGLE_TASKS_CLIENT_SECRET: ${GOOGLE_TASKS_CLIENT_SECRET:-}
       ELEVENLABS_SERVER_URL_SECRET: ${ELEVENLABS_SERVER_URL_SECRET:-}
       ELEVENLABS_WEBHOOK_SECRET: ${ELEVENLABS_WEBHOOK_SECRET:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TINFOIL_API_KEY: ${TINFOIL_API_KEY:-}
       PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
       # Resend API for notification emails (optional)
       RESEND_API_KEY: ${RESEND_API_KEY:-}
@@ -197,8 +146,8 @@ services:
     networks:
       - lightfriend
     depends_on:
-      synapse:
-        condition: service_healthy
+      tuwunel:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
@@ -212,11 +161,9 @@ networks:
 
 volumes:
   postgres_data:
-  synapse_data:
+  tuwunel_data:
   whatsapp_data:
   signal_data:
-  messenger_data:
-  instagram_data:
   telegram_data:
   core_data:
   core_uploads:

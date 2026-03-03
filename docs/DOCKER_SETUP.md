@@ -94,7 +94,7 @@ just up
 **Optional**: Edit `.env` to add API keys for optional features:
 - Twilio (SMS/Voice)
 - Stripe (Payments)
-- Google OAuth (Calendar/Tasks)
+- Google OAuth
 - OpenRouter/Perplexity (AI)
 
 **Note**: Bridge tokens (as_token, hs_token) are **auto-generated** - no manual token management needed!

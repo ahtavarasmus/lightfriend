@@ -9,15 +9,6 @@ use crate::utils::api::Api;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MediaPlatform {
     YouTube,
-    TikTok,
-    Instagram,
-    Twitter,
-    Vimeo,
-    Rumble,
-    Dailymotion,
-    Reddit,
-    Streamable,
-    Spotify,
     Unknown,
 }
 
@@ -40,15 +31,6 @@ impl MediaItem {
     pub fn embed_url(&self) -> String {
         match self.platform.as_str() {
             "youtube" => format!("https://www.youtube.com/embed/{}?autoplay=0", self.video_id),
-            "tiktok" => format!("https://www.tiktok.com/embed/v2/{}", self.video_id),
-            "instagram" => format!("https://www.instagram.com/p/{}/embed/", self.video_id),
-            "twitter" => format!("https://platform.twitter.com/embed/Tweet.html?id={}", self.video_id),
-            "vimeo" => format!("https://player.vimeo.com/video/{}", self.video_id),
-            "rumble" => format!("https://rumble.com/embed/{}/", self.video_id),
-            "dailymotion" => format!("https://www.dailymotion.com/embed/video/{}", self.video_id),
-            "reddit" => format!("https://www.redditmedia.com/mediaembed/{}?responsive=true", self.video_id),
-            "streamable" => format!("https://streamable.com/e/{}", self.video_id),
-            "spotify" => format!("https://open.spotify.com/embed/track/{}?theme=0", self.video_id),
             _ => String::new(),
         }
     }
@@ -57,7 +39,6 @@ impl MediaItem {
     pub fn default_thumbnail(&self) -> String {
         match self.platform.as_str() {
             "youtube" => format!("https://img.youtube.com/vi/{}/mqdefault.jpg", self.video_id),
-            "vimeo" => String::new(), // Vimeo requires API call for thumbnails
             _ => String::new(),
         }
     }
@@ -68,24 +49,6 @@ pub fn detect_platform(input: &str) -> MediaPlatform {
     let input = input.trim().to_lowercase();
     if input.contains("youtube.com") || input.contains("youtu.be") {
         MediaPlatform::YouTube
-    } else if input.contains("tiktok.com") || input.contains("vm.tiktok.com") {
-        MediaPlatform::TikTok
-    } else if input.contains("instagram.com/reel") || input.contains("instagram.com/p/") {
-        MediaPlatform::Instagram
-    } else if input.contains("twitter.com") || input.contains("x.com") || input.contains("t.co/") {
-        MediaPlatform::Twitter
-    } else if input.contains("vimeo.com") {
-        MediaPlatform::Vimeo
-    } else if input.contains("rumble.com") {
-        MediaPlatform::Rumble
-    } else if input.contains("dailymotion.com") || input.contains("dai.ly") {
-        MediaPlatform::Dailymotion
-    } else if input.contains("reddit.com") || input.contains("redd.it") {
-        MediaPlatform::Reddit
-    } else if input.contains("streamable.com") {
-        MediaPlatform::Streamable
-    } else if input.contains("spotify.com") || input.contains("spotify:") {
-        MediaPlatform::Spotify
     } else {
         MediaPlatform::Unknown
     }
@@ -124,202 +87,11 @@ pub fn extract_youtube_video_id(url: &str) -> Option<String> {
     None
 }
 
-/// Extract video ID from a TikTok URL
-/// Formats: tiktok.com/@user/video/VIDEO_ID, vm.tiktok.com/VIDEO_ID
-pub fn extract_tiktok_video_id(url: &str) -> Option<String> {
-    // Handle tiktok.com/@user/video/VIDEO_ID
-    if url.contains("/video/") {
-        return url
-            .split("/video/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle vm.tiktok.com/CODE (short URL)
-    if url.contains("vm.tiktok.com/") {
-        return url
-            .split("vm.tiktok.com/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    None
-}
-
-/// Extract video ID from a Vimeo URL
-/// Formats: vimeo.com/VIDEO_ID, player.vimeo.com/video/VIDEO_ID
-pub fn extract_vimeo_video_id(url: &str) -> Option<String> {
-    // Handle player.vimeo.com/video/VIDEO_ID
-    if url.contains("/video/") {
-        return url
-            .split("/video/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle vimeo.com/VIDEO_ID
-    if url.contains("vimeo.com/") {
-        return url
-            .split("vimeo.com/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string())
-            .filter(|s| s.chars().all(|c| c.is_ascii_digit()));
-    }
-    None
-}
-
-/// Extract video ID from a Rumble URL
-/// Formats: rumble.com/VIDEO_ID-title.html, rumble.com/embed/VIDEO_ID
-pub fn extract_rumble_video_id(url: &str) -> Option<String> {
-    // Handle rumble.com/embed/VIDEO_ID
-    if url.contains("/embed/") {
-        return url
-            .split("/embed/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle rumble.com/VIDEO_ID-title.html
-    if url.contains("rumble.com/") {
-        return url
-            .split("rumble.com/")
-            .nth(1)
-            .and_then(|s| {
-                let part = s.split('-').next()?;
-                if part.is_empty() || part == "embed" { None } else { Some(part.to_string()) }
-            });
-    }
-    None
-}
-
-/// Extract video ID from a Dailymotion URL
-/// Formats: dailymotion.com/video/VIDEO_ID, dai.ly/VIDEO_ID
-pub fn extract_dailymotion_video_id(url: &str) -> Option<String> {
-    // Handle dailymotion.com/video/VIDEO_ID
-    if url.contains("/video/") {
-        return url
-            .split("/video/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle dai.ly/VIDEO_ID
-    if url.contains("dai.ly/") {
-        return url
-            .split("dai.ly/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    None
-}
-
-/// Extract video/reel ID from an Instagram URL
-/// Formats: instagram.com/reel/CODE/, instagram.com/p/CODE/
-pub fn extract_instagram_video_id(url: &str) -> Option<String> {
-    // Handle instagram.com/reel/CODE/ or /reels/CODE/
-    if url.contains("/reel/") || url.contains("/reels/") {
-        let split_key = if url.contains("/reel/") { "/reel/" } else { "/reels/" };
-        return url
-            .split(split_key)
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle instagram.com/p/CODE/
-    if url.contains("/p/") {
-        return url
-            .split("/p/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    None
-}
-
-/// Extract tweet ID from a Twitter/X URL
-/// Formats: twitter.com/user/status/TWEET_ID, x.com/user/status/TWEET_ID
-pub fn extract_twitter_video_id(url: &str) -> Option<String> {
-    // Handle twitter.com/user/status/TWEET_ID or x.com/user/status/TWEET_ID
-    if url.contains("/status/") {
-        return url
-            .split("/status/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    None
-}
-
-/// Extract post ID from a Reddit URL
-/// Formats: reddit.com/r/subreddit/comments/POST_ID/...
-pub fn extract_reddit_video_id(url: &str) -> Option<String> {
-    // Handle reddit.com/r/subreddit/comments/POST_ID/
-    if url.contains("/comments/") {
-        return url
-            .split("/comments/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle redd.it/POST_ID
-    if url.contains("redd.it/") {
-        return url
-            .split("redd.it/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    None
-}
-
-/// Extract video ID from a Streamable URL
-/// Formats: streamable.com/VIDEO_ID, streamable.com/e/VIDEO_ID
-pub fn extract_streamable_video_id(url: &str) -> Option<String> {
-    // Handle streamable.com/e/VIDEO_ID (embed)
-    if url.contains("/e/") {
-        return url
-            .split("/e/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-    }
-    // Handle streamable.com/VIDEO_ID
-    if url.contains("streamable.com/") {
-        return url
-            .split("streamable.com/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string())
-            .filter(|s| !s.is_empty() && s != "e");
-    }
-    None
-}
-
-/// Extract track/content ID from a Spotify URL
-/// Formats: open.spotify.com/track/ID, spotify:track:ID
-pub fn extract_spotify_id(url: &str) -> Option<String> {
-    // Handle spotify:track:ID URI format
-    if url.starts_with("spotify:") {
-        let parts: Vec<&str> = url.split(':').collect();
-        if parts.len() >= 3 {
-            return Some(parts[2].to_string());
-        }
-    }
-    // Handle open.spotify.com/track/ID, /episode/ID, etc.
-    for content_type in &["track", "episode", "playlist", "album"] {
-        let pattern = format!("/{}/", content_type);
-        if url.contains(&pattern) {
-            return url
-                .split(&pattern)
-                .nth(1)
-                .map(|s| s.split(&['?', '&', '#', '/'][..]).next().unwrap_or(s).to_string());
-        }
-    }
-    None
-}
-
 /// Generic function to extract video ID from any supported platform
 pub fn extract_video_id(url: &str) -> Option<(MediaPlatform, String)> {
     let platform = detect_platform(url);
     let video_id = match platform {
         MediaPlatform::YouTube => extract_youtube_video_id(url),
-        MediaPlatform::TikTok => extract_tiktok_video_id(url),
-        MediaPlatform::Instagram => extract_instagram_video_id(url),
-        MediaPlatform::Twitter => extract_twitter_video_id(url),
-        MediaPlatform::Vimeo => extract_vimeo_video_id(url),
-        MediaPlatform::Rumble => extract_rumble_video_id(url),
-        MediaPlatform::Dailymotion => extract_dailymotion_video_id(url),
-        MediaPlatform::Reddit => extract_reddit_video_id(url),
-        MediaPlatform::Streamable => extract_streamable_video_id(url),
-        MediaPlatform::Spotify => extract_spotify_id(url),
         _ => None,
     };
     video_id.map(|id| (platform, id))
@@ -443,7 +215,7 @@ const MEDIA_PANEL_STYLES: &str = r#"
     overflow: hidden;
 }
 .media-embed-container.vertical {
-    padding-top: 177.78%; /* 9:16 aspect ratio for vertical videos (TikTok, Instagram) */
+    padding-top: 177.78%; /* 9:16 aspect ratio for vertical videos */
     max-width: 320px;
     margin: 0 auto;
 }
@@ -891,117 +663,17 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
                 let item = &items[*playing_index];
                 let platform = item.platform.as_str();
 
-                // YouTube doesn't need resolution - it uses direct embed URLs
+                // YouTube uses direct embed URLs, no resolution needed
+                // For any other platform, fall back to embed_url()
                 if platform == "youtube" {
                     resolved_embed.set(None);
                     resolving_embed.set(false);
                     resolve_error.set(None);
                 } else {
-                    // Use original URL if available, otherwise construct from video_id
-                    // Note: vimeo, dailymotion, reddit, spotify use direct embed URLs (no backend resolve needed)
-                    let url_opt = if let Some(orig_url) = &item.original_url {
-                        // Use the original URL for platforms that need resolution
-                        match platform {
-                            "tiktok" | "rumble" | "instagram" | "twitter" | "streamable" => Some(orig_url.clone()),
-                            _ => None,
-                        }
-                    } else {
-                        // Fallback: construct URL from video_id (may not work for all platforms)
-                        match platform {
-                            "tiktok" => Some(format!("https://www.tiktok.com/@user/video/{}", item.video_id)),
-                            "rumble" => Some(format!("https://rumble.com/{}", item.video_id)),
-                            "instagram" => Some(format!("https://www.instagram.com/reel/{}/", item.video_id)),
-                            "twitter" => Some(format!("https://twitter.com/i/status/{}", item.video_id)),
-                            "streamable" => Some(format!("https://streamable.com/{}", item.video_id)),
-                            _ => None,
-                        }
-                    };
-
-                    let api_endpoint = match platform {
-                        "tiktok" => Some("/api/tiktok/resolve"),
-                        "rumble" => Some("/api/rumble/resolve"),
-                        "instagram" => Some("/api/instagram/resolve"),
-                        "twitter" => Some("/api/twitter/resolve"),
-                        "streamable" => Some("/api/streamable/resolve"),
-                        _ => None,
-                    };
-
-                    if let (Some(url), Some(endpoint)) = (url_opt, api_endpoint) {
-                        let is_vertical = platform == "tiktok" || platform == "instagram";
-                        let platform_str = platform.to_string();
-                        let resolved_embed = resolved_embed.clone();
-                        let resolving_embed = resolving_embed.clone();
-                        let resolve_error = resolve_error.clone();
-                        let fallback_url = item.embed_url();
-
-                        resolving_embed.set(true);
-                        resolve_error.set(None);
-                        resolved_embed.set(None);
-
-                        spawn_local(async move {
-                            web_sys::console::log_1(&format!("MediaPanel: Resolving {} URL: {}", platform_str, url).into());
-
-                            match Api::post(endpoint)
-                                .json(&json!({ "url": url }))
-                                .unwrap()
-                                .send()
-                                .await
-                            {
-                                Ok(response) => {
-                                    if response.ok() {
-                                        // Parse based on platform - all have embed_url field
-                                        match response.json::<serde_json::Value>().await {
-                                            Ok(data) => {
-                                                if let Some(embed_url) = data["embed_url"].as_str() {
-                                                    web_sys::console::log_1(&format!("MediaPanel: Resolved embed URL: {}", embed_url).into());
-                                                    resolved_embed.set(Some(ResolvedEmbed {
-                                                        embed_url: embed_url.to_string(),
-                                                        is_vertical,
-                                                    }));
-                                                } else {
-                                                    web_sys::console::warn_1(&"MediaPanel: Response missing embed_url, using fallback".into());
-                                                    resolved_embed.set(Some(ResolvedEmbed {
-                                                        embed_url: fallback_url,
-                                                        is_vertical,
-                                                    }));
-                                                }
-                                            }
-                                            Err(e) => {
-                                                web_sys::console::error_1(&format!("MediaPanel: Failed to parse response: {:?}", e).into());
-                                                resolved_embed.set(Some(ResolvedEmbed {
-                                                    embed_url: fallback_url,
-                                                    is_vertical,
-                                                }));
-                                            }
-                                        }
-                                    } else {
-                                        web_sys::console::error_1(&format!("MediaPanel: Resolve request failed with status {}", response.status()).into());
-                                        // Fall back to direct URL
-                                        resolved_embed.set(Some(ResolvedEmbed {
-                                            embed_url: fallback_url,
-                                            is_vertical,
-                                        }));
-                                    }
-                                }
-                                Err(e) => {
-                                    web_sys::console::error_1(&format!("MediaPanel: Resolve request error: {:?}", e).into());
-                                    resolve_error.set(Some(format!("Failed to load video: {:?}", e)));
-                                    // Fall back to direct URL
-                                    resolved_embed.set(Some(ResolvedEmbed {
-                                        embed_url: fallback_url,
-                                        is_vertical,
-                                    }));
-                                }
-                            }
-                            resolving_embed.set(false);
-                        });
-                    } else {
-                        // For unsupported platforms, use direct embed URL
-                        resolved_embed.set(Some(ResolvedEmbed {
-                            embed_url: item.embed_url(),
-                            is_vertical: false,
-                        }));
-                    }
+                    resolved_embed.set(Some(ResolvedEmbed {
+                        embed_url: item.embed_url(),
+                        is_vertical: false,
+                    }));
                 }
             } else {
                 // Not playing, clear resolved embed
@@ -1127,7 +799,6 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
         let item = &props.media_items[0];
         match item.platform.as_str() {
             "youtube" => "YouTube Video",
-            "tiktok" => "TikTok Video",
             _ => "Video",
         }
     } else {
@@ -1174,7 +845,7 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
                                 };
                             } else {
                                 // Fallback to direct URL while resolve is pending
-                                (item.embed_url(), item.platform == "tiktok" || item.platform == "instagram")
+                                (item.embed_url(), false)
                             };
 
                             let container_class = if is_vertical {

@@ -2,9 +2,7 @@
 //!
 //! Tests the public structs used for AI response parsing and digest data.
 
-use backend::proactive::utils::{
-    CalendarEvent, DigestData, ItemMatchResponse, MatchResponse, MessageInfo,
-};
+use backend::proactive::utils::{DigestData, ItemMatchResponse, MatchResponse, MessageInfo};
 
 // =========================================================================
 // MatchResponse Parsing Tests
@@ -146,11 +144,6 @@ fn test_digest_data_serializes_correctly() {
             platform: "whatsapp".to_string(),
             room_id: None,
         }],
-        calendar_events: vec![CalendarEvent {
-            title: "Meeting".to_string(),
-            start_time_rfc: "2024-01-15T14:00:00Z".to_string(),
-            duration_minutes: 60,
-        }],
         time_period_hours: 8,
         current_datetime_local: "2024-01-15T12:00:00+02:00".to_string(),
     };
@@ -160,7 +153,6 @@ fn test_digest_data_serializes_correctly() {
     assert!(json.contains("John"));
     assert!(json.contains("Hello there"));
     assert!(json.contains("whatsapp"));
-    assert!(json.contains("Meeting"));
     assert!(json.contains("8")); // time_period_hours
 }
 

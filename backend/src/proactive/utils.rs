@@ -55,7 +55,7 @@ pub struct ParsedTags {
     pub notify: Option<String>,
     /// Repeat pattern: "daily HH:MM", "weekdays HH:MM", "weekly DAY HH:MM", "none"
     pub repeat: Option<String>,
-    /// Fetch tools to call: list of "email", "chat", "calendar", "weather", "items"
+    /// Fetch tools to call: list of "email", "chat", "weather", "items"
     pub fetch: Vec<String>,
     /// Sender name from [sender:X] tag (for monitor grouping)
     pub sender: Option<String>,
@@ -685,20 +685,6 @@ pub async fn process_triggered_item(
                         chat_parts.join("\n\n")
                     }
                 }
-                "calendar" => {
-                    let tz: chrono_tz::Tz = tz_label.parse().unwrap_or(chrono_tz::UTC);
-                    let now_local = chrono::Utc::now().with_timezone(&tz);
-                    let end_local = now_local + chrono::Duration::hours(24);
-                    let args = format!(
-                        r#"{{"start":"{}","end":"{}"}}"#,
-                        now_local.format("%Y-%m-%dT%H:%M"),
-                        end_local.format("%Y-%m-%dT%H:%M"),
-                    );
-                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state, user_id, &args,
-                    )
-                    .await
-                }
                 "weather" => {
                     // Use user's location for weather
                     let location = ctx
@@ -915,7 +901,6 @@ pub async fn process_triggered_item(
         // Legacy item: provide all fetch tools (LLM decides what to call)
         tools.push(crate::tool_call_utils::email::get_fetch_emails_tool());
         tools.push(crate::tool_call_utils::bridge::get_fetch_recent_messages_tool());
-        tools.push(crate::tool_call_utils::calendar::get_fetch_calendar_event_tool());
         tools.push(crate::tool_call_utils::internet::get_weather_tool());
         tools.push(fetch_tracked_items_tool);
     } else if is_tracking {
@@ -925,9 +910,6 @@ pub async fn process_triggered_item(
                 "email" => tools.push(crate::tool_call_utils::email::get_fetch_emails_tool()),
                 "chat" => {
                     tools.push(crate::tool_call_utils::bridge::get_fetch_recent_messages_tool())
-                }
-                "calendar" => {
-                    tools.push(crate::tool_call_utils::calendar::get_fetch_calendar_event_tool())
                 }
                 "weather" => tools.push(crate::tool_call_utils::internet::get_weather_tool()),
                 "items" => tools.push(fetch_tracked_items_tool.clone()),
@@ -1080,12 +1062,6 @@ pub async fn process_triggered_item(
                     )
                     .await
                 }
-                "fetch_calendar_events" => {
-                    crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state, user_id, fn_args,
-                    )
-                    .await
-                }
                 "get_weather" => {
                     let weather_args: serde_json::Value =
                         serde_json::from_str(fn_args).unwrap_or_default();
@@ -1169,7 +1145,6 @@ pub async fn process_triggered_item(
 #[derive(Debug, Serialize)]
 pub struct DigestData {
     pub messages: Vec<MessageInfo>,
-    pub calendar_events: Vec<CalendarEvent>,
     pub time_period_hours: u32,
     pub current_datetime_local: String, // Current date/time in user's timezone for relative timestamp calculation
 }
@@ -1181,13 +1156,6 @@ pub struct MessageInfo {
     pub timestamp_rfc: String,
     pub platform: String, // e.g., "email", "whatsapp", "telegram", "signal" etc.
     pub room_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CalendarEvent {
-    pub title: String,
-    pub start_time_rfc: String,
-    pub duration_minutes: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1994,7 +1962,7 @@ Rules:
     }
 }
 
-const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. Your goal is to help users stay on top of unread messages and upcoming calendar events without needing to open their apps. Group items by platform (e.g., WHATSAPP:, EMAIL:, CALENDAR:), starting each group on a new line. Within each group, provide clear teasers for critical or prioritized items (e.g., sender, topic hint, timestamp in parentheses), separating them with commas or '+' for brevity. Summarize less urgent or grouped items at the end of the group with '+' (e.g., '+ other routine items from xai, claude, ..'). Adjust detail based on overall content: if low volume or mostly low-criticality, expand critical items with fuller, detailed teasers (e.g., key excerpts or actions) to avoid follow-ups. For high volume or non-critical items, use minimal teasers. Highlight critical/actionable items with more specific hints to reduce follow-ups, but avoid full content. Cover all items concisely without omissions.
+const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages. Your goal is to help users stay on top of unread messages without needing to open their apps. Group items by platform (e.g., WHATSAPP:, EMAIL:), starting each group on a new line. Within each group, provide clear teasers for critical or prioritized items (e.g., sender, topic hint, timestamp in parentheses), separating them with commas or '+' for brevity. Summarize less urgent or grouped items at the end of the group with '+' (e.g., '+ other routine items from xai, claude, ..'). Adjust detail based on overall content: if low volume or mostly low-criticality, expand critical items with fuller, detailed teasers (e.g., key excerpts or actions) to avoid follow-ups. For high volume or non-critical items, use minimal teasers. Highlight critical/actionable items with more specific hints to reduce follow-ups, but avoid full content. Cover all items concisely without omissions.
 Rules
 • Absolute length limit: 480 characters.
 • Do NOT use markdown (no *, **, _, links, or backticks).
@@ -2004,7 +1972,6 @@ Rules
 • Messages marked with [PRIORITY] are from user-defined priority senders. Always put them first in their platform group, highlight them with more detailed teasers (e.g., key excerpts, actions, or urgency hints), and treat them as critical/actionable to minimize user follow-ups.
 • Put critical or prioritized items first within each group.
 • Include timestamps in parentheses using relative terms based on the current datetime provided. Use '(today Xpm/am)' for same-day messages and '(yesterday Xpm/am)' only for messages from the previous calendar day. Compare the message date with the current date to determine this correctly.
-• For calendar, include events in the next 24 hours with start time and brief hint.
 • Tease naturally, e.g., 'Mom suggested dinner in family chat (today 8pm)'.
 Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating groups.
@@ -2040,30 +2007,10 @@ pub async fn generate_digest(
         })
         .collect::<Vec<String>>()
         .join("\n");
-    // Format calendar events for the prompt
-    let events_str = data
-        .calendar_events
-        .iter()
-        .map(|event| {
-            format!(
-                "- {} at {} lasting {} minutes",
-                event.title, event.start_time_rfc, event.duration_minutes,
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-    // Conditionally include calendar section only if there are events
-    let user_content = if data.calendar_events.is_empty() {
-        format!(
-            "Current datetime (user's local time): {}\n\nCreate a digest covering the last {} hours.\n\nMessages:\n{}",
-            data.current_datetime_local, data.time_period_hours, messages_str
-        )
-    } else {
-        format!(
-            "Current datetime (user's local time): {}\n\nCreate a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
-            data.current_datetime_local, data.time_period_hours, messages_str, events_str
-        )
-    };
+    let user_content = format!(
+        "Current datetime (user's local time): {}\n\nCreate a digest covering the last {} hours.\n\nMessages:\n{}",
+        data.current_datetime_local, data.time_period_hours, messages_str
+    );
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -2093,9 +2040,7 @@ pub async fn generate_digest(
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_digest"),
-            description: Some(String::from(
-                "Creates a concise digest of messages and calendar events",
-            )),
+            description: Some(String::from("Creates a concise digest of messages")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
@@ -2155,18 +2100,7 @@ pub struct NotificationMeta {
 /// Extract platform name from a content_type string like "whatsapp_profile_sms".
 pub fn extract_platform_from_content_type(ct: &str) -> Option<String> {
     let ct_lower = ct.to_lowercase();
-    for prefix in &[
-        "whatsapp",
-        "telegram",
-        "signal",
-        "email",
-        "calendar",
-        "tesla",
-        "messenger",
-        "instagram",
-        "bluesky",
-        "digest",
-    ] {
+    for prefix in &["whatsapp", "telegram", "signal", "email", "tesla", "digest"] {
         if ct_lower.starts_with(prefix) {
             return Some(prefix.to_string());
         }

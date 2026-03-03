@@ -74,47 +74,6 @@ impl ToolHandler for FirecrawlHandler {
     }
 }
 
-// ─── get_directions ──────────────────────────────────────────────────────────
-
-pub struct DirectionsHandler;
-
-#[derive(Deserialize, Serialize)]
-struct DirectionsQuestion {
-    start_address: String,
-    end_address: String,
-    mode: Option<String>,
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for DirectionsHandler {
-    fn name(&self) -> &'static str {
-        "get_directions"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::internet::get_directions_tool()
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing get_directions tool call");
-        let c: DirectionsQuestion =
-            serde_json::from_str(ctx.arguments).map_err(|e| e.to_string())?;
-        match crate::tool_call_utils::internet::handle_directions_tool(
-            c.start_address,
-            c.end_address,
-            c.mode,
-        )
-        .await
-        {
-            Ok(answer) => {
-                tracing::debug!("Successfully received directions answer");
-                Ok(ToolResult::Answer(answer))
-            }
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
-
 // ─── scan_qr_code ────────────────────────────────────────────────────────────
 
 pub struct QrScanHandler;

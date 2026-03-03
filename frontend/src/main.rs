@@ -68,13 +68,9 @@ mod proactive {
 mod connections {
     pub mod bridge_connect;
     pub mod email;
-    pub mod calendar;
     pub mod whatsapp;
     pub mod telegram;
     pub mod signal;
-    pub mod uber;
-    pub mod messenger;
-    pub mod instagram;
     pub mod tesla;
     pub mod youtube;
     pub mod mcp;
@@ -301,7 +297,7 @@ use crate::utils::seo::{use_seo, SeoMeta};
 pub fn pricing_wrapper() -> Html {
     use_seo(SeoMeta {
         title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
-        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, calendar, and more. Available in 40+ countries.",
+        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, and more. Available in 40+ countries.",
         canonical: "https://lightfriend.ai/pricing",
         og_type: "website",
     });

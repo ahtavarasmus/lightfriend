@@ -926,57 +926,6 @@ pub async fn handle_firecrawl_tool_call(
     }
 }
 
-pub async fn handle_calendar_tool_call(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Json<serde_json::Value> {
-    // Extract required parameters from query
-    let user_id_str = match params.get("user_id") {
-        Some(id) => id,
-        None => {
-            return Json(json!({
-                "error": "Missing user_id parameter"
-            }));
-        }
-    };
-
-    let start = match params.get("start") {
-        Some(start) => start,
-        None => {
-            return Json(json!({
-                "error": "Missing start parameter"
-            }));
-        }
-    };
-
-    let end = match params.get("end") {
-        Some(end) => end,
-        None => {
-            return Json(json!({
-                "error": "Missing end parameter"
-            }));
-        }
-    };
-
-    // Parse user_id from string to i32
-    let user_id = match user_id_str.parse::<i32>() {
-        Ok(id) => id,
-        Err(_) => {
-            return Json(json!({
-                "error": "Invalid user ID format"
-            }));
-        }
-    };
-
-    // Call the handler in google_calendar.rs
-    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, start, end)
-        .await
-    {
-        Ok(response) => response,
-        Err((_, json_response)) => json_response,
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct EmailSearchPayload {
     pub search_term: String,
@@ -992,15 +941,6 @@ pub struct ChatSearchPayload {
 pub struct ChatConfirmPayload {
     chat_name: String,
     message: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CalendarEventConfirmPayload {
-    summary: String,
-    start_time: String,
-    duration_minutes: i32,
-    description: Option<String>,
-    add_notification: Option<bool>,
 }
 
 pub async fn handle_email_search_tool_call(
@@ -1818,66 +1758,6 @@ pub async fn handle_respond_to_email(
     })))
 }
 
-pub async fn handle_calendar_event_creation(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<CalendarEventConfirmPayload>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract user_id from query parameters
-    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing or invalid user_id"
-                })),
-            ));
-        }
-    };
-    // Parse the start time
-    let start_time = match chrono::DateTime::parse_from_rfc3339(&payload.start_time) {
-        Ok(dt) => dt.with_timezone(&chrono::Utc),
-        Err(_) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Invalid start_time format. Please use RFC3339 format."
-                })),
-            ));
-        }
-    };
-    // Create the event request
-    let event_request = crate::handlers::google_calendar::CreateEventRequest {
-        summary: payload.summary.clone(),
-        description: payload.description.clone(),
-        start_time,
-        duration_minutes: payload.duration_minutes,
-        add_notification: payload.add_notification.unwrap_or(false),
-    };
-    // Create the event directly
-    match crate::handlers::google_calendar::create_calendar_event(
-        State(state.clone()),
-        crate::handlers::auth_middleware::AuthUser {
-            user_id,
-            is_admin: false,
-        },
-        Json(event_request),
-    )
-    .await
-    {
-        Ok(response) => Ok(Json(json!({
-            "status": "success",
-            "message": "Calendar event created successfully",
-            "event": response.0
-        }))),
-        Err(e) => {
-            error!("Failed to create calendar event: {:?}", e);
-            Err(e)
-        }
-    }
-}
-
 pub async fn handle_search_chat_contacts_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -2506,48 +2386,6 @@ pub async fn handle_weather_tool_call(
             error!("Error getting weather information: {}", e);
             Json(json!({
                 "error": "Failed to get weather information",
-                "details": e.to_string()
-            }))
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub struct DirectionsCallPayload {
-    pub start_address: String,
-    pub end_address: String,
-    pub mode: Option<String>,
-}
-
-pub async fn handle_directions_tool_call(
-    State(_state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<DirectionsCallPayload>,
-) -> Json<serde_json::Value> {
-    // Extract user_id from query parameters
-    let _user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Json(json!({
-                "error": "Missing or invalid user_id",
-            }));
-        }
-    };
-
-    match crate::tool_call_utils::internet::handle_directions_tool(
-        payload.start_address,
-        payload.end_address,
-        payload.mode,
-    )
-    .await
-    {
-        Ok(directions_info) => Json(json!({
-            "response": directions_info
-        })),
-        Err(e) => {
-            error!("Error getting directions information: {}", e);
-            Json(json!({
-                "error": "Failed to get directions information",
                 "details": e.to_string()
             }))
         }

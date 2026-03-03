@@ -188,10 +188,6 @@ pub trait UserCoreOps: Send + Sync {
         &self,
         user_id: i32,
     ) -> Result<crate::handlers::profile_handlers::CriticalNotificationInfo, DieselError>;
-    fn get_priority_notification_info(
-        &self,
-        user_id: i32,
-    ) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, DieselError>;
 
     // Profile (complex transaction)
     fn update_profile(&self, params: UpdateProfileParams<'_>) -> Result<(), DieselError>;
@@ -239,9 +235,6 @@ pub trait UserCoreOps: Send + Sync {
         active: bool,
         amount: Option<f32>,
     ) -> Result<(), DieselError>;
-    fn increment_monthly_message_count(&self, user_id: i32) -> Result<(), DieselError>;
-    fn reset_monthly_message_count(&self, user_id: i32) -> Result<(), DieselError>;
-
     // Validation
     fn email_exists(&self, email: &str) -> Result<bool, DieselError>;
     fn phone_number_exists(&self, phone: &str) -> Result<bool, DieselError>;
@@ -394,35 +387,20 @@ impl UserCoreOps for UserCore {
 
     fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::{
-            bridges, calendar_notifications, conversations, critical_categories, email_judgments,
-            google_calendar, imap_connection, keywords, message_history, priority_senders,
-            processed_emails, refund_info, tasks, tesla, totp_backup_codes, totp_secrets, uber,
-            usage_logs, user_info, user_settings, webauthn_challenges, webauthn_credentials,
-            youtube,
+            bridges, critical_categories, imap_connection, message_history, processed_emails,
+            refund_info, tesla, totp_backup_codes, totp_secrets, usage_logs, user_info,
+            user_settings, webauthn_challenges, webauthn_credentials, youtube,
         };
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Delete from all related tables first (cascade delete in code)
         diesel::delete(bridges::table.filter(bridges::user_id.eq(user_id))).execute(&mut conn)?;
-        diesel::delete(
-            calendar_notifications::table.filter(calendar_notifications::user_id.eq(user_id)),
-        )
-        .execute(&mut conn)?;
-        diesel::delete(conversations::table.filter(conversations::user_id.eq(user_id)))
-            .execute(&mut conn)?;
         diesel::delete(critical_categories::table.filter(critical_categories::user_id.eq(user_id)))
-            .execute(&mut conn)?;
-        diesel::delete(email_judgments::table.filter(email_judgments::user_id.eq(user_id)))
-            .execute(&mut conn)?;
-        diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
             .execute(&mut conn)?;
-        diesel::delete(keywords::table.filter(keywords::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(message_history::table.filter(message_history::user_id.eq(user_id)))
-            .execute(&mut conn)?;
-        diesel::delete(priority_senders::table.filter(priority_senders::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(processed_emails::table.filter(processed_emails::user_id.eq(user_id)))
             .execute(&mut conn)?;
@@ -433,14 +411,12 @@ impl UserCoreOps for UserCore {
             .execute(&mut conn)?;
         diesel::delete(totp_secrets::table.filter(totp_secrets::user_id.eq(user_id)))
             .execute(&mut conn)?;
-        diesel::delete(uber::table.filter(uber::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(user_info::table.filter(user_info::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .execute(&mut conn)?;
-        diesel::delete(tasks::table.filter(tasks::user_id.eq(user_id))).execute(&mut conn)?;
         diesel::delete(webauthn_challenges::table.filter(webauthn_challenges::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(
@@ -494,11 +470,9 @@ impl UserCoreOps for UserCore {
             let new_user_info = NewUserInfo {
                 user_id,
                 location: None,
-                dictionary: None,
                 info: None,
                 timezone: None,
                 nearby_places: None,
-                recent_contacts: None,
             };
 
             diesel::insert_into(user_info::table)
@@ -542,7 +516,6 @@ impl UserCoreOps for UserCore {
                     agent_language: "en".to_string(),
                     sub_country: None,
                     save_context: Some(5),
-                    number_of_digests_locked: 0,
                     critical_enabled: Some("sms".to_string()),
                     proactive_agent_on: true,
                     notify_about_calls: true,
@@ -689,7 +662,6 @@ impl UserCoreOps for UserCore {
                 agent_language: "en".to_string(),
                 sub_country: None,
                 save_context: Some(5),
-                number_of_digests_locked: 0,
                 critical_enabled: Some("sms".to_string()),
                 proactive_agent_on: true,
                 notify_about_calls: true,
@@ -1593,92 +1565,6 @@ impl UserCoreOps for UserCore {
         )
     }
 
-    fn get_priority_notification_info(
-        &self,
-        user_id: i32,
-    ) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error>
-    {
-        use crate::schema::usage_logs;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        // Get average priority notifications per day
-        let average_priority_per_day = {
-            let now: i64 = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_secs() as i64;
-            let thirty_days_ago: i64 = now - 2_592_000; // 30 * 86_400
-            let active_days_count: i64 = usage_logs::table
-                .select(sql::<BigInt>("COUNT(DISTINCT created_at / 86400)"))
-                .filter(crate::schema::usage_logs::user_id.eq(user_id))
-                .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
-                .first(&mut conn)?;
-            if active_days_count < 3 {
-                0.0
-            } else {
-                let oldest_day: i64 = usage_logs::table
-                    .select(sql::<BigInt>("MIN(created_at / 86400)"))
-                    .filter(crate::schema::usage_logs::user_id.eq(user_id))
-                    .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
-                    .first(&mut conn)?;
-                let current_day: i64 = now / 86_400;
-                let num_days = (current_day - oldest_day + 1) as i64;
-                if num_days <= 0 {
-                    0.0
-                } else {
-                    let start_timestamp: i64 = oldest_day * 86_400;
-                    let end_timestamp: i64 = (current_day + 1) * 86_400;
-                    let total_priority: i64 = usage_logs::table
-                        .filter(crate::schema::usage_logs::user_id.eq(user_id))
-                        .filter(usage_logs::activity_type.like("%_priority"))
-                        .filter(usage_logs::created_at.ge(start_timestamp as i32))
-                        .filter(usage_logs::created_at.lt(end_timestamp as i32))
-                        .count()
-                        .get_result(&mut conn)?;
-                    if total_priority == 0 {
-                        0.0
-                    } else {
-                        total_priority as f32 / num_days as f32
-                    }
-                }
-            }
-        };
-        // Get user's phone number to determine country
-        let phone_number = self
-            .find_by_id(user_id)?
-            .map(|user| user.phone_number)
-            .ok_or_else(|| diesel::result::Error::NotFound)?;
-        // Determine country based on phone number
-        let country = if phone_number.starts_with("+1") {
-            "US"
-        } else if phone_number.starts_with("+358") {
-            "FI"
-        } else if phone_number.starts_with("+31") {
-            "NL"
-        } else if phone_number.starts_with("+44") {
-            "UK"
-        } else if phone_number.starts_with("+61") {
-            "AU"
-        } else {
-            "Other"
-        };
-        // Calculate estimated monthly price based on country, assuming "sms"
-        let estimated_monthly_price = {
-            let notifications_per_month = average_priority_per_day * 30.0; // Assume 30 days per month
-            match (country, "sms") {
-                ("US", "sms") => notifications_per_month * 0.15 / 2.0,
-                ("FI", "sms") => notifications_per_month * 0.15,
-                ("NL", "sms") => notifications_per_month * 0.15,
-                ("UK", "sms") => notifications_per_month * 0.15,
-                ("AU", "sms") => notifications_per_month * 0.15,
-                _ => 0.0, // No pricing for "Other"
-            }
-        };
-        Ok(crate::handlers::filter_handlers::PriorityNotificationInfo {
-            average_per_day: average_priority_per_day,
-            estimated_monthly_price,
-        })
-    }
-
     fn update_next_billing_date(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
         use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1930,30 +1816,6 @@ impl UserCoreOps for UserCore {
         // Update the server_instance_id
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::elevenlabs_phone_number_id.eq(Some(phone_number_id)))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    // Increment monthly message count
-    fn increment_monthly_message_count(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::monthly_message_count.eq(user_settings::monthly_message_count + 1))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    // Reset monthly message count (called on billing cycle)
-    fn reset_monthly_message_count(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::monthly_message_count.eq(0))
             .execute(&mut conn)?;
 
         Ok(())

@@ -102,9 +102,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         twilio_client,
         twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
-        google_calendar_oauth_client: google_oauth.clone(),
         youtube_oauth_client: google_oauth.clone(),
-        uber_oauth_client: google_oauth,
         tesla_oauth_client: tesla_oauth,
         session_store: MemoryStore::default(),
         login_limiter: DashMap::new(),
@@ -152,7 +150,6 @@ pub fn create_test_user(
         credits: params.credits,
         credits_left: params.credits_left,
         charge_when_under: false,
-        waiting_checks_count: 0,
         discount: false,
         sub_tier: params.sub_tier.clone(),
     };
@@ -587,7 +584,6 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
 // =============================================================================
 
 pub mod mock_user_core {
-    use crate::handlers::filter_handlers::PriorityNotificationInfo;
     use crate::handlers::profile_handlers::CriticalNotificationInfo;
     use crate::models::user_models::{User, UserInfo, UserSettings};
     use crate::repositories::user_core::{DigestSettings, UpdateProfileParams, UserCoreOps};
@@ -1073,16 +1069,6 @@ pub mod mock_user_core {
             })
         }
 
-        fn get_priority_notification_info(
-            &self,
-            _user_id: i32,
-        ) -> Result<PriorityNotificationInfo, DieselError> {
-            Ok(PriorityNotificationInfo {
-                average_per_day: 0.5,
-                estimated_monthly_price: 2.0,
-            })
-        }
-
         fn update_profile(&self, _params: UpdateProfileParams<'_>) -> Result<(), DieselError> {
             Ok(())
         }
@@ -1191,14 +1177,6 @@ pub mod mock_user_core {
             _active: bool,
             _amount: Option<f32>,
         ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn increment_monthly_message_count(&self, _user_id: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn reset_monthly_message_count(&self, _user_id: i32) -> Result<(), DieselError> {
             Ok(())
         }
 
@@ -1409,176 +1387,6 @@ pub mod mock_user_core {
 // =============================================================================
 // Task Testing Helpers
 // =============================================================================
-
-/// Builder for test task parameters
-#[derive(Debug, Clone)]
-pub struct TestTaskParams {
-    pub user_id: i32,
-    pub trigger: String,
-    pub action: String,
-    pub notification_type: Option<String>,
-    pub is_permanent: Option<i32>,
-    pub recurrence_rule: Option<String>,
-    pub recurrence_time: Option<String>,
-    pub sources: Option<String>,
-    pub condition: Option<String>,
-    pub end_time: Option<i32>,
-}
-
-impl TestTaskParams {
-    /// Create a one-time task with given trigger timestamp
-    pub fn once_task(user_id: i32, trigger_ts: i32) -> Self {
-        Self {
-            user_id,
-            trigger: format!("once_{}", trigger_ts),
-            action: "test_action".to_string(),
-            notification_type: Some("sms".to_string()),
-            is_permanent: Some(0),
-            recurrence_rule: None,
-            recurrence_time: None,
-            sources: None,
-            condition: None,
-            end_time: None,
-        }
-    }
-
-    /// Create a permanent daily recurring task
-    pub fn permanent_daily(user_id: i32, time: &str) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        Self {
-            user_id,
-            trigger: format!("once_{}", now + 86400), // Tomorrow
-            action: "test_action".to_string(),
-            notification_type: Some("sms".to_string()),
-            is_permanent: Some(1),
-            recurrence_rule: Some("daily".to_string()),
-            recurrence_time: Some(time.to_string()),
-            sources: None,
-            condition: None,
-            end_time: None,
-        }
-    }
-
-    /// Create a digest task (permanent daily with sources)
-    pub fn digest_task(user_id: i32, time: &str) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        Self {
-            user_id,
-            trigger: format!("once_{}", now + 86400),
-            action: "generate_digest".to_string(),
-            notification_type: Some("sms".to_string()),
-            is_permanent: Some(1),
-            recurrence_rule: Some("daily".to_string()),
-            recurrence_time: Some(time.to_string()),
-            sources: Some("email,whatsapp,telegram,signal,calendar".to_string()),
-            condition: None,
-            end_time: None,
-        }
-    }
-
-    /// Create a quiet mode task
-    pub fn quiet_mode_task(user_id: i32, end_time: Option<i32>) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        Self {
-            user_id,
-            trigger: format!("once_{}", now),
-            action: r#"{"tool":"quiet_mode"}"#.to_string(),
-            notification_type: None,
-            is_permanent: None,
-            recurrence_rule: None,
-            recurrence_time: None,
-            sources: None,
-            condition: None,
-            end_time,
-        }
-    }
-
-    /// Add sources to the task
-    pub fn with_sources(mut self, sources: &str) -> Self {
-        self.sources = Some(sources.to_string());
-        self
-    }
-
-    /// Add condition to the task
-    pub fn with_condition(mut self, condition: &str) -> Self {
-        self.condition = Some(condition.to_string());
-        self
-    }
-
-    /// Set the action
-    pub fn with_action(mut self, action: &str) -> Self {
-        self.action = action.to_string();
-        self
-    }
-
-    /// Set notification type
-    pub fn with_notification_type(mut self, ntype: &str) -> Self {
-        self.notification_type = Some(ntype.to_string());
-        self
-    }
-}
-
-/// Create a test task in the database from TestTaskParams
-pub fn create_test_task(
-    state: &Arc<crate::AppState>,
-    params: &TestTaskParams,
-) -> crate::models::user_models::Task {
-    use crate::models::user_models::NewTask;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    let new_task = NewTask {
-        user_id: params.user_id,
-        trigger: params.trigger.clone(),
-        condition: params.condition.clone(),
-        action: params.action.clone(),
-        notification_type: params.notification_type.clone(),
-        status: "active".to_string(),
-        created_at: now,
-        is_permanent: params.is_permanent,
-        recurrence_rule: params.recurrence_rule.clone(),
-        recurrence_time: params.recurrence_time.clone(),
-        sources: params.sources.clone(),
-        end_time: params.end_time,
-    };
-
-    state
-        .user_repository
-        .create_task(&new_task)
-        .expect("Failed to create test task");
-
-    // Return the created task (get most recent)
-    state
-        .user_repository
-        .get_user_tasks(params.user_id)
-        .expect("Failed to get user tasks")
-        .into_iter()
-        .next()
-        .expect("No tasks found after creation")
-}
-
-/// Get all tasks for a user
-pub fn get_user_tasks(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-) -> Vec<crate::models::user_models::Task> {
-    state
-        .user_repository
-        .get_user_tasks(user_id)
-        .expect("Failed to get user tasks")
-}
 
 // =============================================================================
 // Item Testing Helpers

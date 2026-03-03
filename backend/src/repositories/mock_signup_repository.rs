@@ -51,9 +51,6 @@ impl MockUser {
             last_credits_notification: None,
             discount: false,
             discount_tier: None,
-            free_reply: false,
-            confirm_send_event: None,
-            waiting_checks_count: 0,
             next_billing_date_timestamp: None,
             magic_token: self.magic_token.clone(),
             plan_type: None,
@@ -358,7 +355,6 @@ mod tests {
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            waiting_checks_count: 0,
             discount: false,
             sub_tier: None,
         };
@@ -384,7 +380,6 @@ mod tests {
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            waiting_checks_count: 0,
             discount: false,
             sub_tier: None,
         };
@@ -409,7 +404,6 @@ mod tests {
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            waiting_checks_count: 0,
             discount: false,
             sub_tier: None,
         };
@@ -438,7 +432,6 @@ mod tests {
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            waiting_checks_count: 0,
             discount: false,
             sub_tier: None,
         };

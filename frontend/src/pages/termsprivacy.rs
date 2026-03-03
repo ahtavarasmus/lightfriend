@@ -75,19 +75,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"6. Google Calendar Integration and OAuth"}</h2>
-                <p>{"Lightfriend integrates with Google Calendar to allow you to manage your calendar via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
-                <ul>
-                    <li>{"Data We Access: We request access to your Google Calendar data only when you authorize it through OAuth."}</li>
-                    <li>{"Tokens We Store: Upon your authorization, we store an access token and a refresh token in our secure database. These tokens enable Lightfriend to access your Google Calendar on your behalf when you use our SMS or voice call features. We encrypt these tokens to protect your data."}</li>
-                    <li>{"What We Don't Store: We do not store any additional Google account data, such as your calendar events, email, or personal details—only the encrypted tokens necessary for calendar access are retained."}</li>
-                    <li>{"Usage: The stored tokens are used exclusively to authenticate and access your Google Calendar when you request actions (e.g., checking or updating your schedule). Lightfriend does not retain user data obtained through Workspace APIs to develop, improve, or train generalized AI and/or ML models."}</li>
-                    <li>{"Sharing: We do not share these tokens or your Google user data with third parties, except as required by law or to facilitate the Google API services you've authorized."}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"7. Messaging Platform Integrations (WhatsApp, Signal, Telegram)"}</h2>
+                <h2>{"6. Messaging Platform Integrations (WhatsApp, Signal, Telegram)"}</h2>
                 <p>{"Lightfriend integrates with various messaging platforms to allow you to send and receive messages via SMS or voice calls. This section applies to all messaging integrations including WhatsApp, Signal, and Telegram."}</p>
                 <ul>
                     <li>{"Connection Data: We store encrypted authentication data to maintain connections to your messaging accounts."}</li>

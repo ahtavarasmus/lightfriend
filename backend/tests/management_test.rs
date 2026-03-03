@@ -191,7 +191,7 @@ fn test_m4_tag_ordering() {
         description: "Test".to_string(),
         due_at: None,
         repeat: Some("daily 08:00".to_string()),
-        fetch: Some("email,calendar".to_string()),
+        fetch: Some("email,weather".to_string()),
         platform: Some("email".to_string()),
         sender: Some("HR".to_string()),
         topic: Some("offer".to_string()),

@@ -214,32 +214,24 @@ fn test_extract_platform_from_content_type() {
         Some("email".to_string())
     );
     assert_eq!(
-        extract_platform_from_content_type("calendar_reminder"),
-        Some("calendar".to_string())
-    );
-    assert_eq!(
         extract_platform_from_content_type("tesla_charging"),
         Some("tesla".to_string())
-    );
-    assert_eq!(
-        extract_platform_from_content_type("messenger_sms"),
-        Some("messenger".to_string())
-    );
-    assert_eq!(
-        extract_platform_from_content_type("instagram_dm"),
-        Some("instagram".to_string())
     );
     assert_eq!(
         extract_platform_from_content_type("digest_morning"),
         Some("digest".to_string())
     );
-    assert_eq!(
-        extract_platform_from_content_type("bluesky_mention"),
-        Some("bluesky".to_string())
-    );
     // Unknown content type
     assert_eq!(extract_platform_from_content_type("unknown_type"), None);
     assert_eq!(extract_platform_from_content_type("item_sms"), None);
+    // Removed platforms should return None
+    assert_eq!(
+        extract_platform_from_content_type("calendar_reminder"),
+        None
+    );
+    assert_eq!(extract_platform_from_content_type("messenger_sms"), None);
+    assert_eq!(extract_platform_from_content_type("instagram_dm"), None);
+    assert_eq!(extract_platform_from_content_type("bluesky_mention"), None);
 }
 
 // =============================================================================

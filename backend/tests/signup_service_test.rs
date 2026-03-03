@@ -118,7 +118,6 @@ fn test_existing_user_phone_updated_if_empty() {
         credits: 0.0,
         credits_left: 0.0,
         charge_when_under: false,
-        waiting_checks_count: 0,
         discount: false,
         sub_tier: None,
     };
@@ -152,7 +151,6 @@ fn test_existing_user_phone_not_overwritten() {
         credits: 0.0,
         credits_left: 0.0,
         charge_when_under: false,
-        waiting_checks_count: 0,
         discount: false,
         sub_tier: None,
     };

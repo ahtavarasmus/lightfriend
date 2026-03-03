@@ -135,7 +135,7 @@ pub fn faq() -> Html {
       "name": "What problem does Lightfriend solve?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It gives you access to WhatsApp, Telegram, Signal, email, calendar, web search, GPS directions, and more via simple SMS and voice calls - no apps or smartphone needed."
+        "text": "Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It gives you access to WhatsApp, Telegram, Signal, email, web search, and more via simple SMS and voice calls - no apps or smartphone needed."
       }
     },
     {
@@ -159,7 +159,7 @@ pub fn faq() -> Html {
       "name": "Can I try the service before signing up?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes! The FAQ page includes an interactive demo chat where you can try common requests like checking WhatsApp messages, weather, emails, calendar, web search, photo translation, and QR code scanning."
+        "text": "Yes! The FAQ page includes an interactive demo chat where you can try common requests like checking WhatsApp messages, weather, emails, web search, photo translation, and QR code scanning."
       }
     },
     {
@@ -217,7 +217,6 @@ pub fn faq() -> Html {
         ("Check my WhatsApp messages", "You have 3 new WhatsApp messages:\n\n📱 Mom: \"Don't forget dinner at 7pm\"\n📱 Sarah: \"Great job on the presentation!\"\n📱 Work Group: \"Meeting moved to 3pm tomorrow\""),
         ("What's the weather like?", "🌤️ Today in your location:\n\nTemperature: 72°F (22°C)\nConditions: Partly cloudy\nChance of rain: 20%\n\nPerfect weather for a walk!"),
         ("Any important emails?", "📧 You have 2 important emails:\n\n• From: boss@company.com\n  Subject: \"Q4 Budget Review - Action Required\"\n  Received: 2 hours ago\n\n• From: bank@yourbank.com\n  Subject: \"Account Statement Ready\"\n  Received: 1 hour ago"),
-        ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
         ("When is the next Light Phone 3 estimated delivery date?", "📱 Light Phone 3 has estimated delivery date in August 2025 if you order today"),
         ("📸 [Image sent] Can you translate this menu?", "I see a Japanese restaurant menu in the image. Here's the translation:\n\n🍜 Ramen Section:\n1. Tonkotsu Ramen - $12\n   Rich pork bone broth\n2. Miso Ramen - $11\n   Traditional fermented soybean paste soup\n3. Shoyu Ramen - $11\n   Classic soy sauce based broth\n\n🍱 Side Dishes:\n• Gyoza (6 pcs) - $6\n• Edamame - $4\n• Karaage (Japanese fried chicken) - $7\n\nWould you like me to explain any of these dishes in more detail?"),
         ("📸 [Image sent of QR code]", "The QR code contains the URL: https://lightfriend.ai (you can now open this on your computer, or if you have a light phone the link gets send automatically to your email)"),
@@ -370,7 +369,7 @@ pub fn faq() -> Html {
                     <h3>{"Reducing Costs"}</h3>
                     <ul>
                         <li>{"You can choose which country's number to use in your settings - options include US, Canada, UK, Finland, Netherlands, and Australia. For example, if you're in Europe, a UK number may be cheaper to text than a US number."}</li>
-                        <li>{"Most of Lightfriend's value comes from receiving notifications - calendar reminders, message summaries, and alerts - which doesn't require you to reply."}</li>
+                        <li>{"Most of Lightfriend's value comes from receiving notifications - message summaries and alerts - which doesn't require you to reply."}</li>
                     </ul>
                     <h3>{"Check Your Carrier's Rates"}</h3>
                     <p>{"International SMS rates vary by carrier. Contact your mobile provider to understand what you'd pay to text a US or UK number, then choose the cheaper option in your Lightfriend settings."}</p>
@@ -549,10 +548,10 @@ pub fn faq() -> Html {
                     <p>{"If you use bus in your home town, ask for physical keycard which can be loaded with credits."}</p>
                     
                     <h3>{"Taxi & Ridesharing"}</h3>
-                    <p>{"In US, Canada and UK there is "}<a href="https://www.tremp.me/">{"Tremp."}</a>{" And soon lightfriend will have its own Uber tool!"}</p>
+                    <p>{"In US, Canada and UK there is "}<a href="https://www.tremp.me/">{"Tremp."}</a></p>
                     
                     <h3>{"Maps"}</h3>
-                    <p>{"You can use lightfriend's Directions tool to get step-by-step navigation instructions via text! Also options include physical paper map, maps on your computer or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" While you might still get lost occasionally, that's part of the adventure:)."}</p>
+                    <p>{"Options include physical paper map, maps on your computer, or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" While you might still get lost occasionally, that's part of the adventure:)."}</p>
                 </FaqItem>
 
                 <FaqItem 

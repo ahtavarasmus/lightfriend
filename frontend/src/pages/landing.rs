@@ -20,7 +20,7 @@ struct SmartphoneFreeDaysResponse {
 pub fn landing() -> Html {
     use_seo(SeoMeta {
         title: "Lightfriend: Private Proactive AI Assistant for Any Phone - Open Source",
-        description: "Private AI assistant for any phone - flip phones, dumbphones, and smartphones. Fully open source, zero prompt injection risk. AI processing in cryptographically verified secure enclaves. WhatsApp, email, calendar, web search via SMS and voice calls.",
+        description: "Private AI assistant for any phone - flip phones, dumbphones, and smartphones. Fully open source, zero prompt injection risk. AI processing in cryptographically verified secure enclaves. WhatsApp, email, web search via SMS and voice calls.",
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
@@ -94,11 +94,6 @@ pub fn landing() -> Html {
             (false, "Your Amazon package has been delivered to your front porch. Order: wireless headphones."),
             (true, "Any other deliveries today?"),
             (false, "Yes - IKEA order is out for delivery, estimated arrival by 4pm."),
-        ]),
-        ("Calendar", "fas fa-calendar-days", vec![
-            (false, "You have a dentist appointment at Smile Clinic in 45 minutes. It's a 20 min drive from your location."),
-            (true, "Thanks, cancel my 3pm meeting"),
-            (false, "Done - 3pm meeting with Jake cancelled and he's been notified \u{2713}"),
         ]),
         ("Reminder", "fas fa-bell", vec![
             (false, "Reminder: Pick up your prescription from the pharmacy. They close at 6pm today."),
@@ -284,7 +279,7 @@ pub fn landing() -> Html {
                             <div class="adhd-card">
                                 <div class="adhd-card-icon"><i class="fa-solid fa-calendar-check"></i></div>
                                 <h3>{"Never Forget Again"}</h3>
-                                <p>{"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox and calendar so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it. \u{2014} Kasperi"}</p>
+                                <p>{"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it. \u{2014} Kasperi"}</p>
                             </div>
                             <div class="adhd-card">
                                 <div class="adhd-card-icon"><i class="fa-solid fa-filter"></i></div>
@@ -304,16 +299,14 @@ pub fn landing() -> Html {
             <section class="features-section">
                 <div class="features-grid-compact scroll-animate">
                     <h2>{"What You Get"}</h2>
-                    <p class="features-subheader">{"Lightfriend is a private AI assistant that gives any phone user access to WhatsApp, email, calendar, web search, and more via SMS and voice calls."}</p>
+                    <p class="features-subheader">{"Lightfriend is a private AI assistant that gives any phone user access to WhatsApp, email, web search, and more via SMS and voice calls."}</p>
                     <div class="features-flat-grid">
                         <div class="feature-chip"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
                         <div class="feature-chip"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
                         <div class="feature-chip"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
                         <div class="feature-chip"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-calendar-days"></i><span>{"Calendar"}</span></div>
                         <div class="feature-chip"><i class="fas fa-search"></i><span>{"Web Search"}</span></div>
                         <div class="feature-chip"><i class="fas fa-cloud-sun"></i><span>{"Weather"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-route"></i><span>{"Directions"}</span></div>
                         <div class="feature-chip"><i class="fas fa-image"></i><span>{"Photo Analysis"}</span></div>
                         <div class="feature-chip"><i class="fas fa-qrcode"></i><span>{"QR Scanning"}</span></div>
                         <div class="feature-chip"><i class="fas fa-bell"></i><span>{"Proactive Alerts"}</span></div>
@@ -360,7 +353,7 @@ pub fn landing() -> Html {
                 <div class="section-intro">
                     <h2>{"The Story"}</h2>
                     <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I\u{2019}m Rasmus. I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp, email, and calendar without a smartphone."}</p>
+                    <p>{"I\u{2019}m Rasmus. I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
                 </div>
             </section>
 

@@ -1,0 +1,65 @@
+[global]
+server_name = "localhost"
+database_path = "/var/lib/tuwunel"
+address = "0.0.0.0"
+port = 8008
+
+# Registration via token (replaces Synapse's shared secret)
+allow_registration = true
+registration_token = "50488688df12077194170cdf738c5bbda3f656ad8d063e044e7bcf48f0a21b57"
+
+# First user becomes admin
+grant_admin_to_first_user = true
+
+# No federation needed (private homeserver)
+allow_federation = false
+
+# Appservices - tokens extracted from bridge registration files
+
+[global.appservice.whatsapp]
+url = "http://mautrix-whatsapp:29318"
+as_token = "cNnKmL5ubAZnX3eLY4wvIU5oQIbLXn6LH6V5ylbcFVvQOKl3nncQ3yztBIqj14V1"
+hs_token = "0J06drRLo7VOgjzJagr1KKMD3Js7J8dc7DukC4oaNED4cFrmFQFoSGFBgvmfceg1"
+sender_localpart = "3WHJwKnpQbHbHPwrGWMxZuBpNPBcTAHD"
+rate_limited = false
+[[global.appservice.whatsapp.users]]
+exclusive = true
+regex = "@whatsappbot:localhost"
+[[global.appservice.whatsapp.users]]
+exclusive = true
+regex = "@whatsapp_.*:localhost"
+
+[global.appservice.signal]
+url = "http://mautrix-signal:29328"
+as_token = "dhcOX2QTMiDhMmtrzs9wLZEyfwt5ZoElGcq8nQdXydqEDrtQi3A16MQxltLaYXnj"
+hs_token = "oTTWSBm1DieGNtfj3Qxb0CoeMUslnQUGippnAmZh51FpR2SDnRrMjRJCCzKLLQlV"
+sender_localpart = "T8kWwx9RuWKn9Y02pB17wnjMosZlqtR6"
+rate_limited = false
+[[global.appservice.signal.users]]
+exclusive = true
+regex = "@signalbot:localhost"
+[[global.appservice.signal.users]]
+exclusive = true
+regex = "@signal_.*:localhost"
+
+[global.appservice.telegram]
+url = "http://mautrix-telegram:29317"
+as_token = "pkOZyJOPppHJ6Hbs02V8iNPi2K9fbHdhYzG6Xa43X8MEScLuDN2EYIAPwsjejl_u"
+hs_token = "2Wy_aooh-o6sCNHLtzTqRxOM3hQI6gjI7hGRkq5Xpqp1TqRKb3NKCz91pxQnSX3r"
+sender_localpart = "PGRipUMsDLcWmnEivUxLcqqDnpWFW_96P2I5NBMZ7YUzkigYuzMs9vin1EKIjHGV"
+rate_limited = false
+[[global.appservice.telegram.users]]
+exclusive = true
+regex = "@telegrambot:localhost"
+[[global.appservice.telegram.users]]
+exclusive = true
+regex = "@telegram_.*:localhost"
+
+[global.appservice.doublepuppet]
+as_token = "jrEwR0zBJEqUx9Rtz4PjS53hw3vGhr1gBnmYgF13aGk="
+hs_token = "jrEwR0zBJEqUx9Rtz4PjS53hw3vGhr1gBnmYgF13aGk="
+sender_localpart = "doublepuppetbot"
+rate_limited = false
+[[global.appservice.doublepuppet.users]]
+exclusive = false
+regex = "@.*:localhost"

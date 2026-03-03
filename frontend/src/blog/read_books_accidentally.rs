@@ -49,7 +49,7 @@ pub fn read_more_accidentally_guide() -> Html {
                 <h2>{"The Dumbphone Magic Trick"}</h2>
                 <p>{"Grab a simple Nokia or something from "}<a href="https://dumbphones.org" target="_blank">{"dumbphones.org"}</a>{". No apps, no feeds, just calls and texts. Suddenly, waiting in line? Book! Bored on the bus? Book! It's hilarious how compelling books become when your only alternative is counting ceiling tiles. Options like The Light Phone or Mudita Kompakt even have hotspots for your laptop wifi needs. Retro Nokia from vintagemobile.fr? Chef's kiss."}</p>
                 <h2>{"Lightfriend AI: Your Wingman"}</h2>
-                <p>{"But hey, life's not all analog. Lightfriend.ai is your dumbphone's smart sidekick, text or call it to check emails, messages, or calendars. It filters out the noise, forwarding only the urgent stuff."}</p>
+                <p>{"But hey, life's not all analog. Lightfriend.ai is your dumbphone's smart sidekick, text or call it to check emails or messages. It filters out the noise, forwarding only the urgent stuff."}</p>
                 <h2>{"Quick Steps to Book Bliss"}</h2>
                 <ol>
                     <li>{"Pick a dumbphone (Nokia vibes welcome)."}</li>

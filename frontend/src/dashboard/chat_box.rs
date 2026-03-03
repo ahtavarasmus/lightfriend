@@ -12,7 +12,6 @@ use super::timeline_view::UpcomingItem;
 const MENTION_OPTIONS: &[(&str, &str, &str)] = &[
     ("tesla", "Tesla Controls", "fa-car"),
     ("youtube", "YouTube", "fa-youtube"),
-    // Future: ("calendar", "Calendar", "fa-calendar"),
     // Future: ("weather", "Weather", "fa-cloud"),
 ];
 
@@ -1137,34 +1136,10 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             use crate::dashboard::media_panel::MediaPlatform;
                                             let platform_name = match platform {
                                                 MediaPlatform::YouTube => "youtube",
-                                                MediaPlatform::TikTok => "tiktok",
-                                                MediaPlatform::Instagram => "instagram",
-                                                MediaPlatform::Twitter => "twitter",
-                                                MediaPlatform::Vimeo => "vimeo",
-                                                MediaPlatform::Rumble => "rumble",
-                                                MediaPlatform::Dailymotion => "dailymotion",
-                                                MediaPlatform::Reddit => "reddit",
-                                                MediaPlatform::Streamable => "streamable",
-                                                MediaPlatform::Spotify => "spotify",
                                                 _ => continue,
                                             };
-                                            let thumbnail = match platform_name {
-                                                "youtube" => format!("https://img.youtube.com/vi/{}/mqdefault.jpg", video_id),
-                                                _ => String::new(),
-                                            };
-                                            let title = match platform_name {
-                                                "youtube" => format!("YouTube Video: {}", video_id),
-                                                "tiktok" => format!("TikTok Video: {}", video_id),
-                                                "instagram" => format!("Instagram Reel: {}", video_id),
-                                                "twitter" => format!("Twitter Video: {}", video_id),
-                                                "vimeo" => format!("Vimeo Video: {}", video_id),
-                                                "rumble" => format!("Rumble Video: {}", video_id),
-                                                "dailymotion" => format!("Dailymotion Video: {}", video_id),
-                                                "reddit" => format!("Reddit Post: {}", video_id),
-                                                "streamable" => format!("Streamable Video: {}", video_id),
-                                                "spotify" => format!("Spotify Track: {}", video_id),
-                                                _ => format!("Video: {}", video_id),
-                                            };
+                                            let thumbnail = format!("https://img.youtube.com/vi/{}/mqdefault.jpg", video_id);
+                                            let title = format!("YouTube Video: {}", video_id);
                                             new_media.push(MediaItem {
                                                 platform: platform_name.to_string(),
                                                 video_id: video_id.clone(),
@@ -1373,7 +1348,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             on_state_change={on_yt_state_change}
                         /> }
                         }
-                        // Future: Some("calendar") => html! { <CalendarPanel on_close={...} /> }
                         _ => html! {}
                     }
                 }

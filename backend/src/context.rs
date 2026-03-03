@@ -359,7 +359,6 @@ const SKIP_FROM_HISTORY: &[&str] = &[
     "fetch_emails",
     "fetch_specific_email",
     "get_weather",
-    "fetch_calendar_events",
     "direct_response",
 ];
 

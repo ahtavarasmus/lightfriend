@@ -75,7 +75,7 @@ pub fn use_seo(meta: SeoMeta) {
                             el.set_attribute(attr, value).ok();
                         }
                     };
-                    restore(r#"meta[name="description"]"#, "content", "Lightfriend: AI assistant for dumbphones like Light Phone 3, Nokia flip phones, and other minimalist phones. Access WhatsApp, Telegram, Signal, email, calendar, AI search, and GPS via SMS/voice. Enhance your digital detox without unwanted isolation.");
+                    restore(r#"meta[name="description"]"#, "content", "Lightfriend: AI assistant for dumbphones like Light Phone 3, Nokia flip phones, and other minimalist phones. Access WhatsApp, Telegram, Signal, email, AI search via SMS/voice. Enhance your digital detox without unwanted isolation.");
                     restore(r#"meta[property="og:title"]"#, "content", "lightfriend: AI Assistant for Dumbphones & Minimalist Phones like Light Phone 3");
                     restore(r#"meta[property="og:description"]"#, "content", "Enhance any dumbphone with WhatsApp, Telegram, Signal, email, and more via AI. Perfect match for The Light Phone or Nokia flip phones. Stay connected without apps or screens.");
                     restore(r#"meta[property="og:url"]"#, "content", "https://lightfriend.ai");

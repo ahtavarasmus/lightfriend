@@ -61,10 +61,6 @@ pub fn Home() -> Html {
                         // OAuth success messages
                         let success_message = if params.get("tesla").as_deref() == Some("success") {
                             Some("Tesla account connected successfully!")
-                        } else if params.get("uber").as_deref() == Some("success") {
-                            Some("Uber account connected successfully!")
-                        } else if params.get("google_calendar").as_deref() == Some("success") {
-                            Some("Google Calendar connected successfully!")
                         } else if params.get("youtube").as_deref() == Some("success") {
                             Some("YouTube connected successfully!")
                         } else {

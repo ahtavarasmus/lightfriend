@@ -6,42 +6,26 @@ pub mod handlers {
     pub mod auth_handlers;
     pub mod auth_middleware;
     pub mod billing_handlers;
-    pub mod bluesky;
     pub mod bridge_auth_common;
     pub mod contact_profile_handlers;
     pub mod dashboard_handlers;
     pub mod filter_handlers;
-    pub mod google_calendar;
-    pub mod google_calendar_auth;
-    pub mod google_maps;
     pub mod imap_auth;
     pub mod imap_handlers;
-    pub mod instagram_auth;
-    pub mod instagram_handlers;
-    pub mod instagram_reels;
     pub mod mcp_handlers;
-    pub mod messenger_auth;
-    pub mod messenger_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
-    pub mod reddit;
     pub mod refund_handlers;
-    pub mod rumble;
     pub mod self_host_handlers;
     pub mod signal_auth;
     pub mod signal_handlers;
-    pub mod spotify;
     pub mod stats_handlers;
-    pub mod streamable;
     pub mod stripe_handlers;
     pub mod telegram_auth;
     pub mod telegram_handlers;
     pub mod tesla_auth;
-    pub mod tiktok;
     pub mod totp_handlers;
     pub mod twilio_handlers;
-    pub mod twitter;
-    pub mod uber_auth;
     pub mod webauthn_handlers;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
@@ -49,7 +33,6 @@ pub mod handlers {
     pub mod youtube_auth;
 }
 pub mod utils {
-    pub mod action_executor;
     pub mod bridge;
     pub mod country;
     pub mod elevenlabs_prompts;
@@ -69,7 +52,6 @@ pub mod proactive {
 }
 pub mod tool_call_utils {
     pub mod bridge;
-    pub mod calendar;
     pub mod email;
     pub mod internet;
     pub mod management;
@@ -95,7 +77,6 @@ pub mod api {
 pub mod context;
 pub mod error;
 pub mod tools {
-    pub mod calendar;
     pub mod email;
     pub mod items;
     pub mod messaging;
@@ -210,9 +191,7 @@ pub struct AppState {
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
-    pub google_calendar_oauth_client: GoogleOAuthClient,
     pub youtube_oauth_client: GoogleOAuthClient,
-    pub uber_oauth_client: GoogleOAuthClient,
     pub tesla_oauth_client: TeslaOAuthClient,
     pub session_store: MemoryStore,
     pub login_limiter:
@@ -258,7 +237,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     // Search tools
     registry.register(Arc::new(tools::search::PerplexityHandler));
     registry.register(Arc::new(tools::search::FirecrawlHandler));
-    registry.register(Arc::new(tools::search::DirectionsHandler));
     registry.register(Arc::new(tools::search::QrScanHandler));
 
     // Weather
@@ -276,16 +254,11 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
 
-    // Calendar tools
-    registry.register(Arc::new(tools::calendar::FetchEventsHandler));
-    registry.register(Arc::new(tools::calendar::CreateEventHandler));
-
     // Schedule/management tools
     registry.register(Arc::new(tools::schedule::CreateItemHandler));
 
     // Tesla tools
     registry.register(Arc::new(tools::tesla::TeslaControlHandler));
-    registry.register(Arc::new(tools::tesla::TeslaSwitchHandler));
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));

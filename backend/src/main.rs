@@ -27,11 +27,10 @@ use backend::{
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    dashboard_handlers, filter_handlers, google_calendar, google_calendar_auth, imap_auth,
-    imap_handlers, instagram_auth, instagram_handlers, messenger_auth, messenger_handlers,
-    profile_handlers, refund_handlers, self_host_handlers, signal_auth, signal_handlers,
-    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, uber_auth,
-    whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
+    dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
+    refund_handlers, self_host_handlers, signal_auth, signal_handlers, stripe_handlers,
+    telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth,
+    whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -90,7 +89,6 @@ pub fn validate_env() {
 
     // Note: The following are truly optional even in production:
     // - PERPLEXITY_API_KEY, OPENROUTER_API_KEY (AI features gracefully degrade)
-    // - GOOGLE_CALENDAR_CLIENT_ID/SECRET (OAuth, user-specific)
     // - SENTRY_DSN (error tracking, optional)
     // - Bridge bot IDs (may have defaults)
 }
@@ -146,7 +144,6 @@ async fn bootstrap_admin_if_needed(
         credits: 1000.0,
         credits_left: 1000.0,
         charge_when_under: false,
-        waiting_checks_count: 0,
         discount: false,
         sub_tier: Some("2".to_string()), // tier 2 = sentinel (full access)
     };
@@ -236,46 +233,6 @@ async fn main() {
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
         std::env::var("SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID")
-        .unwrap_or_else(|_| "default-client-id-for-testing".to_string());
-    let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET")
-        .unwrap_or_else(|_| "default-secret-for-testing".to_string());
-    let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
-        .set_client_secret(ClientSecret::new(client_secret.clone()))
-        .set_auth_uri(
-            AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
-                .expect("Invalid auth URL"),
-        )
-        .set_token_uri(
-            TokenUrl::new("https://oauth2.googleapis.com/token".to_string())
-                .expect("Invalid token URL"),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(format!(
-                "{}/api/auth/google/calendar/callback",
-                server_url_oauth
-            ))
-            .expect("Invalid redirect URL"),
-        );
-    let uber_url_oauth =
-        std::env::var("UBER_API_URL").unwrap_or_else(|_| "https://login.uber.com".to_string());
-    let uber_client_id = std::env::var("UBER_CLIENT_ID")
-        .unwrap_or_else(|_| "default-uber-client-id-for-testing".to_string());
-    let uber_client_secret = std::env::var("UBER_CLIENT_SECRET")
-        .unwrap_or_else(|_| "default-uber-secret-for-testing".to_string());
-    let uber_oauth_client = BasicClient::new(ClientId::new(uber_client_id))
-        .set_client_secret(ClientSecret::new(uber_client_secret))
-        .set_auth_uri(
-            AuthUrl::new(format!("{}/oauth/v2/authorize", uber_url_oauth))
-                .expect("Invalid auth URL"),
-        )
-        .set_token_uri(
-            TokenUrl::new(format!("{}/oauth/v2/token", uber_url_oauth)).expect("Invalid token URL"),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(format!("{}/api/auth/uber/callback", server_url_oauth))
-                .expect("Invalid redirect URL"),
-        );
     let session_store = MemoryStore::default();
     let is_prod = std::env::var("ENVIRONMENT") != Ok("development".to_string());
     let session_layer = SessionManagerLayer::new(session_store.clone())
@@ -341,8 +298,6 @@ async fn main() {
         twilio_client,
         twilio_message_service,
         ai_config: AiConfig::from_env(),
-        google_calendar_oauth_client,
-        uber_oauth_client,
         tesla_oauth_client,
         youtube_oauth_client,
         session_store: session_store.clone(),
@@ -406,14 +361,6 @@ async fn main() {
     let elevenlabs_routes = Router::new()
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route(
-            "/api/call/calendar",
-            get(elevenlabs::handle_calendar_tool_call),
-        )
-        .route(
-            "/api/call/calendar/create",
-            get(elevenlabs::handle_calendar_event_creation),
-        )
-        .route(
             "/api/call/email",
             get(elevenlabs::handle_email_fetch_tool_call),
         )
@@ -452,10 +399,6 @@ async fn main() {
             post(elevenlabs::handle_send_chat_message),
         )
         .route(
-            "/api/call/directions",
-            post(elevenlabs::handle_directions_tool_call),
-        )
-        .route(
             "/api/call/firecrawl",
             post(elevenlabs::handle_firecrawl_tool_call),
         )
@@ -475,11 +418,6 @@ async fn main() {
         ));
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
-        .route(
-            "/api/auth/google/calendar/callback",
-            get(google_calendar_auth::google_callback),
-        )
-        .route("/api/auth/uber/callback", get(uber_auth::uber_callback))
         .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback))
         .route(
             "/api/auth/youtube/callback",
@@ -835,37 +773,6 @@ async fn main() {
             "/api/stripe/customer-portal/{user_id}",
             get(stripe_handlers::create_customer_portal_session),
         )
-        .route(
-            "/api/auth/google/calendar/login",
-            get(google_calendar_auth::google_login),
-        )
-        .route(
-            "/api/auth/google/calendar/connection",
-            delete(google_calendar_auth::delete_google_calendar_connection),
-        )
-        .route(
-            "/api/auth/google/calendar/status",
-            get(google_calendar::google_calendar_status),
-        )
-        .route(
-            "/api/auth/google/calendar/email",
-            get(google_calendar::get_calendar_email),
-        )
-        .route(
-            "/api/calendar/events",
-            get(google_calendar::handle_calendar_fetching_route),
-        )
-        .route(
-            "/api/calendar/create",
-            post(google_calendar::create_calendar_event),
-        )
-        .route("/api/auth/uber/login", get(uber_auth::uber_login))
-        .route(
-            "/api/auth/uber/connection",
-            delete(uber_auth::uber_disconnect),
-        )
-        .route("/api/auth/uber/status", get(uber_auth::uber_status))
-        //.route("api/uber", get(uber::test_status_change))
         .route("/api/auth/tesla/login", get(tesla_auth::tesla_login))
         .route(
             "/api/auth/tesla/connection",
@@ -974,39 +881,6 @@ async fn main() {
             "/api/youtube/video/{video_id}/rate",
             post(youtube::rate_video),
         )
-        // External media platforms (no platform auth required, just user auth)
-        .route(
-            "/api/tiktok/resolve",
-            post(handlers::tiktok::resolve_tiktok_url),
-        )
-        .route(
-            "/api/instagram/resolve",
-            post(handlers::instagram_reels::resolve_instagram_reel),
-        )
-        .route(
-            "/api/twitter/resolve",
-            post(handlers::twitter::resolve_twitter_url),
-        )
-        .route(
-            "/api/reddit/resolve",
-            post(handlers::reddit::resolve_reddit_url),
-        )
-        .route(
-            "/api/spotify/resolve",
-            post(handlers::spotify::resolve_spotify_url),
-        )
-        .route(
-            "/api/rumble/resolve",
-            post(handlers::rumble::resolve_rumble_url),
-        )
-        .route(
-            "/api/streamable/resolve",
-            post(handlers::streamable::resolve_streamable_url),
-        )
-        .route(
-            "/api/bluesky/resolve",
-            post(handlers::bluesky::resolve_bluesky_url),
-        )
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
         .route(
@@ -1091,70 +965,6 @@ async fn main() {
             get(signal_handlers::search_rooms_handler),
         )
         .route(
-            "/api/auth/messenger/status",
-            get(messenger_auth::get_messenger_status),
-        )
-        .route(
-            "/api/auth/messenger/connect",
-            get(messenger_auth::start_messenger_connection),
-        )
-        .route(
-            "/api/auth/messenger/disconnect",
-            delete(messenger_auth::disconnect_messenger),
-        )
-        .route(
-            "/api/auth/messenger/resync",
-            post(messenger_auth::resync_messenger),
-        )
-        .route(
-            "/api/messenger/test-messages",
-            get(messenger_handlers::test_fetch_messenger_messages),
-        )
-        .route(
-            "/api/messenger/send",
-            post(messenger_handlers::send_messenger_message),
-        )
-        .route(
-            "/api/messenger/search-rooms",
-            post(messenger_handlers::search_messenger_rooms_handler),
-        )
-        .route(
-            "/api/messenger/rooms",
-            get(messenger_handlers::search_messenger_rooms_handler),
-        )
-        .route(
-            "/api/auth/instagram/status",
-            get(instagram_auth::get_instagram_status),
-        )
-        .route(
-            "/api/auth/instagram/connect",
-            get(instagram_auth::start_instagram_connection),
-        )
-        .route(
-            "/api/auth/instagram/disconnect",
-            delete(instagram_auth::disconnect_instagram),
-        )
-        .route(
-            "/api/auth/instagram/resync",
-            post(instagram_auth::resync_instagram),
-        )
-        .route(
-            "/api/instagram/test-messages",
-            get(instagram_handlers::test_fetch_instagram_messages),
-        )
-        .route(
-            "/api/instagram/send",
-            post(instagram_handlers::send_instagram_message),
-        )
-        .route(
-            "/api/instagram/search-rooms",
-            post(instagram_handlers::search_instagram_rooms_handler),
-        )
-        .route(
-            "/api/instagram/rooms",
-            get(instagram_handlers::search_instagram_rooms_handler),
-        )
-        .route(
             "/api/auth/whatsapp/status",
             get(whatsapp_auth::get_whatsapp_status),
         )
@@ -1201,38 +1011,6 @@ async fn main() {
             "/api/items/{id}/edit-ai-stream",
             get(filter_handlers::edit_item_with_ai_stream),
         )
-        .route(
-            "/api/filters/monitored-contacts",
-            get(filter_handlers::get_priority_senders),
-        )
-        .route(
-            "/api/filters/monitored-contact/{service_type}",
-            post(filter_handlers::create_priority_sender),
-        )
-        .route(
-            "/api/filters/monitored-contact/{service_type}/{content}",
-            delete(filter_handlers::delete_priority_sender),
-        )
-        .route(
-            "/api/filters/priority-sender/{service_type}",
-            post(filter_handlers::create_priority_sender),
-        )
-        .route(
-            "/api/filters/priority-sender/{service_type}/{sender}",
-            delete(filter_handlers::delete_priority_sender),
-        )
-        .route(
-            "/api/filters/priority-senders/{service_type}",
-            get(filter_handlers::get_priority_senders),
-        )
-        .route(
-            "/api/filters/keyword/{service_type}",
-            post(filter_handlers::create_keyword),
-        )
-        .route(
-            "/api/filters/keyword/{service_type}/{keyword}",
-            delete(filter_handlers::delete_keyword),
-        )
         // Dashboard routes
         .route(
             "/api/dashboard/summary",
@@ -1276,12 +1054,6 @@ async fn main() {
         .route(
             "/api/contact-profiles/{id}",
             delete(contact_profile_handlers::delete_contact_profile),
-        )
-        // WhatsApp filter toggle routes
-        // Generic filter toggle routes
-        .route(
-            "/api/profile/email-judgments",
-            get(profile_handlers::get_email_judgments),
         )
         // Web-based voice call routes (browser to ElevenLabs)
         .route(

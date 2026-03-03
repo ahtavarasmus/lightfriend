@@ -453,22 +453,6 @@ async fn test_llm_question_looks_like_task() {
     );
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_llm_calendar_question_no_item() {
-    let state = create_llm_test_state();
-    let user = setup_user_with_location(&state);
-
-    let response = send_message(
-        &state,
-        &user,
-        "do I have anything scheduled for tomorrow morning?",
-    )
-    .await;
-
-    assert_no_item(&response);
-}
-
 // =============================================================================
 // 4. Future actions - must use create_item, not execute immediately
 // =============================================================================
@@ -844,8 +828,7 @@ async fn test_c7_call_notification_type() {
 #[ignore]
 async fn test_c8_recurring_not_tracking() {
     let (state, user, response) =
-        send_message_with_retry("give me a daily morning briefing with my emails and calendar")
-            .await;
+        send_message_with_retry("give me a daily morning briefing with my emails").await;
 
     assert!(
         response.created_item_id.is_some(),
@@ -870,7 +853,7 @@ async fn test_c8_recurring_not_tracking() {
     let first_line = summary.lines().next().unwrap_or("");
     assert!(
         first_line.to_lowercase().contains("[fetch:"),
-        "C8: Should have fetch sources for email/calendar. First line: {}",
+        "C8: Should have fetch sources for email. First line: {}",
         first_line
     );
 

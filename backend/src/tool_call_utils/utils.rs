@@ -42,11 +42,6 @@ pub fn get_available_runtime_tools() -> Vec<RuntimeTool> {
             params_schema: r#"{"to": "email@example.com", "subject": "Subject", "body": "Email body"}"#,
         },
         RuntimeTool {
-            name: "fetch_calendar_events",
-            description: "Check/fetch calendar events",
-            params_schema: r#"{}"#,
-        },
-        RuntimeTool {
             name: "get_weather",
             description: "Get weather information for a location",
             params_schema: r#"{"location": "City name or 'current location'"}"#,

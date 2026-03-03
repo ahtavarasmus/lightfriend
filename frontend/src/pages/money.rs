@@ -2211,7 +2211,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"Do I need to text back?"}</summary>
-                                    <p>{"Rarely! Lightfriend is proactive-first - it monitors your emails, calendar, and messages, then notifies you about what matters. You can ask questions via web chat or voice calls from the dashboard anytime."}</p>
+                                    <p>{"Rarely! Lightfriend is proactive-first - it monitors your emails and messages, then notifies you about what matters. You can ask questions via web chat or voice calls from the dashboard anytime."}</p>
                                 </details>
                                 </>
                             }

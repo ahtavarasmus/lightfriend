@@ -5,7 +5,7 @@ network:
     displayname_template: "{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber}} (Signal~){{end}}"
 
 homeserver:
-    address: http://synapse:8008
+    address: http://tuwunel:8008
     domain: localhost
 
 appservice:

@@ -751,7 +751,7 @@ pub async fn get_item_detail(
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Build sources_display from [fetch:...] tags (e.g. "email, calendar")
+    // Build sources_display from [fetch:...] tags (e.g. "email, chat")
     let sources_display = if !tags.fetch.is_empty() {
         Some(tags.fetch.join(", "))
     } else {

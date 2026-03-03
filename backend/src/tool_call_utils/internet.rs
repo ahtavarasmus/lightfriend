@@ -103,53 +103,10 @@ pub fn get_ask_perplexity_tool() -> openai_api_rs::v1::chat_completion::Tool {
     }
 }
 
-pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
-    let mut properties = HashMap::new();
-    properties.insert(
-        "start_address".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Starting address: a specific real-world address, landmark, or place name (e.g., '123 Main St, City, State' or 'Eiffel Tower, Paris').".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "end_address".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Ending address: a specific real-world address, landmark, or place name (e.g., '456 Elm St, City, State' or 'Statue of Liberty, New York').".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "mode".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The mode of transportation: driving, walking (default if not specified), transit (for public transport), or bicycling.".to_string()),
-            enum_values: Some(vec![
-                "driving".to_string(),
-                "walking".to_string(),
-                "transit".to_string(),
-                "bicycling".to_string(),
-            ]),
-            ..Default::default()
-        }),
-    );
-    chat_completion::Tool {
-        r#type: chat_completion::ToolType::Function,
-        function: types::Function {
-            name: String::from("get_directions"),
-            description: Some(String::from("Fetches step-by-step directions from Google Maps between two specific addresses or landmarks, including duration and distance. Defaults to walking if mode is not specified.")),
-            parameters: types::FunctionParameters {
-                schema_type: types::JSONSchemaType::Object,
-                properties: Some(properties),
-                required: Some(vec![String::from("start_address"), String::from("end_address")]),
-            },
-        },
-    }
-}
-
 pub fn get_firecrawl_search_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
+
     let mut properties = HashMap::new();
     properties.insert(
         "query".to_string(),
@@ -328,54 +285,10 @@ pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>
     Ok(MenuContent::Unknown("No QR code found".to_string()))
 }
 
-use axum::extract::Json as AxumJson;
-use openai_api_rs::v1::{chat_completion, types};
-use std::collections::HashMap;
-
-pub async fn handle_directions_tool(
-    start_address: String,
-    end_address: String,
-    mode: Option<String>,
-) -> Result<String, Box<dyn Error>> {
-    let effective_mode = mode.unwrap_or_else(|| "walking".to_string());
-    let request = crate::handlers::google_maps::DirectionsRequest {
-        start_address,
-        end_address,
-        mode: effective_mode.clone(),
-    };
-    println!("here");
-    match crate::handlers::google_maps::handle_get_directions(request).await {
-        Ok(AxumJson(value)) => {
-            println!("here");
-            let duration = value["duration"].as_str().unwrap_or("Unknown").to_string();
-            println!("here");
-            let distance = value["distance"].as_str().unwrap_or("Unknown").to_string();
-            println!("here");
-            let formatted_instructions =
-                if let Some(instructions) = value["instructions"].as_array() {
-                    instructions
-                        .iter()
-                        .map(|instr| instr.as_str().unwrap_or("").to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    "No instructions found.".to_string()
-                };
-            println!("here");
-            Ok(format!(
-                "With {}: Duration: {}\nDistance: {}\nDirections:\n{}",
-                effective_mode, duration, distance, formatted_instructions
-            ))
-        }
-        Err((status, AxumJson(err_value))) => Ok(format!(
-            "Error fetching directions (status {}): {}",
-            status,
-            err_value["error"].as_str().unwrap_or("Unknown error")
-        )),
-    }
-}
-
 pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
+
     let mut properties = HashMap::new();
     properties.insert(
         "response".to_string(),
@@ -391,7 +304,7 @@ pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("direct_response"),
             description: Some(String::from(
-                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. Use ask_perplexity for factual questions and other tools for messages, emails, weather, calendar, or tasks."
+                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. Use ask_perplexity for factual questions and other tools for messages, emails, weather, or tasks."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,

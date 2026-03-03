@@ -52,8 +52,6 @@ impl MatrixTestConfig {
             "whatsapp" => format!("@whatsappbot:{}", self.domain),
             "signal" => format!("@signalbot:{}", self.domain),
             "telegram" => format!("@telegrambot:{}", self.domain),
-            "messenger" => format!("@messengerbot:{}", self.domain),
-            "instagram" => format!("@igbot:{}", self.domain),
             _ => format!("@{}bot:{}", service, self.domain),
         }
     }

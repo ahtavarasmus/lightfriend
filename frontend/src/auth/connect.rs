@@ -5,13 +5,9 @@ use wasm_bindgen::JsValue;
 use web_sys::UrlSearchParams;
 use crate::utils::api::Api;
 use crate::connections::whatsapp::WhatsappConnect;
-use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
 use crate::connections::telegram::TelegramConnect;
-use crate::connections::uber::UberConnect;
 use crate::connections::signal::SignalConnect;
-use crate::connections::messenger::MessengerConnect;
-use crate::connections::instagram::InstagramConnect;
 use crate::connections::tesla::TeslaConnect;
 use crate::connections::youtube::YouTubeConnect;
 use crate::connections::mcp::McpConnect;
@@ -35,50 +31,26 @@ struct ServiceGroupState {
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
-    let calendar_connected = use_state(|| false);
     let email_connected = use_state(|| false);
     let whatsapp_connected = use_state(|| false);
     let telegram_connected = use_state(|| false);
     let signal_connected = use_state(|| false);
-    let instagram_connected = use_state(|| false);
-    let messenger_connected = use_state(|| false);
-    let uber_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
     let youtube_connected = use_state(|| false);
     let mcp_server_count = use_state(|| 0_usize);
     let selected_app = use_state(|| None::<String>);
 
     {
-        let calendar_connected = calendar_connected.clone();
         let email_connected = email_connected.clone();
         let whatsapp_connected = whatsapp_connected.clone();
         let telegram_connected= telegram_connected.clone();
         let signal_connected= signal_connected.clone();
-        let instagram_connected = instagram_connected.clone();
-        let messenger_connected = messenger_connected.clone();
-        let uber_connected = uber_connected.clone();
         let tesla_connected = tesla_connected.clone();
         let youtube_connected = youtube_connected.clone();
         let mcp_server_count = mcp_server_count.clone();
         use_effect_with_deps(
             move |_| {
                 // Auth handled by cookies - check all connection statuses
-                // Calendar status check
-                spawn_local({
-                    let calendar_connected = calendar_connected.clone();
-                    async move {
-                        if let Ok(response) = Api::get("/api/auth/google/calendar/status")
-                            .send()
-                            .await
-                        {
-                                        if let Ok(data) = response.json::<Value>().await {
-                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                                calendar_connected.set(connected);
-                                            }
-                                        }
-                                    }
-                                }
-                            });
                 // Email status check
                 spawn_local({
                     let email_connected = email_connected.clone();
@@ -138,54 +110,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                             if let Ok(data) = response.json::<Value>().await {
                                 if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                     signal_connected.set(connected);
-                                }
-                            }
-                        }
-                    }
-                });
-                // instagram status check
-                spawn_local({
-                    let instagram_connected = instagram_connected.clone();
-                    async move {
-                        if let Ok(response) = Api::get("/api/auth/instagram/status")
-                            .send()
-                            .await
-                        {
-                            if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                    instagram_connected.set(connected);
-                                }
-                            }
-                        }
-                    }
-                });
-                // messenger status check
-                spawn_local({
-                    let messenger_connected = messenger_connected.clone();
-                    async move {
-                        if let Ok(response) = Api::get("/api/auth/messenger/status")
-                            .send()
-                            .await
-                        {
-                            if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                    messenger_connected.set(connected);
-                                }
-                            }
-                        }
-                    }
-                });
-                // uber status check
-                spawn_local({
-                    let uber_connected = uber_connected.clone();
-                    async move {
-                        if let Ok(response) = Api::get("/api/auth/uber/status")
-                            .send()
-                            .await
-                        {
-                            if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                    uber_connected.set(connected);
                                 }
                             }
                         }
@@ -276,20 +200,15 @@ pub fn connect(props: &ConnectProps) -> Html {
     );
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
-            "calendar" => html! { <CalendarConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "instagram" => html! { <InstagramConnect /> },
-            "messenger" => html! { <MessengerConnect /> },
-            "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
             "mcp" => html! { <McpConnect user_id={props.user_id} /> },
             "perplexity" => html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> },
             "weather" => html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> },
-            "directions" => html! { <div class="builtin-detail"><p>{"Step-by-step navigation and travel time estimates between locations."}</p></div> },
             "photo" => html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> },
             "sms_calls" => html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> },
             _ => html! {},
@@ -301,14 +220,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                 <div class="connect-section">
                     // Apps
                     <div class="apps-icons-row">
-                        <button
-                            class={classes!("app-icon", if *calendar_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "calendar") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("calendar".to_string()) { None } else { Some("calendar".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar" width="24" height="24"/>
-                        </button>
                         <button
                             class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
                             onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
@@ -390,15 +301,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                             })}
                         >
                             <i class="fa-solid fa-sun"></i>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "directions") { "selected" } else { "" })}
-                            title="Directions - Step-by-step navigation"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("directions".to_string()) { None } else { Some("directions".to_string()) });
-                            })}
-                        >
-                            <i class="fa-solid fa-directions"></i>
                         </button>
                         <button
                             class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "photo") { "selected" } else { "" })}
@@ -793,7 +695,6 @@ pub fn connect(props: &ConnectProps) -> Html {
 .info-subsection.security-notice h5 {
     color: #69f0ae;
 }
-.fas.fa-directions,
 .fas.fa-qrcode {
     display: inline-block;
     width: 24px;
@@ -924,25 +825,6 @@ pub fn connect(props: &ConnectProps) -> Html {
 .test-button:hover {
     background: rgba(76, 175, 80, 0.3);
     border-color: rgba(76, 175, 80, 0.4);
-}
-.calendar-connect-options {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 10px;
-}
-.calendar-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    color: #666;
-    cursor: pointer;
-}
-.calendar-checkbox input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
 }
 .service-status-container {
     display: flex;

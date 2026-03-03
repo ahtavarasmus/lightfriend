@@ -32,26 +32,3 @@ impl ToolHandler for TeslaControlHandler {
         Ok(ToolResult::Answer(response))
     }
 }
-
-// ─── switch_selected_tesla_vehicle ───────────────────────────────────────────
-
-pub struct TeslaSwitchHandler;
-
-#[async_trait::async_trait]
-impl ToolHandler for TeslaSwitchHandler {
-    fn name(&self) -> &'static str {
-        "switch_selected_tesla_vehicle"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::tesla::get_tesla_switch_vehicle_tool()
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing switch_selected_tesla_vehicle tool call");
-        let response =
-            crate::tool_call_utils::tesla::handle_tesla_switch_vehicle(ctx.state, ctx.user_id)
-                .await;
-        Ok(ToolResult::Answer(response))
-    }
-}

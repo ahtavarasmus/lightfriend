@@ -130,6 +130,7 @@
       "Bash(ls*)",
       "Bash(pwd*)",
       "Bash(cd*)",
+      "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend &&*)",
       "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend-cloud*&&*git log*)",
       "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend-cloud*&&*git*)",
       "Bash(cat*)",
@@ -185,7 +186,15 @@
       "Bash(kill 81747:*)",
       "Bash(rg:*)",
       "Bash(kill %1:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(docker manifest:*)",
+      "Bash(docker:*)",
+      "Bash(test:*)",
+      "Bash(.env:*)",
+      "Bash(/Users/ahtavarasmus/Developer/sites/lightfriend/docker/tuwunel/tuwunel.toml:*)",
+      "Bash(bash:*)",
+      "Bash(git:*)",
+      "Bash(chmod +x:*)"
     ],
     "deny": [
       "Read(.env)",

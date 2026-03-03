@@ -14,12 +14,13 @@ use tokio::time::{sleep, Duration};
 use url::Url;
 use uuid::Uuid;
 
-pub async fn register_user(
+/// Register a new Matrix user via Synapse admin API (HMAC-SHA1 nonce flow).
+/// Used on the VPS where Synapse is the homeserver.
+pub async fn register_user_synapse(
     homeserver: &str,
     shared_secret: &str,
 ) -> Result<(String, String, String, String)> {
-    tracing::info!("🔑 Starting Matrix user registration...");
-    // Create HTTP client
+    tracing::info!("Starting Matrix user registration (Synapse admin API)...");
     let http_client = HttpClient::new();
 
     // Get registration nonce
@@ -38,7 +39,6 @@ pub async fn register_user(
     // Generate unique username and password
     let username = format!("appuser_{}", Uuid::new_v4().to_string().replace("-", ""));
     let password = Uuid::new_v4().to_string();
-    tracing::info!("👤 Generated username and 🔑 password");
 
     // Calculate MAC
     let mac_content = format!("{}\0{}\0{}\0notadmin", nonce, username, password);
@@ -48,7 +48,6 @@ pub async fn register_user(
     let mac_result = hex::encode(mac.finalize().into_bytes());
 
     // Register user
-    tracing::info!("📡 Sending registration request to Matrix server...");
     let response = http_client
         .post(format!("{}/_synapse/admin/v1/register", homeserver))
         .json(&json!({
@@ -62,16 +61,11 @@ pub async fn register_user(
         .await
         .map_err(|e| anyhow!("Failed to send registration request: {}", e))?;
 
-    // Log status
     let status = response.status();
-    tracing::debug!("📡 Registration response status: {}", status);
-
-    // Get response body
     let register_res = response
         .text()
         .await
         .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
-    tracing::debug!("📡 Registration response body: {}", register_res);
 
     let register_json: serde_json::Value = serde_json::from_str(&register_res)
         .map_err(|e| anyhow!("Failed to parse registration response: {}", e))?;
@@ -85,7 +79,7 @@ pub async fn register_user(
             .as_str()
             .ok_or_else(|| anyhow!("No device_id in response: {}", register_res))?
             .to_string();
-        tracing::debug!("✅ Matrix registration successful!");
+        tracing::info!("Matrix registration successful (Synapse)");
         Ok((username, access_token, device_id, password))
     } else {
         let error = register_json["error"].as_str().unwrap_or("Unknown error");
@@ -95,6 +89,123 @@ pub async fn register_user(
             status
         ))
     }
+}
+
+/// Register a new Matrix user using the standard UIAA registration_token flow.
+/// Works with Tuwunel and any spec-compliant homeserver.
+pub async fn register_user_token(
+    homeserver: &str,
+    registration_token: &str,
+) -> Result<(String, String, String, String)> {
+    tracing::info!("Starting Matrix user registration (UIAA token flow)...");
+    let http_client = HttpClient::new();
+
+    let username = format!("appuser_{}", Uuid::new_v4().to_string().replace("-", ""));
+    let password = Uuid::new_v4().to_string();
+
+    let register_url = format!("{}/_matrix/client/v3/register", homeserver);
+
+    // Step 1: Initial request to get UIAA session
+    let initial_response = http_client
+        .post(&register_url)
+        .json(&json!({
+            "username": username,
+            "password": password
+        }))
+        .send()
+        .await
+        .map_err(|e| anyhow!("Failed to send initial registration request: {}", e))?;
+
+    let initial_status = initial_response.status();
+    let initial_body: serde_json::Value = initial_response
+        .json()
+        .await
+        .map_err(|e| anyhow!("Failed to parse initial registration response: {}", e))?;
+
+    // If 200 - registration succeeded without UIAA (unlikely but handle it)
+    if initial_status.is_success() {
+        let access_token = initial_body["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("No access_token in response"))?
+            .to_string();
+        let device_id = initial_body["device_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("No device_id in response"))?
+            .to_string();
+        return Ok((username, access_token, device_id, password));
+    }
+
+    // Expect 401 with UIAA session
+    if initial_status.as_u16() != 401 {
+        let error = initial_body["error"].as_str().unwrap_or("Unknown error");
+        return Err(anyhow!(
+            "Registration failed at step 1: {} (status: {})",
+            error,
+            initial_status
+        ));
+    }
+
+    let session = initial_body["session"]
+        .as_str()
+        .ok_or_else(|| anyhow!("No session in UIAA 401 response"))?;
+
+    // Step 2: Complete registration with token
+    let response = http_client
+        .post(&register_url)
+        .json(&json!({
+            "auth": {
+                "type": "m.login.registration_token",
+                "token": registration_token,
+                "session": session
+            },
+            "username": username,
+            "password": password
+        }))
+        .send()
+        .await
+        .map_err(|e| anyhow!("Failed to send registration request: {}", e))?;
+
+    let status = response.status();
+    let register_body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| anyhow!("Failed to parse registration response: {}", e))?;
+
+    if status.is_success() {
+        let access_token = register_body["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("No access_token in response"))?
+            .to_string();
+        let device_id = register_body["device_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("No device_id in response"))?
+            .to_string();
+        tracing::info!("Matrix registration successful (UIAA token)");
+        Ok((username, access_token, device_id, password))
+    } else {
+        let error = register_body["error"].as_str().unwrap_or("Unknown error");
+        Err(anyhow!(
+            "Registration failed: {} (status: {})",
+            error,
+            status
+        ))
+    }
+}
+
+/// Register a new Matrix user, auto-detecting which method to use:
+/// - If MATRIX_REGISTRATION_TOKEN is set: uses standard UIAA token flow (Tuwunel/Docker)
+/// - Otherwise: uses Synapse admin API with MATRIX_SHARED_SECRET (VPS)
+pub async fn register_user(homeserver: &str) -> Result<(String, String, String, String)> {
+    if let Ok(token) = std::env::var("MATRIX_REGISTRATION_TOKEN") {
+        if !token.is_empty() {
+            return register_user_token(homeserver, &token).await;
+        }
+    }
+
+    let shared_secret = std::env::var("MATRIX_SHARED_SECRET").map_err(|_| {
+        anyhow!("Neither MATRIX_REGISTRATION_TOKEN nor MATRIX_SHARED_SECRET is set")
+    })?;
+    register_user_synapse(homeserver, &shared_secret).await
 }
 
 pub async fn login_with_password(
@@ -328,14 +439,12 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
     // Initialize the Matrix client
     let homeserver_url =
         std::env::var("MATRIX_HOMESERVER").map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
-    let shared_secret = std::env::var("MATRIX_SHARED_SECRET")
-        .map_err(|_| anyhow!("MATRIX_SHARED_SECRET not set"))?;
 
     // Get or register Matrix credentials
     let (username, password, device_id, access_token) =
         match (&user.matrix_username, &user.encrypted_matrix_password) {
             (Some(existing_username), Some(encrypted_password)) => {
-                tracing::debug!("✓ Existing Matrix credentials found");
+                tracing::debug!("Existing Matrix credentials found");
                 let access_token = user
                     .encrypted_matrix_access_token
                     .as_ref()
@@ -349,9 +458,9 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
                 )
             }
             _ => {
-                tracing::info!("🆕 Registering new Matrix user");
+                tracing::info!("Registering new Matrix user");
                 let (username, access_token, device_id, password) =
-                    register_user(&homeserver_url, &shared_secret).await?;
+                    register_user(&homeserver_url).await?;
                 state.user_repository.set_matrix_credentials(
                     user.id,
                     &username,

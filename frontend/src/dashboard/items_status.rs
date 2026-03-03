@@ -506,11 +506,8 @@ fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
             "email" => return PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" },
             "telegram" => return PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" },
             "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" },
-            "messenger" => return PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" },
-            "instagram" => return PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", icon: "fa-brands fa-instagram" },
             "internet" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
             "items" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
-            "calendar" => return PlatformVisual { name: "Calendar", color: "#10b981", glow: "rgba(16,185,129,0.25)", icon: "fa-solid fa-calendar" },
             "weather" => return PlatformVisual { name: "Weather", color: "#38bdf8", glow: "rgba(56,189,248,0.25)", icon: "fa-solid fa-cloud-sun" },
             _ => {}
         }
@@ -524,10 +521,6 @@ fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
         PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" }
     } else if lower.contains("signal") {
         PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" }
-    } else if lower.contains("messenger") {
-        PlatformVisual { name: "Messenger", color: "#0084FF", glow: "rgba(0,132,255,0.3)", icon: "fa-brands fa-facebook-messenger" }
-    } else if lower.contains("instagram") {
-        PlatformVisual { name: "Instagram", color: "#E4405F", glow: "rgba(228,64,95,0.25)", icon: "fa-brands fa-instagram" }
     } else {
         PlatformVisual { name: "Monitor", color: "#7EB2FF", glow: "rgba(126,178,255,0.25)", icon: "fa-solid fa-eye" }
     }
@@ -597,8 +590,6 @@ fn tracking_topic(desc: &str, sender: Option<&str>) -> String {
         "Emails ", "Email ", "emails ", "email ",
         "Telegram messages ", "telegram messages ", "Telegram ", "telegram ",
         "Signal messages ", "signal messages ", "Signal ", "signal ",
-        "Messenger messages ", "messenger messages ",
-        "Instagram messages ", "instagram messages ",
         "Messages ", "messages ",
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {
@@ -693,14 +684,13 @@ fn parse_repeat_hour(summary: &str) -> Option<u32> {
 
 /// Get readable sources: from `[fetch:]` tag, or from "Sources:" in legacy descriptions.
 pub fn digest_sources(summary: &str, description: &str) -> Option<String> {
-    // Tagged items: parse [fetch:email,chat,calendar,items]
+    // Tagged items: parse [fetch:email,chat,items]
     if let Some(val) = extract_tag(summary, "fetch") {
         let parts: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
         if !parts.is_empty() {
             let labels: Vec<&str> = parts.iter().map(|s| match *s {
                 "email" => "email",
                 "chat" => "messages",
-                "calendar" => "calendar",
                 "weather" => "weather",
                 "items" => "tracked items",
                 other => other,
@@ -758,7 +748,7 @@ fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
         suggestions.push(AttentionItem {
             id: -1,
             item_type: "recurring".to_string(),
-            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 08:00]".to_string(),
+            summary: "[fetch:email,chat,items][notify:sms][repeat:daily 08:00]".to_string(),
             description: "Daily digest: morning briefing".to_string(),
             priority: 0,
             due_at: None,
@@ -774,7 +764,7 @@ fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
         suggestions.push(AttentionItem {
             id: -4,
             item_type: "recurring".to_string(),
-            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 13:00]".to_string(),
+            summary: "[fetch:email,chat,items][notify:sms][repeat:daily 13:00]".to_string(),
             description: "Daily digest: afternoon update".to_string(),
             priority: 0,
             due_at: None,
@@ -790,7 +780,7 @@ fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
         suggestions.push(AttentionItem {
             id: -5,
             item_type: "recurring".to_string(),
-            summary: "[fetch:email,chat,calendar,items][notify:sms][repeat:daily 19:00]".to_string(),
+            summary: "[fetch:email,chat,items][notify:sms][repeat:daily 19:00]".to_string(),
             description: "Daily digest: evening recap".to_string(),
             priority: 0,
             due_at: None,
@@ -846,9 +836,9 @@ fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
 
 fn example_prefill_prompt(id: i32) -> Option<String> {
     match id {
-        -1 => Some("Set up a daily digest at 8am covering my emails, messages, calendar, and tracked items".to_string()),
-        -4 => Some("Set up a daily digest at 1pm covering my emails, messages, calendar, and tracked items".to_string()),
-        -5 => Some("Set up a daily digest at 7pm covering my emails, messages, calendar, and tracked items".to_string()),
+        -1 => Some("Set up a daily digest at 8am covering my emails, messages, and tracked items".to_string()),
+        -4 => Some("Set up a daily digest at 1pm covering my emails, messages, and tracked items".to_string()),
+        -5 => Some("Set up a daily digest at 7pm covering my emails, messages, and tracked items".to_string()),
         -2 => Some("Watch for delivery updates from Amazon in my email and text me when it ships".to_string()),
         -3 => Some("Remind me to take the cake out of the oven in 2 hours".to_string()),
         _ => None,
@@ -989,8 +979,8 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
                     <p><strong>{"Example: "}</strong>{"\"Remind me to call the dentist at 3pm\""}</p>
 
                     <h4>{"Scheduled report (recurring)"}</h4>
-                    <p>{"Runs on a repeating schedule - daily, weekdays, or weekly. Pulls fresh data from your connected sources (email, messages, calendar) and sends a summary."}</p>
-                    <p><strong>{"Example: "}</strong>{"\"Every morning at 8am summarize my emails and calendar\""}</p>
+                    <p>{"Runs on a repeating schedule - daily, weekdays, or weekly. Pulls fresh data from your connected sources (email, messages, tracked items) and sends a summary."}</p>
+                    <p><strong>{"Example: "}</strong>{"\"Every morning at 8am summarize my emails and messages\""}</p>
 
                     <h4>{"Tracking"}</h4>
                     <p>{"Watches your incoming messages or external data for a specific condition. Only notifies you when there's a match - stays silent otherwise. Expires after 30 days."}</p>

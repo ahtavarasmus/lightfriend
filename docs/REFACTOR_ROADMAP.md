@@ -27,14 +27,14 @@ One agent, multiple modes - all sharing the same tool registry, context building
 - Contact profiles (who the user knows, per-contact settings)
 - Available tools (filtered by subscription + connections)
 - Conversation history (for chat mode)
-- Source data (for scheduled execution mode - fetched emails, messages, calendar events)
+- Source data (for scheduled execution mode - fetched emails, messages)
 
 **Key design:**
 ```
 ContextBuilder::new(state, user_id)
     .with_tools()          // filters by subscription + connections
     .with_history(n)       // last N conversation turns
-    .with_sources(["email", "calendar"])  // fetch source data
+    .with_sources(["email", "chat"])  // fetch source data
     .build()               // returns AgentContext
 ```
 
@@ -55,17 +55,17 @@ ContextBuilder::new(state, user_id)
 
 **What was built:**
 - `backend/src/tools/registry.rs` - `ToolHandler` trait, `ToolRegistry`, `ToolContext`, `ToolResult`
-- 10 tool handler files in `backend/src/tools/` (calendar, email, messaging, respond, schedule, search, tesla, weather, youtube)
+- 10 tool handler files in `backend/src/tools/` (email, items, messaging, respond, schedule, search, tesla, weather, youtube)
 - Registry initialized in `AppState`, dispatch loop in `twilio_sms.rs` (~30 lines replacing ~800)
 
-**Current tool mapping (21 handlers):**
-- Search: `PerplexityHandler`, `FirecrawlHandler`, `DirectionsHandler`, `QrScanHandler`
+**Current tool mapping (18 handlers):**
+- Search: `PerplexityHandler`, `FirecrawlHandler`, `QrScanHandler`
 - Weather: `WeatherHandler`
 - Email: `FetchEmailsHandler`, `FetchSpecificEmailHandler`, `SendEmailHandler`, `RespondEmailHandler`
 - Messaging: `SearchContactsHandler`, `FetchRecentHandler`, `FetchMessagesHandler`, `SendMessageHandler`
-- Calendar: `FetchEventsHandler`, `CreateEventHandler`
-- Schedule: `CreateTaskHandler`, `UpdateMonitoringHandler`
-- Tesla: `TeslaControlHandler`, `TeslaSwitchHandler`
+- Items: `ListTrackedItemsHandler`, `UpdateTrackedItemHandler`
+- Schedule: `CreateItemHandler`
+- Tesla: `TeslaControlHandler`
 - YouTube: `YouTubeHandler`
 - Response: `DirectResponseHandler`
 
@@ -86,7 +86,7 @@ ContextBuilder::new(state, user_id)
 | `fetch_emails` + `fetch_specific_email` | `fetch_emails` | Add optional `message_id` param |
 | `send_email` + `respond_to_email` | `send_email` | Add optional `reply_to_id` param |
 | `search_chat_contacts` + `fetch_recent_messages` + `fetch_chat_messages` | `messaging` | Action param: "search", "recent", "fetch" |
-| `control_tesla` + `switch_selected_tesla_vehicle` | `tesla` | Action param covers both |
+| `control_tesla` | `tesla` | Already single tool |
 | `ask_perplexity` + `search_firecrawl` | `web_search` | Engine param |
 | `create_task` + `update_monitoring_status` | `schedule` | Action param |
 
@@ -136,7 +136,7 @@ Output (structured): {
 **Flow:**
 ```
 Trigger fires
-  -> ContextBuilder assembles sources (email, calendar, messages)
+  -> ContextBuilder assembles sources (email, messages)
   -> Agent receives: "Generate morning digest from these sources"
   -> Agent uses tools (same registry) to format and deliver
   -> Result written to history

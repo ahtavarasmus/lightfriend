@@ -1,24 +1,15 @@
 use crate::schema::bridge_disconnection_events;
 use crate::schema::bridges;
-use crate::schema::calendar_notifications;
 use crate::schema::contact_profile_exceptions;
 use crate::schema::contact_profiles;
-use crate::schema::conversations;
 use crate::schema::country_availability;
-use crate::schema::email_judgments;
-use crate::schema::google_calendar;
 use crate::schema::imap_connection;
 use crate::schema::items;
-use crate::schema::keywords;
 use crate::schema::message_history;
 use crate::schema::message_status_log;
-use crate::schema::priority_senders;
 use crate::schema::processed_emails;
-use crate::schema::subaccounts;
-use crate::schema::tasks;
 use crate::schema::totp_backup_codes;
 use crate::schema::totp_secrets;
-use crate::schema::uber;
 use crate::schema::usage_logs;
 use crate::schema::user_info;
 use crate::schema::user_settings;
@@ -58,9 +49,6 @@ pub struct User {
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
     pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
-    pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
-    pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
-    pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub magic_token: Option<String>, // token for magic link login/password setup
     pub plan_type: Option<String>, // "assistant", "autopilot", or "byot"
@@ -77,13 +65,9 @@ pub struct UserInfo {
     pub id: Option<i32>,
     pub user_id: i32,
     pub location: Option<String>,
-    pub dictionary: Option<String>,
     pub info: Option<String>,
     pub timezone: Option<String>,
     pub nearby_places: Option<String>,
-    pub recent_contacts: Option<String>,
-    pub blocker_password_vault: Option<String>,
-    pub lockbox_password_vault: Option<String>,
     pub latitude: Option<f32>,
     pub longitude: Option<f32>,
 }
@@ -93,11 +77,9 @@ pub struct UserInfo {
 pub struct NewUserInfo {
     pub user_id: i32,
     pub location: Option<String>,
-    pub dictionary: Option<String>,
     pub info: Option<String>,
     pub timezone: Option<String>,
     pub nearby_places: Option<String>,
-    pub recent_contacts: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -112,7 +94,6 @@ pub struct ImapConnection {
     pub last_update: i32,
     pub created_on: i32,
     pub description: String,
-    pub expires_in: i32,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
 }
@@ -127,7 +108,6 @@ pub struct NewImapConnection {
     pub last_update: i32,
     pub created_on: i32,
     pub description: String,
-    pub expires_in: i32,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
 }
@@ -148,30 +128,6 @@ pub struct NewProcessedEmail {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = email_judgments)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct EmailJudgment {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub email_timestamp: i32,
-    pub processed_at: i32,
-    pub should_notify: bool,
-    pub score: i32,
-    pub reason: String,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = email_judgments)]
-pub struct NewEmailJudgment {
-    pub user_id: i32,
-    pub email_timestamp: i32,
-    pub processed_at: i32,
-    pub should_notify: bool,
-    pub score: i32,
-    pub reason: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
@@ -224,7 +180,7 @@ pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
     pub sid: Option<String>,        // elevenlabs call id or twilio message id
-    pub activity_type: String, // sms, call, calendar_notification, email_priority, email_waiting_check, email_critical, whatsapp_critical, whatsapp_priority, whatsapp_waiting_check
+    pub activity_type: String, // sms, call, email_priority, email_critical, whatsapp_critical, whatsapp_priority
     pub credits: Option<f32>,  // the amount of credits used in euros
     pub created_at: i32,       // int timestamp utc epoch
     pub time_consumed: Option<i32>, // messsage response time or call duration in seconds
@@ -250,88 +206,6 @@ pub struct NewUsageLog {
     pub status: Option<String>,
     pub recharge_threshold_timestamp: Option<i32>,
     pub zero_credits_timestamp: Option<i32>,
-}
-
-#[derive(Queryable, Selectable, Insertable, Clone)]
-#[diesel(table_name = conversations)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Conversation {
-    pub id: i32,
-    pub user_id: i32,
-    pub conversation_sid: String, // twilio conversation sid
-    pub service_sid: String,      // twilio service sid where all the conversations fall under
-    pub created_at: i32,          // epoch timestamp
-    pub active: bool,             // should default to active for now
-    pub twilio_number: String,    // where user was texting in this conversation
-    pub user_number: String,      // user's number for this conversation
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = conversations)]
-pub struct NewConversation {
-    pub user_id: i32,
-    pub conversation_sid: String,
-    pub service_sid: String,
-    pub created_at: i32,
-    pub active: bool,
-    pub twilio_number: String,
-    pub user_number: String,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = uber)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Uber {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32, // for access token
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = uber)]
-pub struct NewUber {
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = google_calendar)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct GoogleCalendar {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32, // for access token
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = google_calendar)]
-pub struct NewGoogleCalendar {
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -360,87 +234,6 @@ pub struct NewYouTube {
     pub last_update: i32,
     pub created_on: i32,
     pub description: String,
-}
-
-#[derive(Debug, Queryable, Insertable)]
-#[diesel(table_name = calendar_notifications)]
-pub struct CalendarNotification {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub event_id: String,
-    pub notification_time: i32,
-}
-
-#[derive(Debug, Insertable)]
-#[diesel(table_name = calendar_notifications)]
-pub struct NewCalendarNotification {
-    pub user_id: i32,
-    pub event_id: String,
-    pub notification_time: i32,
-}
-
-/// Unified task model for scheduled and recurring tasks
-/// trigger: "once_<timestamp>" or "recurring_email" or "recurring_messaging"
-/// condition: optional natural language condition checked at runtime
-/// action: tool call or empty (e.g., "generate_digest", "control_tesla(climate_on)", "")
-/// sources: comma-separated list of data sources to fetch before action (e.g., "email,whatsapp,telegram")
-#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
-#[diesel(table_name = tasks)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Task {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub trigger: String, // "once_<timestamp>", "recurring_email", "recurring_messaging"
-    pub condition: Option<String>, // natural language condition (optional)
-    pub action: String,  // tool call like "generate_digest" or empty for just notification
-    pub notification_type: Option<String>, // "sms" or "call"
-    pub status: Option<String>, // "active", "completed", "cancelled"
-    pub created_at: i32,
-    pub completed_at: Option<i32>,
-    pub is_permanent: Option<i32>, // 0 or 1, set via dashboard only
-    pub recurrence_rule: Option<String>, // "daily", "weekly:1,3,5", "monthly:15"
-    pub recurrence_time: Option<String>, // "09:00" (HH:MM in user timezone)
-    pub sources: Option<String>,   // "email,whatsapp,telegram,signal,calendar"
-    pub end_time: Option<i32>,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = tasks)]
-pub struct NewTask {
-    pub user_id: i32,
-    pub trigger: String,
-    pub condition: Option<String>,
-    pub action: String,
-    pub notification_type: Option<String>,
-    pub status: String,
-    pub created_at: i32,
-    pub is_permanent: Option<i32>,
-    pub recurrence_rule: Option<String>,
-    pub recurrence_time: Option<String>,
-    pub sources: Option<String>,
-    pub end_time: Option<i32>,
-}
-
-#[derive(Queryable, Selectable, Insertable, Debug)]
-#[diesel(table_name = priority_senders)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct PrioritySender {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub sender: String,
-    pub service_type: String,      // like email, whatsapp, ..
-    pub noti_type: Option<String>, // "sms", "call"
-    pub noti_mode: String, // "all" to notify about every msg, "focus" to pay extra attention on digests and eligible for family on different monitoring settings
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = priority_senders)]
-pub struct NewPrioritySender {
-    pub user_id: i32,
-    pub sender: String,
-    pub service_type: String,
-    pub noti_type: Option<String>,
-    pub noti_mode: String,
 }
 
 // Contact Profiles - unified notification settings per person/group
@@ -504,24 +297,6 @@ pub struct NewContactProfileException {
     pub notify_on_call: i32,
 }
 
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = keywords)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Keyword {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub keyword: String,
-    pub service_type: String, // like email, whatsapp, ..
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = keywords)]
-pub struct NewKeyword {
-    pub user_id: i32,
-    pub keyword: String,
-    pub service_type: String, // like email, whatsapp, ..
-}
-
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = user_settings)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -537,26 +312,17 @@ pub struct UserSettings {
     pub morning_digest: Option<String>, // whether and when to send user morning digest noti, time is in UTC as rfc
     pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
     pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
-    pub number_of_digests_locked: i32, // if user wants to change some of the digests for base messages we can lock some digests
     pub critical_enabled: Option<String>, // whether to inform users about their critical messages immediately and by which way ("sms" or "call")
     pub encrypted_twilio_account_sid: Option<String>, // for self hosted instance
     pub encrypted_twilio_auth_token: Option<String>, // for self hosted instance
     pub encrypted_openrouter_api_key: Option<String>, // for self hosted instance
-    pub server_url: Option<String>,       // for self hosted instance
-    pub encrypted_geoapify_key: Option<String>, // for self hosted instance
-    pub encrypted_pirate_weather_key: Option<String>, // for self hosted instance
-    pub server_ip: Option<String>,        // for self hosted instance
     pub encrypted_textbee_device_id: Option<String>,
     pub encrypted_textbee_api_key: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
     pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
     pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
     pub action_on_critical_message: Option<String>, // "notify_family" or None (notify all). Only applies to messaging platforms (WhatsApp, Telegram, Signal), not email.
-    pub magic_login_token: Option<String>,          // guest checkout magic link token
-    pub magic_login_token_expiration_timestamp: Option<i32>, // guest checkout magic token expiration timestamp
-    pub monthly_message_count: i32,                          // monthly message count tracking
-    pub outbound_message_pricing: Option<f32>, // cached Twilio outbound SMS price for user's country
-    pub last_instant_digest_time: Option<i32>, // timestamp of last on-demand digest fetch
+    pub last_instant_digest_time: Option<i32>,      // timestamp of last on-demand digest fetch
     pub phone_service_active: bool, // whether phone service (SMS and calls) is active - can be disabled for security (e.g., stolen phone)
     pub default_notification_mode: Option<String>, // "critical", "digest", or "ignore" - default behavior for unknown senders
     pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
@@ -579,45 +345,9 @@ pub struct NewUserSettings {
     pub agent_language: String,
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
-    pub number_of_digests_locked: i32,
     pub critical_enabled: Option<String>,
     pub proactive_agent_on: bool,
     pub notify_about_calls: bool,
-}
-
-#[derive(Queryable, Insertable)]
-#[diesel(table_name = subaccounts)]
-pub struct Subaccount {
-    pub id: i32,
-    pub user_id: String,
-    pub subaccount_sid: String,
-    pub auth_token: String,
-    pub country: Option<String>,
-    pub number: Option<String>,
-    pub cost_this_month: Option<f32>,
-    pub created_at: Option<i32>,
-    pub status: Option<String>,
-    pub tinfoil_key: Option<String>,
-    pub messaging_service_sid: Option<String>,
-    pub subaccount_type: String, // "us_ca", "full_service", "notification_only"
-    pub country_code: Option<String>, // ISO country code (US, CA, FI, IL, etc.)
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = subaccounts)]
-pub struct NewSubaccount {
-    pub user_id: String,
-    pub subaccount_sid: String,
-    pub auth_token: String,
-    pub country: Option<String>,
-    pub number: Option<String>,
-    pub cost_this_month: Option<f32>,
-    pub created_at: Option<i32>,
-    pub status: Option<String>,
-    pub tinfoil_key: Option<String>,
-    pub messaging_service_sid: Option<String>,
-    pub subaccount_type: String, // "us_ca", "full_service", "notification_only"
-    pub country_code: Option<String>, // ISO country code
 }
 
 #[derive(Queryable, Selectable, Insertable, Debug)]

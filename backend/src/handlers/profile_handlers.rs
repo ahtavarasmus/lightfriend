@@ -109,7 +109,7 @@ pub struct ProfileResponse {
     phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
-    has_any_connection: bool, // whether user has connected any service (calendar, email, bridges)
+    has_any_connection: bool, // whether user has connected any service (email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -233,17 +233,7 @@ pub async fn get_profile(
                     )
                 })?;
             let estimated_critical_monthly = critical_info.estimated_monthly_price;
-            // Get priority notification info
-            let priority_info = state
-                .user_core
-                .get_priority_notification_info(auth_user.user_id)
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)})),
-                    )
-                })?;
-            let estimated_priority_monthly = priority_info.estimated_monthly_price;
+            let estimated_priority_monthly = 0.0_f32;
             // Calculate digest estimated monthly cost
             let estimated_digest_monthly = if current_count > 0 {
                 let active_count_f = current_count as f32;
@@ -264,14 +254,10 @@ pub async fn get_profile(
             // Check if user has any connected services (for onboarding modal)
             let has_any_connection = state
                 .user_repository
-                .has_active_google_calendar(auth_user.user_id)
-                .unwrap_or(false)
-                || state
-                    .user_repository
-                    .get_imap_credentials(auth_user.user_id)
-                    .ok()
-                    .flatten()
-                    .is_some()
+                .get_imap_credentials(auth_user.user_id)
+                .ok()
+                .flatten()
+                .is_some()
                 || state
                     .user_repository
                     .get_bridge(auth_user.user_id, "whatsapp")
@@ -1286,48 +1272,6 @@ pub async fn get_nearby_places(
 }
 
 #[derive(Serialize)]
-pub struct EmailJudgmentResponse {
-    pub id: i32,
-    pub email_timestamp: i32,
-    pub processed_at: i32,
-    pub should_notify: bool,
-    pub score: i32,
-    pub reason: String,
-}
-
-pub async fn get_email_judgments(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<Vec<EmailJudgmentResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    match state
-        .user_repository
-        .get_user_email_judgments(auth_user.user_id)
-    {
-        Ok(judgments) => {
-            let responses: Vec<EmailJudgmentResponse> = judgments
-                .into_iter()
-                .map(|j| EmailJudgmentResponse {
-                    id: j.id.unwrap_or(0),
-                    email_timestamp: j.email_timestamp,
-                    processed_at: j.processed_at,
-                    should_notify: j.should_notify,
-                    score: j.score,
-                    reason: j.reason,
-                })
-                .collect();
-            Ok(Json(responses))
-        }
-        Err(e) => {
-            tracing::error!("Failed to get email judgments: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get email judgments: {}", e)})),
-            ))
-        }
-    }
-}
-
-#[derive(Serialize)]
 pub struct DigestsResponse {
     morning_digest_time: Option<String>,
     day_digest_time: Option<String>,
@@ -2136,7 +2080,6 @@ pub async fn web_chat_stream(
                         }
                         Some(ChatStatus::ToolCall { name }) => {
                             let display = match name.as_str() {
-                                "get_calendar_events" | "create_calendar_event" => "Checking calendar...".to_string(),
                                 "ask_perplexity" => "Searching the web...".to_string(),
                                 "create_task" => "Creating item...".to_string(),
                                 "send_sms" | "send_email" => "Preparing message...".to_string(),
@@ -2268,7 +2211,7 @@ pub async fn get_instant_digest(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
-    use crate::proactive::utils::{generate_digest, CalendarEvent, DigestData, MessageInfo};
+    use crate::proactive::utils::{generate_digest, DigestData, MessageInfo};
     use chrono::{Duration, Utc};
     use std::collections::{HashMap, HashSet};
 
@@ -2456,42 +2399,8 @@ pub async fn get_instant_digest(
         }
     }
 
-    // Fetch calendar events for next 24 hours
-    let mut calendar_events: Vec<CalendarEvent> = Vec::new();
-    if let Ok(true) = state
-        .user_repository
-        .has_active_google_calendar(auth_user.user_id)
-    {
-        let start_time = now.to_rfc3339();
-        let end_time = (now + Duration::hours(24)).to_rfc3339();
-        if let Ok(axum::Json(value)) = crate::handlers::google_calendar::handle_calendar_fetching(
-            state.as_ref(),
-            auth_user.user_id,
-            &start_time,
-            &end_time,
-        )
-        .await
-        {
-            if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
-                for event in events {
-                    if let (Some(summary), Some(start), Some(duration)) = (
-                        event.get("summary").and_then(|s| s.as_str()),
-                        event.get("start").and_then(|s| s.as_str()),
-                        event.get("duration_minutes").and_then(|d| d.as_str()),
-                    ) {
-                        calendar_events.push(CalendarEvent {
-                            title: summary.to_string(),
-                            start_time_rfc: start.to_string(),
-                            duration_minutes: duration.parse().unwrap_or(60),
-                        });
-                    }
-                }
-            }
-        }
-    }
-
     // Check if there's anything to report
-    if messages.is_empty() && calendar_events.is_empty() {
+    if messages.is_empty() {
         // Update last instant digest time even if empty
         let _ = state
             .user_core
@@ -2505,15 +2414,54 @@ pub async fn get_instant_digest(
         }));
     }
 
-    // Build priority map for digest generation
+    // Build priority map from contact profiles for digest generation
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
-    for platform in ["email", "whatsapp", "telegram", "signal"] {
-        let priors = state
-            .user_repository
-            .get_priority_senders(auth_user.user_id, platform)
-            .unwrap_or(Vec::new());
-        let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
-        priority_map.insert(platform.to_string(), set);
+    priority_map.insert("email".to_string(), HashSet::new());
+    priority_map.insert("whatsapp".to_string(), HashSet::new());
+    priority_map.insert("telegram".to_string(), HashSet::new());
+    priority_map.insert("signal".to_string(), HashSet::new());
+
+    if let Ok(profiles) = state
+        .user_repository
+        .get_contact_profiles(auth_user.user_id)
+    {
+        for profile in profiles {
+            if let Some(ref emails) = profile.email_addresses {
+                for addr in emails.split(',') {
+                    let addr = addr.trim().to_string();
+                    if !addr.is_empty() {
+                        priority_map
+                            .entry("email".to_string())
+                            .or_default()
+                            .insert(addr);
+                    }
+                }
+            }
+            if let Some(ref chat) = profile.whatsapp_chat {
+                if !chat.is_empty() {
+                    priority_map
+                        .entry("whatsapp".to_string())
+                        .or_default()
+                        .insert(chat.clone());
+                }
+            }
+            if let Some(ref chat) = profile.telegram_chat {
+                if !chat.is_empty() {
+                    priority_map
+                        .entry("telegram".to_string())
+                        .or_default()
+                        .insert(chat.clone());
+                }
+            }
+            if let Some(ref chat) = profile.signal_chat {
+                if !chat.is_empty() {
+                    priority_map
+                        .entry("signal".to_string())
+                        .or_default()
+                        .insert(chat.clone());
+                }
+            }
+        }
     }
 
     // Sort messages
@@ -2544,7 +2492,6 @@ pub async fn get_instant_digest(
     // Prepare digest data
     let digest_data = DigestData {
         messages,
-        calendar_events,
         time_period_hours: hours_since.max(1),
         current_datetime_local,
     };

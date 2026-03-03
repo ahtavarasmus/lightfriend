@@ -351,7 +351,7 @@ async fn test_n4_recurring_digest_with_fetch() {
 
     let item = make_item(
         user.id,
-        "[type:recurring] [notify:sms] [repeat:daily 09:00] [fetch:calendar]\nMorning briefing: summarize today's calendar events.",
+        "[type:recurring] [notify:sms] [repeat:daily 09:00] [fetch:email]\nMorning briefing: summarize today's important emails.",
         1,
     );
     let result = process_item_with_retry(&state, user.id, &item).await;

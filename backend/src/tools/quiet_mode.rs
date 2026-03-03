@@ -77,8 +77,7 @@ impl ToolHandler for QuietModeHandler {
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::String),
                 description: Some(
-                    "Filter by platform: whatsapp, telegram, signal, email, calendar, etc."
-                        .to_string(),
+                    "Filter by platform: whatsapp, telegram, signal, email, etc.".to_string(),
                 ),
                 ..Default::default()
             }),

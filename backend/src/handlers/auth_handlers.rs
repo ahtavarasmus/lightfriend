@@ -481,7 +481,6 @@ pub async fn register(
         credits: 0.00,
         credits_left: 0.00,
         charge_when_under: false,
-        waiting_checks_count: 0,
         discount: false,
         sub_tier: None,
     };

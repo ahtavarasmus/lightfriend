@@ -15,7 +15,7 @@ network:
 
 
 homeserver:
-    address: http://synapse:8008
+    address: http://tuwunel:8008
     domain: localhost
 
 appservice:

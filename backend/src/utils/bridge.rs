@@ -1282,7 +1282,7 @@ pub async fn handle_bridge_message(
 
     // Early exit: Skip ALL message processing if any bridge is in "connecting" state
     // This prevents blocking the connection flow with long waits
-    let connecting_bridge_types = vec!["signal", "telegram", "whatsapp", "instagram", "messenger"];
+    let connecting_bridge_types = vec!["signal", "telegram", "whatsapp"];
     for bridge_type in &connecting_bridge_types {
         if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
             if bridge.status == "connecting" {

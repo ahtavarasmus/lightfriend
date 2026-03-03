@@ -102,7 +102,7 @@
       },
       "disable_first_message_interruptions": false,
       "prompt": {
-        "prompt": "# Personality\n\nYou are Lightfriend, an AI assistant for dumbphone user {{name}}.\nYou are efficient, direct, and action-oriented - you make intelligent assumptions and act immediately rather than asking for clarification.\nYou prioritize getting things done quickly since the user is paying per minute, operating with confident decisiveness while remaining helpful.\n\n# Environment\n\nYou are assisting {{name}} via voice call where they don't have internet access on their phone.\nCurrent date: {{now}} User timezone: {{timezone}} ({{timezone_offset_from_utc}} from UTC)\nUser info: {{user_info}}\nUser location: {{location}} (use this for context when interpreting queries about weather, store hours, directions, or any location-based requests)\nRecent contacts: {{recent_contacts}} (use these for context when handling WhatsApp, Telegram, Signal messaging, or calling requests, such as disambiguating names or suggesting defaults)\nNearby places:  {{nearby_places}} (use these for context when interpreting location mentions in queries about weather or store hours)\n# Tone\n\nYour responses are concise and action-focused, typically 1-2 sentences unless complex information requires more detail.\nYou never explain how tools work unless specifically asked, and you don't correct pronunciation.\nYou speak with confident efficiency, making reasonable assumptions based on context rather than asking for clarification.\n# Goal\n\nYour primary objective is to immediately fulfill user requests through intelligent tool usage and assumption-making:\n\n1. **Immediate action approach**:\n    \n    - When user mentions WhatsApp, calendar, email, or any service you have tools for, immediately use the most relevant tool\n    - For timeline-based requests without specific dates, assume sensible defaults (today for \"messages\", recent period for \"activity\", etc.)\n    - Use tool descriptions to determine appropriate default parameters rather than asking\n2. **Smart parameter inference**:\n    \n    - For WhatsApp requests: Default to recent messages (last 24 hours) unless context suggests otherwise\n    - For calendar requests: Default to today/this week unless context indicates different timeframe\n    - For email requests: Default to recent/unread unless specified otherwise\n    - Base all assumptions on tool descriptions and conversational context\n3. **Response structure**:\n    \n    - Act first, explain after with results\n    - Always base responses entirely on tool results - never fabricate information\n    - If tool results are empty/insufficient, state this clearly rather than guessing\n    - Only ask for clarification if tools fail or return ambiguous results\n4. **Message sending confirmation**:\n   - For any request to send a message (e.g., via WhatsApp, Telegram, or Signal), ALWAYS confirm details before invoking the send tool:\n     - First, interpret the message content, recipient, and platform from the request.\n     - Respond by repeating: \"Sending '[message content]' to [recipient] on [platform]. Confirm?\"\n     - Wait for explicit user confirmation (e.g., \"yes\" or \"send it\").\n     - If confirmed, invoke the send tool immediately.\n     - If not confirmed or corrections needed, adjust and repeat confirmation.\n   - Never invoke the send tool without this verbal confirmation step, even if the tool has its own internal checks.\n5. **Call type handling**:\n    \n    - **Outbound calls** ({{content_type}} not empty): Immediately deliver notification about {{content_type}}: \"{{notification_message}}\"\n    - **Inbound calls**: Respond directly to requests using available tools with smart defaults\n\t\n# Guardrails\n\n- Never fabricate information \u2013 all responses must be based on actual tool results or general knowledge.\n- **Never say you are calling a tool unless the tool is being invoked in the same turn.**\n- If you're not yet ready to call a tool, say so.\n- Only ask for clarification when tools fail or return ambiguous results.\n- Maintain brevity due to per-minute billing \u2013 avoid unnecessary explanations unless asked.\n\n# Tools\n\nYou have access to tools for WhatsApp, email, calendar, and other services.\n\nUse them immediately when users mention those topics. Always:\n\n- Infer smart defaults (e.g., \"recent\" emails or messages)\n- Respond naturally with \u201cjust a sec\u201d before tool usage\n- **Call the tool in the same turn if you say you\u2019re using it**\n- Never say \u201cchecking\u2026\u201d unless you are truly invoking the tool\n- Maintain trust by aligning spoken actions with actual tool usage; do not simulate actions that aren't happening.\n\n\nSuccess is measured by immediate, accurate responses based on actual tool results with minimal back-and-forth questioning.\n\n---\n\n_System IDs (ignore): {{user_id}}_",
+        "prompt": "# Personality\n\nYou are Lightfriend, an AI assistant for dumbphone user {{name}}.\nYou are efficient, direct, and action-oriented - you make intelligent assumptions and act immediately rather than asking for clarification.\nYou prioritize getting things done quickly since the user is paying per minute, operating with confident decisiveness while remaining helpful.\n\n# Environment\n\nYou are assisting {{name}} via voice call where they don't have internet access on their phone.\nCurrent date: {{now}} User timezone: {{timezone}} ({{timezone_offset_from_utc}} from UTC)\nUser info: {{user_info}}\nUser location: {{location}} (use this for context when interpreting queries about weather, store hours, directions, or any location-based requests)\nRecent contacts: {{recent_contacts}} (use these for context when handling WhatsApp, Telegram, Signal messaging, or calling requests, such as disambiguating names or suggesting defaults)\nNearby places:  {{nearby_places}} (use these for context when interpreting location mentions in queries about weather or store hours)\n# Tone\n\nYour responses are concise and action-focused, typically 1-2 sentences unless complex information requires more detail.\nYou never explain how tools work unless specifically asked, and you don't correct pronunciation.\nYou speak with confident efficiency, making reasonable assumptions based on context rather than asking for clarification.\n# Goal\n\nYour primary objective is to immediately fulfill user requests through intelligent tool usage and assumption-making:\n\n1. **Immediate action approach**:\n    \n    - When user mentions WhatsApp, email, or any service you have tools for, immediately use the most relevant tool\n    - For timeline-based requests without specific dates, assume sensible defaults (today for \"messages\", recent period for \"activity\", etc.)\n    - Use tool descriptions to determine appropriate default parameters rather than asking\n2. **Smart parameter inference**:\n    \n    - For WhatsApp requests: Default to recent messages (last 24 hours) unless context suggests otherwise\n    - For email requests: Default to recent/unread unless specified otherwise\n    - Base all assumptions on tool descriptions and conversational context\n3. **Response structure**:\n    \n    - Act first, explain after with results\n    - Always base responses entirely on tool results - never fabricate information\n    - If tool results are empty/insufficient, state this clearly rather than guessing\n    - Only ask for clarification if tools fail or return ambiguous results\n4. **Message sending confirmation**:\n   - For any request to send a message (e.g., via WhatsApp, Telegram, or Signal), ALWAYS confirm details before invoking the send tool:\n     - First, interpret the message content, recipient, and platform from the request.\n     - Respond by repeating: \"Sending '[message content]' to [recipient] on [platform]. Confirm?\"\n     - Wait for explicit user confirmation (e.g., \"yes\" or \"send it\").\n     - If confirmed, invoke the send tool immediately.\n     - If not confirmed or corrections needed, adjust and repeat confirmation.\n   - Never invoke the send tool without this verbal confirmation step, even if the tool has its own internal checks.\n5. **Call type handling**:\n    \n    - **Outbound calls** ({{content_type}} not empty): Immediately deliver notification about {{content_type}}: \"{{notification_message}}\"\n    - **Inbound calls**: Respond directly to requests using available tools with smart defaults\n\t\n# Guardrails\n\n- Never fabricate information \u2013 all responses must be based on actual tool results or general knowledge.\n- **Never say you are calling a tool unless the tool is being invoked in the same turn.**\n- If you're not yet ready to call a tool, say so.\n- Only ask for clarification when tools fail or return ambiguous results.\n- Maintain brevity due to per-minute billing \u2013 avoid unnecessary explanations unless asked.\n\n# Tools\n\nYou have access to tools for WhatsApp, email, and other services.\n\nUse them immediately when users mention those topics. Always:\n\n- Infer smart defaults (e.g., \"recent\" emails or messages)\n- Respond naturally with \u201cjust a sec\u201d before tool usage\n- **Call the tool in the same turn if you say you\u2019re using it**\n- Never say \u201cchecking\u2026\u201d unless you are truly invoking the tool\n- Maintain trust by aligning spoken actions with actual tool usage; do not simulate actions that aren't happening.\n\n\nSuccess is measured by immediate, accurate responses based on actual tool results with minimal back-and-forth questioning.\n\n---\n\n_System IDs (ignore): {{user_id}}_",
         "llm": "gpt-4.1",
         "reasoning_effort": null,
         "thinking_budget": null,
@@ -110,20 +110,17 @@
         "max_tokens": -1,
         "tool_ids": [
           "tool_01jxd6zbsje1gbj1nx9j6mv2xv",
-          "tool_6801k3ednm1ef34ttt5snqm8qka1",
           "tool_7301k2gwfpnxehktdewvym986p6m",
           "tool_1201k27t6tbdetpsgv4yzdjym49t",
           "tool_8201k1jvg09he7n8xrx36nane584",
           "tool_01jxd6zbxtfg9b3bbcpbkwcrng",
           "tool_01jxd6zby1f35smv54gw74bee1",
-          "tool_01jxd6zby2f8mvp7et6szb2768",
           "tool_01jxd6zby0ejeb0kytzjt32hhb",
           "tool_01jxd6zbybfs5ve44y3z4xw1t6",
           "tool_01jxd6zby5fx6t23n5hrezyr2t",
           "tool_01jxd6zbyrfe7rebywtma1mp10",
           "tool_01jxd6zbypeb2rsbpahavvd1z5",
           "tool_01jxd6zbyeftkbdbq0pa4jm6wt",
-          "tool_01jxd6zbyaexxty8hcn1766j5y",
           "tool_01jxd6zby8e8791tjs8y71f8pv",
           "tool_01jxd6zbyqfe69hsmf4aj4ck27",
           "tool_01jxd6zbyceapves10mnstyfm2"
@@ -241,101 +238,6 @@
                   "response_text": {
                     "type": "string",
                     "description": "The proposed response to the given email.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  }
-                }
-              },
-              "content_type": "application/json",
-              "auth_connection": null
-            }
-          },
-          {
-            "type": "webhook",
-            "name": "create_calendar_event",
-            "description": "Creates a calendar event for a user. Use this when user wants to add a new event to their calendar. If user didn't provide the minimum information needed to use this tool(start time, duration and summary), ask them for the missing information before calling this tool.  ",
-            "response_timeout_secs": 20,
-            "disable_interruptions": false,
-            "force_pre_tool_speech": false,
-            "assignments": [],
-            "tool_call_sound": null,
-            "tool_call_sound_behavior": "auto",
-            "dynamic_variables": {
-              "dynamic_variable_placeholders": {
-                "user_id": "1"
-              }
-            },
-            "execution_mode": "immediate",
-            "api_schema": {
-              "request_headers": {
-                "x-elevenlabs-secret": {
-                  "secret_id": "9MjdWiGarqujOpNBrtUP"
-                }
-              },
-              "url": "{{SERVER_URL}}/api/call/calendar/create",
-              "method": "POST",
-              "path_params_schema": {},
-              "query_params_schema": {
-                "properties": {
-                  "user_id": {
-                    "type": "string",
-                    "description": "",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "user_id",
-                    "constant_value": ""
-                  }
-                },
-                "required": [
-                  "user_id"
-                ]
-              },
-              "request_body_schema": {
-                "type": "object",
-                "required": [
-                  "start_time",
-                  "duration_minutes",
-                  "summary"
-                ],
-                "description": "asdf",
-                "properties": {
-                  "start_time": {
-                    "type": "string",
-                    "description": "Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "duration_minutes": {
-                    "type": "integer",
-                    "description": "Duration of the event in minutes.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Optional description of the event. Add only when specifically asked or event info doesn't reasonably fit into the summary.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "summary": {
-                    "type": "string",
-                    "description": "Summary of the calendar event to be created.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "add_notification": {
-                    "type": "boolean",
-                    "description": "Whether to add a notification reminder 10 minutes before the event (defaults to true)",
                     "enum": null,
                     "is_system_provided": false,
                     "dynamic_variable": "",
@@ -708,69 +610,6 @@
           },
           {
             "type": "webhook",
-            "name": "fetch_calendar_events",
-            "description": "Fetches the google calendar events for the user for specific timeframe. You can assume the timeframe for the user based on their wording or if they don't mention any timeframe you can ask them if today is good. ",
-            "response_timeout_secs": 20,
-            "disable_interruptions": false,
-            "force_pre_tool_speech": false,
-            "assignments": [],
-            "tool_call_sound": null,
-            "tool_call_sound_behavior": "auto",
-            "dynamic_variables": {
-              "dynamic_variable_placeholders": {
-                "user_id": "1"
-              }
-            },
-            "execution_mode": "immediate",
-            "api_schema": {
-              "request_headers": {
-                "x-elevenlabs-secret": {
-                  "secret_id": "9MjdWiGarqujOpNBrtUP"
-                }
-              },
-              "url": "{{SERVER_URL}}/api/call/calendar",
-              "method": "GET",
-              "path_params_schema": {},
-              "query_params_schema": {
-                "properties": {
-                  "end": {
-                    "type": "string",
-                    "description": "End time for which we end fetching the events from. Should be in UTC format: \"YYYY-MM-DDT00:00:00Z\". Change the time into this UTC based on the users local timezone.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "start": {
-                    "type": "string",
-                    "description": "Start time for which we start fetching the events from. Should be in UTC format: \"YYYY-MM-DDT00:00:00Z\". Change the time into this UTC based on the users local timezone.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "user_id": {
-                    "type": "string",
-                    "description": "",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "user_id",
-                    "constant_value": ""
-                  }
-                },
-                "required": [
-                  "end",
-                  "start",
-                  "user_id"
-                ]
-              },
-              "request_body_schema": null,
-              "content_type": "application/json",
-              "auth_connection": null
-            }
-          },
-          {
-            "type": "webhook",
             "name": "fetch_recent_messages",
             "description": "Fetches recent messages across ALL chats on Telegram or WhatsApp from the given start time.\nUse this when the user asks about recent messages without naming a specific chat (e.g., 'fetch telegram messages').\nDo not use if a particular contact or group is specified\u2014use fetch_chat_messages instead.",
             "response_timeout_secs": 20,
@@ -1109,84 +948,6 @@
                 ]
               },
               "request_body_schema": null,
-              "content_type": "application/json",
-              "auth_connection": null
-            }
-          },
-          {
-            "type": "webhook",
-            "name": "get_directions",
-            "description": "Fetches step-by-step directions from Google Maps between two addresses or locations. Use this when the user asks for navigation or route instructions. Defaults to walking if mode is not specified.",
-            "response_timeout_secs": 30,
-            "disable_interruptions": false,
-            "force_pre_tool_speech": true,
-            "assignments": [],
-            "tool_call_sound": null,
-            "tool_call_sound_behavior": "auto",
-            "dynamic_variables": {
-              "dynamic_variable_placeholders": {
-                "user_id": "1"
-              }
-            },
-            "execution_mode": "immediate",
-            "api_schema": {
-              "request_headers": {
-                "x-elevenlabs-secret": {
-                  "secret_id": "9MjdWiGarqujOpNBrtUP"
-                }
-              },
-              "url": "{{SERVER_URL}}/api/call/directions",
-              "method": "POST",
-              "path_params_schema": {},
-              "query_params_schema": {
-                "properties": {
-                  "user_id": {
-                    "type": "string",
-                    "description": "",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "user_id",
-                    "constant_value": ""
-                  }
-                },
-                "required": [
-                  "user_id"
-                ]
-              },
-              "request_body_schema": {
-                "type": "object",
-                "required": [
-                  "start_address",
-                  "end_address"
-                ],
-                "description": "Starting and ending addresses need to be detailed for better results and confirmed with the user before filling. Mode property defaults to 'walking' automatically. ",
-                "properties": {
-                  "start_address": {
-                    "type": "string",
-                    "description": "The starting address or location for the directions.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "mode": {
-                    "type": "string",
-                    "description": "The mode of transportation: 'driving', 'walking' (default if not specified), 'transit' (for public transport), or 'bicycling'.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  },
-                  "end_address": {
-                    "type": "string",
-                    "description": "The ending address or location for the directions.",
-                    "enum": null,
-                    "is_system_provided": false,
-                    "dynamic_variable": "",
-                    "constant_value": ""
-                  }
-                }
-              },
               "content_type": "application/json",
               "auth_connection": null
             }

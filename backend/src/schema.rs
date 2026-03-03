@@ -36,15 +36,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    calendar_notifications (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        event_id -> Text,
-        notification_time -> Integer,
-    }
-}
-
-diesel::table! {
     contact_profile_exceptions (id) {
         id -> Nullable<Integer>,
         profile_id -> Integer,
@@ -72,19 +63,6 @@ diesel::table! {
         telegram_room_id -> Nullable<Text>,
         signal_room_id -> Nullable<Text>,
         notes -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
-    conversations (id) {
-        id -> Integer,
-        user_id -> Integer,
-        conversation_sid -> Text,
-        service_sid -> Text,
-        created_at -> Integer,
-        active -> Bool,
-        twilio_number -> Text,
-        user_number -> Text,
     }
 }
 
@@ -121,32 +99,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    email_judgments (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        email_timestamp -> Integer,
-        processed_at -> Integer,
-        should_notify -> Bool,
-        score -> Integer,
-        reason -> Text,
-    }
-}
-
-diesel::table! {
-    google_calendar (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        encrypted_access_token -> Text,
-        encrypted_refresh_token -> Text,
-        status -> Text,
-        last_update -> Integer,
-        created_on -> Integer,
-        description -> Text,
-        expires_in -> Integer,
-    }
-}
-
-diesel::table! {
     imap_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -156,7 +108,6 @@ diesel::table! {
         last_update -> Integer,
         created_on -> Integer,
         description -> Text,
-        expires_in -> Integer,
         imap_server -> Nullable<Text>,
         imap_port -> Nullable<Integer>,
     }
@@ -171,15 +122,6 @@ diesel::table! {
         priority -> Integer,
         source_id -> Nullable<Text>,
         created_at -> Integer,
-    }
-}
-
-diesel::table! {
-    keywords (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        keyword -> Text,
-        service_type -> Text,
     }
 }
 
@@ -228,17 +170,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    priority_senders (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        sender -> Text,
-        service_type -> Text,
-        noti_type -> Nullable<Text>,
-        noti_mode -> Text,
-    }
-}
-
-diesel::table! {
     processed_emails (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -264,43 +195,6 @@ diesel::table! {
         metric_key -> Text,
         metric_value -> Text,
         updated_at -> Integer,
-    }
-}
-
-diesel::table! {
-    subaccounts (id) {
-        id -> Integer,
-        user_id -> Text,
-        subaccount_sid -> Text,
-        auth_token -> Text,
-        country -> Nullable<Text>,
-        number -> Nullable<Text>,
-        cost_this_month -> Nullable<Float>,
-        created_at -> Nullable<Integer>,
-        status -> Nullable<Text>,
-        tinfoil_key -> Nullable<Text>,
-        messaging_service_sid -> Nullable<Text>,
-        subaccount_type -> Text,
-        country_code -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
-    tasks (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        trigger -> Text,
-        condition -> Nullable<Text>,
-        action -> Text,
-        notification_type -> Nullable<Text>,
-        status -> Nullable<Text>,
-        created_at -> Integer,
-        completed_at -> Nullable<Integer>,
-        is_permanent -> Nullable<Integer>,
-        recurrence_rule -> Nullable<Text>,
-        recurrence_time -> Nullable<Text>,
-        sources -> Nullable<Text>,
-        end_time -> Nullable<Integer>,
     }
 }
 
@@ -343,20 +237,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    uber (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        encrypted_access_token -> Text,
-        encrypted_refresh_token -> Text,
-        status -> Text,
-        last_update -> Integer,
-        created_on -> Integer,
-        description -> Text,
-        expires_in -> Integer,
-    }
-}
-
-diesel::table! {
     usage_logs (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -379,13 +259,9 @@ diesel::table! {
         id -> Nullable<Integer>,
         user_id -> Integer,
         location -> Nullable<Text>,
-        dictionary -> Nullable<Text>,
         info -> Nullable<Text>,
         timezone -> Nullable<Text>,
         nearby_places -> Nullable<Text>,
-        recent_contacts -> Nullable<Text>,
-        blocker_password_vault -> Nullable<Text>,
-        lockbox_password_vault -> Nullable<Text>,
         latitude -> Nullable<Float>,
         longitude -> Nullable<Float>,
     }
@@ -404,25 +280,16 @@ diesel::table! {
         morning_digest -> Nullable<Text>,
         day_digest -> Nullable<Text>,
         evening_digest -> Nullable<Text>,
-        number_of_digests_locked -> Integer,
         critical_enabled -> Nullable<Text>,
         encrypted_twilio_account_sid -> Nullable<Text>,
         encrypted_twilio_auth_token -> Nullable<Text>,
         encrypted_openrouter_api_key -> Nullable<Text>,
-        server_url -> Nullable<Text>,
-        encrypted_geoapify_key -> Nullable<Text>,
-        encrypted_pirate_weather_key -> Nullable<Text>,
-        server_ip -> Nullable<Text>,
         encrypted_textbee_device_id -> Nullable<Text>,
         encrypted_textbee_api_key -> Nullable<Text>,
         elevenlabs_phone_number_id -> Nullable<Text>,
         proactive_agent_on -> Bool,
         notify_about_calls -> Bool,
         action_on_critical_message -> Nullable<Text>,
-        magic_login_token -> Nullable<Text>,
-        magic_login_token_expiration_timestamp -> Nullable<Integer>,
-        monthly_message_count -> Integer,
-        outbound_message_pricing -> Nullable<Float>,
         last_instant_digest_time -> Nullable<Integer>,
         phone_service_active -> Bool,
         default_notification_mode -> Nullable<Text>,
@@ -463,9 +330,6 @@ diesel::table! {
         last_credits_notification -> Nullable<Integer>,
         discount -> Bool,
         discount_tier -> Nullable<Text>,
-        free_reply -> Bool,
-        confirm_send_event -> Nullable<Text>,
-        waiting_checks_count -> Integer,
         next_billing_date_timestamp -> Nullable<Integer>,
         magic_token -> Nullable<Text>,
         plan_type -> Nullable<Text>,
@@ -528,19 +392,14 @@ diesel::table! {
 
 diesel::joinable!(bridge_disconnection_events -> users (user_id));
 diesel::joinable!(bridges -> users (user_id));
-diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(contact_profile_exceptions -> contact_profiles (profile_id));
 diesel::joinable!(contact_profiles -> users (user_id));
-diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(items -> users (user_id));
-diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(mcp_servers -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
-diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(refund_info -> users (user_id));
-diesel::joinable!(tasks -> users (user_id));
 diesel::joinable!(tesla -> users (user_id));
 diesel::joinable!(totp_backup_codes -> users (user_id));
 diesel::joinable!(totp_secrets -> users (user_id));
@@ -553,31 +412,22 @@ diesel::allow_tables_to_appear_in_same_query!(
     admin_alerts,
     bridge_disconnection_events,
     bridges,
-    calendar_notifications,
     contact_profile_exceptions,
     contact_profiles,
-    conversations,
     country_availability,
     critical_categories,
     disabled_alert_types,
-    email_judgments,
-    google_calendar,
     imap_connection,
     items,
-    keywords,
     mcp_servers,
     message_history,
     message_status_log,
-    priority_senders,
     processed_emails,
     refund_info,
     site_metrics,
-    subaccounts,
-    tasks,
     tesla,
     totp_backup_codes,
     totp_secrets,
-    uber,
     usage_logs,
     user_info,
     user_settings,

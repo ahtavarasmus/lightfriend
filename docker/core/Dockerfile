@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 
 # Build stage for backend
-FROM rust:1.86-bookworm AS backend-builder
+FROM rust:1.88-bookworm AS backend-builder
 
 # Install cargo-chef and sccache for faster builds
 RUN cargo install cargo-chef sccache --locked
