@@ -617,7 +617,12 @@ pub async fn process_triggered_item(
     let item_type = tags.item_type.as_deref().unwrap_or(""); // empty = legacy
     let pre_priority = compute_priority_from_tags(&tags, &item.summary, item.priority);
     // [repeat:X] -> deterministic due_at; no tag -> None (LLM may decide for legacy/tracking)
-    let pre_due_at = compute_next_check_at(&tags, &tz_label);
+    let pre_due_at = compute_next_check_at(&tags, &tz_label).and_then(|local_iso| {
+        let tz: chrono_tz::Tz = tz_label.parse().unwrap_or(chrono_tz::UTC);
+        crate::tool_call_utils::utils::parse_user_datetime_to_utc(&local_iso, &tz)
+            .ok()
+            .map(|utc| utc.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    });
 
     // Scheduling is locked for oneshot (always None) and recurring (always computed).
     // Tracking and legacy items let the LLM decide.
@@ -646,14 +651,51 @@ pub async fn process_triggered_item(
             let result_text = match f.as_str() {
                 "email" => crate::tool_call_utils::email::handle_fetch_emails(state, user_id).await,
                 "chat" => {
-                    crate::tool_call_utils::bridge::handle_fetch_recent_messages(
-                        state, user_id, "{}",
-                    )
-                    .await
+                    let cutoff = chrono::Utc::now().timestamp() - 12 * 3600;
+                    let mut chat_parts: Vec<String> = Vec::new();
+                    for platform in &["whatsapp", "telegram", "signal"] {
+                        if let Ok(Some(_)) = state.user_repository.get_bridge(user_id, platform) {
+                            if let Ok(msgs) = crate::utils::bridge::fetch_bridge_messages(
+                                platform, state, user_id, cutoff, true,
+                            )
+                            .await
+                            {
+                                if !msgs.is_empty() {
+                                    let formatted: Vec<String> = msgs
+                                        .into_iter()
+                                        .map(|m| {
+                                            format!(
+                                                "  [{}] {}: {}",
+                                                m.formatted_timestamp, m.room_name, m.content
+                                            )
+                                        })
+                                        .collect();
+                                    chat_parts.push(format!(
+                                        "{}:\n{}",
+                                        platform,
+                                        formatted.join("\n")
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if chat_parts.is_empty() {
+                        "No recent chat messages.".to_string()
+                    } else {
+                        chat_parts.join("\n\n")
+                    }
                 }
                 "calendar" => {
+                    let tz: chrono_tz::Tz = tz_label.parse().unwrap_or(chrono_tz::UTC);
+                    let now_local = chrono::Utc::now().with_timezone(&tz);
+                    let end_local = now_local + chrono::Duration::hours(24);
+                    let args = format!(
+                        r#"{{"start":"{}","end":"{}"}}"#,
+                        now_local.format("%Y-%m-%dT%H:%M"),
+                        end_local.format("%Y-%m-%dT%H:%M"),
+                    );
                     crate::tool_call_utils::calendar::handle_fetch_calendar_events(
-                        state, user_id, "{}",
+                        state, user_id, &args,
                     )
                     .await
                 }
@@ -676,12 +718,28 @@ pub async fn process_triggered_item(
                 "items" => match state.item_repository.get_items(user_id) {
                     Ok(items) => {
                         let current_item_id = item.id;
+                        let now_ts = chrono::Utc::now().timestamp() as i32;
+                        let in_24h = now_ts + 24 * 3600;
                         let filtered: Vec<_> = items
                             .into_iter()
-                            .filter(|i| i.id != current_item_id)
+                            .filter(|i| {
+                                if i.id == current_item_id {
+                                    return false;
+                                }
+                                // Exclude recurring items
+                                let i_tags = parse_summary_tags(&i.summary);
+                                if i_tags.item_type.as_deref() == Some("recurring") {
+                                    return false;
+                                }
+                                // Only include items due within the next 24 hours
+                                match i.due_at {
+                                    Some(ts) => ts >= now_ts && ts <= in_24h,
+                                    None => false,
+                                }
+                            })
                             .collect();
                         if filtered.is_empty() {
-                            "No tracked items.".to_string()
+                            "No items due in the next 24 hours.".to_string()
                         } else {
                             filtered
                                 .iter()
