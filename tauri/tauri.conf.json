@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
+  "productName": "Lightfriend",
+  "version": "0.1.0",
+  "identifier": "ai.lightfriend.app",
+  "build": {
+    "beforeBuildCommand": "cd ../frontend && trunk build --release --features tauri",
+    "beforeDevCommand": "cd ../frontend && trunk build --features tauri",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Lightfriend",
+        "width": 1024,
+        "height": 768,
+        "minWidth": 375,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' https://lightfriend.ai; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://kit.fontawesome.com https://ka-f.fontawesome.com https://www.googletagmanager.com https://www.google-analytics.com https://scripts.simpleanalyticscdn.com https://datafa.st https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://ka-f.fontawesome.com; font-src 'self' https://fonts.gstatic.com https://ka-f.fontawesome.com data:; img-src 'self' https://lightfriend.ai data: blob:; connect-src 'self' https://lightfriend.ai https://api.stripe.com https://ka-f.fontawesome.com https://www.google-analytics.com https://scripts.simpleanalyticscdn.com https://datafa.st wss://lightfriend.ai; frame-src https://js.stripe.com https://hooks.stripe.com; media-src 'self' blob:; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

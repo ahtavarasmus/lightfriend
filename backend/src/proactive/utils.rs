@@ -2262,6 +2262,18 @@ pub async fn send_notification_with_context(
         }
     }
 
+    // Push to connected WebSocket clients (best-effort, non-blocking)
+    crate::handlers::ws_handler::send_to_user(
+        state,
+        user_id,
+        &serde_json::json!({
+            "type": "notification",
+            "content": notification,
+            "content_type": content_type,
+            "timestamp": current_time,
+        }),
+    );
+
     let user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,
         Err(e) => {

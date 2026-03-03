@@ -94,6 +94,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         user_repository.clone(),
     ));
 
+    let wellbeing_repository = Arc::new(crate::WellbeingRepository::new(pool.clone()));
+
     Arc::new(crate::AppState {
         db_pool: pool,
         user_core,
@@ -120,10 +122,12 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         phone_verify_verify_limiter: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
+        ws_notification_senders: Arc::new(DashMap::new()),
         totp_repository,
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        wellbeing_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),

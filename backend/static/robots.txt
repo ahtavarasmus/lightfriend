@@ -25,6 +25,27 @@ Allow: /
 User-agent: Applebot-Extended
 Allow: /
 
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
 # Sitemap
 Sitemap: https://lightfriend.ai/sitemap.xml
 

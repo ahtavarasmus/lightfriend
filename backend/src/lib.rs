@@ -28,6 +28,7 @@ pub mod handlers {
     pub mod refund_handlers;
     pub mod rumble;
     pub mod self_host_handlers;
+    pub mod seo_pages;
     pub mod signal_auth;
     pub mod signal_handlers;
     pub mod spotify;
@@ -43,8 +44,10 @@ pub mod handlers {
     pub mod twitter;
     pub mod uber_auth;
     pub mod webauthn_handlers;
+    pub mod wellbeing_handlers;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
+    pub mod ws_handler;
     pub mod youtube;
     pub mod youtube_auth;
 }
@@ -128,6 +131,7 @@ pub mod repositories {
     pub mod user_repository;
     pub mod user_subscriptions;
     pub mod webauthn_repository;
+    pub mod wellbeing_repository;
 }
 pub mod services {
     pub mod country_service;
@@ -160,6 +164,7 @@ pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
+pub use repositories::wellbeing_repository::WellbeingRepository;
 pub use services::twilio_message_service::TwilioMessageService;
 
 // Tesla client trait and pure functions
@@ -235,6 +240,7 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub phone_verify_otps: DashMap<String, (String, u64)>,
     pub pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
+    pub ws_notification_senders: Arc<DashMap<i32, tokio::sync::broadcast::Sender<String>>>,
     pub totp_repository: Arc<TotpRepository>,
     pub webauthn_repository: Arc<WebauthnRepository>,
     pub admin_alert_repository: Arc<AdminAlertRepository>,
@@ -246,6 +252,7 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub wellbeing_repository: Arc<WellbeingRepository>,
     pub tool_registry: tools::registry::ToolRegistry,
 }
 

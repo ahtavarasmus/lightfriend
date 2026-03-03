@@ -3,7 +3,7 @@ use crate::UserCoreOps;
 use axum::{
     body::Body,
     extract::{FromRequestParts, State},
-    http::{request::Parts, Request, StatusCode},
+    http::{header::HeaderMap, request::Parts, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -137,39 +137,17 @@ pub async fn require_admin(
 }
 
 pub async fn require_auth(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
-    // Extract token from cookies
-    let cookie_header = request
-        .headers()
-        .get(axum::http::header::COOKIE)
-        .and_then(|header| header.to_str().ok());
-
-    let token = if let Some(cookies) = cookie_header {
-        // Parse cookies to find access_token
-        cookies
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
-                } else {
-                    None
-                }
-            })
-            .ok_or(AuthError {
-                status: StatusCode::UNAUTHORIZED,
-                message: "No authorization token provided".to_string(),
-            })?
-    } else {
-        return Err(AuthError {
+    // Try Bearer token first, then fall back to cookies
+    let token = extract_bearer_token(request.headers())
+        .or_else(|| extract_cookie_token(request.headers()))
+        .ok_or(AuthError {
             status: StatusCode::UNAUTHORIZED,
             message: "No authorization token provided".to_string(),
-        });
-    };
+        })?;
 
     // Validate the token
     decode::<Claims>(
-        token,
+        &token,
         &DecodingKey::from_secret(
             std::env::var("JWT_SECRET_KEY")
                 .expect("JWT_SECRET_KEY must be set in environment")
@@ -208,37 +186,11 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Extract the token from cookies
-        // Note: header names are case-insensitive in HTTP
-        let cookie_header = parts
-            .headers
-            .get(axum::http::header::COOKIE)
-            .and_then(|header| header.to_str().ok())
+        // Try Bearer token first, then fall back to cookies
+        let token = extract_bearer_token(&parts.headers)
+            .or_else(|| extract_cookie_token(&parts.headers))
             .ok_or_else(|| {
-                tracing::debug!("No cookie header found");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
-
-        tracing::debug!("Cookie header: {}", cookie_header);
-
-        // Parse cookies to find access_token
-        let token = cookie_header
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                tracing::debug!("No access_token found in cookies");
+                tracing::debug!("No authorization token found in Bearer header or cookies");
                 AuthError {
                     status: StatusCode::UNAUTHORIZED,
                     message: "No authorization token provided".to_string(),
@@ -247,7 +199,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
 
         // Decode the token
         let claims = decode::<Claims>(
-            token,
+            &token,
             &DecodingKey::from_secret(
                 std::env::var("JWT_SECRET_KEY")
                     .expect("JWT_SECRET_KEY must be set in environment")
@@ -275,4 +227,39 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             is_admin,
         })
     }
+}
+
+/// Extract JWT from `Authorization: Bearer <token>` header.
+fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|auth| auth.strip_prefix("Bearer "))
+        .map(|t| t.to_string())
+}
+
+/// Extract JWT from `access_token` cookie.
+fn extract_cookie_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').map(|s| s.trim()).find_map(|cookie| {
+                let parts: Vec<&str> = cookie.splitn(2, '=').collect();
+                if parts.len() == 2 && parts[0] == "access_token" {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+/// Extract JWT from a query parameter (used for WebSocket connections).
+pub fn extract_query_token(uri: &axum::http::Uri) -> Option<String> {
+    uri.query().and_then(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.to_string())
+    })
 }

@@ -1,0 +1,89 @@
+{
+  "name": "Lightfriend",
+  "tagline": "AI assistant for dumbphones",
+  "description": "Lightfriend is a SaaS AI assistant that makes dumbphones functionally equivalent to smartphones for essential communication and productivity. Users interact via SMS text messages and voice calls — no apps, no internet, no smartphone required.",
+  "url": "https://lightfriend.ai",
+  "category": "Communication & Productivity",
+  "founded": "2024",
+  "founder": "Rasmus Ähtävä",
+  "location": "Finland",
+  "license": "GNU AGPLv3",
+  "source_code": "https://github.com/ahtavarasmus/lightfriend",
+  "pricing": {
+    "currency_usd": {
+      "assistant": 19,
+      "autopilot": 29,
+      "byot": 19
+    },
+    "currency_eur": {
+      "assistant": 29,
+      "autopilot": 49,
+      "byot": 19
+    }
+  },
+  "features": [
+    "WhatsApp messaging via SMS",
+    "Telegram messaging via SMS",
+    "Signal messaging via SMS",
+    "Email access (Gmail, Outlook) via SMS",
+    "Google Calendar via SMS",
+    "AI-powered web search via SMS",
+    "Weather forecasts via SMS",
+    "GPS turn-by-turn directions via SMS",
+    "Photo analysis and translation via MMS",
+    "QR code scanning via MMS",
+    "Tesla vehicle control via SMS",
+    "Smart home control via MCP servers",
+    "Voice AI assistant via phone calls",
+    "24/7 critical message monitoring",
+    "Scheduled daily message digests",
+    "Priority sender notifications",
+    "Digital wellness and dumbphone mode tracking"
+  ],
+  "supported_countries": {
+    "full_service": ["US", "CA", "GB", "FI", "NL", "AU"],
+    "notification_only": ["DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ", "SE", "DK", "NO", "IE", "NZ", "GR", "HU", "RO", "SK", "BG", "HR", "SI", "LT", "LV", "EE", "LU", "MT", "CY", "IS", "JP", "KR", "SG", "HK", "TW", "IL"],
+    "byot": "Any country via Bring Your Own Twilio number"
+  },
+  "compatible_phones": [
+    "Light Phone 2",
+    "Light Phone 3",
+    "Nokia 2780 Flip",
+    "Nokia 2760 Flip",
+    "Nokia 225",
+    "Any SMS-capable phone"
+  ],
+  "target_audiences": [
+    "Dumbphone users needing messaging app access",
+    "People with ADHD seeking distraction-free phones",
+    "Digital detox practitioners",
+    "Parents looking for safe first phones for kids",
+    "Professionals minimizing workplace distractions",
+    "Tesla owners using dumbphones",
+    "Smart home users wanting SMS control"
+  ],
+  "technology": {
+    "backend": "Rust (Axum framework)",
+    "frontend": "Rust (Yew WebAssembly)",
+    "database": "SQLite with Diesel ORM",
+    "encryption": "AES-256-GCM",
+    "self_hostable": true
+  },
+  "contact": {
+    "support": "support@lightfriend.ai",
+    "email": "rasmus@ahtava.com",
+    "twitter": "https://x.com/ahtavarasm_us",
+    "github": "https://github.com/ahtavarasmus/lightfriend"
+  },
+  "links": {
+    "homepage": "https://lightfriend.ai",
+    "pricing": "https://lightfriend.ai/pricing",
+    "faq": "https://lightfriend.ai/faq",
+    "blog": "https://lightfriend.ai/blog",
+    "supported_countries": "https://lightfriend.ai/supported-countries",
+    "privacy": "https://lightfriend.ai/privacy",
+    "terms": "https://lightfriend.ai/terms",
+    "llms_txt": "https://lightfriend.ai/llms.txt",
+    "llms_full_txt": "https://lightfriend.ai/llms-full.txt"
+  }
+}

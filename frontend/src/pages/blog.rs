@@ -57,6 +57,92 @@ pub fn blog() -> Html {
                     </Link<Route>>
 
                 </div>
+
+                // New blog posts - March 2026
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogBestDumbphones}>
+                        <h2>{"Best Dumbphones in 2026: Complete Buyer\u{2019}s Guide"}</h2>
+                        <p>{"The definitive guide to Light Phone 3, Nokia flip phones, Punkt MP02, and more. Find the perfect minimalist phone."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogAdhdSmartphones}>
+                        <h2>{"ADHD and Smartphones: Why Dumbphones Are the Ultimate ADHD Tool"}</h2>
+                        <p>{"How smartphones exploit ADHD vulnerabilities, and why switching to a dumbphone can transform focus and mental health."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogWhatsappWithout}>
+                        <h2>{"How to Use WhatsApp Without a Smartphone"}</h2>
+                        <p>{"All the methods to access WhatsApp on a dumbphone, flip phone, or feature phone in 2026."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogDigitalDetox}>
+                        <h2>{"Digital Detox Guide: Everything You Need to Know"}</h2>
+                        <p>{"A comprehensive guide to digital detox \u{2013} benefits, step-by-step plan, and how to stay connected without a smartphone."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogTeslaSms}>
+                        <h2>{"Tesla Control via SMS: Manage Your Tesla Without a Smartphone"}</h2>
+                        <p>{"Lock, unlock, climate control, battery check \u{2013} all Tesla commands you can send via text message."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogVsBeeper}>
+                        <h2>{"Lightfriend vs Beeper vs Bridge Apps: Which Messaging Solution?"}</h2>
+                        <p>{"Detailed comparison of unified messaging solutions for dumbphone users."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogBestAi}>
+                        <h2>{"Best AI Assistants in 2026: Complete Comparison"}</h2>
+                        <p>{"Siri, Google Assistant, Alexa, ChatGPT, Claude, Lightfriend \u{2013} which work on dumbphones?"}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogEmailDumbphone}>
+                        <h2>{"How to Get Email on a Dumbphone"}</h2>
+                        <p>{"Gmail and Outlook access from any basic phone. Forwarding, bridges, and the best method."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogHomeAssistant}>
+                        <h2>{"Home Assistant via SMS: Control Your Smart Home from Any Phone"}</h2>
+                        <p>{"Lights, thermostat, locks \u{2013} control everything through text messages."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogScanQr}>
+                        <h2>{"How to Scan QR Codes Without a Smartphone"}</h2>
+                        <p>{"QR codes are everywhere. Here\u{2019}s how dumbphone users can decode them."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogBestPhoneAdhd}>
+                        <h2>{"Best Phone for ADHD in 2026"}</h2>
+                        <p>{"Phone recommendations, setup guides, and daily routines for managing ADHD with a dumbphone."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::BlogTelegramSignal}>
+                        <h2>{"How to Use Telegram and Signal Without a Smartphone"}</h2>
+                        <p>{"Access secure messaging apps from any basic phone via SMS."}</p>
+                        <span class="blog-date">{"March 3, 2026"}</span>
+                    </Link<Route>>
+                </div>
             </section>
             <style>
                 {r#"

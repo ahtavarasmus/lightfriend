@@ -1,0 +1,13 @@
+pub mod whatsapp_dumbphone;
+pub mod telegram_dumbphone;
+pub mod signal_dumbphone;
+pub mod email_sms;
+pub mod calendar_sms;
+pub mod tesla_sms;
+pub mod ai_search_sms;
+pub mod gps_directions_sms;
+pub mod voice_ai;
+pub mod autopilot;
+pub mod smart_home_sms;
+pub mod qr_scanner;
+pub mod wellness;

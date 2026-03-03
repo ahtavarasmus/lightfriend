@@ -492,9 +492,10 @@ pub async fn regenerate_backup_codes(
 /// Verify TOTP code during login (public endpoint, uses totp_token)
 pub async fn verify_login(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<TotpLoginVerifyRequest>,
 ) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
-    use crate::handlers::auth_handlers::generate_tokens_and_response;
+    use crate::handlers::auth_handlers::{generate_tokens_and_response, is_tauri_origin};
     use governor::{Quota, RateLimiter};
     use std::num::NonZeroU32;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -631,5 +632,5 @@ pub async fn verify_login(
     state.pending_totp_logins.remove(&req.totp_token);
 
     // Generate tokens and return response
-    generate_tokens_and_response(user_id)
+    generate_tokens_and_response(user_id, is_tauri_origin(&headers))
 }

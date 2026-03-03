@@ -1,6 +1,7 @@
 use yew::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
+use crate::config;
 use crate::utils::api::Api;
 
 #[derive(Properties, PartialEq)]
@@ -81,7 +82,11 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                                 Ok(data) => {
                                     if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
                                         if let Some(window) = web_sys::window() {
-                                            let _ = window.location().set_href(auth_url);
+                                            if config::is_tauri() {
+                                                let _ = window.open_with_url(auth_url);
+                                            } else {
+                                                let _ = window.location().set_href(auth_url);
+                                            }
                                         }
                                     } else {
                                         error.set(Some("YouTube integration coming soon".to_string()));
@@ -150,7 +155,11 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
                                 if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
                                     if let Some(window) = web_sys::window() {
-                                        let _ = window.location().set_href(auth_url);
+                                        if config::is_tauri() {
+                                            let _ = window.open_with_url(auth_url);
+                                        } else {
+                                            let _ = window.location().set_href(auth_url);
+                                        }
                                     }
                                 }
                             }

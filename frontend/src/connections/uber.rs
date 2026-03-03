@@ -3,6 +3,7 @@ use web_sys::{MouseEvent, Event, HtmlSelectElement};
 use wasm_bindgen::JsCast;
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
+use crate::config;
 use crate::utils::api::Api;
 #[derive(Properties, PartialEq)]
 pub struct UberConnectProps {
@@ -64,7 +65,11 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
                                 if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
                                     if let Some(window) = web_sys::window() {
-                                        let _ = window.location().set_href(auth_url);
+                                        if config::is_tauri() {
+                                            let _ = window.open_with_url(auth_url);
+                                        } else {
+                                            let _ = window.location().set_href(auth_url);
+                                        }
                                     }
                                 } else {
                                     error.set(Some("Invalid response format".to_string()));
