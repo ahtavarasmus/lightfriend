@@ -130,6 +130,8 @@
       "Bash(ls*)",
       "Bash(pwd*)",
       "Bash(cd*)",
+      "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend-cloud*&&*git log*)",
+      "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend-cloud*&&*git*)",
       "Bash(cat*)",
       "Bash(head*)",
       "Bash(tail*)",
@@ -182,7 +184,8 @@
       "Bash(/Users/ahtavarasmus/.cargo/bin/wasm-bindgen:*)",
       "Bash(kill 81747:*)",
       "Bash(rg:*)",
-      "Bash(kill %1:*)"
+      "Bash(kill %1:*)",
+      "Bash(python3:*)"
     ],
     "deny": [
       "Read(.env)",
