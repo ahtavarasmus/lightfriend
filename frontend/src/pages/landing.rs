@@ -219,7 +219,7 @@ pub fn landing() -> Html {
                             </a>
                         </div>
                         <div class="hero-metric hero-anim hero-anim-3">
-                            <span class="hero-metric-number">{"0"}</span>
+                            <span class="hero-metric-number">{days_smartphone_free}</span>
                             <span class="hero-metric-label">{"smartphone-free days powered"}</span>
                         </div>
                     </div>
