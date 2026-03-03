@@ -17,6 +17,31 @@ Lightfriend bridges the gap between minimalist dumbphones and essential digital 
 - [How to Switch to a Dumbphone](https://lightfriend.ai/how-to-switch-to-dumbphone): Complete guide for the dumbphone lifestyle
 - [How to Read More Accidentally](https://lightfriend.ai/how-to-read-more-accidentally): How removing smartphone distractions leads to reading more
 
+## Features
+
+- [WhatsApp on Dumbphone](https://lightfriend.ai/features/whatsapp-dumbphone): Use WhatsApp without a smartphone via SMS
+- [Telegram on Dumbphone](https://lightfriend.ai/features/telegram-dumbphone): Access Telegram from any basic phone
+- [Signal on Dumbphone](https://lightfriend.ai/features/signal-dumbphone): Use Signal messenger on a dumbphone
+- [Email via SMS](https://lightfriend.ai/features/email-sms): Read and send email from any phone
+- [Calendar via SMS](https://lightfriend.ai/features/calendar-sms): Google Calendar on your dumbphone
+- [Tesla SMS Control](https://lightfriend.ai/features/tesla-sms): Control your Tesla from any phone
+- [AI Search via SMS](https://lightfriend.ai/features/ai-search-sms): Web search on a dumbphone
+- [GPS Directions via SMS](https://lightfriend.ai/features/gps-directions-sms): Navigation on any phone
+- [Voice AI Assistant](https://lightfriend.ai/features/voice-ai): Call an AI assistant from any phone
+- [Autopilot Monitoring](https://lightfriend.ai/features/autopilot): Proactive message monitoring
+- [Smart Home via SMS](https://lightfriend.ai/features/smart-home-sms): Control Home Assistant from any phone
+- [QR Code Scanner](https://lightfriend.ai/features/qr-scanner): Scan QR codes from a dumbphone
+- [Digital Wellness](https://lightfriend.ai/features/wellness): Screen time reduction and digital wellness tools
+
+## For
+
+- [ADHD & Focus](https://lightfriend.ai/for/adhd): Best phone solution for ADHD
+- [Digital Detox](https://lightfriend.ai/for/digital-detox): Stay connected during your digital detox
+- [Light Phone Users](https://lightfriend.ai/for/light-phone): The perfect Light Phone companion
+- [Nokia Users](https://lightfriend.ai/for/nokia): Add smart features to your Nokia flip phone
+- [Parents & Kids](https://lightfriend.ai/for/parents): Safe first phone solution for children
+- [Business Users](https://lightfriend.ai/for/business): Professional minimalist phone setup
+
 ## Optional
 
 - [Privacy Policy](https://lightfriend.ai/privacy): Data handling and privacy practices

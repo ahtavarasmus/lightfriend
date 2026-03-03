@@ -28,6 +28,7 @@ pub mod handlers {
     pub mod refund_handlers;
     pub mod rumble;
     pub mod self_host_handlers;
+    pub mod seo_pages;
     pub mod signal_auth;
     pub mod signal_handlers;
     pub mod spotify;

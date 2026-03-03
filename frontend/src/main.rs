@@ -31,6 +31,18 @@ mod profile {
 mod blog {
     pub mod switch_to_dumbphone;
     pub mod read_books_accidentally;
+    pub mod best_dumbphones_2026;
+    pub mod adhd_and_smartphones;
+    pub mod whatsapp_without_smartphone;
+    pub mod digital_detox_guide;
+    pub mod tesla_sms_control;
+    pub mod lightfriend_vs_beeper;
+    pub mod best_ai_assistants_2026;
+    pub mod email_on_dumbphone;
+    pub mod home_assistant_sms;
+    pub mod scan_qr_without_smartphone;
+    pub mod best_phone_adhd_2026;
+    pub mod telegram_signal_without_smartphone;
 }
 mod pages {
     pub mod home;
@@ -44,6 +56,15 @@ mod pages {
     pub mod blog;
     pub mod change_log;
     pub mod subscription_success;
+    pub mod features;
+    pub mod features_index;
+    pub mod for_adhd;
+    pub mod for_digital_detox;
+    pub mod for_light_phone;
+    pub mod for_nokia;
+    pub mod for_parents;
+    pub mod for_business;
+    pub mod fi;
 }
 mod components {
     pub mod notification;
@@ -108,6 +129,59 @@ use pages::{
 use blog::{
     switch_to_dumbphone::SwitchToDumbphoneGuide,
     read_books_accidentally::ReadMoreAccidentallyGuide,
+    best_dumbphones_2026::BestDumbphones2026,
+    adhd_and_smartphones::AdhdAndSmartphones,
+    whatsapp_without_smartphone::WhatsappWithoutSmartphone,
+    digital_detox_guide::DigitalDetoxGuide,
+    tesla_sms_control::TeslaSmsControl,
+    lightfriend_vs_beeper::LightfriendVsBeeper,
+    best_ai_assistants_2026::BestAiAssistants2026,
+    email_on_dumbphone::EmailOnDumbphone,
+    home_assistant_sms::HomeAssistantSms,
+    scan_qr_without_smartphone::ScanQrWithoutSmartphone,
+    best_phone_adhd_2026::BestPhoneAdhd2026,
+    telegram_signal_without_smartphone::TelegramSignalWithoutSmartphone,
+};
+use pages::features::{
+    whatsapp_dumbphone::WhatsAppDumbphone,
+    telegram_dumbphone::TelegramDumbphone,
+    signal_dumbphone::SignalDumbphone,
+    email_sms::EmailSms,
+    calendar_sms::CalendarSms,
+    tesla_sms::TeslaSms,
+    ai_search_sms::AiSearchSms,
+    gps_directions_sms::GpsDirectionsSms,
+    voice_ai::VoiceAi,
+    autopilot::Autopilot,
+    smart_home_sms::SmartHomeSms,
+    qr_scanner::QrScanner,
+    wellness::Wellness,
+};
+use pages::features_index::FeaturesIndex;
+use pages::{
+    for_adhd::ForAdhd,
+    for_digital_detox::ForDigitalDetox,
+    for_light_phone::ForLightPhone,
+    for_nokia::ForNokia,
+    for_parents::ForParents,
+    for_business::ForBusiness,
+};
+use pages::fi::{
+    landing::FiLanding,
+    pricing::FiPricing,
+    faq::FiFaq,
+    feature_whatsapp::FiFeatureWhatsapp,
+    feature_telegram::FiFeatureTelegram,
+    feature_signal::FiFeatureSignal,
+    feature_email::FiFeatureEmail,
+    feature_calendar::FiFeatureCalendar,
+    feature_tesla::FiFeatureTesla,
+    for_adhd::FiForAdhd,
+    for_digital_detox::FiForDigitalDetox,
+    for_light_phone::FiForLightPhone,
+    for_nokia::FiForNokia,
+    for_parents::FiForParents,
+    for_business::FiForBusiness,
 };
 use auth::{
     signup::login::Login,
@@ -161,6 +235,105 @@ pub enum Route {
     SetPasswordWithToken { token: String },
     #[at("/subscription-success")]
     SubscriptionSuccess,
+    // Features index
+    #[at("/features")]
+    FeaturesIndex,
+    // Feature pages
+    #[at("/features/whatsapp-dumbphone")]
+    FeatureWhatsApp,
+    #[at("/features/telegram-dumbphone")]
+    FeatureTelegram,
+    #[at("/features/signal-dumbphone")]
+    FeatureSignal,
+    #[at("/features/email-sms")]
+    FeatureEmail,
+    #[at("/features/calendar-sms")]
+    FeatureCalendar,
+    #[at("/features/tesla-sms")]
+    FeatureTesla,
+    #[at("/features/ai-search-sms")]
+    FeatureAiSearch,
+    #[at("/features/gps-directions-sms")]
+    FeatureGps,
+    #[at("/features/voice-ai")]
+    FeatureVoiceAi,
+    #[at("/features/autopilot")]
+    FeatureAutopilot,
+    #[at("/features/smart-home-sms")]
+    FeatureSmartHome,
+    #[at("/features/qr-scanner")]
+    FeatureQrScanner,
+    #[at("/features/wellness")]
+    FeatureWellness,
+    // Audience pages
+    #[at("/for/adhd")]
+    ForAdhd,
+    #[at("/for/digital-detox")]
+    ForDigitalDetox,
+    #[at("/for/light-phone")]
+    ForLightPhone,
+    #[at("/for/nokia")]
+    ForNokia,
+    #[at("/for/parents")]
+    ForParents,
+    #[at("/for/business")]
+    ForBusiness,
+    // New blog posts
+    #[at("/blog/best-dumbphones-2026")]
+    BlogBestDumbphones,
+    #[at("/blog/adhd-and-smartphones")]
+    BlogAdhdSmartphones,
+    #[at("/blog/whatsapp-without-smartphone")]
+    BlogWhatsappWithout,
+    #[at("/blog/digital-detox-guide")]
+    BlogDigitalDetox,
+    #[at("/blog/tesla-sms-control")]
+    BlogTeslaSms,
+    #[at("/blog/lightfriend-vs-beeper")]
+    BlogVsBeeper,
+    #[at("/blog/best-ai-assistants-2026")]
+    BlogBestAi,
+    #[at("/blog/email-on-dumbphone")]
+    BlogEmailDumbphone,
+    #[at("/blog/home-assistant-sms")]
+    BlogHomeAssistant,
+    #[at("/blog/scan-qr-without-smartphone")]
+    BlogScanQr,
+    #[at("/blog/best-phone-for-adhd-2026")]
+    BlogBestPhoneAdhd,
+    #[at("/blog/telegram-signal-without-smartphone")]
+    BlogTelegramSignal,
+    // Finnish pages
+    #[at("/fi")]
+    FiLanding,
+    #[at("/fi/pricing")]
+    FiPricing,
+    #[at("/fi/faq")]
+    FiFaq,
+    #[at("/fi/features/whatsapp-dumbphone")]
+    FiFeatureWhatsapp,
+    #[at("/fi/features/telegram-dumbphone")]
+    FiFeatureTelegram,
+    #[at("/fi/features/signal-dumbphone")]
+    FiFeatureSignal,
+    #[at("/fi/features/email-sms")]
+    FiFeatureEmail,
+    #[at("/fi/features/calendar-sms")]
+    FiFeatureCalendar,
+    #[at("/fi/features/tesla-sms")]
+    FiFeatureTesla,
+    #[at("/fi/for/adhd")]
+    FiForAdhd,
+    #[at("/fi/for/digital-detox")]
+    FiForDigitalDetox,
+    #[at("/fi/for/light-phone")]
+    FiForLightPhone,
+    #[at("/fi/for/nokia")]
+    FiForNokia,
+    #[at("/fi/for/parents")]
+    FiForParents,
+    #[at("/fi/for/business")]
+    FiForBusiness,
 }
 fn switch(routes: Route) -> Html {
     match routes {
@@ -244,6 +417,58 @@ fn switch(routes: Route) -> Html {
             info!("Rendering SubscriptionSuccess page");
             html! { <SubscriptionSuccess /> }
         },
+        // Features index
+        Route::FeaturesIndex => html! { <FeaturesIndex /> },
+        // Feature pages
+        Route::FeatureWhatsApp => html! { <WhatsAppDumbphone /> },
+        Route::FeatureTelegram => html! { <TelegramDumbphone /> },
+        Route::FeatureSignal => html! { <SignalDumbphone /> },
+        Route::FeatureEmail => html! { <EmailSms /> },
+        Route::FeatureCalendar => html! { <CalendarSms /> },
+        Route::FeatureTesla => html! { <TeslaSms /> },
+        Route::FeatureAiSearch => html! { <AiSearchSms /> },
+        Route::FeatureGps => html! { <GpsDirectionsSms /> },
+        Route::FeatureVoiceAi => html! { <VoiceAi /> },
+        Route::FeatureAutopilot => html! { <Autopilot /> },
+        Route::FeatureSmartHome => html! { <SmartHomeSms /> },
+        Route::FeatureQrScanner => html! { <QrScanner /> },
+        Route::FeatureWellness => html! { <Wellness /> },
+        // Audience pages
+        Route::ForAdhd => html! { <ForAdhd /> },
+        Route::ForDigitalDetox => html! { <ForDigitalDetox /> },
+        Route::ForLightPhone => html! { <ForLightPhone /> },
+        Route::ForNokia => html! { <ForNokia /> },
+        Route::ForParents => html! { <ForParents /> },
+        Route::ForBusiness => html! { <ForBusiness /> },
+        // New blog posts
+        Route::BlogBestDumbphones => html! { <BestDumbphones2026 /> },
+        Route::BlogAdhdSmartphones => html! { <AdhdAndSmartphones /> },
+        Route::BlogWhatsappWithout => html! { <WhatsappWithoutSmartphone /> },
+        Route::BlogDigitalDetox => html! { <DigitalDetoxGuide /> },
+        Route::BlogTeslaSms => html! { <TeslaSmsControl /> },
+        Route::BlogVsBeeper => html! { <LightfriendVsBeeper /> },
+        Route::BlogBestAi => html! { <BestAiAssistants2026 /> },
+        Route::BlogEmailDumbphone => html! { <EmailOnDumbphone /> },
+        Route::BlogHomeAssistant => html! { <HomeAssistantSms /> },
+        Route::BlogScanQr => html! { <ScanQrWithoutSmartphone /> },
+        Route::BlogBestPhoneAdhd => html! { <BestPhoneAdhd2026 /> },
+        Route::BlogTelegramSignal => html! { <TelegramSignalWithoutSmartphone /> },
+        // Finnish pages
+        Route::FiLanding => html! { <FiLanding /> },
+        Route::FiPricing => html! { <FiPricing /> },
+        Route::FiFaq => html! { <FiFaq /> },
+        Route::FiFeatureWhatsapp => html! { <FiFeatureWhatsapp /> },
+        Route::FiFeatureTelegram => html! { <FiFeatureTelegram /> },
+        Route::FiFeatureSignal => html! { <FiFeatureSignal /> },
+        Route::FiFeatureEmail => html! { <FiFeatureEmail /> },
+        Route::FiFeatureCalendar => html! { <FiFeatureCalendar /> },
+        Route::FiFeatureTesla => html! { <FiFeatureTesla /> },
+        Route::FiForAdhd => html! { <FiForAdhd /> },
+        Route::FiForDigitalDetox => html! { <FiForDigitalDetox /> },
+        Route::FiForLightPhone => html! { <FiForLightPhone /> },
+        Route::FiForNokia => html! { <FiForNokia /> },
+        Route::FiForParents => html! { <FiForParents /> },
+        Route::FiForBusiness => html! { <FiForBusiness /> },
     }
 }
 #[function_component(TwilioHostedInstructionsWrapper)]
@@ -307,7 +532,7 @@ use crate::utils::seo::{use_seo, SeoMeta};
 pub fn pricing_wrapper() -> Html {
     use_seo(SeoMeta {
         title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
-        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, calendar, and more. Available in 40+ countries.",
+        description: "Lightfriend pricing plans starting at $19/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, calendar, and more. Available in 40+ countries.",
         canonical: "https://lightfriend.ai/pricing",
         og_type: "website",
     });

@@ -38,6 +38,116 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
+use axum::response::IntoResponse;
+use handlers::seo_pages;
+
+/// Middleware that serves pre-rendered HTML to bots for SEO.
+/// Regular browsers pass through to the SPA frontend.
+async fn seo_bot_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let is_bot = req
+        .headers()
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|ua| seo_pages::is_bot(ua))
+        .unwrap_or(false);
+
+    if !is_bot {
+        return next.run(req).await;
+    }
+
+    let path = req.uri().path().to_string();
+    match path.as_str() {
+        "/" => seo_pages::landing().await.into_response(),
+        "/pricing" => seo_pages::pricing().await.into_response(),
+        "/faq" => seo_pages::faq().await.into_response(),
+        "/blog" => seo_pages::blog().await.into_response(),
+        "/updates" => seo_pages::updates().await.into_response(),
+        "/supported-countries" => seo_pages::supported_countries().await.into_response(),
+        "/bring-own-number" => seo_pages::bring_own_number().await.into_response(),
+        "/light-phone-3-whatsapp-guide" => {
+            seo_pages::light_phone_3_whatsapp().await.into_response()
+        }
+        "/how-to-switch-to-dumbphone" => seo_pages::switch_to_dumbphone().await.into_response(),
+        "/how-to-read-more-accidentally" => {
+            seo_pages::read_more_accidentally().await.into_response()
+        }
+        "/terms" => seo_pages::terms().await.into_response(),
+        "/privacy" => seo_pages::privacy().await.into_response(),
+        // Features index
+        "/features" => seo_pages::features_index().await.into_response(),
+        // Feature pages
+        "/features/whatsapp-dumbphone" => seo_pages::feature_whatsapp_dumbphone()
+            .await
+            .into_response(),
+        "/features/telegram-dumbphone" => seo_pages::feature_telegram_dumbphone()
+            .await
+            .into_response(),
+        "/features/signal-dumbphone" => seo_pages::feature_signal_dumbphone().await.into_response(),
+        "/features/email-sms" => seo_pages::feature_email_sms().await.into_response(),
+        "/features/calendar-sms" => seo_pages::feature_calendar_sms().await.into_response(),
+        "/features/tesla-sms" => seo_pages::feature_tesla_sms().await.into_response(),
+        "/features/ai-search-sms" => seo_pages::feature_ai_search_sms().await.into_response(),
+        "/features/gps-directions-sms" => seo_pages::feature_gps_directions_sms()
+            .await
+            .into_response(),
+        "/features/voice-ai" => seo_pages::feature_voice_ai().await.into_response(),
+        "/features/autopilot" => seo_pages::feature_autopilot().await.into_response(),
+        "/features/smart-home-sms" => seo_pages::feature_smart_home_sms().await.into_response(),
+        "/features/qr-scanner" => seo_pages::feature_qr_scanner().await.into_response(),
+        "/features/wellness" => seo_pages::feature_wellness().await.into_response(),
+        // Audience pages
+        "/for/adhd" => seo_pages::for_adhd().await.into_response(),
+        "/for/digital-detox" => seo_pages::for_digital_detox().await.into_response(),
+        "/for/light-phone" => seo_pages::for_light_phone().await.into_response(),
+        "/for/nokia" => seo_pages::for_nokia().await.into_response(),
+        "/for/parents" => seo_pages::for_parents().await.into_response(),
+        "/for/business" => seo_pages::for_business().await.into_response(),
+        // Finnish pages
+        "/fi" => seo_pages::fi_landing().await.into_response(),
+        "/fi/pricing" => seo_pages::fi_pricing().await.into_response(),
+        "/fi/faq" => seo_pages::fi_faq().await.into_response(),
+        "/fi/features/whatsapp-dumbphone" => seo_pages::fi_feature_whatsapp().await.into_response(),
+        "/fi/features/telegram-dumbphone" => seo_pages::fi_feature_telegram().await.into_response(),
+        "/fi/features/signal-dumbphone" => seo_pages::fi_feature_signal().await.into_response(),
+        "/fi/features/email-sms" => seo_pages::fi_feature_email().await.into_response(),
+        "/fi/features/calendar-sms" => seo_pages::fi_feature_calendar().await.into_response(),
+        "/fi/features/tesla-sms" => seo_pages::fi_feature_tesla().await.into_response(),
+        "/fi/for/adhd" => seo_pages::fi_for_adhd().await.into_response(),
+        "/fi/for/digital-detox" => seo_pages::fi_for_digital_detox().await.into_response(),
+        "/fi/for/light-phone" => seo_pages::fi_for_light_phone().await.into_response(),
+        "/fi/for/nokia" => seo_pages::fi_for_nokia().await.into_response(),
+        "/fi/for/parents" => seo_pages::fi_for_parents().await.into_response(),
+        "/fi/for/business" => seo_pages::fi_for_business().await.into_response(),
+        // Blog posts
+        "/blog/best-dumbphones-2026" => seo_pages::best_dumbphones_2026().await.into_response(),
+        "/blog/adhd-and-smartphones" => seo_pages::adhd_and_smartphones().await.into_response(),
+        "/blog/whatsapp-without-smartphone" => seo_pages::whatsapp_without_smartphone()
+            .await
+            .into_response(),
+        "/blog/digital-detox-guide" => seo_pages::digital_detox_guide().await.into_response(),
+        "/blog/tesla-sms-control" => seo_pages::tesla_sms_control().await.into_response(),
+        "/blog/lightfriend-vs-beeper" => seo_pages::lightfriend_vs_beeper().await.into_response(),
+        "/blog/best-ai-assistants-2026" => {
+            seo_pages::best_ai_assistants_2026().await.into_response()
+        }
+        "/blog/email-on-dumbphone" => seo_pages::email_on_dumbphone().await.into_response(),
+        "/blog/home-assistant-sms" => seo_pages::home_assistant_sms().await.into_response(),
+        "/blog/scan-qr-without-smartphone" => seo_pages::scan_qr_without_smartphone()
+            .await
+            .into_response(),
+        "/blog/best-phone-for-adhd-2026" => seo_pages::best_phone_adhd_2026().await.into_response(),
+        "/blog/telegram-signal-without-smartphone" => {
+            seo_pages::telegram_signal_without_smartphone()
+                .await
+                .into_response()
+        }
+        _ => next.run(req).await,
+    }
+}
+
 pub fn validate_env() {
     // Core variables (always required regardless of environment)
     let core_vars = [
@@ -1385,7 +1495,12 @@ async fn main() {
             "/.well-known/llms.txt",
             tower_http::services::ServeFile::new("static/llms.txt"),
         )
+        .nest_service(
+            "/api/about.json",
+            tower_http::services::ServeFile::new("static/about.json"),
+        )
         .layer(session_layer)
+        .layer(middleware::from_fn(seo_bot_middleware))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
