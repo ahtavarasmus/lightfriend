@@ -2526,7 +2526,7 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     { let s = exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
                 );
                 let sg_row_html = render_platform_row(
-                    "fa-solid fa-comment-dots", "#3A76F1", true,
+                    "fa-brands fa-signal-messenger", "#3A76F1", true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*form_signal).clone()} oninput={on_form_signal_input}
@@ -3663,7 +3663,7 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     { let s = add_exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
                 );
                 let add_sg_row = render_platform_row(
-                    "fa-solid fa-comment-dots", "#3A76F1", true,
+                    "fa-brands fa-signal-messenger", "#3A76F1", true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*add_signal).clone()} oninput={on_signal_input}
