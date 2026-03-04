@@ -47,6 +47,9 @@ fn main() {
     migrate_usage_logs(&mut sqlite_conn, &mut pg_conn);
     migrate_processed_emails(&mut sqlite_conn, &mut pg_conn);
 
+    // Reset all PG sequences to max(id) so new inserts get correct IDs
+    reset_sequences(&mut pg_conn);
+
     println!("Migration complete!");
 }
 
@@ -1037,4 +1040,35 @@ fn migrate_processed_emails(sqlite: &mut SqliteConnection, pg: &mut PgConnection
         }
     }
     println!("processed_emails: migrated {} rows", count);
+}
+
+fn reset_sequences(pg: &mut PgConnection) {
+    let tables = [
+        "contact_profiles",
+        "contact_profile_exceptions",
+        "message_history",
+        "items",
+        "bridges",
+        "bridge_disconnection_events",
+        "usage_logs",
+        "imap_connection",
+        "tesla",
+        "youtube",
+        "mcp_servers",
+        "totp_secrets",
+        "totp_backup_codes",
+        "webauthn_credentials",
+        "webauthn_challenges",
+        "processed_emails",
+    ];
+
+    for table in &tables {
+        let query = format!(
+            "SELECT setval('{table}_id_seq', \
+             (SELECT COALESCE(MAX(id), 1) FROM {table}), \
+             (SELECT MAX(id) IS NOT NULL FROM {table}))"
+        );
+        let _ = sql_query(&query).execute(pg);
+    }
+    println!("sequences: reset all to current max(id)");
 }

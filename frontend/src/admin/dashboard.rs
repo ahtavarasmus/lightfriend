@@ -183,13 +183,11 @@ struct UserInfo {
     email: String,
     phone_number: String,
     time_to_live: Option<i32>,
-    verified: bool,
     credits: f32,
     notify: bool,
     preferred_number: Option<String>,
     sub_tier: Option<String>,
     credits_left: f32,
-    discount_tier: Option<String>,
     plan_type: Option<String>,
     has_twilio_credentials: bool,
 }
@@ -1371,20 +1369,6 @@ pub fn admin_dashboard() -> Html {
                                                                                 _ => html! {}
                                                                             }
                                                                         }
-                                                                        {
-                                                                            match user.discount_tier.as_deref() {
-                                                                                Some("msg") => html! {
-                                                                                    <span class="discount-badge msg">{"msg✦"}</span>
-                                                                                },
-                                                                                Some("voice") => html! {
-                                                                                    <span class="discount-badge voice">{"voice✧"}</span>
-                                                                                },
-                                                                                Some("full") => html! {
-                                                                                    <span class="discount-badge full">{"full✶"}</span>
-                                                                                },
-                                                                                _ => html! {}
-                                                                            }
-                                                                        }
                                                                     </div>
                                                                 </td>
                                                                 <td>{&user.phone_number}</td>
@@ -1625,106 +1609,6 @@ pub fn admin_dashboard() -> Html {
                                                                             class="iq-button reset"
                                                                         >
                                                                             {"-10 Messages"}
-                                                                        </button>
-                                                                        {
-                                                                            if !user.verified {
-                                                                                html! {
-                                                                                    <button 
-                                                                                        onclick={{
-                                                                                            let users = users.clone();
-                                                                                            let error = error.clone();
-                                                                                            let user_id = user.id;
-                                                                                            Callback::from(move |_| {
-                                                                                                let users = users.clone();
-                                                                                                let error = error.clone();
-                                                                                                wasm_bindgen_futures::spawn_local(async move {
-                                                                                                    match Api::post(&format!("/api/admin/verify/{}", user_id))
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        Ok(response) => {
-                                                                                                            if response.ok() {
-                                                                                                                // Refresh the users list after verifying
-                                                                                                                if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                                    .send()
-                                                                                                                    .await
-                                                                                                                {
-                                                                                                                    if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                        users.set(updated_users);
-                                                                                                                    }
-                                                                                                                }
-                                                                                                            } else {
-                                                                                                                error.set(Some("Failed to verify user".to_string()));
-                                                                                                            }
-                                                                                                        }
-                                                                                                        Err(_) => {
-                                                                                                            error.set(Some("Failed to send verification request".to_string()));
-                                                                                                        }
-                                                                                                    }
-                                                                                                });
-                                                                                            })
-                                                                                        }}
-                                                                                        class="iq-button"
-                                                                                    >
-                                                                                        {"Verify User"}
-                                                                                    </button>
-                                                                                }
-                                                                            } else {
-                                                                                html! {}
-                                                                            }
-                                                                        }
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                let current_discount_tier = user.discount_tier.clone();
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    let new_tier = match current_discount_tier.as_deref() {
-                                                                                        None => "msg",
-                                                                                        Some("msg") => "voice",
-                                                                                        Some("voice") => "full",
-                                                                                        Some("full") | _ => "none",
-                                                                                    };
-                                                                                    
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/discount-tier/{}/{}", user_id, new_tier))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
-                                                                                                        }
-                                                                                                    }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to update discount tier".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button discount-tier"
-                                                                        >
-                                                                            {match user.discount_tier.as_deref() {
-                                                                                None => "Set MSG Discount",
-                                                                                Some("msg") => "Set Voice Discount",
-                                                                                Some("voice") => "Set Full Discount",
-                                                                                Some("full") => "Remove Discount",
-                                                                                _ => "Set MSG Discount",
-                                                                            }}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{
@@ -2477,17 +2361,6 @@ pub fn admin_dashboard() -> Html {
                         font-weight: 500;
                     }
 
-                    .status-badge.verified {
-                        background: rgba(76, 175, 80, 0.1);
-                        color: #4CAF50;
-                        border: 1px solid rgba(76, 175, 80, 0.2);
-                    }
-
-                    .status-badge.unverified {
-                        background: rgba(255, 152, 0, 0.1);
-                        color: #FF9800;
-                        border: 1px solid rgba(255, 152, 0, 0.2);
-                    }
 
                     .status-badge.enabled {
                         background: rgba(33, 150, 243, 0.1);
