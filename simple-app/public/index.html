@@ -2,172 +2,47 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <meta name="description" content="Lightfriend - AI assistant for dumbphones">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="Lightfriend - AI assistant">
     <title>lightfriend</title>
     <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        /* Fonts */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-        /* Reset */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; }
-
+        html, body { width: 100%; height: 100%; overflow: hidden; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            min-height: 100vh;
-            background: #1a1a1a;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.5;
+            background: #111;
             color: #fff;
         }
 
-        /* Navigation */
-        .top-nav {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            z-index: 1002;
-            padding: 1rem 0;
-            transition: all 0.3s ease;
-        }
-
-        .nav-content {
-            max-width: 100%;
-            padding: 0 3rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .nav-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .nav-logo {
-            color: white;
-            text-decoration: none;
-            font-size: 1.5rem;
-            font-weight: 600;
-            background: linear-gradient(45deg, #fff, #7EB2FF);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            transition: opacity 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .nav-logo:hover { opacity: 0.8; }
-
-        .nav-right {
-            display: flex;
-            align-items: center;
-            gap: 1.5rem;
-        }
-
-        .nav-trust-badges {
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .nav-trust-badge {
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 0.65rem;
-            letter-spacing: 0.04em;
-            padding: 0.35rem 0.7rem;
-            background: linear-gradient(135deg, rgba(126, 178, 255, 0.04), rgba(255, 255, 255, 0.02));
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            border: 1px solid rgba(126, 178, 255, 0.1);
-            white-space: nowrap;
-            transition: all 0.3s ease;
-        }
-
-        .nav-trust-badge:hover {
-            border-color: rgba(126, 178, 255, 0.2);
-            color: rgba(255, 255, 255, 0.7);
-        }
-
-        .nav-trust-badge i {
-            font-size: 0.6rem;
-            color: rgba(126, 178, 255, 0.4);
-        }
-
-        .nav-link {
-            color: rgba(255, 255, 255, 0.75);
-            text-decoration: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            background: rgba(180, 180, 180, 0.12);
-            border: 1px solid rgba(200, 200, 200, 0.25);
-            cursor: pointer;
-            font-family: inherit;
-        }
-
-        .nav-link:hover {
-            background: rgba(200, 200, 200, 0.2);
-            transform: translateY(-2px);
-            color: #fff;
-        }
-
-        .nav-login-button {
-            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
-            color: #1a1a2e;
-            text-decoration: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            cursor: pointer;
-            white-space: nowrap;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-            font-family: inherit;
-        }
-
-        .nav-login-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
-            background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
-        }
-
-        /* Auth background */
-        .gradient-bg {
-            background: #1a1a1a;
-            background: linear-gradient(to bottom right, rgba(30, 144, 255, 0.05), rgba(0, 0, 0, 0.95));
+        /* ===== AUTH SCREENS ===== */
+        .auth-screen {
+            display: none;
             min-height: 100vh;
-            display: flex;
+            background: linear-gradient(to bottom right, rgba(30,144,255,0.05), #111);
             align-items: center;
             justify-content: center;
             padding: 2rem;
-            padding-top: 5rem;
         }
+        .auth-screen.active { display: flex; }
 
-        /* Login container */
-        .login-container {
-            background: rgba(30, 30, 30, 0.7);
-            border: 1px solid rgba(30, 144, 255, 0.1);
+        .auth-box {
+            background: rgba(25,25,25,0.9);
+            border: 1px solid rgba(30,144,255,0.12);
             border-radius: 16px;
-            padding: 3rem;
+            padding: 2.5rem;
             width: 100%;
-            max-width: 480px;
+            max-width: 400px;
             backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
 
-        .login-container h1 {
-            font-size: 2rem;
+        .auth-box h1 {
+            font-size: 1.6rem;
             margin-bottom: 1.5rem;
             text-align: center;
             background: linear-gradient(45deg, #fff, #7EB2FF);
@@ -175,738 +50,1144 @@
             -webkit-text-fill-color: transparent;
         }
 
-        /* Form elements */
-        .form-group {
-            margin-bottom: 1.25rem;
-        }
-
+        .form-group { margin-bottom: 1rem; }
         .form-group label {
             display: block;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
+            color: rgba(255,255,255,0.6);
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
         }
-
         .form-group input {
             width: 100%;
-            padding: 1rem;
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(30, 144, 255, 0.2);
+            padding: 0.8rem;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(30,144,255,0.2);
             border-radius: 8px;
-            color: #ffffff;
-            font-size: 1rem;
+            color: #fff;
+            font-size: 0.95rem;
             font-family: inherit;
-            transition: all 0.3s ease;
             outline: none;
+            transition: border-color 0.2s;
         }
+        .form-group input:focus { border-color: rgba(30,144,255,0.5); }
+        .form-group input::placeholder { color: rgba(255,255,255,0.25); }
 
-        .form-group input:focus {
-            border-color: rgba(30, 144, 255, 0.5);
-            box-shadow: 0 0 12px rgba(30, 144, 255, 0.15);
-        }
-
-        .form-group input::placeholder {
-            color: rgba(255, 255, 255, 0.3);
-        }
-
-        /* Submit button */
-        .submit-button {
+        .btn {
             width: 100%;
-            padding: 1rem;
-            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
+            padding: 0.8rem;
+            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 50%, #c0c0c0);
             color: #1a1a2e;
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255,255,255,0.3);
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
             font-family: inherit;
-            margin-top: 0.5rem;
+            transition: all 0.2s;
         }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-        .submit-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
-            background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
-        }
-
-        .submit-button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Auth redirect */
-        .auth-redirect {
-            margin-top: 2rem;
+        .auth-link {
+            margin-top: 1.5rem;
             text-align: center;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 0.9rem;
+            color: rgba(255,255,255,0.5);
+            font-size: 0.85rem;
         }
+        .auth-link a { color: #1E90FF; text-decoration: none; cursor: pointer; }
+        .auth-link a:hover { text-decoration: underline; }
 
-        .auth-redirect a {
-            color: #1E90FF;
-            text-decoration: none;
-            transition: color 0.3s ease;
-            margin-left: 0.25rem;
-        }
+        .msg { padding: 0.6rem 0.8rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem; display: none; }
+        .msg.error { background: rgba(255,0,0,0.1); color: #ff6b6b; border: 1px solid rgba(255,0,0,0.2); display: block; }
+        .msg.success { background: rgba(0,255,0,0.1); color: #69f0ae; border: 1px solid rgba(0,255,0,0.2); display: block; }
 
-        .auth-redirect a:hover {
-            color: #7EB2FF;
-            text-decoration: underline;
-        }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(26,26,46,0.3); border-top-color: #1a1a2e; border-radius: 50%; animation: spin 0.5s linear infinite; margin-right: 0.4rem; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Error/success messages */
-        .message {
+        /* ===== APP SHELL ===== */
+        .app { display: none; height: 100vh; flex-direction: column; }
+        .app.active { display: flex; }
+
+        /* Top bar */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             padding: 0.75rem 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-            display: none;
+            background: rgba(20,20,20,0.95);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            flex-shrink: 0;
         }
-
-        .message.error {
-            background: rgba(255, 0, 0, 0.1);
-            color: #ff6b6b;
-            border: 1px solid rgba(255, 0, 0, 0.2);
-        }
-
-        .message.success {
-            background: rgba(0, 255, 0, 0.1);
-            color: #69f0ae;
-            border: 1px solid rgba(0, 255, 0, 0.2);
-        }
-
-        /* ===== DASHBOARD (shown after login) ===== */
-        .dashboard {
-            display: none;
-            min-height: 100vh;
-            background: #1a1a1a;
-        }
-
-        .dashboard-content {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 6rem 2rem 2rem;
-        }
-
-        .welcome-card {
-            background: rgba(30, 30, 30, 0.7);
-            border: 1px solid rgba(30, 144, 255, 0.1);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 1.5rem;
-            backdrop-filter: blur(10px);
-        }
-
-        .welcome-card h2 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
+        .topbar-title {
+            font-size: 1.1rem;
+            font-weight: 600;
             background: linear-gradient(45deg, #fff, #7EB2FF);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-
-        .welcome-card p {
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 0.95rem;
+        .topbar-btn {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            font-size: 1.1rem;
+            cursor: pointer;
+            padding: 0.4rem;
         }
+        .topbar-btn:hover { color: #fff; }
 
-        /* Chat area */
-        .chat-container {
-            background: rgba(30, 30, 30, 0.7);
-            border: 1px solid rgba(30, 144, 255, 0.1);
-            border-radius: 16px;
-            overflow: hidden;
-            backdrop-filter: blur(10px);
-        }
-
-        .chat-messages {
-            padding: 1.5rem;
-            min-height: 300px;
-            max-height: 400px;
+        /* Tab content */
+        .tab-content {
+            flex: 1;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
+        .tab-panel { display: none; height: 100%; }
+        .tab-panel.active { display: flex; flex-direction: column; }
 
-        .chat-message {
-            margin-bottom: 1rem;
-            padding: 0.75rem 1rem;
-            border-radius: 12px;
-            max-width: 80%;
-            font-size: 0.95rem;
+        /* Bottom tabs */
+        .bottom-tabs {
+            display: flex;
+            background: rgba(20,20,20,0.98);
+            border-top: 1px solid rgba(255,255,255,0.06);
+            flex-shrink: 0;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.2rem;
+            padding: 0.6rem 0;
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.35);
+            font-size: 0.65rem;
+            cursor: pointer;
+            transition: color 0.2s;
+            font-family: inherit;
+        }
+        .tab-btn i { font-size: 1.15rem; }
+        .tab-btn.active { color: #7EB2FF; }
+
+        /* ===== CHAT TAB ===== */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .chat-msg {
+            padding: 0.7rem 1rem;
+            border-radius: 14px;
+            max-width: 85%;
+            font-size: 0.9rem;
             line-height: 1.5;
+            word-break: break-word;
         }
-
-        .chat-message.user {
-            background: rgba(30, 144, 255, 0.15);
-            border: 1px solid rgba(30, 144, 255, 0.2);
+        .chat-msg.user {
+            background: rgba(30,144,255,0.2);
+            border: 1px solid rgba(30,144,255,0.25);
             margin-left: auto;
-            color: #fff;
+            border-bottom-right-radius: 4px;
         }
-
-        .chat-message.assistant {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.9);
+        .chat-msg.assistant {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-bottom-left-radius: 4px;
         }
-
-        .chat-message.system {
+        .chat-msg.system {
             text-align: center;
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 0.85rem;
+            color: rgba(255,255,255,0.3);
+            font-size: 0.8rem;
             max-width: 100%;
             background: none;
             border: none;
+            padding: 0.5rem;
+        }
+        .chat-msg .thinking {
+            color: rgba(255,255,255,0.4);
+            font-size: 0.8rem;
+            font-style: italic;
         }
 
-        .chat-input-row {
+        .chat-input-area {
             display: flex;
-            gap: 0.75rem;
-            padding: 1rem 1.5rem;
-            border-top: 1px solid rgba(30, 144, 255, 0.1);
-            align-items: center;
-        }
-
-        .chat-input-row input[type="text"] {
-            flex: 1;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(30, 144, 255, 0.15);
-            border-radius: 8px;
+            gap: 0.6rem;
             padding: 0.75rem 1rem;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            background: rgba(20,20,20,0.5);
+        }
+        .chat-input-area input {
+            flex: 1;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 0.65rem 1rem;
             color: #fff;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             font-family: inherit;
             outline: none;
-            transition: border-color 0.2s, background 0.2s;
         }
-
-        .chat-input-row input[type="text"]:focus {
-            border-color: rgba(30, 144, 255, 0.5);
-            background: rgba(255, 255, 255, 0.08);
-        }
-
-        .chat-input-row input[type="text"]::placeholder {
-            color: #666;
-        }
-
-        .chat-send-button {
-            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
-            color: #1a1a2e;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            border-radius: 8px;
-            padding: 0.75rem 1.25rem;
-            font-weight: 600;
+        .chat-input-area input:focus { border-color: rgba(30,144,255,0.4); }
+        .chat-input-area input::placeholder { color: rgba(255,255,255,0.25); }
+        .chat-send {
+            background: #7EB2FF;
+            color: #111;
+            border: none;
+            border-radius: 50%;
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
-            font-family: inherit;
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            font-size: 1rem;
+            flex-shrink: 0;
         }
+        .chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        .chat-send-button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
+        /* ===== CALL TAB ===== */
+        .call-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            gap: 2rem;
+            flex: 1;
         }
-
-        /* Connection cards */
-        .connections-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 1rem;
-            margin-top: 1.5rem;
-        }
-
-        .connection-card {
-            background: rgba(30, 30, 30, 0.7);
-            border: 1px solid rgba(30, 144, 255, 0.1);
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .connection-card:hover {
-            border-color: rgba(30, 144, 255, 0.3);
-            transform: translateY(-2px);
-        }
-
-        .connection-card i {
-            font-size: 2rem;
-            margin-bottom: 0.75rem;
+        .call-avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(30,144,255,0.2), rgba(126,178,255,0.1));
+            border: 2px solid rgba(126,178,255,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
             color: #7EB2FF;
         }
-
-        .connection-card h3 {
-            font-size: 0.95rem;
-            color: rgba(255, 255, 255, 0.9);
-            margin-bottom: 0.25rem;
+        .call-avatar.active {
+            animation: pulse-ring 2s ease-out infinite;
+            border-color: #69f0ae;
+            color: #69f0ae;
         }
-
-        .connection-card p {
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(105,240,174,0.3); }
+            70% { box-shadow: 0 0 0 20px rgba(105,240,174,0); }
+            100% { box-shadow: 0 0 0 0 rgba(105,240,174,0); }
+        }
+        .call-status {
+            text-align: center;
+        }
+        .call-status h2 {
+            font-size: 1.3rem;
+            margin-bottom: 0.3rem;
+        }
+        .call-status p {
+            color: rgba(255,255,255,0.4);
+            font-size: 0.9rem;
+        }
+        .call-btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .call-btn.start {
+            background: #69f0ae;
+            color: #111;
+        }
+        .call-btn.end {
+            background: #ff5252;
+            color: #fff;
+        }
+        .call-btn:hover { transform: scale(1.05); }
+        .call-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .call-timer {
+            font-size: 2rem;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            color: rgba(255,255,255,0.8);
+        }
+        .call-credits {
             font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.4);
+            color: rgba(255,255,255,0.3);
         }
 
-        .connection-card .status {
-            display: inline-block;
-            margin-top: 0.5rem;
-            padding: 0.2rem 0.6rem;
+        /* ===== CONNECTIONS TAB ===== */
+        .connections-list {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .conn-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
             border-radius: 12px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .conn-item:hover { background: rgba(255,255,255,0.07); }
+        .conn-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+        }
+        .conn-icon.whatsapp { background: rgba(37,211,102,0.15); color: #25d366; }
+        .conn-icon.telegram { background: rgba(0,136,204,0.15); color: #0088cc; }
+        .conn-icon.signal { background: rgba(59,134,247,0.15); color: #3b86f7; }
+        .conn-icon.email { background: rgba(234,67,53,0.15); color: #ea4335; }
+        .conn-info { flex: 1; }
+        .conn-info h3 { font-size: 0.95rem; font-weight: 500; }
+        .conn-info p { font-size: 0.8rem; color: rgba(255,255,255,0.4); }
+        .conn-status {
+            padding: 0.2rem 0.6rem;
+            border-radius: 10px;
             font-size: 0.7rem;
             font-weight: 500;
+            flex-shrink: 0;
         }
+        .conn-status.on { background: rgba(105,240,174,0.12); color: #69f0ae; border: 1px solid rgba(105,240,174,0.2); }
+        .conn-status.off { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.35); border: 1px solid rgba(255,255,255,0.08); }
+        .conn-status.loading { color: rgba(255,255,255,0.3); }
 
-        .connection-card .status.connected {
-            background: rgba(0, 255, 0, 0.1);
-            color: #69f0ae;
-            border: 1px solid rgba(0, 255, 0, 0.2);
+        /* ===== SETTINGS TAB ===== */
+        .settings-list {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
         }
-
-        .connection-card .status.disconnected {
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(255, 255, 255, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+        .settings-section {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            overflow: hidden;
         }
-
-        /* Register page styles */
-        .register-container {
-            background: rgba(30, 30, 30, 0.7);
-            border: 1px solid rgba(30, 144, 255, 0.1);
-            border-radius: 16px;
-            padding: 3rem;
-            width: 100%;
-            max-width: 480px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-
-        .register-container h1 {
-            font-size: 2rem;
-            margin-bottom: 1.5rem;
-            text-align: center;
-            background: linear-gradient(45deg, #fff, #7EB2FF);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        /* Spinner */
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(26, 26, 46, 0.3);
-            border-top-color: #1a1a2e;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-            margin-right: 0.5rem;
-            vertical-align: middle;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Pages hidden by default */
-        .page { display: none; }
-        .page.active { display: block; }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .nav-content { padding: 0 1rem; }
-            .nav-right { gap: 0.5rem; }
-            .nav-trust-badges { display: none; }
-            .nav-login-button, .nav-link {
-                padding: 0.5rem 1rem;
-                font-size: 0.85rem;
-            }
-            .login-container, .register-container {
-                padding: 2rem;
-                margin: 1rem;
-            }
-            .dashboard-content { padding: 5rem 1rem 1rem; }
-            .connections-grid { grid-template-columns: 1fr; }
-        }
-
-        /* Password reset */
-        .forgot-link {
-            display: block;
-            text-align: right;
-            margin-top: -0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .forgot-link a {
-            color: rgba(255, 255, 255, 0.4);
+        .settings-section h3 {
             font-size: 0.8rem;
-            text-decoration: none;
-            transition: color 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: rgba(255,255,255,0.4);
+            padding: 0.8rem 1rem 0.4rem;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.8rem 1rem;
+            border-top: 1px solid rgba(255,255,255,0.04);
+        }
+        .setting-row:first-child { border-top: none; }
+        .setting-label {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.8);
+        }
+        .setting-label small {
+            display: block;
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.35);
+            margin-top: 0.1rem;
         }
 
-        .forgot-link a:hover {
-            color: #1E90FF;
+        /* Time input */
+        .time-input {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            padding: 0.4rem 0.6rem;
+            color: #fff;
+            font-size: 0.85rem;
+            font-family: inherit;
+            outline: none;
+            width: 90px;
+            text-align: center;
+        }
+        .time-input:focus { border-color: rgba(30,144,255,0.4); }
+
+        /* Toggle switch */
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.15);
+            border-radius: 24px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+        .toggle input:checked + .toggle-slider { background: #7EB2FF; }
+        .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            background: rgba(126,178,255,0.15);
+            color: #7EB2FF;
+            border: 1px solid rgba(126,178,255,0.2);
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn-sm:hover { background: rgba(126,178,255,0.25); }
+
+        .btn-danger {
+            background: rgba(255,82,82,0.12);
+            color: #ff5252;
+            border: 1px solid rgba(255,82,82,0.2);
+        }
+        .btn-danger:hover { background: rgba(255,82,82,0.2); }
+
+        .save-indicator {
+            font-size: 0.75rem;
+            color: #69f0ae;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .save-indicator.show { opacity: 1; }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .auth-box { padding: 2rem 1.5rem; margin: 0 0.5rem; }
         }
     </style>
 </head>
 <body>
 
-<!-- ===== NAVIGATION ===== -->
-<nav class="top-nav" id="navbar">
-    <div class="nav-content">
-        <div class="nav-left">
-            <a href="#" class="nav-logo" onclick="showPage('login')">lightfriend</a>
-        </div>
-        <div class="nav-right">
-            <div class="nav-trust-badges" id="trust-badges">
-                <span class="nav-trust-badge"><i class="fa-brands fa-github"></i> Open Source</span>
-                <span class="nav-trust-badge"><i class="fa-solid fa-server"></i> Self-Hosted</span>
-                <span class="nav-trust-badge"><i class="fa-solid fa-lock"></i> Encrypted</span>
+<!-- ===== LOGIN ===== -->
+<div id="screen-login" class="auth-screen active">
+    <div class="auth-box">
+        <h1>lightfriend</h1>
+        <div id="login-msg"></div>
+        <form onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
             </div>
-            <!-- Shown when logged out -->
-            <div id="nav-auth-buttons">
-                <button class="nav-link" onclick="showPage('register')">Register</button>
-                <button class="nav-login-button" onclick="showPage('login')">Log in</button>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="Password" required autocomplete="current-password">
             </div>
-            <!-- Shown when logged in -->
-            <div id="nav-user-buttons" style="display:none;">
-                <button class="nav-link" onclick="showPage('dashboard')"><i class="fa-solid fa-user"></i> Profile</button>
-                <button class="nav-login-button" onclick="logout()">Log out</button>
-            </div>
-        </div>
-    </div>
-</nav>
-
-<!-- ===== LOGIN PAGE ===== -->
-<div id="page-login" class="page active">
-    <div class="gradient-bg">
-        <div class="login-container">
-            <h1>Welcome back</h1>
-            <div class="message error" id="login-error"></div>
-            <div class="message success" id="login-success"></div>
-            <form id="login-form" onsubmit="handleLogin(event)">
-                <div class="form-group">
-                    <label for="login-email">Email</label>
-                    <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
-                </div>
-                <div class="form-group">
-                    <label for="login-password">Password</label>
-                    <input type="password" id="login-password" placeholder="Your password" required autocomplete="current-password">
-                </div>
-                <div class="forgot-link">
-                    <a href="#" onclick="showPage('reset')">Forgot password?</a>
-                </div>
-                <button type="submit" class="submit-button" id="login-btn">Log in</button>
-            </form>
-            <div class="auth-redirect">
-                New here?<a href="#" onclick="showPage('register')">Create an account</a>
-            </div>
+            <button type="submit" class="btn" id="login-btn">Log in</button>
+        </form>
+        <div class="auth-link">
+            No account? <a onclick="showScreen('register')">Register</a>
         </div>
     </div>
 </div>
 
-<!-- ===== REGISTER PAGE ===== -->
-<div id="page-register" class="page">
-    <div class="gradient-bg">
-        <div class="register-container">
-            <h1>Create account</h1>
-            <div class="message error" id="register-error"></div>
-            <div class="message success" id="register-success"></div>
-            <form id="register-form" onsubmit="handleRegister(event)">
-                <div class="form-group">
-                    <label for="reg-email">Email</label>
-                    <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
-                </div>
-                <div class="form-group">
-                    <label for="reg-phone">Phone number</label>
-                    <input type="tel" id="reg-phone" placeholder="+358..." required>
-                </div>
-                <div class="form-group">
-                    <label for="reg-password">Password</label>
-                    <input type="password" id="reg-password" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
-                </div>
-                <div class="form-group">
-                    <label for="reg-password2">Confirm password</label>
-                    <input type="password" id="reg-password2" placeholder="Repeat password" required minlength="8" autocomplete="new-password">
-                </div>
-                <button type="submit" class="submit-button" id="register-btn">Create account</button>
-            </form>
-            <div class="auth-redirect">
-                Already have an account?<a href="#" onclick="showPage('login')">Log in</a>
+<!-- ===== REGISTER ===== -->
+<div id="screen-register" class="auth-screen">
+    <div class="auth-box">
+        <h1>Create account</h1>
+        <div id="register-msg"></div>
+        <form onsubmit="handleRegister(event)">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
             </div>
+            <div class="form-group">
+                <label>Phone number</label>
+                <input type="tel" id="reg-phone" placeholder="+358..." required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="reg-password" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label>Confirm password</label>
+                <input type="password" id="reg-password2" placeholder="Repeat" required minlength="8" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn" id="reg-btn">Create account</button>
+        </form>
+        <div class="auth-link">
+            Have an account? <a onclick="showScreen('login')">Log in</a>
         </div>
     </div>
 </div>
 
-<!-- ===== PASSWORD RESET PAGE ===== -->
-<div id="page-reset" class="page">
-    <div class="gradient-bg">
-        <div class="login-container">
-            <h1>Reset password</h1>
-            <div class="message error" id="reset-error"></div>
-            <div class="message success" id="reset-success"></div>
-            <p style="color: rgba(255,255,255,0.6); text-align: center; margin-bottom: 1.5rem; font-size: 0.9rem;">
-                Contact the admin to reset your password.
-            </p>
-            <div class="auth-redirect">
-                <a href="#" onclick="showPage('login')"><i class="fa-solid fa-arrow-left"></i> Back to login</a>
+<!-- ===== MAIN APP ===== -->
+<div id="app" class="app">
+    <!-- Top bar -->
+    <div class="topbar">
+        <span class="topbar-title">lightfriend</span>
+        <button class="topbar-btn" onclick="logout()" title="Log out"><i class="fa-solid fa-right-from-bracket"></i></button>
+    </div>
+
+    <!-- Tab content area -->
+    <div class="tab-content">
+        <!-- CHAT -->
+        <div id="panel-chat" class="tab-panel active">
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-msg system">Send a message to start chatting</div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey)sendChat()">
+                <button class="chat-send" id="chat-send-btn" onclick="sendChat()"><i class="fa-solid fa-arrow-up"></i></button>
+            </div>
+        </div>
+
+        <!-- CALL -->
+        <div id="panel-call" class="tab-panel">
+            <div class="call-panel">
+                <div class="call-avatar" id="call-avatar">
+                    <i class="fa-solid fa-phone"></i>
+                </div>
+                <div class="call-status">
+                    <h2 id="call-status-text">Voice assistant</h2>
+                    <p id="call-status-sub">Tap to start a call</p>
+                </div>
+                <div class="call-timer" id="call-timer" style="display:none">00:00</div>
+                <button class="call-btn start" id="call-btn" onclick="toggleCall()">
+                    <i class="fa-solid fa-phone"></i>
+                </button>
+                <div class="call-credits" id="call-credits"></div>
+            </div>
+        </div>
+
+        <!-- CONNECTIONS -->
+        <div id="panel-connections" class="tab-panel">
+            <div class="connections-list" id="connections-list">
+                <div class="conn-item" data-service="whatsapp">
+                    <div class="conn-icon whatsapp"><i class="fa-brands fa-whatsapp"></i></div>
+                    <div class="conn-info"><h3>WhatsApp</h3><p>Messages</p></div>
+                    <span class="conn-status loading">...</span>
+                </div>
+                <div class="conn-item" data-service="telegram">
+                    <div class="conn-icon telegram"><i class="fa-brands fa-telegram"></i></div>
+                    <div class="conn-info"><h3>Telegram</h3><p>Messages</p></div>
+                    <span class="conn-status loading">...</span>
+                </div>
+                <div class="conn-item" data-service="signal">
+                    <div class="conn-icon signal"><i class="fa-solid fa-comment-dots"></i></div>
+                    <div class="conn-info"><h3>Signal</h3><p>Messages</p></div>
+                    <span class="conn-status loading">...</span>
+                </div>
+                <div class="conn-item" data-service="imap">
+                    <div class="conn-icon email"><i class="fa-solid fa-envelope"></i></div>
+                    <div class="conn-info"><h3>Email</h3><p>IMAP</p></div>
+                    <span class="conn-status loading">...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div id="panel-settings" class="tab-panel">
+            <div class="settings-list">
+                <!-- Digests -->
+                <div class="settings-section">
+                    <h3>Digests</h3>
+                    <div class="setting-row">
+                        <div class="setting-label">Morning<small>Daily morning summary</small></div>
+                        <input type="time" class="time-input" id="digest-morning" onchange="saveDigests()">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Day<small>Midday update</small></div>
+                        <input type="time" class="time-input" id="digest-day" onchange="saveDigests()">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Evening<small>End of day summary</small></div>
+                        <input type="time" class="time-input" id="digest-evening" onchange="saveDigests()">
+                    </div>
+                    <div class="setting-row">
+                        <span class="save-indicator" id="digest-saved">Saved</span>
+                        <button class="btn-sm" onclick="getInstantDigest()">Get digest now</button>
+                    </div>
+                </div>
+
+                <!-- Quiet mode -->
+                <div class="settings-section">
+                    <h3>Quiet mode</h3>
+                    <div class="setting-row">
+                        <div class="setting-label">Do not disturb<small id="quiet-status-text">Off</small></div>
+                        <label class="toggle">
+                            <input type="checkbox" id="quiet-toggle" onchange="toggleQuietMode()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Account -->
+                <div class="settings-section">
+                    <h3>Account</h3>
+                    <div class="setting-row">
+                        <div class="setting-label" id="account-email">-</div>
+                        <button class="btn-sm btn-danger" onclick="logout()">Log out</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- ===== DASHBOARD (after login) ===== -->
-<div id="page-dashboard" class="page">
-    <div class="dashboard">
-        <div class="dashboard-content">
-            <div class="welcome-card">
-                <h2 id="welcome-text">Welcome!</h2>
-                <p>Your AI assistant is ready. Send a message below or connect your services.</p>
-            </div>
-
-            <!-- Chat -->
-            <div class="chat-container">
-                <div class="chat-messages" id="chat-messages">
-                    <div class="chat-message system">Send a message to start chatting with your AI assistant</div>
-                </div>
-                <div class="chat-input-row">
-                    <input type="text" id="chat-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()">
-                    <button class="chat-send-button" onclick="sendMessage()">Send</button>
-                </div>
-            </div>
-
-            <!-- Connections -->
-            <h2 style="margin-top: 2rem; margin-bottom: 0.5rem; font-size: 1.1rem; color: rgba(255,255,255,0.7);">Connections</h2>
-            <div class="connections-grid">
-                <div class="connection-card">
-                    <i class="fa-brands fa-whatsapp"></i>
-                    <h3>WhatsApp</h3>
-                    <p>Messages & monitoring</p>
-                    <span class="status disconnected">Not connected</span>
-                </div>
-                <div class="connection-card">
-                    <i class="fa-brands fa-telegram"></i>
-                    <h3>Telegram</h3>
-                    <p>Messages & monitoring</p>
-                    <span class="status disconnected">Not connected</span>
-                </div>
-                <div class="connection-card">
-                    <i class="fa-solid fa-envelope"></i>
-                    <h3>Email</h3>
-                    <p>Gmail & Outlook</p>
-                    <span class="status disconnected">Not connected</span>
-                </div>
-                <div class="connection-card">
-                    <i class="fa-solid fa-calendar"></i>
-                    <h3>Calendar</h3>
-                    <p>Google Calendar</p>
-                    <span class="status disconnected">Not connected</span>
-                </div>
-            </div>
-        </div>
+    <!-- Bottom tabs -->
+    <div class="bottom-tabs">
+        <button class="tab-btn active" onclick="switchTab('chat', this)">
+            <i class="fa-solid fa-comment"></i>
+            <span>Chat</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('call', this)">
+            <i class="fa-solid fa-phone"></i>
+            <span>Call</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('connections', this)">
+            <i class="fa-solid fa-plug"></i>
+            <span>Connect</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('settings', this)">
+            <i class="fa-solid fa-gear"></i>
+            <span>Settings</span>
+        </button>
     </div>
 </div>
 
 <script>
-    // ===== CONFIG =====
-    const API_BASE = window.location.origin; // Same origin as the page
+// ===== CONFIG =====
+const API = window.location.origin;
 
-    // ===== STATE =====
-    let accessToken = localStorage.getItem('access_token') || null;
-    let refreshToken = localStorage.getItem('refresh_token') || null;
-    let userEmail = localStorage.getItem('user_email') || null;
+// ===== STATE =====
+let token = localStorage.getItem('lf_token');
+let refreshToken = localStorage.getItem('lf_refresh');
+let userEmail = localStorage.getItem('lf_email');
+let callActive = false;
+let callStartTime = null;
+let callTimerInterval = null;
+let callConversation = null; // ElevenLabs conversation instance
 
-    // ===== PAGE ROUTING =====
-    function showPage(page) {
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        const el = document.getElementById('page-' + page);
-        if (el) {
-            el.classList.add('active');
-            // Show dashboard div if dashboard page
-            if (page === 'dashboard') {
-                el.querySelector('.dashboard').style.display = 'block';
-            }
+// ===== SCREENS =====
+function showScreen(name) {
+    document.querySelectorAll('.auth-screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('app').classList.remove('active');
+    const el = document.getElementById('screen-' + name);
+    if (el) el.classList.add('active');
+}
+
+function showApp() {
+    document.querySelectorAll('.auth-screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('app').classList.add('active');
+    document.getElementById('account-email').textContent = userEmail || '';
+    loadConnectionStatuses();
+    loadDigestSettings();
+    loadQuietMode();
+    checkCallCredits();
+}
+
+// ===== TABS =====
+function switchTab(name, btn) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    if (btn) btn.classList.add('active');
+    // Refresh data when switching to tab
+    if (name === 'connections') loadConnectionStatuses();
+    if (name === 'settings') { loadDigestSettings(); loadQuietMode(); }
+    if (name === 'call') checkCallCredits();
+}
+
+// ===== API HELPERS =====
+async function api(path, opts = {}) {
+    const headers = { ...opts.headers };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (opts.body && typeof opts.body === 'object') {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(API + path, { ...opts, headers });
+    if (res.status === 401) {
+        // Try refresh
+        const refreshed = await tryRefresh();
+        if (refreshed) {
+            headers['Authorization'] = 'Bearer ' + token;
+            return fetch(API + path, { ...opts, headers });
         }
-        updateNavState();
+        logout();
+        throw new Error('Session expired');
     }
+    return res;
+}
 
-    function updateNavState() {
-        const isLoggedIn = !!accessToken;
-        document.getElementById('nav-auth-buttons').style.display = isLoggedIn ? 'none' : 'flex';
-        document.getElementById('nav-user-buttons').style.display = isLoggedIn ? 'flex' : 'none';
-        if (isLoggedIn) {
-            document.getElementById('trust-badges').style.display = 'none';
-        } else {
-            document.getElementById('trust-badges').style.display = '';
-        }
-    }
-
-    // ===== AUTH =====
-    async function handleLogin(e) {
-        e.preventDefault();
-        const btn = document.getElementById('login-btn');
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-
-        hideMessages('login');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>Verifying...';
-
-        try {
-            const res = await fetch(API_BASE + '/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email_or_username: email, password })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || data.message || 'Login failed');
-            }
-
-            if (data.requires_2fa) {
-                showMessage('login', 'error', '2FA is required but not yet supported in this app.');
-                return;
-            }
-
-            // Save tokens
-            accessToken = data.access_token;
-            refreshToken = data.refresh_token;
-            userEmail = email;
-            localStorage.setItem('access_token', accessToken);
-            localStorage.setItem('refresh_token', refreshToken);
-            localStorage.setItem('user_email', userEmail);
-
-            document.getElementById('welcome-text').textContent = 'Welcome, ' + email + '!';
-            showPage('dashboard');
-        } catch (err) {
-            showMessage('login', 'error', err.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Log in';
-        }
-    }
-
-    async function handleRegister(e) {
-        e.preventDefault();
-        const btn = document.getElementById('register-btn');
-        const email = document.getElementById('reg-email').value;
-        const phone = document.getElementById('reg-phone').value;
-        const password = document.getElementById('reg-password').value;
-        const password2 = document.getElementById('reg-password2').value;
-
-        hideMessages('register');
-
-        if (password !== password2) {
-            showMessage('register', 'error', 'Passwords do not match');
-            return;
-        }
-
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>Creating account...';
-
-        try {
-            const res = await fetch(API_BASE + '/api/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, phone_number: phone, password })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || data.message || 'Registration failed');
-            }
-
-            showMessage('register', 'success', 'Account created! You can now log in.');
-            setTimeout(() => showPage('login'), 2000);
-        } catch (err) {
-            showMessage('register', 'error', err.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Create account';
-        }
-    }
-
-    function logout() {
-        accessToken = null;
-        refreshToken = null;
-        userEmail = null;
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('user_email');
-        showPage('login');
-    }
-
-    // ===== CHAT =====
-    async function sendMessage() {
-        const input = document.getElementById('chat-input');
-        const text = input.value.trim();
-        if (!text) return;
-
-        addChatMessage(text, 'user');
-        input.value = '';
-
-        try {
-            const res = await fetch(API_BASE + '/api/web-chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + accessToken
-                },
-                body: JSON.stringify({ message: text })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Failed to send message');
-            }
-
-            addChatMessage(data.response || data.message || 'OK', 'assistant');
-        } catch (err) {
-            addChatMessage('Error: ' + err.message, 'assistant');
-        }
-    }
-
-    function addChatMessage(text, type) {
-        const container = document.getElementById('chat-messages');
-        // Remove system message if first real message
-        const sysMsg = container.querySelector('.chat-message.system');
-        if (sysMsg) sysMsg.remove();
-
-        const msg = document.createElement('div');
-        msg.className = 'chat-message ' + type;
-        msg.textContent = text;
-        container.appendChild(msg);
-        container.scrollTop = container.scrollHeight;
-    }
-
-    // ===== HELPERS =====
-    function showMessage(page, type, text) {
-        const el = document.getElementById(page + '-' + type);
-        if (el) {
-            el.textContent = text;
-            el.style.display = 'block';
-        }
-    }
-
-    function hideMessages(page) {
-        ['error', 'success'].forEach(type => {
-            const el = document.getElementById(page + '-' + type);
-            if (el) el.style.display = 'none';
+async function tryRefresh() {
+    if (!refreshToken) return false;
+    try {
+        const res = await fetch(API + '/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken })
         });
+        if (!res.ok) return false;
+        const data = await res.json();
+        token = data.access_token;
+        if (data.refresh_token) refreshToken = data.refresh_token;
+        localStorage.setItem('lf_token', token);
+        localStorage.setItem('lf_refresh', refreshToken);
+        return true;
+    } catch { return false; }
+}
+
+function showMsg(id, type, text) {
+    const el = document.getElementById(id);
+    el.className = 'msg ' + type;
+    el.textContent = text;
+}
+
+function clearMsg(id) {
+    const el = document.getElementById(id);
+    el.className = 'msg';
+    el.textContent = '';
+}
+
+// ===== AUTH =====
+async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    clearMsg('login-msg');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Logging in...';
+    try {
+        const res = await fetch(API + '/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email_or_username: email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || 'Login failed');
+        if (data.requires_2fa) { showMsg('login-msg', 'error', '2FA not supported in this app yet'); return; }
+        token = data.access_token;
+        refreshToken = data.refresh_token;
+        userEmail = email;
+        localStorage.setItem('lf_token', token);
+        localStorage.setItem('lf_refresh', refreshToken);
+        localStorage.setItem('lf_email', userEmail);
+        showApp();
+    } catch (err) {
+        showMsg('login-msg', 'error', err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Log in';
+    }
+}
+
+async function handleRegister(e) {
+    e.preventDefault();
+    const btn = document.getElementById('reg-btn');
+    const email = document.getElementById('reg-email').value;
+    const phone = document.getElementById('reg-phone').value;
+    const pw = document.getElementById('reg-password').value;
+    const pw2 = document.getElementById('reg-password2').value;
+    clearMsg('register-msg');
+    if (pw !== pw2) { showMsg('register-msg', 'error', 'Passwords do not match'); return; }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Creating...';
+    try {
+        const res = await fetch(API + '/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, phone_number: phone, password: pw })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || 'Failed');
+        showMsg('register-msg', 'success', 'Account created! Logging in...');
+        setTimeout(() => showScreen('login'), 1500);
+    } catch (err) {
+        showMsg('register-msg', 'error', err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+    }
+}
+
+function logout() {
+    token = null;
+    refreshToken = null;
+    userEmail = null;
+    localStorage.removeItem('lf_token');
+    localStorage.removeItem('lf_refresh');
+    localStorage.removeItem('lf_email');
+    if (callActive) endCall();
+    showScreen('login');
+}
+
+// ===== CHAT (SSE streaming) =====
+let chatAbort = null;
+
+async function sendChat() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    const sendBtn = document.getElementById('chat-send-btn');
+    sendBtn.disabled = true;
+
+    addChatMsg(text, 'user');
+    input.value = '';
+
+    // Create assistant message placeholder
+    const msgEl = addChatMsg('', 'assistant');
+    const thinkEl = document.createElement('div');
+    thinkEl.className = 'thinking';
+    thinkEl.textContent = 'Thinking...';
+    msgEl.appendChild(thinkEl);
+
+    try {
+        const url = API + '/api/chat/web-stream?message=' + encodeURIComponent(text);
+        chatAbort = new AbortController();
+        const res = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + token },
+            signal: chatAbort.signal
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Chat failed');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalMessage = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.slice(6).trim();
+                    if (!jsonStr || jsonStr === 'keep-alive') continue;
+                    try {
+                        const evt = JSON.parse(jsonStr);
+                        if (evt.step === 'thinking' || evt.step === 'tool_call' || evt.step === 'reasoning') {
+                            thinkEl.textContent = evt.message || '...';
+                        } else if (evt.step === 'complete') {
+                            finalMessage = evt.message || '';
+                        } else if (evt.step === 'error') {
+                            finalMessage = 'Error: ' + (evt.message || 'Unknown error');
+                        }
+                    } catch {}
+                }
+            }
+        }
+
+        // Show final message
+        thinkEl.remove();
+        msgEl.textContent = finalMessage || '(no response)';
+    } catch (err) {
+        thinkEl.remove();
+        if (err.name !== 'AbortError') {
+            msgEl.textContent = 'Error: ' + err.message;
+        }
+    } finally {
+        sendBtn.disabled = false;
+        chatAbort = null;
+        scrollChat();
+    }
+}
+
+function addChatMsg(text, type) {
+    const container = document.getElementById('chat-messages');
+    const sys = container.querySelector('.chat-msg.system');
+    if (sys) sys.remove();
+    const el = document.createElement('div');
+    el.className = 'chat-msg ' + type;
+    el.textContent = text;
+    container.appendChild(el);
+    scrollChat();
+    return el;
+}
+
+function scrollChat() {
+    const c = document.getElementById('chat-messages');
+    c.scrollTop = c.scrollHeight;
+}
+
+// ===== VOICE CALL (ElevenLabs) =====
+async function checkCallCredits() {
+    try {
+        const res = await api('/api/call/web-check-credits');
+        const data = await res.json();
+        const el = document.getElementById('call-credits');
+        if (data.has_credits) {
+            el.textContent = data.remaining_minutes + ' min remaining';
+        } else {
+            el.textContent = 'No credits available';
+            document.getElementById('call-btn').disabled = true;
+        }
+    } catch {}
+}
+
+async function toggleCall() {
+    if (callActive) {
+        endCall();
+    } else {
+        startCall();
+    }
+}
+
+async function startCall() {
+    const btn = document.getElementById('call-btn');
+    btn.disabled = true;
+    document.getElementById('call-status-text').textContent = 'Connecting...';
+    document.getElementById('call-status-sub').textContent = '';
+
+    try {
+        const res = await api('/api/call/web-signed-url');
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to start call');
+        }
+        const data = await res.json();
+
+        // Load ElevenLabs client SDK dynamically
+        if (!window.ElevenLabsClient) {
+            await loadScript('https://cdn.jsdelivr.net/npm/@11labs/client@latest/dist/browser/index.js');
+        }
+
+        // Start conversation using ElevenLabs
+        if (window.ElevenLabsClient && window.ElevenLabsClient.Conversation) {
+            callConversation = await window.ElevenLabsClient.Conversation.startSession({
+                signedUrl: data.signed_url,
+                overrides: data.agent_overrides || {},
+                onConnect: () => {
+                    callActive = true;
+                    callStartTime = Date.now();
+                    btn.className = 'call-btn end';
+                    btn.innerHTML = '<i class="fa-solid fa-phone-slash"></i>';
+                    btn.disabled = false;
+                    document.getElementById('call-avatar').classList.add('active');
+                    document.getElementById('call-status-text').textContent = 'Connected';
+                    document.getElementById('call-status-sub').textContent = 'Speak to your assistant';
+                    document.getElementById('call-timer').style.display = '';
+                    startCallTimer();
+                },
+                onDisconnect: () => {
+                    endCall();
+                },
+                onError: (err) => {
+                    console.error('Call error:', err);
+                    endCall();
+                }
+            });
+        } else {
+            // Fallback: just show that the signed URL was obtained
+            callActive = true;
+            callStartTime = Date.now();
+            btn.className = 'call-btn end';
+            btn.innerHTML = '<i class="fa-solid fa-phone-slash"></i>';
+            btn.disabled = false;
+            document.getElementById('call-avatar').classList.add('active');
+            document.getElementById('call-status-text').textContent = 'Connected';
+            document.getElementById('call-status-sub').textContent = 'ElevenLabs SDK not loaded - audio unavailable';
+            document.getElementById('call-timer').style.display = '';
+            startCallTimer();
+        }
+    } catch (err) {
+        document.getElementById('call-status-text').textContent = 'Failed to connect';
+        document.getElementById('call-status-sub').textContent = err.message;
+        btn.disabled = false;
+    }
+}
+
+async function endCall() {
+    const duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
+
+    if (callConversation) {
+        try { await callConversation.endSession(); } catch {}
+        callConversation = null;
     }
 
-    // ===== INIT =====
-    if (accessToken) {
-        document.getElementById('welcome-text').textContent = 'Welcome, ' + (userEmail || '') + '!';
-        showPage('dashboard');
-    } else {
-        showPage('login');
+    callActive = false;
+    clearInterval(callTimerInterval);
+    callStartTime = null;
+
+    const btn = document.getElementById('call-btn');
+    btn.className = 'call-btn start';
+    btn.innerHTML = '<i class="fa-solid fa-phone"></i>';
+    btn.disabled = false;
+    document.getElementById('call-avatar').classList.remove('active');
+    document.getElementById('call-status-text').textContent = 'Voice assistant';
+    document.getElementById('call-status-sub').textContent = 'Tap to start a call';
+    document.getElementById('call-timer').style.display = 'none';
+    document.getElementById('call-timer').textContent = '00:00';
+
+    // Report duration to backend
+    if (duration > 0) {
+        try { await api('/api/call/web-end', { method: 'POST', body: { duration_secs: duration } }); } catch {}
     }
+    checkCallCredits();
+}
+
+function startCallTimer() {
+    clearInterval(callTimerInterval);
+    callTimerInterval = setInterval(() => {
+        if (!callStartTime) return;
+        const secs = Math.floor((Date.now() - callStartTime) / 1000);
+        const m = String(Math.floor(secs / 60)).padStart(2, '0');
+        const s = String(secs % 60).padStart(2, '0');
+        document.getElementById('call-timer').textContent = m + ':' + s;
+    }, 1000);
+}
+
+function loadScript(src) {
+    return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+    });
+}
+
+// ===== CONNECTIONS =====
+async function loadConnectionStatuses() {
+    const services = [
+        { key: 'whatsapp', path: '/api/auth/whatsapp/status' },
+        { key: 'telegram', path: '/api/auth/telegram/status' },
+        { key: 'signal', path: '/api/auth/signal/status' },
+        { key: 'imap', path: '/api/auth/imap/status' },
+    ];
+
+    for (const svc of services) {
+        const item = document.querySelector(`.conn-item[data-service="${svc.key}"]`);
+        if (!item) continue;
+        const statusEl = item.querySelector('.conn-status');
+        try {
+            const res = await api(svc.path);
+            const data = await res.json();
+            if (data.connected) {
+                statusEl.className = 'conn-status on';
+                statusEl.textContent = 'Connected';
+                // Show account info
+                const info = item.querySelector('.conn-info p');
+                if (data.connected_account) info.textContent = data.connected_account;
+                else if (data.email) info.textContent = data.email;
+            } else {
+                statusEl.className = 'conn-status off';
+                statusEl.textContent = 'Not connected';
+            }
+        } catch {
+            statusEl.className = 'conn-status off';
+            statusEl.textContent = 'Error';
+        }
+    }
+}
+
+// ===== DIGEST SETTINGS =====
+let digestSaveTimeout = null;
+
+async function loadDigestSettings() {
+    try {
+        const res = await api('/api/profile/digests');
+        const data = await res.json();
+        document.getElementById('digest-morning').value = data.morning_digest_time || '';
+        document.getElementById('digest-day').value = data.day_digest_time || '';
+        document.getElementById('digest-evening').value = data.evening_digest_time || '';
+    } catch {}
+}
+
+function saveDigests() {
+    clearTimeout(digestSaveTimeout);
+    digestSaveTimeout = setTimeout(async () => {
+        const body = {
+            morning_digest_time: document.getElementById('digest-morning').value || null,
+            day_digest_time: document.getElementById('digest-day').value || null,
+            evening_digest_time: document.getElementById('digest-evening').value || null,
+        };
+        try {
+            await api('/api/profile/digests', { method: 'POST', body });
+            const ind = document.getElementById('digest-saved');
+            ind.classList.add('show');
+            setTimeout(() => ind.classList.remove('show'), 2000);
+        } catch {}
+    }, 500);
+}
+
+async function getInstantDigest() {
+    try {
+        const res = await api('/api/chat/digest');
+        const data = await res.json();
+        // Switch to chat tab and show digest
+        switchTab('chat', document.querySelector('.tab-btn'));
+        addChatMsg(data.message || data.response || 'Digest received', 'assistant');
+    } catch (err) {
+        alert('Failed to get digest: ' + err.message);
+    }
+}
+
+// ===== QUIET MODE =====
+async function loadQuietMode() {
+    try {
+        const res = await api('/api/profile/quiet-mode');
+        const data = await res.json();
+        document.getElementById('quiet-toggle').checked = data.is_quiet;
+        if (data.is_quiet && data.until_display) {
+            document.getElementById('quiet-status-text').textContent = 'Until ' + data.until_display;
+        } else if (data.is_quiet) {
+            document.getElementById('quiet-status-text').textContent = 'On (indefinite)';
+        } else {
+            document.getElementById('quiet-status-text').textContent = 'Off';
+        }
+    } catch {}
+}
+
+async function toggleQuietMode() {
+    const on = document.getElementById('quiet-toggle').checked;
+    try {
+        await api('/api/profile/quiet-mode', {
+            method: 'POST',
+            body: { until: on ? 0 : null }
+        });
+        document.getElementById('quiet-status-text').textContent = on ? 'On (indefinite)' : 'Off';
+    } catch {
+        // Revert toggle on error
+        document.getElementById('quiet-toggle').checked = !on;
+    }
+}
+
+// ===== INIT =====
+if (token) {
+    showApp();
+} else {
+    showScreen('login');
+}
 </script>
 
 </body>
