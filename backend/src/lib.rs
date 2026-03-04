@@ -15,7 +15,7 @@ pub mod handlers {
     pub mod mcp_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
-    pub mod refund_handlers;
+
     pub mod self_host_handlers;
     pub mod signal_auth;
     pub mod signal_handlers;
