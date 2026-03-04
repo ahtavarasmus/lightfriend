@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="description" content="Lightfriend - AI assistant for dumbphones">
+    <title>lightfriend</title>
+    <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        /* Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            min-height: 100vh;
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        /* Navigation */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 1002;
+            padding: 1rem 0;
+            transition: all 0.3s ease;
+        }
+
+        .nav-content {
+            max-width: 100%;
+            padding: 0 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-logo {
+            color: white;
+            text-decoration: none;
+            font-size: 1.5rem;
+            font-weight: 600;
+            background: linear-gradient(45deg, #fff, #7EB2FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            transition: opacity 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-logo:hover { opacity: 0.8; }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .nav-trust-badges {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-trust-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.65rem;
+            letter-spacing: 0.04em;
+            padding: 0.35rem 0.7rem;
+            background: linear-gradient(135deg, rgba(126, 178, 255, 0.04), rgba(255, 255, 255, 0.02));
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            border: 1px solid rgba(126, 178, 255, 0.1);
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        .nav-trust-badge:hover {
+            border-color: rgba(126, 178, 255, 0.2);
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .nav-trust-badge i {
+            font-size: 0.6rem;
+            color: rgba(126, 178, 255, 0.4);
+        }
+
+        .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(180, 180, 180, 0.12);
+            border: 1px solid rgba(200, 200, 200, 0.25);
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .nav-link:hover {
+            background: rgba(200, 200, 200, 0.2);
+            transform: translateY(-2px);
+            color: #fff;
+        }
+
+        .nav-login-button {
+            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
+            color: #1a1a2e;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            cursor: pointer;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            font-family: inherit;
+        }
+
+        .nav-login-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
+            background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
+        }
+
+        /* Auth background */
+        .gradient-bg {
+            background: #1a1a1a;
+            background: linear-gradient(to bottom right, rgba(30, 144, 255, 0.05), rgba(0, 0, 0, 0.95));
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            padding-top: 5rem;
+        }
+
+        /* Login container */
+        .login-container {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(30, 144, 255, 0.1);
+            border-radius: 16px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 480px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-container h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            background: linear-gradient(45deg, #fff, #7EB2FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(30, 144, 255, 0.2);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: rgba(30, 144, 255, 0.5);
+            box-shadow: 0 0 12px rgba(30, 144, 255, 0.15);
+        }
+
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Submit button */
+        .submit-button {
+            width: 100%;
+            padding: 1rem;
+            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
+            color: #1a1a2e;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            font-family: inherit;
+            margin-top: 0.5rem;
+        }
+
+        .submit-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
+            background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
+        }
+
+        .submit-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Auth redirect */
+        .auth-redirect {
+            margin-top: 2rem;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.9rem;
+        }
+
+        .auth-redirect a {
+            color: #1E90FF;
+            text-decoration: none;
+            transition: color 0.3s ease;
+            margin-left: 0.25rem;
+        }
+
+        .auth-redirect a:hover {
+            color: #7EB2FF;
+            text-decoration: underline;
+        }
+
+        /* Error/success messages */
+        .message {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .message.error {
+            background: rgba(255, 0, 0, 0.1);
+            color: #ff6b6b;
+            border: 1px solid rgba(255, 0, 0, 0.2);
+        }
+
+        .message.success {
+            background: rgba(0, 255, 0, 0.1);
+            color: #69f0ae;
+            border: 1px solid rgba(0, 255, 0, 0.2);
+        }
+
+        /* ===== DASHBOARD (shown after login) ===== */
+        .dashboard {
+            display: none;
+            min-height: 100vh;
+            background: #1a1a1a;
+        }
+
+        .dashboard-content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 6rem 2rem 2rem;
+        }
+
+        .welcome-card {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(30, 144, 255, 0.1);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .welcome-card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, #fff, #7EB2FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .welcome-card p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.95rem;
+        }
+
+        /* Chat area */
+        .chat-container {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(30, 144, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .chat-messages {
+            padding: 1.5rem;
+            min-height: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .chat-message {
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            max-width: 80%;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .chat-message.user {
+            background: rgba(30, 144, 255, 0.15);
+            border: 1px solid rgba(30, 144, 255, 0.2);
+            margin-left: auto;
+            color: #fff;
+        }
+
+        .chat-message.assistant {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .chat-message.system {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.85rem;
+            max-width: 100%;
+            background: none;
+            border: none;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 0.75rem;
+            padding: 1rem 1.5rem;
+            border-top: 1px solid rgba(30, 144, 255, 0.1);
+            align-items: center;
+        }
+
+        .chat-input-row input[type="text"] {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(30, 144, 255, 0.15);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: #fff;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .chat-input-row input[type="text"]:focus {
+            border-color: rgba(30, 144, 255, 0.5);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .chat-input-row input[type="text"]::placeholder {
+            color: #666;
+        }
+
+        .chat-send-button {
+            background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
+            color: #1a1a2e;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 8px;
+            padding: 0.75rem 1.25rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        }
+
+        .chat-send-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
+        }
+
+        /* Connection cards */
+        .connections-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .connection-card {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(30, 144, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .connection-card:hover {
+            border-color: rgba(30, 144, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .connection-card i {
+            font-size: 2rem;
+            margin-bottom: 0.75rem;
+            color: #7EB2FF;
+        }
+
+        .connection-card h3 {
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 0.25rem;
+        }
+
+        .connection-card p {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .connection-card .status {
+            display: inline-block;
+            margin-top: 0.5rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .connection-card .status.connected {
+            background: rgba(0, 255, 0, 0.1);
+            color: #69f0ae;
+            border: 1px solid rgba(0, 255, 0, 0.2);
+        }
+
+        .connection-card .status.disconnected {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Register page styles */
+        .register-container {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(30, 144, 255, 0.1);
+            border-radius: 16px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 480px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .register-container h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            background: linear-gradient(45deg, #fff, #7EB2FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(26, 26, 46, 0.3);
+            border-top-color: #1a1a2e;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Pages hidden by default */
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-content { padding: 0 1rem; }
+            .nav-right { gap: 0.5rem; }
+            .nav-trust-badges { display: none; }
+            .nav-login-button, .nav-link {
+                padding: 0.5rem 1rem;
+                font-size: 0.85rem;
+            }
+            .login-container, .register-container {
+                padding: 2rem;
+                margin: 1rem;
+            }
+            .dashboard-content { padding: 5rem 1rem 1rem; }
+            .connections-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Password reset */
+        .forgot-link {
+            display: block;
+            text-align: right;
+            margin-top: -0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .forgot-link a {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.8rem;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .forgot-link a:hover {
+            color: #1E90FF;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== NAVIGATION ===== -->
+<nav class="top-nav" id="navbar">
+    <div class="nav-content">
+        <div class="nav-left">
+            <a href="#" class="nav-logo" onclick="showPage('login')">lightfriend</a>
+        </div>
+        <div class="nav-right">
+            <div class="nav-trust-badges" id="trust-badges">
+                <span class="nav-trust-badge"><i class="fa-brands fa-github"></i> Open Source</span>
+                <span class="nav-trust-badge"><i class="fa-solid fa-server"></i> Self-Hosted</span>
+                <span class="nav-trust-badge"><i class="fa-solid fa-lock"></i> Encrypted</span>
+            </div>
+            <!-- Shown when logged out -->
+            <div id="nav-auth-buttons">
+                <button class="nav-link" onclick="showPage('register')">Register</button>
+                <button class="nav-login-button" onclick="showPage('login')">Log in</button>
+            </div>
+            <!-- Shown when logged in -->
+            <div id="nav-user-buttons" style="display:none;">
+                <button class="nav-link" onclick="showPage('dashboard')"><i class="fa-solid fa-user"></i> Profile</button>
+                <button class="nav-login-button" onclick="logout()">Log out</button>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<!-- ===== LOGIN PAGE ===== -->
+<div id="page-login" class="page active">
+    <div class="gradient-bg">
+        <div class="login-container">
+            <h1>Welcome back</h1>
+            <div class="message error" id="login-error"></div>
+            <div class="message success" id="login-success"></div>
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" placeholder="Your password" required autocomplete="current-password">
+                </div>
+                <div class="forgot-link">
+                    <a href="#" onclick="showPage('reset')">Forgot password?</a>
+                </div>
+                <button type="submit" class="submit-button" id="login-btn">Log in</button>
+            </form>
+            <div class="auth-redirect">
+                New here?<a href="#" onclick="showPage('register')">Create an account</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== REGISTER PAGE ===== -->
+<div id="page-register" class="page">
+    <div class="gradient-bg">
+        <div class="register-container">
+            <h1>Create account</h1>
+            <div class="message error" id="register-error"></div>
+            <div class="message success" id="register-success"></div>
+            <form id="register-form" onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label for="reg-email">Email</label>
+                    <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="reg-phone">Phone number</label>
+                    <input type="tel" id="reg-phone" placeholder="+358..." required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Password</label>
+                    <input type="password" id="reg-password" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="reg-password2">Confirm password</label>
+                    <input type="password" id="reg-password2" placeholder="Repeat password" required minlength="8" autocomplete="new-password">
+                </div>
+                <button type="submit" class="submit-button" id="register-btn">Create account</button>
+            </form>
+            <div class="auth-redirect">
+                Already have an account?<a href="#" onclick="showPage('login')">Log in</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== PASSWORD RESET PAGE ===== -->
+<div id="page-reset" class="page">
+    <div class="gradient-bg">
+        <div class="login-container">
+            <h1>Reset password</h1>
+            <div class="message error" id="reset-error"></div>
+            <div class="message success" id="reset-success"></div>
+            <p style="color: rgba(255,255,255,0.6); text-align: center; margin-bottom: 1.5rem; font-size: 0.9rem;">
+                Contact the admin to reset your password.
+            </p>
+            <div class="auth-redirect">
+                <a href="#" onclick="showPage('login')"><i class="fa-solid fa-arrow-left"></i> Back to login</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== DASHBOARD (after login) ===== -->
+<div id="page-dashboard" class="page">
+    <div class="dashboard">
+        <div class="dashboard-content">
+            <div class="welcome-card">
+                <h2 id="welcome-text">Welcome!</h2>
+                <p>Your AI assistant is ready. Send a message below or connect your services.</p>
+            </div>
+
+            <!-- Chat -->
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-message system">Send a message to start chatting with your AI assistant</div>
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()">
+                    <button class="chat-send-button" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+
+            <!-- Connections -->
+            <h2 style="margin-top: 2rem; margin-bottom: 0.5rem; font-size: 1.1rem; color: rgba(255,255,255,0.7);">Connections</h2>
+            <div class="connections-grid">
+                <div class="connection-card">
+                    <i class="fa-brands fa-whatsapp"></i>
+                    <h3>WhatsApp</h3>
+                    <p>Messages & monitoring</p>
+                    <span class="status disconnected">Not connected</span>
+                </div>
+                <div class="connection-card">
+                    <i class="fa-brands fa-telegram"></i>
+                    <h3>Telegram</h3>
+                    <p>Messages & monitoring</p>
+                    <span class="status disconnected">Not connected</span>
+                </div>
+                <div class="connection-card">
+                    <i class="fa-solid fa-envelope"></i>
+                    <h3>Email</h3>
+                    <p>Gmail & Outlook</p>
+                    <span class="status disconnected">Not connected</span>
+                </div>
+                <div class="connection-card">
+                    <i class="fa-solid fa-calendar"></i>
+                    <h3>Calendar</h3>
+                    <p>Google Calendar</p>
+                    <span class="status disconnected">Not connected</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ===== CONFIG =====
+    const API_BASE = window.location.origin; // Same origin as the page
+
+    // ===== STATE =====
+    let accessToken = localStorage.getItem('access_token') || null;
+    let refreshToken = localStorage.getItem('refresh_token') || null;
+    let userEmail = localStorage.getItem('user_email') || null;
+
+    // ===== PAGE ROUTING =====
+    function showPage(page) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        const el = document.getElementById('page-' + page);
+        if (el) {
+            el.classList.add('active');
+            // Show dashboard div if dashboard page
+            if (page === 'dashboard') {
+                el.querySelector('.dashboard').style.display = 'block';
+            }
+        }
+        updateNavState();
+    }
+
+    function updateNavState() {
+        const isLoggedIn = !!accessToken;
+        document.getElementById('nav-auth-buttons').style.display = isLoggedIn ? 'none' : 'flex';
+        document.getElementById('nav-user-buttons').style.display = isLoggedIn ? 'flex' : 'none';
+        if (isLoggedIn) {
+            document.getElementById('trust-badges').style.display = 'none';
+        } else {
+            document.getElementById('trust-badges').style.display = '';
+        }
+    }
+
+    // ===== AUTH =====
+    async function handleLogin(e) {
+        e.preventDefault();
+        const btn = document.getElementById('login-btn');
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+
+        hideMessages('login');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Verifying...';
+
+        try {
+            const res = await fetch(API_BASE + '/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email_or_username: email, password })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || data.message || 'Login failed');
+            }
+
+            if (data.requires_2fa) {
+                showMessage('login', 'error', '2FA is required but not yet supported in this app.');
+                return;
+            }
+
+            // Save tokens
+            accessToken = data.access_token;
+            refreshToken = data.refresh_token;
+            userEmail = email;
+            localStorage.setItem('access_token', accessToken);
+            localStorage.setItem('refresh_token', refreshToken);
+            localStorage.setItem('user_email', userEmail);
+
+            document.getElementById('welcome-text').textContent = 'Welcome, ' + email + '!';
+            showPage('dashboard');
+        } catch (err) {
+            showMessage('login', 'error', err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Log in';
+        }
+    }
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        const btn = document.getElementById('register-btn');
+        const email = document.getElementById('reg-email').value;
+        const phone = document.getElementById('reg-phone').value;
+        const password = document.getElementById('reg-password').value;
+        const password2 = document.getElementById('reg-password2').value;
+
+        hideMessages('register');
+
+        if (password !== password2) {
+            showMessage('register', 'error', 'Passwords do not match');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Creating account...';
+
+        try {
+            const res = await fetch(API_BASE + '/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, phone_number: phone, password })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || data.message || 'Registration failed');
+            }
+
+            showMessage('register', 'success', 'Account created! You can now log in.');
+            setTimeout(() => showPage('login'), 2000);
+        } catch (err) {
+            showMessage('register', 'error', err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Create account';
+        }
+    }
+
+    function logout() {
+        accessToken = null;
+        refreshToken = null;
+        userEmail = null;
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('user_email');
+        showPage('login');
+    }
+
+    // ===== CHAT =====
+    async function sendMessage() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if (!text) return;
+
+        addChatMessage(text, 'user');
+        input.value = '';
+
+        try {
+            const res = await fetch(API_BASE + '/api/web-chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + accessToken
+                },
+                body: JSON.stringify({ message: text })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to send message');
+            }
+
+            addChatMessage(data.response || data.message || 'OK', 'assistant');
+        } catch (err) {
+            addChatMessage('Error: ' + err.message, 'assistant');
+        }
+    }
+
+    function addChatMessage(text, type) {
+        const container = document.getElementById('chat-messages');
+        // Remove system message if first real message
+        const sysMsg = container.querySelector('.chat-message.system');
+        if (sysMsg) sysMsg.remove();
+
+        const msg = document.createElement('div');
+        msg.className = 'chat-message ' + type;
+        msg.textContent = text;
+        container.appendChild(msg);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // ===== HELPERS =====
+    function showMessage(page, type, text) {
+        const el = document.getElementById(page + '-' + type);
+        if (el) {
+            el.textContent = text;
+            el.style.display = 'block';
+        }
+    }
+
+    function hideMessages(page) {
+        ['error', 'success'].forEach(type => {
+            const el = document.getElementById(page + '-' + type);
+            if (el) el.style.display = 'none';
+        });
+    }
+
+    // ===== INIT =====
+    if (accessToken) {
+        document.getElementById('welcome-text').textContent = 'Welcome, ' + (userEmail || '') + '!';
+        showPage('dashboard');
+    } else {
+        showPage('login');
+    }
+</script>
+
+</body>
+</html>
