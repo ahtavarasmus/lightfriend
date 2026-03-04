@@ -118,7 +118,7 @@ pub fn write_outgoing_history(
     current_time: i32,
 ) {
     // Write assistant history entry
-    let history_entry = crate::models::user_models::NewMessageHistory {
+    let history_entry = crate::pg_models::NewPgMessageHistory {
         user_id,
         role: "assistant".to_string(),
         encrypted_content: message.to_string(),
@@ -137,7 +137,7 @@ pub fn write_outgoing_history(
     }
 
     // Write tool response history entry
-    let tool_message = crate::models::user_models::NewMessageHistory {
+    let tool_message = crate::pg_models::NewPgMessageHistory {
         user_id,
         role: "tool".to_string(),
         encrypted_content: message.to_string(),
@@ -161,7 +161,7 @@ pub fn write_outgoing_error_history(
     error_msg: &str,
     current_time: i32,
 ) {
-    let tool_message = crate::models::user_models::NewMessageHistory {
+    let tool_message = crate::pg_models::NewPgMessageHistory {
         user_id,
         role: "tool".to_string(),
         encrypted_content: error_msg.to_string(),

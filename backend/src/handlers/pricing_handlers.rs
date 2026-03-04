@@ -743,21 +743,8 @@ pub async fn get_usage_projection(
             "User not found".to_string(),
         ))?;
 
-    // Get user settings for digest info
-    let (morning_digest, day_digest, evening_digest) = state
-        .user_core
-        .get_digests(auth_user.user_id)
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // Count active digests
-    let digest_count = [
-        morning_digest.as_ref(),
-        day_digest.as_ref(),
-        evening_digest.as_ref(),
-    ]
-    .iter()
-    .filter(|&&x| x.is_some())
-    .count() as i32;
+    // Digests have been removed - always zero
+    let digest_count: i32 = 0;
 
     // Get plan capacity: derive message-equivalent from budget / per-message price
     let plan_type = user.plan_type.clone();

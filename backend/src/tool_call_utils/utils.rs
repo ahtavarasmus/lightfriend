@@ -122,18 +122,13 @@ pub async fn cancel_pending_message(
 
 // Helper function to check if a tool is accessible based on user's status
 // Only tier 2 (hosted) subscribers get full access to all tools
-pub fn requires_subscription(
-    tool_name: &str,
-    sub_tier: Option<String>,
-    has_discount: bool,
-) -> bool {
-    // Only tier 2 (hosted) subscribers and users with discount get full access to everything
-    if sub_tier == Some("tier 2".to_string()) || has_discount {
-        println!("✅ User has tier 2 subscription or discount - granting full access");
+pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>) -> bool {
+    // Only tier 2 (hosted) subscribers get full access to everything
+    if sub_tier == Some("tier 2".to_string()) {
         return false;
     }
 
-    println!("❌ Tool {} requires tier 2 subscription", tool_name);
+    tracing::debug!("Tool {} requires tier 2 subscription", tool_name);
     true
 }
 

@@ -3,11 +3,12 @@
 //! Tests CRUD operations, dedup, triggered items query, tracking items query,
 //! dashboard ordering, snooze, complete, reschedule, bulk update, and cleanup.
 
-use backend::models::user_models::NewItem;
+use backend::pg_models::NewPgItem;
 use backend::test_utils::{
     create_test_item, create_test_state, create_test_user, get_user_items, TestItemParams,
     TestUserParams,
 };
+use serial_test::serial;
 
 /// Fixed reference timestamp for deterministic tests.
 const T: i32 = 1_750_000_000;
@@ -17,6 +18,7 @@ const T: i32 = 1_750_000_000;
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_create_and_read_item() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -29,13 +31,14 @@ fn test_create_and_read_item() {
 }
 
 #[test]
+#[serial]
 fn test_get_item_with_ownership_check() {
     let state = create_test_state();
     let user1 = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let user2 = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
 
     let item = create_test_item(&state, &TestItemParams::reminder(user1.id, "User1 item"));
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Owner can access
     let found = state.item_repository.get_item(item_id, user1.id).unwrap();
@@ -51,6 +54,7 @@ fn test_get_item_with_ownership_check() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_item_exists_by_source() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -75,6 +79,7 @@ fn test_item_exists_by_source() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_get_triggered_items() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -104,6 +109,7 @@ fn test_get_triggered_items() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_get_tracking_items() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -131,6 +137,7 @@ fn test_get_tracking_items() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_dashboard_items_ordered_by_priority() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -160,6 +167,7 @@ fn test_dashboard_items_ordered_by_priority() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_snooze_item() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -168,7 +176,7 @@ fn test_snooze_item() {
         &state,
         &TestItemParams::scheduled_reminder(user.id, "Snooze me", T - 60),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Item should currently trigger
     let triggered = state.item_repository.get_triggered_items(T).unwrap();
@@ -195,12 +203,13 @@ fn test_snooze_item() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_complete_item_deletes_it() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(&state, &TestItemParams::reminder(user.id, "Complete me"));
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Item exists
     assert!(state
@@ -222,6 +231,7 @@ fn test_complete_item_deletes_it() {
 }
 
 #[test]
+#[serial]
 fn test_delete_item_requires_ownership() {
     let state = create_test_state();
     let user1 = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -231,7 +241,7 @@ fn test_delete_item_requires_ownership() {
         &state,
         &TestItemParams::reminder(user1.id, "Protected item"),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // User2 cannot delete user1's item
     let deleted = state
@@ -253,6 +263,7 @@ fn test_delete_item_requires_ownership() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_reschedule_recurring_item() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -261,7 +272,7 @@ fn test_reschedule_recurring_item() {
         &state,
         &TestItemParams::scheduled_reminder(user.id, "Daily digest at 08:00", T - 60),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Fires now
     let triggered = state.item_repository.get_triggered_items(T).unwrap();
@@ -291,6 +302,7 @@ fn test_reschedule_recurring_item() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_update_item_bulk() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -299,7 +311,7 @@ fn test_update_item_bulk() {
         &state,
         &TestItemParams::reminder(user.id, "Original summary"),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let updated = state
         .item_repository
@@ -328,12 +340,13 @@ fn test_update_item_bulk() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_delete_old_items() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     // Create old item directly (with old created_at)
-    let old_item = NewItem {
+    let old_item = NewPgItem {
         user_id: user.id,
         summary: "Old item".to_string(),
         due_at: None,
@@ -366,6 +379,7 @@ fn test_delete_old_items() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_delete_items_by_source() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -399,12 +413,13 @@ fn test_delete_items_by_source() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_update_summary() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(&state, &TestItemParams::reminder(user.id, "Original"));
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     state
         .item_repository
@@ -420,12 +435,13 @@ fn test_update_summary() {
 }
 
 #[test]
+#[serial]
 fn test_update_priority() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     let item = create_test_item(&state, &TestItemParams::reminder(user.id, "Escalate me"));
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     state.item_repository.update_priority(item_id, 2).unwrap();
 
@@ -442,6 +458,7 @@ fn test_update_priority() {
 // =============================================================================
 
 #[test]
+#[serial]
 fn test_item_limit_enforcement() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -455,7 +472,7 @@ fn test_item_limit_enforcement() {
     }
 
     // 101st should fail
-    let result = state.item_repository.create_item(&NewItem {
+    let result = state.item_repository.create_item(&NewPgItem {
         user_id: user.id,
         summary: "Item 101".to_string(),
         due_at: None,
@@ -467,6 +484,7 @@ fn test_item_limit_enforcement() {
 }
 
 #[test]
+#[serial]
 fn test_tracking_with_due_at_triggers() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -490,6 +508,7 @@ fn test_tracking_with_due_at_triggers() {
 }
 
 #[test]
+#[serial]
 fn test_tracking_survives_update() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -498,7 +517,7 @@ fn test_tracking_survives_update() {
         &state,
         &TestItemParams::tracking(user.id, "Watch for package delivery"),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Update via update_item
     state
@@ -528,10 +547,11 @@ fn test_tracking_survives_update() {
     // Still shows as a tracking item
     let tracking = state.item_repository.get_tracking_items(user.id).unwrap();
     assert_eq!(tracking.len(), 1);
-    assert_eq!(tracking[0].id, Some(item_id));
+    assert_eq!(tracking[0].id, item_id);
 }
 
 #[test]
+#[serial]
 fn test_tracking_escalation() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -540,7 +560,7 @@ fn test_tracking_escalation() {
         &state,
         &TestItemParams::tracking(user.id, "Invoice $500 due Feb 28").with_priority(0),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Escalate priority 0 -> 2
     state
@@ -563,6 +583,7 @@ fn test_tracking_escalation() {
 }
 
 #[test]
+#[serial]
 fn test_tracking_resolution_deletes() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -571,7 +592,7 @@ fn test_tracking_resolution_deletes() {
         &state,
         &TestItemParams::tracking(user.id, "Watch for payment confirmation").with_due_at(T - 60),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     // Should appear in tracking items and triggered
     assert_eq!(
@@ -606,6 +627,7 @@ fn test_tracking_resolution_deletes() {
 }
 
 #[test]
+#[serial]
 fn test_multi_user_tracking_isolation() {
     let state = create_test_state();
     let user_a = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -630,6 +652,7 @@ fn test_multi_user_tracking_isolation() {
 }
 
 #[test]
+#[serial]
 fn test_multi_user_triggered_isolation() {
     let state = create_test_state();
     let user_a = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -665,6 +688,7 @@ fn test_multi_user_triggered_isolation() {
 }
 
 #[test]
+#[serial]
 fn test_mixed_items_dashboard() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
@@ -710,12 +734,13 @@ fn test_mixed_items_dashboard() {
 }
 
 #[test]
+#[serial]
 fn test_stale_tracking_cleanup() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     // Stale tracking: due_at >7 days ago
-    let stale = NewItem {
+    let stale = NewPgItem {
         user_id: user.id,
         summary: "[type:tracking] Old invoice".to_string(),
         due_at: Some(T - 8 * 86400), // 8 days ago
@@ -726,7 +751,7 @@ fn test_stale_tracking_cleanup() {
     state.item_repository.create_item(&stale).unwrap();
 
     // Active tracking: due_at in the future
-    let active = NewItem {
+    let active = NewPgItem {
         user_id: user.id,
         summary: "[type:tracking] Active tracking".to_string(),
         due_at: Some(T + 86400), // Future deadline

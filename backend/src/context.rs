@@ -11,7 +11,8 @@ use chrono::{FixedOffset, Utc};
 use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
-use crate::models::user_models::{ContactProfile, User, UserInfo, UserSettings};
+use crate::models::user_models::{User, UserInfo, UserSettings};
+use crate::pg_models::PgContactProfile;
 use crate::{AiProvider, AppState, ModelPurpose, UserCoreOps};
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ pub struct AgentContext {
     pub user_settings: Option<UserSettings>,
     pub user_info: Option<UserInfo>,
     pub timezone: Option<TimezoneInfo>,
-    pub contact_profiles: Option<Vec<ContactProfile>>,
+    pub contact_profiles: Option<Vec<PgContactProfile>>,
     pub user_given_info: Option<String>,
     pub contacts_prompt_fragment: Option<String>,
 
@@ -362,9 +363,7 @@ const SKIP_FROM_HISTORY: &[&str] = &[
     "direct_response",
 ];
 
-pub fn convert_history(
-    raw: Vec<crate::models::user_models::MessageHistory>,
-) -> Vec<ChatCompletionMessage> {
+pub fn convert_history(raw: Vec<crate::pg_models::PgMessageHistory>) -> Vec<ChatCompletionMessage> {
     let mut out = Vec::new();
 
     for msg in raw.into_iter().rev() {

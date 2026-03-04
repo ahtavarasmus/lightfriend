@@ -31,8 +31,7 @@ pub struct User {
     pub phone_number: String,
     pub nickname: Option<String>,  // what user wants the ai to call them
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
-    pub verified: bool,
-    pub credits: f32, // user purchased credits, will not expire, can be bought if has subscribtion or is a early user(discount = true)
+    pub credits: f32,              // user purchased credits, will not expire
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
     pub charge_when_under: bool, // flag for if user wants to automatically buy more overage credits
     pub charge_back_to: Option<f32>, // the credit amount to charge
@@ -47,15 +46,13 @@ pub struct User {
     pub encrypted_matrix_password: Option<String>,
     pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
-    pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
-    pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
-    pub magic_token: Option<String>, // token for magic link login/password setup
-    pub plan_type: Option<String>, // "assistant", "autopilot", or "byot"
-    pub matrix_e2ee_enabled: bool, // whether E2EE is enabled for Matrix messaging
-    pub migrated_to_new_server: bool, // whether user has migrated to new AWS server
-    pub last_backup_at: Option<i32>, // Unix timestamp of last backup
-    pub backup_session_active: bool, // whether a backup session is currently active
+    pub magic_token: Option<String>,            // token for magic link login/password setup
+    pub plan_type: Option<String>,              // "assistant", "autopilot", or "byot"
+    pub matrix_e2ee_enabled: bool,              // whether E2EE is enabled for Matrix messaging
+    pub migrated_to_new_server: bool,           // whether user has migrated to new AWS server
+    pub last_backup_at: Option<i32>,            // Unix timestamp of last backup
+    pub backup_session_active: bool,            // whether a backup session is currently active
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
@@ -309,26 +306,17 @@ pub struct UserSettings {
     pub agent_language: String, // language the agent will use to answer, default 'en'.
     pub sub_country: Option<String>, // "US", "FI", "UK", "AU"
     pub save_context: Option<i32>, // how many messages to save in context or None if nothing is saved
-    pub morning_digest: Option<String>, // whether and when to send user morning digest noti, time is in UTC as rfc
-    pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
-    pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
     pub critical_enabled: Option<String>, // whether to inform users about their critical messages immediately and by which way ("sms" or "call")
     pub encrypted_twilio_account_sid: Option<String>, // for self hosted instance
     pub encrypted_twilio_auth_token: Option<String>, // for self hosted instance
-    pub encrypted_openrouter_api_key: Option<String>, // for self hosted instance
-    pub encrypted_textbee_device_id: Option<String>,
-    pub encrypted_textbee_api_key: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
-    pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
     pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
     pub action_on_critical_message: Option<String>, // "notify_family" or None (notify all). Only applies to messaging platforms (WhatsApp, Telegram, Signal), not email.
-    pub last_instant_digest_time: Option<i32>,      // timestamp of last on-demand digest fetch
     pub phone_service_active: bool, // whether phone service (SMS and calls) is active - can be disabled for security (e.g., stolen phone)
     pub default_notification_mode: Option<String>, // "critical", "digest", or "ignore" - default behavior for unknown senders
     pub default_notification_type: Option<String>, // "sms" or "call" - default notification type for unknown senders
     pub default_notify_on_call: i32,               // 1 = notify on incoming calls, 0 = don't notify
     pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - which LLM provider to use for SMS/chat
-    pub quiet_mode_until: Option<i32>, // NULL = active, 0 = indefinite quiet, >0 = quiet until that unix timestamp
     pub phone_contact_notification_mode: Option<String>, // "critical", "digest", or "ignore" - for phone contacts without a profile
     pub phone_contact_notification_type: Option<String>, // "sms" or "call" - notification type for phone contacts
     pub phone_contact_notify_on_call: i32, // 1 = notify on incoming calls from phone contacts, 0 = don't
@@ -346,7 +334,6 @@ pub struct NewUserSettings {
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
     pub critical_enabled: Option<String>,
-    pub proactive_agent_on: bool,
     pub notify_about_calls: bool,
 }
 

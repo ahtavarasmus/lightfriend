@@ -114,11 +114,9 @@ fn test_existing_user_phone_updated_if_empty() {
         password_hash: "hash".to_string(),
         phone_number: "".to_string(), // Empty phone
         time_to_live: 0,
-        verified: true,
         credits: 0.0,
         credits_left: 0.0,
         charge_when_under: false,
-        discount: false,
         sub_tier: None,
     };
     repo.create_user(new_user).unwrap();
@@ -147,11 +145,9 @@ fn test_existing_user_phone_not_overwritten() {
         password_hash: "hash".to_string(),
         phone_number: "+14155551234".to_string(),
         time_to_live: 0,
-        verified: true,
         credits: 0.0,
         credits_left: 0.0,
         charge_when_under: false,
-        discount: false,
         sub_tier: None,
     };
     repo.create_user(new_user).unwrap();

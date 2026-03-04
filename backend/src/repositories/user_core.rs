@@ -16,9 +16,6 @@ define_sql_function! {
     fn lower(x: Text) -> Text;
 }
 
-/// Type alias for digest settings (morning, day, evening)
-pub type DigestSettings = (Option<String>, Option<String>, Option<String>);
-
 /// Type alias for tier3 settings
 pub type Tier3Settings = (
     Option<String>,
@@ -59,14 +56,12 @@ pub trait UserCoreOps: Send + Sync {
     fn create_user(&self, new_user: crate::handlers::auth_dtos::NewUser)
         -> Result<(), DieselError>;
     fn delete_user(&self, user_id: i32) -> Result<(), DieselError>;
-    fn verify_user(&self, user_id: i32) -> Result<(), DieselError>;
 
     // Core field updates
     fn update_password(&self, user_id: i32, password_hash: &str) -> Result<(), DieselError>;
     fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), DieselError>;
     fn update_nickname(&self, user_id: i32, nickname: &str) -> Result<(), DieselError>;
     fn update_preferred_number(&self, user_id: i32, number: &str) -> Result<(), DieselError>;
-    fn update_discount_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError>;
 
     // User info
     fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError>;
@@ -131,22 +126,6 @@ pub trait UserCoreOps: Send + Sync {
     fn get_call_notify(&self, user_id: i32) -> Result<bool, DieselError>;
     fn update_call_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError>;
 
-    // Digests
-    fn update_digests(
-        &self,
-        user_id: i32,
-        morning: Option<&str>,
-        day: Option<&str>,
-        evening: Option<&str>,
-    ) -> Result<(), DieselError>;
-    fn get_digests(&self, user_id: i32) -> Result<DigestSettings, DieselError>;
-    fn get_last_instant_digest_time(&self, user_id: i32) -> Result<Option<i32>, DieselError>;
-    fn set_last_instant_digest_time(&self, user_id: i32, ts: i32) -> Result<(), DieselError>;
-
-    // Proactive agent
-    fn update_proactive_agent_on(&self, user_id: i32, enabled: bool) -> Result<(), DieselError>;
-    fn get_proactive_agent_on(&self, user_id: i32) -> Result<bool, DieselError>;
-
     // Quiet mode
     fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError>;
     fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError>;
@@ -206,17 +185,6 @@ pub trait UserCoreOps: Send + Sync {
         token: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
     fn clear_twilio_credentials(&self, user_id: i32) -> Result<(), Box<dyn Error + Send + Sync>>;
-    fn get_textbee_credentials(
-        &self,
-        user_id: i32,
-    ) -> Result<(String, String), Box<dyn Error + Send + Sync>>;
-    fn update_textbee_credentials(
-        &self,
-        user_id: i32,
-        device_id: &str,
-        api_key: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
-    fn get_openrouter_api_key(&self, user_id: i32) -> Result<String, Box<dyn Error + Send + Sync>>;
 
     // ElevenLabs
     fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError>;
@@ -387,17 +355,15 @@ impl UserCoreOps for UserCore {
 
     fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::{
-            bridges, critical_categories, imap_connection, message_history, processed_emails,
-            refund_info, tesla, totp_backup_codes, totp_secrets, usage_logs, user_info,
-            user_settings, webauthn_challenges, webauthn_credentials, youtube,
+            bridges, imap_connection, message_history, processed_emails, refund_info, tesla,
+            totp_backup_codes, totp_secrets, usage_logs, user_info, user_settings,
+            webauthn_challenges, webauthn_credentials, youtube,
         };
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Delete from all related tables first (cascade delete in code)
         diesel::delete(bridges::table.filter(bridges::user_id.eq(user_id))).execute(&mut conn)?;
-        diesel::delete(critical_categories::table.filter(critical_categories::user_id.eq(user_id)))
-            .execute(&mut conn)?;
         diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
             .execute(&mut conn)?;
         diesel::delete(message_history::table.filter(message_history::user_id.eq(user_id)))
@@ -427,14 +393,6 @@ impl UserCoreOps for UserCore {
 
         // Finally delete the user
         diesel::delete(users::table.find(user_id)).execute(&mut conn)?;
-        Ok(())
-    }
-
-    fn verify_user(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::verified.eq(true))
-            .execute(&mut conn)?;
         Ok(())
     }
 
@@ -517,7 +475,6 @@ impl UserCoreOps for UserCore {
                     sub_country: None,
                     save_context: Some(5),
                     critical_enabled: Some("sms".to_string()),
-                    proactive_agent_on: true,
                     notify_about_calls: true,
                 };
 
@@ -663,7 +620,6 @@ impl UserCoreOps for UserCore {
                 sub_country: None,
                 save_context: Some(5),
                 critical_enabled: Some("sms".to_string()),
-                proactive_agent_on: true,
                 notify_about_calls: true,
             };
 
@@ -959,15 +915,12 @@ impl UserCoreOps for UserCore {
             if existing_email.is_some() {
                 return Err(DieselError::NotFound);
             }
-            // Get current user
-            let current_user = users::table.find(params.user_id).first::<User>(conn)?;
-            // Update user table (no longer unverifying on phone change)
+            // Update user table
             diesel::update(users::table.find(params.user_id))
                 .set((
                     users::email.eq(params.email),
                     users::phone_number.eq(params.phone_number),
                     users::nickname.eq(params.nickname),
-                    users::verified.eq(current_user.verified), // Keep verified status unchanged
                     users::preferred_number.eq(params.preferred_number),
                 ))
                 .execute(conn)?;
@@ -1069,96 +1022,6 @@ impl UserCoreOps for UserCore {
             .set(users::last_credits_notification.eq(None::<i32>))
             .execute(&mut conn)?;
         Ok(())
-    }
-
-    fn update_discount_tier(
-        &self,
-        user_id: i32,
-        discount_tier: Option<&str>,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(users::table.find(user_id))
-            .set(users::discount_tier.eq(discount_tier))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    fn update_digests(
-        &self,
-        user_id: i32,
-        morning_digest: Option<&str>,
-        day_digest: Option<&str>,
-        evening_digest: Option<&str>,
-    ) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the digest settings
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set((
-                user_settings::morning_digest.eq(morning_digest.map(|s| s.to_string())),
-                user_settings::day_digest.eq(day_digest.map(|s| s.to_string())),
-                user_settings::evening_digest.eq(evening_digest.map(|s| s.to_string())),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    fn get_digests(&self, user_id: i32) -> Result<DigestSettings, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select((
-                user_settings::morning_digest,
-                user_settings::day_digest,
-                user_settings::evening_digest,
-            ))
-            .first::<(Option<String>, Option<String>, Option<String>)>(&mut conn)?;
-
-        Ok(settings)
-    }
-
-    fn update_proactive_agent_on(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the setting
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::proactive_agent_on.eq(enabled))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    fn get_proactive_agent_on(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Get the setting
-        let proactive_agent_on = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::proactive_agent_on)
-            .first::<bool>(&mut conn)?;
-
-        Ok(proactive_agent_on)
     }
 
     fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
@@ -1433,12 +1296,12 @@ impl UserCoreOps for UserCore {
         self.ensure_user_settings_exist(user_id)?;
 
         // Get the setting
-        let proactive_agent_on = user_settings::table
+        let call_notify = user_settings::table
             .filter(user_settings::user_id.eq(user_id))
             .select(user_settings::notify_about_calls)
             .first::<bool>(&mut conn)?;
 
-        Ok(proactive_agent_on)
+        Ok(call_notify)
     }
 
     fn update_call_notify(&self, user_id: i32, call_notify: bool) -> Result<(), DieselError> {
@@ -1603,27 +1466,6 @@ impl UserCoreOps for UserCore {
         Ok(timestamp)
     }
 
-    fn get_openrouter_api_key(&self, user_id: i32) -> Result<String, Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::decrypt;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::encrypted_openrouter_api_key)
-            .first::<Option<String>>(&mut conn)?;
-
-        match settings {
-            Some(encrypted_openrouter_api_key) => {
-                let openrouter_api_key = decrypt(&encrypted_openrouter_api_key)?;
-                Ok(openrouter_api_key)
-            }
-            _ => Err("Openrouter api key not found".into()),
-        }
-    }
-
     fn get_twilio_credentials(
         &self,
         user_id: i32,
@@ -1732,60 +1574,6 @@ impl UserCoreOps for UserCore {
         Ok(())
     }
 
-    fn get_textbee_credentials(
-        &self,
-        user_id: i32,
-    ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::decrypt;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select((
-                user_settings::encrypted_textbee_device_id,
-                user_settings::encrypted_textbee_api_key,
-            ))
-            .first::<(Option<String>, Option<String>)>(&mut conn)?;
-
-        match settings {
-            (Some(encrypted_device_id), Some(encrypted_api_key)) => {
-                let device_id = decrypt(&encrypted_device_id)?;
-                let api_key = decrypt(&encrypted_api_key)?;
-                Ok((device_id, api_key))
-            }
-            _ => Err("Textbee credentials not found".into()),
-        }
-    }
-
-    fn update_textbee_credentials(
-        &self,
-        user_id: i32,
-        device_id: &str,
-        api_key: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::encrypt;
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_device_id = encrypt(device_id)?;
-        let encrypted_api_key = encrypt(api_key)?;
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set((
-                user_settings::encrypted_textbee_device_id.eq(encrypted_device_id.clone()),
-                user_settings::encrypted_textbee_api_key.eq(encrypted_api_key.clone()),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
     fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1816,39 +1604,6 @@ impl UserCoreOps for UserCore {
         // Update the server_instance_id
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::elevenlabs_phone_number_id.eq(Some(phone_number_id)))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    // Get last instant digest time for on-demand digest feature
-    fn get_last_instant_digest_time(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        self.ensure_user_settings_exist(user_id)?;
-
-        let timestamp = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::last_instant_digest_time)
-            .first::<Option<i32>>(&mut conn)?;
-
-        Ok(timestamp)
-    }
-
-    // Set last instant digest time for on-demand digest feature
-    fn set_last_instant_digest_time(
-        &self,
-        user_id: i32,
-        timestamp: i32,
-    ) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        self.ensure_user_settings_exist(user_id)?;
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::last_instant_digest_time.eq(Some(timestamp)))
             .execute(&mut conn)?;
 
         Ok(())

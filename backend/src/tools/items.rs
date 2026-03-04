@@ -50,7 +50,7 @@ impl ToolHandler for ListTrackedItemsHandler {
 
         let mut result = format!("{} item(s):\n", items.len());
         for item in &items {
-            result.push_str(&format!("- [{}] {}\n", item.id.unwrap_or(0), item.summary,));
+            result.push_str(&format!("- [{}] {}\n", item.id, item.summary,));
         }
 
         Ok(ToolResult::Answer(result))

@@ -2,25 +2,25 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 
 use crate::{
-    models::user_models::{Item, NewItem},
-    schema::items,
-    DbPool,
+    pg_models::{NewPgItem, PgItem},
+    pg_schema::items,
+    PgDbPool,
 };
 
 /// Maximum active items per user (safety limit)
 const MAX_ITEMS_PER_USER: i64 = 100;
 
 pub struct ItemRepository {
-    pub pool: DbPool,
+    pub pool: PgDbPool,
 }
 
 impl ItemRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 
     /// Insert a new item. Returns the new item's id.
-    pub fn create_item(&self, new_item: &NewItem) -> Result<i32, DieselError> {
+    pub fn create_item(&self, new_item: &NewPgItem) -> Result<i32, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Check item limit
@@ -39,50 +39,44 @@ impl ItemRepository {
             ));
         }
 
-        diesel::insert_into(items::table)
+        let item: PgItem = diesel::insert_into(items::table)
             .values(new_item)
-            .execute(&mut conn)?;
+            .get_result(&mut conn)?;
 
-        let item_id: Option<i32> = items::table
-            .filter(items::user_id.eq(new_item.user_id))
-            .order(items::id.desc())
-            .select(items::id)
-            .first(&mut conn)?;
-
-        Ok(item_id.unwrap_or(0))
+        Ok(item.id)
     }
 
     /// Get all items for a user, ordered by priority desc, created_at desc.
-    pub fn get_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
+    pub fn get_items(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         items::table
             .filter(items::user_id.eq(user_id))
             .order(items::priority.desc())
             .then_order_by(items::created_at.desc())
-            .load::<Item>(&mut conn)
+            .load::<PgItem>(&mut conn)
     }
 
     /// Get a single item with ownership check.
-    pub fn get_item(&self, id: i32, user_id: i32) -> Result<Option<Item>, DieselError> {
+    pub fn get_item(&self, id: i32, user_id: i32) -> Result<Option<PgItem>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         items::table
             .filter(items::id.eq(id))
             .filter(items::user_id.eq(user_id))
-            .first::<Item>(&mut conn)
+            .first::<PgItem>(&mut conn)
             .optional()
     }
 
     /// Get items where due_at <= now (scheduler hot path, no LLM).
-    pub fn get_triggered_items(&self, now: i32) -> Result<Vec<Item>, DieselError> {
+    pub fn get_triggered_items(&self, now: i32) -> Result<Vec<PgItem>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         items::table
             .filter(items::due_at.is_not_null())
             .filter(items::due_at.le(now))
-            .load::<Item>(&mut conn)
+            .load::<PgItem>(&mut conn)
     }
 
     /// Get tracking items for a user (summary contains [type:tracking]).
-    pub fn get_tracking_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
+    pub fn get_tracking_items(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
         let all = self.get_items(user_id)?;
         Ok(all
             .into_iter()
@@ -91,7 +85,7 @@ impl ItemRepository {
     }
 
     /// Get all items for dashboard display, ordered by priority desc, created_at desc.
-    pub fn get_dashboard_items(&self, user_id: i32) -> Result<Vec<Item>, DieselError> {
+    pub fn get_dashboard_items(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
         self.get_items(user_id)
     }
 
@@ -114,11 +108,11 @@ impl ItemRepository {
     /// Returns Ok(Some(id)) if inserted, Ok(None) if already exists.
     pub fn create_item_if_not_exists(
         &self,
-        new_item: &NewItem,
+        new_item: &NewPgItem,
     ) -> Result<Option<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        conn.exclusive_transaction(|conn| {
+        conn.transaction(|conn| {
             // Check dedup inside transaction
             if let Some(ref sid) = new_item.source_id {
                 let count: i64 = items::table
@@ -147,17 +141,11 @@ impl ItemRepository {
                 ));
             }
 
-            diesel::insert_into(items::table)
+            let item: PgItem = diesel::insert_into(items::table)
                 .values(new_item)
-                .execute(conn)?;
+                .get_result(conn)?;
 
-            let item_id: Option<i32> = items::table
-                .filter(items::user_id.eq(new_item.user_id))
-                .order(items::id.desc())
-                .select(items::id)
-                .first(conn)?;
-
-            Ok(Some(item_id.unwrap_or(0)))
+            Ok(Some(item.id))
         })
     }
 
@@ -262,13 +250,13 @@ impl ItemRepository {
         &self,
         user_id: i32,
         source_id_prefix: &str,
-    ) -> Result<Vec<Item>, DieselError> {
+    ) -> Result<Vec<PgItem>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let pattern = format!("{}%", source_id_prefix);
         items::table
             .filter(items::user_id.eq(user_id))
             .filter(items::source_id.like(pattern))
-            .load::<Item>(&mut conn)
+            .load::<PgItem>(&mut conn)
     }
 
     /// Cleanup: delete items older than a given timestamp.

@@ -25,7 +25,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    models::user_models::NewTesla,
+    pg_models::NewPgTesla,
     utils::encryption::{decrypt, encrypt},
     AppState,
 };
@@ -480,7 +480,7 @@ pub async fn tesla_callback(
         .as_secs() as i32;
 
     // Store tokens in database
-    let new_tesla = NewTesla {
+    let new_tesla = NewPgTesla {
         user_id,
         encrypted_access_token,
         encrypted_refresh_token,

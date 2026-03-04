@@ -64,13 +64,11 @@ pub async fn get_users(
             phone_number: user.phone_number.clone(),
             nickname: user.nickname,
             time_to_live: user.time_to_live,
-            verified: user.verified,
             credits: user.credits,
             notify: settings.notify,
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
             credits_left: user.credits_left,
-            discount_tier: user.discount_tier,
             plan_type: user.plan_type,
             has_twilio_credentials,
         });
@@ -352,8 +350,8 @@ pub async fn verify_phone_verify(
             Json(json!({"error": "Invalid OTP"})),
         ));
     }
-    // Find user by phone_number to verify
-    let user = match state
+    // Find user by phone_number to confirm they exist
+    let _user = match state
         .user_core
         .find_by_phone_number(&verify_req.phone_number)
     {
@@ -371,15 +369,7 @@ pub async fn verify_phone_verify(
             ));
         }
     };
-    // Verify the user
-    if let Err(e) = state.user_core.verify_user(user.id) {
-        tracing::error!("Error verifying user: {}", e);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to verify user"})),
-        ));
-    }
-    tracing::info!("User verified successfully");
+    tracing::info!("Phone number verified successfully");
 
     // Create success response
     let response = PasswordResetResponse {
@@ -477,11 +467,9 @@ pub async fn register(
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
-        verified: true, // No phone verification required
         credits: 0.00,
         credits_left: 0.00,
         charge_when_under: false,
-        discount: false,
         sub_tier: None,
     };
     state.user_core.create_user(new_user).map_err(|e| {

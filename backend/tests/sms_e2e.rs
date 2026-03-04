@@ -21,8 +21,10 @@ use backend::test_utils::{
 };
 use backend::utils::usage::deduct_from_twilio_price;
 use backend::UserCoreOps;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn test_mock_llm_response_creates_valid_response() {
     let mock = MockLlmResponse::with_direct_response("Test response");
     let response = mock.to_response();
@@ -39,6 +41,7 @@ fn test_mock_llm_response_creates_valid_response() {
 }
 
 #[test]
+#[serial]
 fn test_us_user_params_has_correct_phone_format() {
     let params = TestUserParams::us_user(10.0, 5.0);
     assert!(
@@ -51,6 +54,7 @@ fn test_us_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_finland_user_params_has_correct_phone_format() {
     let params = TestUserParams::finland_user(5.0, 2.5);
     assert!(
@@ -60,6 +64,7 @@ fn test_finland_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_uk_user_params_has_correct_phone_format() {
     let params = TestUserParams::uk_user(5.0, 2.5);
     assert!(
@@ -69,6 +74,7 @@ fn test_uk_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_germany_user_params_has_correct_phone_format() {
     let params = TestUserParams::germany_user(5.0, 2.5);
     assert!(
@@ -78,6 +84,7 @@ fn test_germany_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_process_sms_options_default_is_production() {
     let options = ProcessSmsOptions::default();
     assert!(!options.skip_twilio_send);
@@ -85,6 +92,7 @@ fn test_process_sms_options_default_is_production() {
 }
 
 #[test]
+#[serial]
 fn test_process_sms_options_web_chat_skips_twilio() {
     let options = ProcessSmsOptions::web_chat();
     assert!(options.skip_twilio_send);
@@ -92,6 +100,7 @@ fn test_process_sms_options_web_chat_skips_twilio() {
 }
 
 #[test]
+#[serial]
 fn test_process_sms_options_test_with_mock() {
     let mock = MockLlmResponse::with_direct_response("Test");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
@@ -106,6 +115,7 @@ fn test_process_sms_options_test_with_mock() {
 // not at send time. These tests verify the callback deduction logic.
 
 #[test]
+#[serial]
 fn test_callback_deduction_from_credits_left() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -129,6 +139,7 @@ fn test_callback_deduction_from_credits_left() {
 }
 
 #[test]
+#[serial]
 fn test_callback_deduction_fallback_when_credits_left_exhausted() {
     let state = create_test_state();
     let params = TestUserParams::us_user(0.0, 5.0);
@@ -147,6 +158,7 @@ fn test_callback_deduction_fallback_when_credits_left_exhausted() {
 }
 
 #[test]
+#[serial]
 fn test_callback_deduction_finland_user() {
     let state = create_test_state();
     let params = TestUserParams::finland_user(5.0, 2.5);
@@ -168,6 +180,7 @@ fn test_callback_deduction_finland_user() {
 }
 
 #[test]
+#[serial]
 fn test_callback_deduction_uk_user() {
     let state = create_test_state();
     let params = TestUserParams::uk_user(5.0, 2.5);
@@ -186,6 +199,7 @@ fn test_callback_deduction_uk_user() {
 }
 
 #[test]
+#[serial]
 fn test_callback_deduction_germany_user() {
     let state = create_test_state();
     let params = TestUserParams::germany_user(5.0, 2.5);
@@ -209,6 +223,7 @@ fn test_callback_deduction_germany_user() {
 // These tests run the complete SMS processing pipeline with mock LLM
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_us_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -245,6 +260,7 @@ async fn test_process_sms_us_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_finland_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::finland_user(5.0, 2.5);
@@ -274,6 +290,7 @@ async fn test_process_sms_finland_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_uk_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::uk_user(5.0, 2.5);
@@ -303,6 +320,7 @@ async fn test_process_sms_uk_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_germany_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::germany_user(5.0, 2.5);
@@ -332,6 +350,7 @@ async fn test_process_sms_germany_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_credits_fallback_full_flow() {
     let state = create_test_state();
     // User with no credits_left, only credits
@@ -362,6 +381,7 @@ async fn test_process_sms_credits_fallback_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_rejects_user_with_no_credits() {
     let state = create_test_state();
     // User with no credits at all
@@ -401,6 +421,7 @@ async fn test_process_sms_rejects_user_with_no_credits() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_unknown_phone_returns_not_found() {
     let state = create_test_state();
     // Don't create any user - phone number won't exist
@@ -424,6 +445,7 @@ async fn test_process_sms_unknown_phone_returns_not_found() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_phone_service_deactivated() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -462,6 +484,7 @@ async fn test_process_sms_phone_service_deactivated() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_cancel_message() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -491,6 +514,7 @@ async fn test_process_sms_cancel_message() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_byot_user_skips_credit_check() {
     let state = create_test_state();
     // User with NO credits at all
@@ -529,6 +553,7 @@ async fn test_process_sms_byot_user_skips_credit_check() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_empty_message_body() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -558,6 +583,7 @@ async fn test_process_sms_empty_message_body() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_whitespace_only_message() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -582,6 +608,7 @@ async fn test_process_sms_whitespace_only_message() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_very_long_message() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -606,6 +633,7 @@ async fn test_process_sms_very_long_message() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_unicode_emoji_message() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -630,6 +658,7 @@ async fn test_process_sms_unicode_emoji_message() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_uppercase_cancel() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -662,6 +691,7 @@ async fn test_process_sms_uppercase_cancel() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_low_credits_still_processes() {
     let state = create_test_state();
     // User with low credits_left - SMS pre-check only requires > 0.01
@@ -691,6 +721,7 @@ async fn test_process_sms_low_credits_still_processes() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_fractional_credits_accepted() {
     let state = create_test_state();
     // User with 0.5 credits_left - SMS pre-check only requires > 0.01
@@ -721,6 +752,7 @@ async fn test_process_sms_fractional_credits_accepted() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_negative_credits_rejected() {
     let state = create_test_state();
     // User with negative credits (data corruption scenario)
@@ -751,6 +783,7 @@ async fn test_process_sms_negative_credits_rejected() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_with_image_attachment() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -779,6 +812,7 @@ async fn test_process_sms_with_image_attachment() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_with_multiple_attachments() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -809,6 +843,7 @@ async fn test_process_sms_with_multiple_attachments() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_long_llm_response() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -835,6 +870,7 @@ async fn test_process_sms_long_llm_response() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_empty_llm_response() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -862,6 +898,7 @@ async fn test_process_sms_empty_llm_response() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_invalid_tool_call() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -893,6 +930,7 @@ async fn test_process_sms_invalid_tool_call() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_user_with_no_sub_tier() {
     let state = create_test_state();
     // User with sub_tier = None (no subscription)
@@ -924,6 +962,7 @@ async fn test_process_sms_user_with_no_sub_tier() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_user_with_invalid_sub_tier() {
     let state = create_test_state();
     // User with invalid sub_tier (not "tier 2")
@@ -955,6 +994,7 @@ async fn test_process_sms_user_with_invalid_sub_tier() {
 // ============================================================
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_missing_function_name_returns_internal_error() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -990,6 +1030,7 @@ async fn test_process_sms_missing_function_name_returns_internal_error() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_missing_arguments_returns_internal_error() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1021,6 +1062,7 @@ async fn test_process_sms_missing_arguments_returns_internal_error() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_malformed_json_continues_gracefully() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1054,6 +1096,7 @@ async fn test_process_sms_malformed_json_continues_gracefully() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_error_message_does_not_leak_content() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1099,6 +1142,7 @@ async fn test_process_sms_error_message_does_not_leak_content() {
 
 /// Contract A.2: Response fits SMS length limit (<= 480 chars)
 #[tokio::test]
+#[serial]
 async fn test_contract_response_fits_sms() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1126,6 +1170,7 @@ async fn test_contract_response_fits_sms() {
 
 /// Contract B.1: Successful message + callback charges user
 #[tokio::test]
+#[serial]
 async fn test_contract_successful_message_charges_user() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1161,6 +1206,7 @@ async fn test_contract_successful_message_charges_user() {
 
 /// Contract B.2: Failed message preserves credits
 #[tokio::test]
+#[serial]
 async fn test_contract_failed_message_preserves_credits() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1194,6 +1240,7 @@ async fn test_contract_failed_message_preserves_credits() {
 
 /// Contract D.2: Error messages protect privacy (don't leak user content)
 #[tokio::test]
+#[serial]
 async fn test_contract_error_messages_protect_privacy() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1225,6 +1272,7 @@ async fn test_contract_error_messages_protect_privacy() {
 
 /// Contract E.1: "forget" command clears context
 #[tokio::test]
+#[serial]
 async fn test_contract_forget_command_clears_context() {
     let state = create_test_state();
     let params = TestUserParams::us_user(10.0, 5.0);
@@ -1273,6 +1321,7 @@ async fn test_contract_forget_command_clears_context() {
 // These tests ensure all country branches in TwilioMessageService are covered
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_canada_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::canada_user(10.0, 5.0);
@@ -1301,6 +1350,7 @@ async fn test_process_sms_canada_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_netherlands_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::netherlands_user(5.0, 2.5);
@@ -1330,6 +1380,7 @@ async fn test_process_sms_netherlands_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_australia_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::australia_user(5.0, 2.5);
@@ -1359,6 +1410,7 @@ async fn test_process_sms_australia_user_full_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_process_sms_france_user_full_flow() {
     let state = create_test_state();
     let params = TestUserParams::france_user(5.0, 2.5);
@@ -1392,6 +1444,7 @@ async fn test_process_sms_france_user_full_flow() {
 // ============================================================
 
 #[test]
+#[serial]
 fn test_canada_user_params_has_correct_phone_format() {
     let params = TestUserParams::canada_user(10.0, 5.0);
     // Canada uses +1 but with Canadian area codes (e.g., 647 for Toronto)
@@ -1407,6 +1460,7 @@ fn test_canada_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_netherlands_user_params_has_correct_phone_format() {
     let params = TestUserParams::netherlands_user(5.0, 2.5);
     assert!(
@@ -1416,6 +1470,7 @@ fn test_netherlands_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_australia_user_params_has_correct_phone_format() {
     let params = TestUserParams::australia_user(5.0, 2.5);
     assert!(
@@ -1425,6 +1480,7 @@ fn test_australia_user_params_has_correct_phone_format() {
 }
 
 #[test]
+#[serial]
 fn test_france_user_params_has_correct_phone_format() {
     let params = TestUserParams::france_user(5.0, 2.5);
     assert!(

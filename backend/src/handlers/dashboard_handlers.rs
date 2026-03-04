@@ -193,7 +193,7 @@ pub async fn get_dashboard_summary(
         });
 
         attention_items.push(AttentionItem {
-            id: item.id.unwrap_or(0),
+            id: item.id,
             item_type: item_type.to_string(),
             summary: item.summary.clone(),
             description,
@@ -257,7 +257,7 @@ pub async fn get_dashboard_summary(
 }
 
 fn find_next_scheduled_item(
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
     now_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Option<ScheduledItem> {
@@ -272,12 +272,12 @@ fn find_next_scheduled_item(
         .map(|(item, nca)| ScheduledItem {
             time_display: format_time_display(nca, tz),
             description: item.summary.clone(),
-            item_id: item.id,
+            item_id: Some(item.id),
         })
 }
 
 fn find_upcoming_items(
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
@@ -301,7 +301,7 @@ fn find_upcoming_items(
                         None
                     };
                     UpcomingItem {
-                        item_id: item.id,
+                        item_id: Some(item.id),
                         timestamp: nca,
                         time_display: format_time_display(nca, tz),
                         description,
@@ -320,7 +320,7 @@ fn find_upcoming_items(
 }
 
 fn find_upcoming_digest_items(
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
@@ -332,7 +332,7 @@ fn find_upcoming_digest_items(
             item.due_at
                 .filter(|&nca| nca > now_ts && nca <= max_ts)
                 .map(|nca| UpcomingDigest {
-                    item_id: item.id,
+                    item_id: Some(item.id),
                     timestamp: nca,
                     time_display: format_time_display(nca, tz),
                     sources: None,
@@ -347,7 +347,7 @@ fn find_upcoming_digest_items(
 /// Find items beyond the current timeline range (for the extend button)
 /// Returns up to 5 items for preview and the total count
 fn find_items_beyond(
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
     now_ts: i32,
     max_ts: i32,
     tz: &chrono_tz::Tz,
@@ -374,7 +374,7 @@ fn find_items_beyond(
                         None
                     };
                     UpcomingItem {
-                        item_id: item.id,
+                        item_id: Some(item.id),
                         timestamp: nca,
                         time_display: format_time_display(nca, tz),
                         description,
@@ -409,7 +409,7 @@ fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedConta
 }
 
 fn find_next_digest_item(
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
     now_ts: i32,
     tz: &chrono_tz::Tz,
 ) -> Option<NextDigestInfo> {
@@ -672,9 +672,9 @@ pub struct SnoozeRequest {
     pub minutes: Option<i32>, // default 60
 }
 
-fn item_to_response(item: crate::models::user_models::Item) -> ItemResponse {
+fn item_to_response(item: crate::pg_models::PgItem) -> ItemResponse {
     ItemResponse {
-        id: item.id.unwrap_or(0),
+        id: item.id,
         summary: item.summary,
         due_at: item.due_at,
         priority: item.priority,
@@ -759,7 +759,7 @@ pub async fn get_item_detail(
     };
 
     Ok(Json(serde_json::json!({
-        "id": item.id.unwrap_or(0),
+        "id": item.id,
         "trigger_timestamp": trigger_ts,
         "time_display": format_time_display(trigger_ts, &tz),
         "date_display": format_date_display(trigger_ts, &tz),
@@ -805,7 +805,7 @@ pub async fn snooze_item(
 
     state
         .item_repository
-        .update_due_at(item.id.unwrap_or(0), Some(snooze_until))
+        .update_due_at(item.id, Some(snooze_until))
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -277,27 +277,7 @@ pub async fn fetch_assistant(
                     ));
                 }
             };
-            // If user is not verified, verify them
-            if !user.verified {
-                if let Err(e) = state.user_core.verify_user(user.id) {
-                    tracing::error!("Error verifying user: {}", e);
-                    // Continue even if verification fails
-                } else if user_settings.agent_language == "fi" {
-                    conversation_config_override.agent.first_message =
-                        "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string();
-                    conversation_config_override.tts.voice_id = fi_voice_id.clone();
-                } else if user_settings.agent_language == "de" {
-                    conversation_config_override.agent.first_message =
-                        "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?"
-                            .to_string();
-                    conversation_config_override.tts.voice_id = de_voice_id.clone();
-                } else {
-                    conversation_config_override.agent.first_message =
-                        "Welcome! Your number is now verified. Anyways, how can I help?"
-                            .to_string();
-                    conversation_config_override.tts.voice_id = us_voice_id.clone();
-                }
-            } else if crate::utils::usage::check_user_credits(&state, &user, "voice", None)
+            if crate::utils::usage::check_user_credits(&state, &user, "voice", None)
                 .await
                 .is_err()
             {
@@ -369,7 +349,7 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
             let history_limit = 1;
-            let history: Vec<crate::models::user_models::MessageHistory> = match state
+            let history: Vec<crate::pg_models::PgMessageHistory> = match state
                 .user_repository
                 .get_conversation_history(user.id, history_limit, /*include_tools=*/ false)
             {
@@ -550,7 +530,7 @@ pub async fn handle_create_item_voice(
         .as_deref()
         .and_then(crate::proactive::utils::parse_iso_to_timestamp);
 
-    let new_item = crate::models::user_models::NewItem {
+    let new_item = crate::pg_models::NewPgItem {
         user_id,
         summary,
         due_at,
@@ -610,7 +590,7 @@ pub async fn handle_fetch_items_voice(
         .into_iter()
         .map(|item| {
             json!({
-                "id": item.id.unwrap_or(0),
+                "id": item.id,
                 "summary": item.summary,
                 "item_type": crate::proactive::utils::parse_summary_tags(&item.summary).item_type,
                 "due_at": item.due_at,

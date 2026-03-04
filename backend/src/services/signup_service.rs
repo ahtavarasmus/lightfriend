@@ -161,11 +161,9 @@ impl<R: SignupRepository> SignupService<R> {
             password_hash: "NOT_SET".to_string(),
             phone_number: phone_to_use.clone(),
             time_to_live: joined_at,
-            verified: true, // No phone verification needed
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            discount: false,
             sub_tier: None,
         };
 

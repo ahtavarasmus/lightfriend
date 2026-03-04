@@ -1,0 +1,5 @@
+[print_schema]
+file = "src/pg_schema.rs"
+
+[migrations_directory]
+dir = "pg_migrations"

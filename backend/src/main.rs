@@ -43,6 +43,7 @@ pub fn validate_env() {
         "JWT_SECRET_KEY",
         "JWT_REFRESH_KEY",
         "DATABASE_URL",
+        "PG_DATABASE_URL",
         "ENCRYPTION_KEY",
         "MATRIX_SHARED_SECRET",
     ];
@@ -140,11 +141,9 @@ async fn bootstrap_admin_if_needed(
         password_hash,
         phone_number: phone.clone(),
         time_to_live: 60,
-        verified: true,
         credits: 1000.0,
         credits_left: 1000.0,
         charge_when_under: false,
-        discount: false,
         sub_tier: Some("2".to_string()), // tier 2 = sentinel (full access)
     };
 
@@ -216,6 +215,27 @@ async fn main() {
         .connection_customizer(Box::new(SqliteConnectionCustomizer))
         .build(manager)
         .expect("Failed to create pool");
+
+    // PostgreSQL pool for sensitive data
+    let pg_database_url =
+        std::env::var("PG_DATABASE_URL").expect("PG_DATABASE_URL must be set in environment");
+    let pg_manager = ConnectionManager::<diesel::PgConnection>::new(pg_database_url);
+    let pg_pool = r2d2::Pool::builder()
+        .build(pg_manager)
+        .expect("Failed to create PG pool");
+
+    // Run PG migrations
+    {
+        use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
+        const PG_MIGRATIONS: EmbeddedMigrations =
+            diesel_migrations::embed_migrations!("pg_migrations");
+        let mut pg_conn = pg_pool.get().expect("Failed to get PG connection");
+        pg_conn
+            .run_pending_migrations(PG_MIGRATIONS)
+            .expect("Failed to run PG migrations");
+        tracing::info!("PG migrations applied successfully");
+    }
+
     let user_core = Arc::new(UserCore::new(pool.clone()));
 
     // Bootstrap admin user on first startup (only if database is empty)
@@ -223,10 +243,10 @@ async fn main() {
         tracing::warn!("Admin bootstrap failed (app will continue): {}", e);
     }
 
-    let user_repository = Arc::new(UserRepository::new(pool.clone()));
-    let item_repository = Arc::new(ItemRepository::new(pool.clone()));
-    let totp_repository = Arc::new(TotpRepository::new(pool.clone()));
-    let webauthn_repository = Arc::new(WebauthnRepository::new(pool.clone()));
+    let user_repository = Arc::new(UserRepository::new(pg_pool.clone(), pool.clone()));
+    let item_repository = Arc::new(ItemRepository::new(pg_pool.clone()));
+    let totp_repository = Arc::new(TotpRepository::new(pg_pool.clone()));
+    let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pool.clone()));
     let server_url_oauth =
@@ -292,6 +312,7 @@ async fn main() {
     ));
     let state = Arc::new(AppState {
         db_pool: pool,
+        pg_pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
         item_repository,
@@ -499,10 +520,6 @@ async fn main() {
     let admin_routes = Router::new()
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route(
-            "/api/admin/verify/{user_id}",
-            post(admin_handlers::verify_user),
-        )
-        .route(
             "/api/admin/preferred-number/{user_id}",
             post(admin_handlers::update_preferred_number_admin),
         )
@@ -526,10 +543,6 @@ async fn main() {
         .route(
             "/api/admin/monthly-credits/{user_id}/{amount}",
             post(admin_handlers::update_monthly_credits),
-        )
-        .route(
-            "/api/admin/discount-tier/{user_id}/{tier}",
-            post(admin_handlers::update_discount_tier),
         )
         .route(
             "/api/admin/send-password-reset/{user_id}",
@@ -669,10 +682,6 @@ async fn main() {
             delete(self_host_handlers::clear_twilio_creds),
         )
         .route(
-            "/api/profile/textbee-creds",
-            post(self_host_handlers::update_textbee_creds),
-        )
-        .route(
             "/api/profile/timezone",
             post(profile_handlers::update_timezone),
         )
@@ -698,21 +707,12 @@ async fn main() {
             post(profile_handlers::update_notify),
         )
         .route(
-            "/api/profile/digests",
-            post(profile_handlers::update_digests),
-        )
-        .route("/api/profile/digests", get(profile_handlers::get_digests))
-        .route(
             "/api/profile/critical",
             post(profile_handlers::update_critical_settings),
         )
         .route(
             "/api/profile/critical",
             get(profile_handlers::get_critical_settings),
-        )
-        .route(
-            "/api/profile/proactive-agent",
-            get(profile_handlers::get_proactive_agent_on),
         )
         .route(
             "/api/profile/quiet-mode",

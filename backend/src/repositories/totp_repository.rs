@@ -1,8 +1,8 @@
 use crate::utils::encryption::{decrypt, encrypt};
 use crate::{
-    models::user_models::{NewTotpBackupCode, NewTotpSecret, TotpBackupCode, TotpSecret},
-    schema::{totp_backup_codes, totp_secrets},
-    DbPool,
+    pg_models::{NewPgTotpBackupCode, NewPgTotpSecret, PgTotpBackupCode, PgTotpSecret},
+    pg_schema::{totp_backup_codes, totp_secrets},
+    PgDbPool,
 };
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -10,11 +10,11 @@ use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct TotpRepository {
-    pool: DbPool,
+    pool: PgDbPool,
 }
 
 impl TotpRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 
@@ -36,7 +36,7 @@ impl TotpRepository {
             .unwrap()
             .as_secs() as i32;
 
-        let new_secret = NewTotpSecret {
+        let new_secret = NewPgTotpSecret {
             user_id,
             encrypted_secret,
             enabled: 0, // Not enabled until verified
@@ -60,8 +60,8 @@ impl TotpRepository {
 
         let secret_opt = totp_secrets::table
             .filter(totp_secrets::user_id.eq(user_id))
-            .select(TotpSecret::as_select())
-            .first::<TotpSecret>(&mut conn)
+            .select(PgTotpSecret::as_select())
+            .first::<PgTotpSecret>(&mut conn)
             .optional()?;
 
         match secret_opt {
@@ -151,7 +151,7 @@ impl TotpRepository {
                 ))))
             })?;
 
-            let new_code = NewTotpBackupCode {
+            let new_code = NewPgTotpBackupCode {
                 user_id,
                 code_hash,
                 used: 0,
@@ -176,8 +176,8 @@ impl TotpRepository {
         let backup_codes = totp_backup_codes::table
             .filter(totp_backup_codes::user_id.eq(user_id))
             .filter(totp_backup_codes::used.eq(0))
-            .select(TotpBackupCode::as_select())
-            .load::<TotpBackupCode>(&mut conn)?;
+            .select(PgTotpBackupCode::as_select())
+            .load::<PgTotpBackupCode>(&mut conn)?;
 
         // Check each code
         for backup_code in backup_codes {
