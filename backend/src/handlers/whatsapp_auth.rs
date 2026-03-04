@@ -13,7 +13,7 @@ use matrix_sdk::{
     },
     Client as MatrixClient,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -285,6 +285,327 @@ async fn connect_whatsapp(
         "WhatsApp QR code not received within timeout. Please try again."
     ))?;
     Ok((room_id.into(), qr_code_url))
+}
+
+#[derive(Deserialize)]
+pub struct WhatsappPhoneRequest {
+    pub phone_number: String,
+}
+
+#[derive(Serialize)]
+pub struct WhatsappPhoneResponse {
+    pub pairing_code: String,
+}
+
+/// Similar to connect_whatsapp but sends `!wa login phone <number>` and waits for a text pairing code
+async fn connect_whatsapp_phone(
+    client: &MatrixClient,
+    bridge_bot: &str,
+    phone_number: &str,
+) -> Result<(OwnedRoomId, String)> {
+    tracing::debug!("Starting WhatsApp phone pairing process");
+
+    let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
+
+    let request = CreateRoomRequest::new();
+    let response = client.create_room(request).await?;
+    let room_id = response.room_id();
+
+    tracing::debug!("Created room with ID: {}", room_id);
+
+    let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
+
+    tracing::debug!("Inviting bot user: {}", bot_user_id);
+    room.invite_user_by_id(&bot_user_id).await?;
+
+    // Single sync to get the invitation processed
+    client
+        .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
+        .await?;
+
+    // Wait for bot to join
+    for _ in 0..15 {
+        let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
+        if members.iter().any(|m| m.user_id() == bot_user_id) {
+            tracing::debug!("Bot has joined the room");
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
+    if !members.iter().any(|m| m.user_id() == bot_user_id) {
+        return Err(anyhow!("Bot {} failed to join room", bot_user_id));
+    }
+
+    // Cancel any previous login attempt
+    room.send(RoomMessageEventContent::text_plain("!wa cancel"))
+        .await?;
+
+    // Send phone login command
+    let login_command = format!("!wa login phone {}", phone_number);
+    tracing::info!("Sending WhatsApp phone login command");
+    room.send(RoomMessageEventContent::text_plain(&login_command))
+        .await?;
+
+    // Wait for pairing code text response from bot
+    let mut pairing_code = None;
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
+
+    for attempt in 1..=60 {
+        tracing::debug!("Phone pairing sync attempt #{}/60", attempt);
+        client.sync_once(sync_settings.clone()).await?;
+
+        if let Some(room) = client.get_room(room_id) {
+            let mut options =
+                matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
+            let messages = room.messages(options).await?;
+
+            for msg in messages.chunk.iter() {
+                let raw_event = msg.raw();
+                if let Ok(event) = raw_event.deserialize() {
+                    if event.sender() == bot_user_id {
+                        if let AnySyncTimelineEvent::MessageLike(
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                sync_event,
+                            ),
+                        ) = event.clone()
+                        {
+                            let event_content: RoomMessageEventContent = match sync_event {
+                                SyncRoomMessageEvent::Original(original_event) => {
+                                    original_event.content
+                                }
+                                SyncRoomMessageEvent::Redacted(_) => continue,
+                            };
+
+                            let body = match &event_content.msgtype {
+                                MessageType::Text(t) => &t.body,
+                                MessageType::Notice(n) => &n.body,
+                                _ => continue,
+                            };
+
+                            // Check for error messages
+                            if body.to_lowercase().contains("error") {
+                                return Err(anyhow!("Error from bot: {}", body));
+                            }
+
+                            // The bridge returns the pairing code as a short alphanumeric string
+                            // like "A1B2-C3D4" or similar pattern
+                            if let Some(code) = extract_pairing_code(body) {
+                                pairing_code = Some(code);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if pairing_code.is_some() {
+                break;
+            }
+        }
+
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    let pairing_code = pairing_code.ok_or(anyhow!(
+        "WhatsApp pairing code not received within timeout. Please try again."
+    ))?;
+
+    Ok((room_id.into(), pairing_code))
+}
+
+/// Extract pairing code from bot message.
+/// The mautrix-whatsapp bridge returns something like "Your pairing code: ABCD-EFGH" or just the code.
+/// Pairing codes are 8 alphanumeric characters, sometimes with a hyphen in the middle.
+fn extract_pairing_code(message: &str) -> Option<String> {
+    // Look for an 8-character alphanumeric code pattern (with optional hyphen)
+    let re = regex::Regex::new(r"[A-Z0-9]{4}-[A-Z0-9]{4}").ok()?;
+    if let Some(m) = re.find(message) {
+        return Some(m.as_str().to_string());
+    }
+    // Also try without hyphen (8 consecutive alphanumeric chars that aren't part of a longer word)
+    let re2 = regex::Regex::new(r"\b[A-Z0-9]{8}\b").ok()?;
+    if let Some(m) = re2.find(message) {
+        return Some(m.as_str().to_string());
+    }
+    None
+}
+
+/// Wrapper with retry logic for phone pairing (mirrors connect_whatsapp_with_retry)
+async fn connect_whatsapp_phone_with_retry(
+    client: &mut Arc<MatrixClient>,
+    bridge_bot: &str,
+    phone_number: &str,
+    user_id: i32,
+    state: &Arc<AppState>,
+) -> Result<(OwnedRoomId, String)> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+    let username = client
+        .user_id()
+        .ok_or_else(|| anyhow!("User ID not available"))?
+        .localpart()
+        .to_string();
+
+    for retry_count in 0..MAX_RETRIES {
+        match connect_whatsapp_phone(client, bridge_bot, phone_number).await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if retry_count < MAX_RETRIES - 1 && is_one_time_key_conflict(&e) {
+                    tracing::warn!(
+                        "One-time key conflict for user {} (attempt {}/{}), resetting client store",
+                        user_id,
+                        retry_count + 1,
+                        MAX_RETRIES
+                    );
+                    clear_user_store(&username).await?;
+                    sleep(RETRY_DELAY).await;
+                    match matrix_auth::get_client(user_id, state).await {
+                        Ok(new_client) => {
+                            *client = new_client.into();
+                            continue;
+                        }
+                        Err(init_err) => return Err(init_err),
+                    }
+                } else if is_one_time_key_conflict(&e) {
+                    return Err(anyhow!(
+                        "Failed after {} attempts to resolve one-time key conflict: {}",
+                        MAX_RETRIES,
+                        e
+                    ));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("Exceeded maximum retry attempts ({})", MAX_RETRIES))
+}
+
+pub async fn start_whatsapp_phone_connection(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    AxumJson(payload): AxumJson<WhatsappPhoneRequest>,
+) -> Result<AxumJson<WhatsappPhoneResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
+    tracing::debug!(
+        "Starting WhatsApp phone connection for user {}",
+        auth_user.user_id
+    );
+
+    // Validate phone number (basic check: starts with + and has digits)
+    let phone = payload.phone_number.trim().to_string();
+    if !phone.starts_with('+') || phone.len() < 7 || !phone[1..].chars().all(|c| c.is_ascii_digit())
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            AxumJson(
+                json!({"error": "Invalid phone number. Must start with + and country code (e.g. +14155551234)"}),
+            ),
+        ));
+    }
+
+    // Delete any existing bridge
+    if let Err(e) = state
+        .user_repository
+        .delete_bridge(auth_user.user_id, "whatsapp")
+    {
+        tracing::warn!("No existing bridge to delete or error deleting: {}", e);
+    }
+
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
+            )
+        })?;
+
+    // Auto-cleanup if leftovers detected
+    if let Err(e) = cleanup_whatsapp_if_needed(&state, &client, auth_user.user_id).await {
+        tracing::warn!("Auto-cleanup had issues but continuing: {}", e);
+    }
+
+    let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT").expect("WHATSAPP_BRIDGE_BOT not set");
+
+    let mut client_clone = Arc::clone(&client);
+    let (room_id, pairing_code) = connect_whatsapp_phone_with_retry(
+        &mut client_clone,
+        &bridge_bot,
+        &phone,
+        auth_user.user_id,
+        &state,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": format!("Failed to get pairing code: {}", e)})),
+        )
+    })?;
+
+    // Create bridge record
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let new_bridge = NewPgBridge {
+        user_id: auth_user.user_id,
+        bridge_type: "whatsapp".to_string(),
+        status: "connecting".to_string(),
+        room_id: Some(room_id.to_string()),
+        data: None,
+        created_at: Some(current_time),
+    };
+
+    state
+        .user_repository
+        .create_bridge(new_bridge)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to store bridge information: {}", e)})),
+            )
+        })?;
+
+    // Spawn monitor task (same as QR code flow)
+    let state_clone = state.clone();
+    let room_id_clone = room_id.clone();
+    let bridge_bot_clone = bridge_bot.to_string();
+    let client_for_monitor = client.clone();
+
+    tokio::spawn(async move {
+        match monitor_whatsapp_connection(
+            &client_for_monitor,
+            &room_id_clone,
+            &bridge_bot_clone,
+            auth_user.user_id,
+            state_clone,
+        )
+        .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    "WhatsApp phone connection monitoring completed for user {}",
+                    auth_user.user_id
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    "WhatsApp phone connection monitoring failed for user {}: {}",
+                    auth_user.user_id,
+                    e
+                );
+            }
+        }
+    });
+
+    Ok(AxumJson(WhatsappPhoneResponse { pairing_code }))
 }
 
 // Internal cleanup helper (callable from connect; no response needed)
