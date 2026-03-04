@@ -534,7 +534,7 @@ pub fn setup_test_encryption() {
 pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
     setup_test_encryption();
     state
-        .user_core
+        .user_repository
         .update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
         .expect("Failed to set BYOT credentials");
     // Also set plan_type to "byot" so is_byot_user() returns true
@@ -1069,36 +1069,9 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn get_twilio_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-            Ok(("test_sid".to_string(), "test_token".to_string()))
-        }
-
-        fn has_twilio_credentials(&self, _user_id: i32) -> bool {
-            false
-        }
-
         fn is_byot_user(&self, user_id: i32) -> bool {
             self.calls.lock().unwrap().is_byot_user_calls.push(user_id);
             self.byot_users.lock().unwrap().contains(&user_id)
-        }
-
-        fn update_twilio_credentials(
-            &self,
-            _user_id: i32,
-            _sid: &str,
-            _token: &str,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn clear_twilio_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
         }
 
         fn get_elevenlabs_phone_number_id(

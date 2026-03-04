@@ -1305,20 +1305,6 @@ impl UserRepository {
                 .execute(&mut conn)?;
         }
 
-        // Also update the SQLite users table so existing reads still work
-        {
-            use crate::schema::users;
-            let mut sqlite_conn = self.db_pool.get().expect("Failed to get SQLite connection");
-            diesel::update(users::table.find(user_id))
-                .set((
-                    users::matrix_username.eq(Some(matrix_username)),
-                    users::matrix_device_id.eq(Some(device_id)),
-                    users::encrypted_matrix_access_token.eq(Some(&encrypted_access_token)),
-                    users::encrypted_matrix_password.eq(Some(&encrypted_password)),
-                ))
-                .execute(&mut sqlite_conn)?;
-        }
-
         Ok(())
     }
 
@@ -1357,18 +1343,6 @@ impl UserRepository {
                 .execute(&mut conn)?;
         }
 
-        // Also update SQLite
-        {
-            use crate::schema::users;
-            let mut sqlite_conn = self.db_pool.get().expect("Failed to get SQLite connection");
-            diesel::update(users::table.find(user_id))
-                .set((
-                    users::matrix_device_id.eq(Some(device_id)),
-                    users::encrypted_matrix_access_token.eq(Some(&encrypted_access_token)),
-                ))
-                .execute(&mut sqlite_conn)?;
-        }
-
         Ok(())
     }
 
@@ -1386,21 +1360,6 @@ impl UserRepository {
                 user_secrets::encrypted_matrix_secret_storage_recovery_key.eq(None::<String>),
             ))
             .execute(&mut conn)?;
-
-        // Also clear in SQLite
-        {
-            use crate::schema::users;
-            let mut sqlite_conn = self.db_pool.get().expect("Failed to get SQLite connection");
-            diesel::update(users::table.find(user_id))
-                .set((
-                    users::matrix_username.eq(None::<String>),
-                    users::matrix_device_id.eq(None::<String>),
-                    users::encrypted_matrix_access_token.eq(None::<String>),
-                    users::encrypted_matrix_password.eq(None::<String>),
-                    users::encrypted_matrix_secret_storage_recovery_key.eq(None::<String>),
-                ))
-                .execute(&mut sqlite_conn)?;
-        }
 
         Ok(())
     }
@@ -1437,15 +1396,114 @@ impl UserRepository {
                 .execute(&mut conn)?;
         }
 
-        // Also update SQLite
-        {
-            use crate::schema::users;
-            let mut sqlite_conn = self.db_pool.get().expect("Failed to get SQLite connection");
-            diesel::update(users::table.find(user_id))
-                .set(users::encrypted_matrix_secret_storage_recovery_key.eq(Some(&encrypted_key)))
-                .execute(&mut sqlite_conn)?;
+        Ok(())
+    }
+
+    /// Get Twilio credentials from PG `user_secrets` table.
+    pub fn get_twilio_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let settings = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::encrypted_twilio_account_sid,
+                user_secrets::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn)?;
+
+        match settings {
+            (Some(encrypted_account_sid), Some(encrypted_auth_token)) => {
+                let account_sid = decrypt(&encrypted_account_sid)?;
+                let auth_token = decrypt(&encrypted_auth_token)?;
+                Ok((account_sid, auth_token))
+            }
+            _ => Err("Twilio credentials not found".into()),
+        }
+    }
+
+    /// Check if user has their own Twilio credentials stored (BYOT) in PG.
+    pub fn has_twilio_credentials(&self, user_id: i32) -> bool {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let settings = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::encrypted_twilio_account_sid,
+                user_secrets::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn);
+
+        matches!(settings, Ok((Some(_), Some(_))))
+    }
+
+    /// Update Twilio credentials in PG `user_secrets` table.
+    pub fn update_twilio_credentials(
+        &self,
+        user_id: i32,
+        account_sid: &str,
+        auth_token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let encrypted_account_sid = encrypt(account_sid)?;
+        let encrypted_auth_token = encrypt(auth_token)?;
+
+        // Try update first
+        let rows = diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::encrypted_twilio_account_sid.eq(Some(&encrypted_account_sid)),
+                user_secrets::encrypted_twilio_auth_token.eq(Some(&encrypted_auth_token)),
+            ))
+            .execute(&mut conn)?;
+
+        if rows == 0 {
+            // Insert new row
+            diesel::insert_into(user_secrets::table)
+                .values(&crate::pg_models::NewUserSecrets {
+                    user_id,
+                    matrix_username: None,
+                    matrix_device_id: None,
+                    encrypted_matrix_access_token: None,
+                    encrypted_matrix_password: None,
+                    encrypted_matrix_secret_storage_recovery_key: None,
+                    encrypted_twilio_account_sid: Some(encrypted_account_sid),
+                    encrypted_twilio_auth_token: Some(encrypted_auth_token),
+                })
+                .execute(&mut conn)?;
         }
 
+        Ok(())
+    }
+
+    /// Clear BYOT Twilio credentials in PG `user_secrets` table.
+    pub fn clear_twilio_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::encrypted_twilio_account_sid.eq(None::<String>),
+                user_secrets::encrypted_twilio_auth_token.eq(None::<String>),
+            ))
+            .execute(&mut conn)?;
+
+        tracing::info!("Cleared BYOT Twilio credentials for user {}", user_id);
         Ok(())
     }
 

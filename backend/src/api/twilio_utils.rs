@@ -227,7 +227,7 @@ pub async fn validate_twilio_signature(
 
     // BYOT users with their own credentials always use their own account
     let auth_token = if state.user_core.is_byot_user(user.id) {
-        match state.user_core.get_twilio_credentials(user.id) {
+        match state.user_repository.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
@@ -236,7 +236,7 @@ pub async fn validate_twilio_signature(
     {
         std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
-        match state.user_core.get_twilio_credentials(user.id) {
+        match state.user_repository.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }

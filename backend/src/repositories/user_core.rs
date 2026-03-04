@@ -171,20 +171,8 @@ pub trait UserCoreOps: Send + Sync {
     // Profile (complex transaction)
     fn update_profile(&self, params: UpdateProfileParams<'_>) -> Result<(), DieselError>;
 
-    // Credentials (encrypted)
-    fn get_twilio_credentials(
-        &self,
-        user_id: i32,
-    ) -> Result<(String, String), Box<dyn Error + Send + Sync>>;
-    fn has_twilio_credentials(&self, user_id: i32) -> bool;
+    // BYOT check
     fn is_byot_user(&self, user_id: i32) -> bool;
-    fn update_twilio_credentials(
-        &self,
-        user_id: i32,
-        sid: &str,
-        token: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
-    fn clear_twilio_credentials(&self, user_id: i32) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     // ElevenLabs
     fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError>;
@@ -1466,54 +1454,6 @@ impl UserCoreOps for UserCore {
         Ok(timestamp)
     }
 
-    fn get_twilio_credentials(
-        &self,
-        user_id: i32,
-    ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::decrypt;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Get the user settings
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select((
-                user_settings::encrypted_twilio_account_sid,
-                user_settings::encrypted_twilio_auth_token,
-            ))
-            .first::<(Option<String>, Option<String>)>(&mut conn)?;
-
-        match settings {
-            (Some(encrypted_account_sid), Some(encrypted_auth_token)) => {
-                let account_sid = decrypt(&encrypted_account_sid)?;
-                let auth_token = decrypt(&encrypted_auth_token)?;
-                Ok((account_sid, auth_token))
-            }
-            _ => Err("Twilio credentials not found".into()),
-        }
-    }
-
-    /// Check if user has their own Twilio credentials stored (BYOT)
-    fn has_twilio_credentials(&self, user_id: i32) -> bool {
-        use crate::schema::user_settings;
-
-        let mut conn = match self.pool.get() {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-
-        let settings = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select((
-                user_settings::encrypted_twilio_account_sid,
-                user_settings::encrypted_twilio_auth_token,
-            ))
-            .first::<(Option<String>, Option<String>)>(&mut conn);
-
-        matches!(settings, Ok((Some(_), Some(_))))
-    }
-
     /// Check if user is on BYOT (Bring Your Own Twilio) plan by checking plan_type
     fn is_byot_user(&self, user_id: i32) -> bool {
         use crate::schema::users;
@@ -1528,50 +1468,6 @@ impl UserCoreOps for UserCore {
             .first::<Option<String>>(&mut conn)
             .map(|pt| pt.as_deref() == Some("byot"))
             .unwrap_or(false)
-    }
-
-    fn update_twilio_credentials(
-        &self,
-        user_id: i32,
-        account_sid: &str,
-        auth_token: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-        use crate::utils::encryption::encrypt;
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_account_sid = encrypt(account_sid)?;
-        let encrypted_auth_token = encrypt(auth_token)?;
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set((
-                user_settings::encrypted_twilio_account_sid.eq(encrypted_account_sid.clone()),
-                user_settings::encrypted_twilio_auth_token.eq(encrypted_auth_token.clone()),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    /// Clear BYOT Twilio credentials when user switches to a Lightfriend-managed plan
-    fn clear_twilio_credentials(&self, user_id: i32) -> Result<(), Box<dyn Error + Send + Sync>> {
-        use crate::schema::user_settings;
-
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set((
-                user_settings::encrypted_twilio_account_sid.eq(None::<String>),
-                user_settings::encrypted_twilio_auth_token.eq(None::<String>),
-            ))
-            .execute(&mut conn)?;
-
-        tracing::info!("Cleared BYOT Twilio credentials for user {}", user_id);
-        Ok(())
     }
 
     fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {

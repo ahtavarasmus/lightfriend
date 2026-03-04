@@ -683,7 +683,7 @@ pub async fn set_user_twilio_credentials(
     Json(req): Json<SetTwilioCredsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     state
-        .user_core
+        .user_repository
         .update_twilio_credentials(req.user_id, &req.account_sid, &req.auth_token)
         .map_err(|e| {
             tracing::error!("Failed to set twilio creds: {}", e);

@@ -4,20 +4,59 @@
 # Run as: ./update_lightfriend.sh [proxy_sleep] [homeserver_sleep] [bridges_sleep]
 # Defaults: 10s after tesla proxy, 30s after homeserver, 10s after bridges.
 
+# Get sudo password upfront and keep it alive
+echo "This script requires sudo privileges. Please enter your password now."
+sudo -v || { echo "Failed to get sudo privileges"; exit 1; }
+
+# Keep sudo alive in background (refresh every 50 seconds)
+while true; do sudo -n true; sleep 50; done 2>/dev/null &
+SUDO_KEEPALIVE_PID=$!
+trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null" EXIT
+
 # Configurable paths and sleeps
 LIGHTFRIEND_DIR="$HOME/lightfriend-cloud"
 DB_DIR="/var/lib/lightfriend"
+STATE_DIR="$HOME/.lightfriend-update"
 PROXY_SLEEP=${1:-10}
 HOMESERVER_SLEEP=${2:-30}
 BRIDGES_SLEEP=${3:-10}
 
-# Step 1: Pull and build
+# Create state directory if needed
+mkdir -p "$STATE_DIR"
+
+# Step 0: Save current state for rollback
 cd "$LIGHTFRIEND_DIR" || { echo "Error: Can't cd to $LIGHTFRIEND_DIR"; exit 1; }
+
+CURRENT_COMMIT=$(git rev-parse HEAD)
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DB="${STATE_DIR}/database_${TIMESTAMP}.db"
+
+echo "Saving rollback state..."
+echo "$CURRENT_COMMIT" > "${STATE_DIR}/pre_update_commit"
+echo "$TIMESTAMP" > "${STATE_DIR}/last_update_timestamp"
+
+# Backup database with timestamp
+cp "${DB_DIR}/database.db" "$BACKUP_DB" || { echo "Database backup failed"; exit 1; }
+echo "$BACKUP_DB" > "${STATE_DIR}/last_backup_db"
+
+# Also keep the simple backup for quick access
+cp "${DB_DIR}/database.db" "$HOME/backup-lightfriend.db" || { echo "Database backup failed"; exit 1; }
+
+echo "Rollback state saved:"
+echo "  - Previous commit: $CURRENT_COMMIT"
+echo "  - Database backup: $BACKUP_DB"
+
+# Step 1: Pull and build
 git pull || { echo "Git pull failed"; exit 1; }
 
-cp "${DB_DIR}/database.db" "$HOME/backup-lightfriend.db" || { echo "Database backup failed"; exit 1; }
+NEW_COMMIT=$(git rev-parse HEAD)
+echo "$NEW_COMMIT" > "${STATE_DIR}/post_update_commit"
+echo "Updated from $CURRENT_COMMIT to $NEW_COMMIT"
+
 cd backend || { echo "Error: Can't cd to backend"; exit 1; }
-diesel migration run || { echo "Diesel migration failed"; exit 1; }
+diesel migration run || { echo "SQLite migration failed"; exit 1; }
+diesel migration run --database-url "$PG_DATABASE_URL" --config-file diesel_pg.toml 2>/dev/null || echo "PG migration skipped (diesel CLI lacks postgres feature). App runs PG migrations on startup."
+
 # Added: Check if target dir > 10GB and clean only if needed
 if [ -d target ]; then
     target_size=$(du -sb target | cut -f1)
@@ -68,4 +107,15 @@ sleep "$BRIDGES_SLEEP"
 echo "Restarting lightfriend.service..."
 sudo systemctl restart lightfriend.service || { echo "Restart lightfriend failed"; exit 1; }
 
+# Mark update as successful
+echo "success" > "${STATE_DIR}/last_update_status"
+date >> "${STATE_DIR}/update_history.log"
+echo "  $CURRENT_COMMIT -> $NEW_COMMIT" >> "${STATE_DIR}/update_history.log"
+
+echo ""
 echo "Update successfully completed."
+echo "To rollback, run: ./rollback_lightfriend.sh"
+
+# Cleanup old backups (keep last 5)
+cd "$STATE_DIR"
+ls -t database_*.db 2>/dev/null | tail -n +6 | xargs -r rm

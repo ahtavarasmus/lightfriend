@@ -33,8 +33,9 @@ pub async fn update_twilio_phone(
                 auth_user.user_id
             );
 
-            if let Ok((account_sid, auth_token)) =
-                state.user_core.get_twilio_credentials(auth_user.user_id)
+            if let Ok((account_sid, auth_token)) = state
+                .user_repository
+                .get_twilio_credentials(auth_user.user_id)
             {
                 let phone = req.twilio_phone.clone();
                 let user_id = auth_user.user_id;
@@ -101,7 +102,7 @@ pub async fn update_twilio_creds(
         }
     };
 
-    match state.user_core.update_twilio_credentials(
+    match state.user_repository.update_twilio_credentials(
         auth_user.user_id,
         &req.account_sid,
         &req.auth_token,
@@ -153,7 +154,10 @@ pub async fn clear_twilio_creds(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.clear_twilio_credentials(auth_user.user_id) {
+    match state
+        .user_repository
+        .clear_twilio_credentials(auth_user.user_id)
+    {
         Ok(_) => {
             tracing::info!(
                 "Successfully cleared BYOT credentials for user: {}",

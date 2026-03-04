@@ -105,7 +105,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         // BYOT users with their own credentials always use their own account
         if self.user_core.is_byot_user(user.id) {
             let (account_sid, auth_token) = self
-                .user_core
+                .user_repository
                 .get_twilio_credentials(user.id)
                 .map_err(|e| TwilioMessageError::Database(e.to_string()))?;
             return Ok(TwilioCredentials::new(account_sid, auth_token));
@@ -127,7 +127,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Non-supported country must have their own credentials
         let (account_sid, auth_token) = self
-            .user_core
+            .user_repository
             .get_twilio_credentials(user.id)
             .map_err(|_| TwilioMessageError::NoCredentials)?;
         Ok(TwilioCredentials::new(account_sid, auth_token))
