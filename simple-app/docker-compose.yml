@@ -1,0 +1,58 @@
+# Lightfriend Simple App
+# Yksinkertainen versio - vain core + Matrix-palvelin
+# Käynnistä: ./start.sh
+
+services:
+  # Tuwunel Matrix homeserver (Rust, sisäänrakennettu RocksDB)
+  tuwunel:
+    image: jevolk/tuwunel:latest
+    container_name: lightfriend-tuwunel
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
+    volumes:
+      - tuwunel_data:/var/lib/tuwunel
+      - ./tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+    networks:
+      - lightfriend
+    restart: unless-stopped
+
+  # Lightfriend Core (backend + frontend)
+  core:
+    image: ahtavarasmus/lightfriend-core:latest
+    container_name: lightfriend-core
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: /app/data/database.db
+      MATRIX_HOMESERVER: http://tuwunel:8008
+      MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
+      FRONTEND_URL: http://localhost:3000
+      PORT: 3000
+      ENVIRONMENT: development
+    volumes:
+      - core_data:/app/data
+      - core_uploads:/app/uploads
+      - core_matrix_store:/app/matrix_store
+    ports:
+      - "3000:3000"
+    networks:
+      - lightfriend
+    depends_on:
+      tuwunel:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  lightfriend:
+    driver: bridge
+
+volumes:
+  tuwunel_data:
+  core_data:
+  core_uploads:
+  core_matrix_store:
