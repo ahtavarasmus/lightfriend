@@ -523,27 +523,25 @@ pub async fn register(
 pub async fn refresh_token(
     State(_state): State<Arc<AppState>>,
     headers: reqwest::header::HeaderMap,
+    body: Option<Json<serde_json::Value>>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let refresh_token = match headers.get("cookie") {
-        Some(cookie_header) => {
-            let cookies = cookie_header.to_str().unwrap_or("");
-            cookies
-                .split(';')
-                .find(|c| c.trim().starts_with("refresh_token="))
-                .and_then(|c| c.split('=').nth(1))
-                .map(|t| t.to_string())
-                .ok_or((
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Missing refresh token"})),
-                ))?
-        }
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Missing cookies"})),
-            ));
-        }
-    };
+    // Try JSON body first (mobile clients), then cookie (web clients)
+    let refresh_token = body
+        .and_then(|Json(b)| b.get("refresh_token").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .or_else(|| {
+            headers.get("cookie").and_then(|cookie_header| {
+                let cookies = cookie_header.to_str().ok()?;
+                cookies
+                    .split(';')
+                    .find(|c| c.trim().starts_with("refresh_token="))
+                    .and_then(|c| c.split('=').nth(1))
+                    .map(|t| t.to_string())
+            })
+        })
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Missing refresh token"})),
+        ))?;
 
     // Validate refresh token
     let validation = Validation::default();
