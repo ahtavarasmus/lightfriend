@@ -149,27 +149,6 @@ pub struct OverageInfo {
     pub covered_by_auto_topup: bool,
 }
 
-/// Response for refund eligibility check
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-pub struct RefundEligibilityResponse {
-    pub eligible: bool,
-    pub refund_type: Option<String>,  // "subscription" or "credit_pack"
-    pub reason: String,
-    pub usage_percent: Option<f32>,
-    pub days_remaining: Option<i32>,
-    pub refund_amount_cents: Option<i64>,
-    pub already_refunded: bool,
-    pub contact_email: String,
-}
-
-/// Response for refund request
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-pub struct RefundRequestResponse {
-    pub success: bool,
-    pub message: String,
-    pub refund_id: Option<String>,
-}
-
 // ============================================
 // BYOT Usage Types
 // ============================================

@@ -28,9 +28,9 @@ use backend::{
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
     dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
-    refund_handlers, self_host_handlers, signal_auth, signal_handlers, stripe_handlers,
-    telegram_auth, telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
+    telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
+    youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -756,11 +756,6 @@ async fn main() {
             "/api/billing/update-auto-topup/{user_id}",
             post(billing_handlers::update_topup),
         )
-        .route(
-            "/api/refund/eligibility",
-            get(refund_handlers::get_refund_eligibility),
-        )
-        .route("/api/refund/request", post(refund_handlers::request_refund))
         .route(
             "/api/stripe/checkout-session/{user_id}",
             post(stripe_handlers::create_checkout_session),

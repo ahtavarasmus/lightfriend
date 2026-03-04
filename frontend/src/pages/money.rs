@@ -1962,7 +1962,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Daily digests".to_string(), sub_items: vec![] },
                             Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
                             Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
                             Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
@@ -1971,7 +1970,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
                             Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
                             Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <>
@@ -2023,7 +2021,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All features included".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund, no questions asked".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <PricingCard
@@ -2061,7 +2058,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Daily digests".to_string(), sub_items: vec![] },
                             Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
                             Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
                             Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
@@ -2070,14 +2066,12 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
                             Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
                             Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
 
                         let byot_features = vec![
                             Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All Autopilot features included".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
-                            Feature { text: "7-day one-click refund".to_string(), sub_items: vec![] },
                         ];
 
                         html! {
@@ -2165,7 +2159,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Both plans include the same generous message allowance. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30%."}</p>
+                                    <p>{"Plans bill monthly. Both plans include the same generous message allowance. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
@@ -2178,7 +2172,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Phone number included. No hidden fees. One-click refund within 7 days."}</p>
+                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Phone number included. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
@@ -2195,7 +2189,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Messages sent from a US number. No hidden fees. One-click refund within 7 days."}</p>
+                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Messages sent from a US number. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
@@ -2220,7 +2214,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees. One-click refund available in your dashboard within 7 days if you've used less than 30% - no questions asked."}</p>
+                                    <p>{"Plans bill monthly. Use the BYOT (Bring Your Own Twilio) plan to set up your own number and pay messaging costs directly to Twilio. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What is BYOT?"}</summary>

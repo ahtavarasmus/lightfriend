@@ -56,7 +56,7 @@ pub async fn get_users(
         })?;
 
         // Check if user has their own Twilio credentials (for BYOT plan)
-        let has_twilio_credentials = state.user_core.has_twilio_credentials(user.id);
+        let has_twilio_credentials = state.user_repository.has_twilio_credentials(user.id);
 
         users_response.push(UserResponse {
             id: user.id,

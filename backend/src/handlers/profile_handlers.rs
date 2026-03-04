@@ -142,23 +142,25 @@ pub async fn get_profile(
                 (date - current_time) / (24 * 60 * 60)
             });
             // Fetch Twilio credentials and mask them
-            let (twilio_sid, twilio_token) =
-                match state.user_core.get_twilio_credentials(auth_user.user_id) {
-                    Ok((sid, token)) => {
-                        let masked_sid = if sid.len() >= 4 {
-                            format!("...{}", &sid[sid.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        let masked_token = if token.len() >= 4 {
-                            format!("...{}", &token[token.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        (Some(masked_sid), Some(masked_token))
-                    }
-                    Err(_) => (None, None),
-                };
+            let (twilio_sid, twilio_token) = match state
+                .user_repository
+                .get_twilio_credentials(auth_user.user_id)
+            {
+                Ok((sid, token)) => {
+                    let masked_sid = if sid.len() >= 4 {
+                        format!("...{}", &sid[sid.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    let masked_token = if token.len() >= 4 {
+                        format!("...{}", &token[token.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    (Some(masked_sid), Some(masked_token))
+                }
+                Err(_) => (None, None),
+            };
             // Determine country based on phone number (default to "US" if unknown)
             let _country =
                 get_country_code_from_phone(&user.phone_number).unwrap_or_else(|| "US".to_string());
