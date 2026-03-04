@@ -450,31 +450,7 @@ pub async fn handle_textbee_sms(
         }
     };
 
-    // Step 2: Verify device_id matches user's stored TextBee credentials
-    if let Ok((stored_device_id, _api_key)) = state.user_core.get_textbee_credentials(user.id) {
-        if payload.device_id != stored_device_id {
-            tracing::warn!(
-                "Device ID mismatch for user {}: expected {}, got {}",
-                user.id,
-                stored_device_id,
-                payload.device_id
-            );
-            return SmsResult::UserError {
-                message: "Invalid request source".to_string(),
-                status: StatusCode::FORBIDDEN,
-            }
-            .into_response();
-        }
-    } else {
-        tracing::error!("No TextBee credentials found for user {}", user.id);
-        return SmsResult::UserError {
-            message: "No credentials configured".to_string(),
-            status: StatusCode::FORBIDDEN,
-        }
-        .into_response();
-    }
-
-    // Step 3: Map to Twilio payload format
+    // Step 2: Map to Twilio payload format
     let twilio_payload = TwilioWebhookPayload {
         from: payload.sender.clone(),
         to: payload.recipient,
@@ -713,7 +689,7 @@ pub async fn process_sms(
         .as_secs() as i32;
 
     // Store user's message in history
-    let user_message = crate::models::user_models::NewMessageHistory {
+    let user_message = crate::pg_models::NewPgMessageHistory {
         user_id: user.id,
         role: "user".to_string(),
         encrypted_content: payload.body.clone(),
@@ -1073,11 +1049,8 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                 };
 
                 // Check if user has access to this tool
-                if crate::tool_call_utils::utils::requires_subscription(
-                    name,
-                    user.sub_tier.clone(),
-                    user.discount,
-                ) {
+                if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone())
+                {
                     tracing::info!(
                         "Attempted to use subscription-only tool {} without proper subscription",
                         name
@@ -1229,7 +1202,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
 
             // Store tool responses in history
             for (tool_call_id, tool_response) in tool_answers.iter() {
-                let tool_message = crate::models::user_models::NewMessageHistory {
+                let tool_message = crate::pg_models::NewPgMessageHistory {
                     user_id: user.id,
                     role: "tool".to_string(),
                     encrypted_content: tool_response.clone(),
@@ -1441,7 +1414,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         .unwrap()
         .as_secs() as i32;
 
-    let assistant_message = crate::models::user_models::NewMessageHistory {
+    let assistant_message = crate::pg_models::NewPgMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),
         encrypted_content: final_response_with_notice.clone(),

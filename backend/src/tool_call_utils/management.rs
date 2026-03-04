@@ -330,7 +330,7 @@ pub async fn handle_create_item(
         _ => 1, // sms or unknown defaults to 1
     };
 
-    let new_item = crate::models::user_models::NewItem {
+    let new_item = crate::pg_models::NewPgItem {
         user_id,
         summary: summary.clone(),
         due_at: Some(ts),

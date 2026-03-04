@@ -1,6 +1,5 @@
 use crate::{
-    handlers::auth_middleware::AuthUser, models::user_models::NewBridge, utils::matrix_auth,
-    AppState,
+    handlers::auth_middleware::AuthUser, pg_models::NewPgBridge, utils::matrix_auth, AppState,
 };
 use anyhow::{anyhow, Result};
 use axum::{extract::State, http::StatusCode, response::Json as AxumJson};
@@ -325,7 +324,7 @@ pub async fn start_telegram_connection(
         .unwrap()
         .as_secs() as i32;
 
-    let new_bridge = NewBridge {
+    let new_bridge = NewPgBridge {
         user_id: auth_user.user_id,
         bridge_type: "telegram".to_string(),
         status: "connecting".to_string(),
@@ -491,7 +490,7 @@ async fn monitor_telegram_connection(
                                     .unwrap()
                                     .as_secs()
                                     as i32;
-                                let new_bridge = NewBridge {
+                                let new_bridge = NewPgBridge {
                                     user_id,
                                     bridge_type: "telegram".to_string(),
                                     status: "connected".to_string(),

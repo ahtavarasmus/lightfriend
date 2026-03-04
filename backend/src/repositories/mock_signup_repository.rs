@@ -33,7 +33,6 @@ impl MockUser {
             phone_number: self.phone_number.clone(),
             nickname: None,
             time_to_live: Some(0),
-            verified: true,
             credits: 0.0,
             preferred_number: self.preferred_number.clone(),
             charge_when_under: false,
@@ -49,8 +48,6 @@ impl MockUser {
             encrypted_matrix_password: None,
             encrypted_matrix_secret_storage_recovery_key: None,
             last_credits_notification: None,
-            discount: false,
-            discount_tier: None,
             next_billing_date_timestamp: None,
             magic_token: self.magic_token.clone(),
             plan_type: None,
@@ -351,11 +348,9 @@ mod tests {
             password_hash: "hash".to_string(),
             phone_number: "+14155551234".to_string(),
             time_to_live: 0,
-            verified: true,
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            discount: false,
             sub_tier: None,
         };
 
@@ -376,11 +371,9 @@ mod tests {
             password_hash: "hash".to_string(),
             phone_number: "+14155551234".to_string(),
             time_to_live: 0,
-            verified: true,
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            discount: false,
             sub_tier: None,
         };
 
@@ -400,11 +393,9 @@ mod tests {
             password_hash: "hash".to_string(),
             phone_number: "+14155551234".to_string(),
             time_to_live: 0,
-            verified: true,
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            discount: false,
             sub_tier: None,
         };
 
@@ -428,11 +419,9 @@ mod tests {
             password_hash: "hash".to_string(),
             phone_number: "+14155551234".to_string(),
             time_to_live: 0,
-            verified: true,
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            discount: false,
             sub_tier: None,
         };
 

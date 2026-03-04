@@ -17,6 +17,9 @@ use tower_sessions::MemoryStore;
 /// Embedded migrations for in-memory test database
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
+/// Embedded PG migrations for test database
+pub const PG_MIGRATIONS: EmbeddedMigrations = embed_migrations!("./pg_migrations");
+
 /// Create an in-memory SQLite connection pool with migrations applied
 ///
 /// Uses shared cache mode with a unique database name so all connections
@@ -47,6 +50,44 @@ pub fn create_test_pool() -> crate::DbPool {
     pool
 }
 
+/// Create a test PG connection pool.
+///
+/// Uses TEST_PG_DATABASE_URL env var. If PG is unavailable, creates a dummy
+/// pool that will error on first real use. Tests that only use SQLite repos
+/// will still pass since they never call pool.get() on the PG pool.
+pub fn create_test_pg_pool() -> crate::PgDbPool {
+    use diesel::r2d2::{self, ConnectionManager};
+    use diesel::PgConnection;
+
+    let pg_url = std::env::var("TEST_PG_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://lightfriend:test@localhost:5432/lightfriend_test".to_string()
+    });
+
+    let manager = ConnectionManager::<PgConnection>::new(&pg_url);
+    let pool = r2d2::Pool::builder()
+        .max_size(2)
+        .min_idle(Some(0))
+        .connection_timeout(std::time::Duration::from_secs(1))
+        .build_unchecked(manager);
+
+    // Run PG migrations and truncate all tables for test isolation
+    if let Ok(mut conn) = pool.get() {
+        let _ = conn.run_pending_migrations(PG_MIGRATIONS);
+        // Truncate all PG tables so each test starts clean
+        use diesel::RunQueryDsl;
+        let _ = diesel::sql_query(
+            "TRUNCATE items, message_history, usage_logs, contact_profiles, \
+             contact_profile_exceptions, bridges, bridge_disconnection_events, \
+             imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
+             totp_backup_codes, webauthn_credentials, webauthn_challenges, \
+             user_secrets, user_info, processed_emails CASCADE",
+        )
+        .execute(&mut conn);
+    }
+
+    pool
+}
+
 /// Create a dummy Google OAuth client for AppState (not used in credit tests)
 fn create_dummy_google_oauth_client() -> crate::GoogleOAuthClient {
     BasicClient::new(ClientId::new("test_client_id".to_string()))
@@ -69,15 +110,17 @@ fn create_dummy_tesla_oauth_client() -> crate::TeslaOAuthClient {
 /// but stubs out OAuth clients and other services not needed for credit tests.
 pub fn create_test_state() -> Arc<crate::AppState> {
     let pool = create_test_pool();
+    let pg_pool = create_test_pg_pool();
 
     let user_core = Arc::new(crate::UserCore::new(pool.clone()));
-    let user_repository = Arc::new(crate::UserRepository::new(pool.clone()));
-    let item_repository = Arc::new(crate::ItemRepository::new(pool.clone()));
+    let user_repository = Arc::new(crate::UserRepository::new(pg_pool.clone(), pool.clone()));
+    let item_repository = Arc::new(crate::ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
-        pool.clone(),
+        pg_pool.clone(),
     ));
-    let webauthn_repository =
-        Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
+    let webauthn_repository = Arc::new(
+        crate::repositories::webauthn_repository::WebauthnRepository::new(pg_pool.clone()),
+    );
     let admin_alert_repository = Arc::new(
         crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
     );
@@ -96,6 +139,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 
     Arc::new(crate::AppState {
         db_pool: pool,
+        pg_pool,
         user_core,
         user_repository,
         item_repository,
@@ -146,11 +190,9 @@ pub fn create_test_user(
         password_hash,
         phone_number: params.phone_number.clone(),
         time_to_live: 60,
-        verified: true,
         credits: params.credits,
         credits_left: params.credits_left,
         charge_when_under: false,
-        discount: false,
         sub_tier: params.sub_tier.clone(),
     };
 
@@ -586,7 +628,7 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
 pub mod mock_user_core {
     use crate::handlers::profile_handlers::CriticalNotificationInfo;
     use crate::models::user_models::{User, UserInfo, UserSettings};
-    use crate::repositories::user_core::{DigestSettings, UpdateProfileParams, UserCoreOps};
+    use crate::repositories::user_core::{UpdateProfileParams, UserCoreOps};
     use diesel::result::Error as DieselError;
     use std::collections::HashMap;
     use std::error::Error;
@@ -764,10 +806,6 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn verify_user(&self, _user_id: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
         fn update_password(&self, _user_id: i32, _password_hash: &str) -> Result<(), DieselError> {
             Ok(())
         }
@@ -786,14 +824,6 @@ pub mod mock_user_core {
                 .unwrap()
                 .update_preferred_number_calls
                 .push((user_id, number.to_string()));
-            Ok(())
-        }
-
-        fn update_discount_tier(
-            &self,
-            _user_id: i32,
-            _tier: Option<&str>,
-        ) -> Result<(), DieselError> {
             Ok(())
         }
 
@@ -1006,40 +1036,6 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn update_digests(
-            &self,
-            _user_id: i32,
-            _morning: Option<&str>,
-            _day: Option<&str>,
-            _evening: Option<&str>,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn get_digests(&self, _user_id: i32) -> Result<DigestSettings, DieselError> {
-            Ok((None, None, None))
-        }
-
-        fn get_last_instant_digest_time(&self, _user_id: i32) -> Result<Option<i32>, DieselError> {
-            Ok(None)
-        }
-
-        fn set_last_instant_digest_time(&self, _user_id: i32, _ts: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn update_proactive_agent_on(
-            &self,
-            _user_id: i32,
-            _enabled: bool,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn get_proactive_agent_on(&self, _user_id: i32) -> Result<bool, DieselError> {
-            Ok(true)
-        }
-
         fn update_critical_enabled(
             &self,
             _user_id: i32,
@@ -1103,29 +1099,6 @@ pub mod mock_user_core {
             _user_id: i32,
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
             Ok(())
-        }
-
-        fn get_textbee_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-            Err("Not found".into())
-        }
-
-        fn update_textbee_credentials(
-            &self,
-            _user_id: i32,
-            _device_id: &str,
-            _api_key: &str,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn get_openrouter_api_key(
-            &self,
-            _user_id: i32,
-        ) -> Result<String, Box<dyn Error + Send + Sync>> {
-            Err("Not found".into())
         }
 
         fn get_elevenlabs_phone_number_id(
@@ -1495,15 +1468,15 @@ impl TestItemParams {
 pub fn create_test_item(
     state: &Arc<crate::AppState>,
     params: &TestItemParams,
-) -> crate::models::user_models::Item {
-    use crate::models::user_models::NewItem;
+) -> crate::pg_models::PgItem {
+    use crate::pg_models::NewPgItem;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
 
-    let new_item = NewItem {
+    let new_item = NewPgItem {
         user_id: params.user_id,
         summary: params.summary.clone(),
         due_at: params.due_at,
@@ -1525,10 +1498,7 @@ pub fn create_test_item(
 }
 
 /// Get all items for a user
-pub fn get_user_items(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-) -> Vec<crate::models::user_models::Item> {
+pub fn get_user_items(state: &Arc<crate::AppState>, user_id: i32) -> Vec<crate::pg_models::PgItem> {
     state
         .item_repository
         .get_items(user_id)

@@ -1406,7 +1406,7 @@ pub async fn handle_bridge_message(
                 other => other,
             };
 
-            let new_item = crate::models::user_models::NewItem {
+            let new_item = crate::pg_models::NewPgItem {
                 user_id,
                 summary: format!("System: {} bridge disconnected.", bridge_name),
                 due_at: None,
@@ -1669,14 +1669,6 @@ pub async fn handle_bridge_message(
         );
         return;
     }
-    if !state
-        .user_core
-        .get_proactive_agent_on(user_id)
-        .unwrap_or(true)
-    {
-        tracing::debug!("User {} does not have monitoring enabled", user_id);
-        return;
-    }
     // Extract message content
     let content = match event.content.msgtype {
         MessageType::Text(t) => t.body,
@@ -1716,7 +1708,7 @@ pub async fn handle_bridge_message(
         .collect();
     if !chat_tracking.is_empty() {
         // Extract data from Result immediately to drop non-Send Box<dyn Error> before any .await
-        let maybe_match: Option<crate::models::user_models::Item> =
+        let maybe_match: Option<crate::pg_models::PgItem> =
             crate::proactive::utils::check_item_monitor_match(
                 &state,
                 user_id,
@@ -1728,13 +1720,10 @@ pub async fn handle_bridge_message(
             .flatten()
             .and_then(|resp| {
                 let item_id = resp.task_id.unwrap_or(0);
-                chat_tracking
-                    .iter()
-                    .find(|i| i.id == Some(item_id))
-                    .cloned()
+                chat_tracking.iter().find(|i| i.id == item_id).cloned()
             });
         if let Some(matched_item) = maybe_match {
-            let item_id = matched_item.id.unwrap_or(0);
+            let item_id = matched_item.id;
             let priority = matched_item.priority;
             // Process through unified path with matched message context
             // Convert Result to drop non-Send Box<dyn Error> before any .await
@@ -1867,26 +1856,21 @@ pub async fn handle_bridge_message(
                     _ => None,
                 };
                 if profile_room_id.is_none() || profile_room_id == Some("") {
-                    if let Some(pid) = profile.id {
-                        if let Err(e) = state.user_repository.update_profile_room_id(
+                    let pid = profile.id;
+                    if let Err(e) = state.user_repository.update_profile_room_id(
+                        pid,
+                        &service,
+                        &current_room_id,
+                    ) {
+                        tracing::warn!("Failed to auto-save room_id for profile {}: {}", pid, e);
+                    } else {
+                        tracing::info!(
+                            "Auto-saved {} room_id {} for profile {} ({})",
+                            service,
+                            current_room_id,
                             pid,
-                            &service,
-                            &current_room_id,
-                        ) {
-                            tracing::warn!(
-                                "Failed to auto-save room_id for profile {}: {}",
-                                pid,
-                                e
-                            );
-                        } else {
-                            tracing::info!(
-                                "Auto-saved {} room_id {} for profile {} ({})",
-                                service,
-                                current_room_id,
-                                pid,
-                                profile.nickname
-                            );
-                        }
+                            profile.nickname
+                        );
                     }
                 }
             }
@@ -1910,7 +1894,7 @@ pub async fn handle_bridge_message(
         // Check platform-specific exception mode first, then fall back to profile mode
         let effective_mode = matching_profile
             .and_then(|p| {
-                let profile_id = p.id.unwrap_or(0);
+                let profile_id = p.id;
                 state
                     .user_repository
                     .get_profile_exception_for_platform(profile_id, &service)
@@ -2059,7 +2043,7 @@ pub async fn handle_bridge_message(
     let (notification_mode, notification_type_str, notify_on_call, profile_nickname) =
         match matching_profile {
             Some(profile) => {
-                let profile_id = profile.id.unwrap_or(0);
+                let profile_id = profile.id;
                 // Check for platform-specific exception
                 let exception = state
                     .user_repository

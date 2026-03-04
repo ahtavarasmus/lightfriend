@@ -368,13 +368,13 @@ pub async fn check_item_monitor_match(
     state: &Arc<AppState>,
     user_id: i32,
     message: &str,
-    items: &[crate::models::user_models::Item],
+    items: &[crate::pg_models::PgItem],
 ) -> Result<Option<ItemMatchResponse>, Box<dyn std::error::Error>> {
     let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
     let items_str = items
         .iter()
-        .map(|item| format!("ID: {}, Content: {}", item.id.unwrap_or(-1), item.summary))
+        .map(|item| format!("ID: {}, Content: {}", item.id, item.summary))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -598,7 +598,7 @@ Call process_item_result."#;
 pub async fn process_triggered_item(
     state: &Arc<AppState>,
     user_id: i32,
-    item: &crate::models::user_models::Item,
+    item: &crate::pg_models::PgItem,
     matched_message: Option<&str>,
 ) -> Result<TriggeredItemResult, Box<dyn std::error::Error>> {
     let ctx = ContextBuilder::for_user(state, user_id)
@@ -1491,7 +1491,7 @@ pub async fn check_trackable_items(
                 resp.summary
             );
 
-            let new_item = crate::models::user_models::NewItem {
+            let new_item = crate::pg_models::NewPgItem {
                 user_id,
                 summary: tagged_summary,
                 due_at,
@@ -1721,7 +1721,7 @@ pub async fn check_message_trackable_items(
                 service, sender, topic, resp.summary
             );
 
-            let new_item = crate::models::user_models::NewItem {
+            let new_item = crate::pg_models::NewPgItem {
                 user_id,
                 summary,
                 due_at,
@@ -2306,7 +2306,7 @@ pub async fn send_notification_with_context(
                     tracing::info!("Call: SMS sent successfully for user {}", user_id);
 
                     // Store notification in message history
-                    let assistant_notification = crate::models::user_models::NewMessageHistory {
+                    let assistant_notification = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
                         role: "assistant".to_string(),
                         encrypted_content: notification.to_string(),
@@ -2362,7 +2362,7 @@ pub async fn send_notification_with_context(
                     tracing::info!("Successfully sent notification to user {}", user_id);
 
                     // Store notification in message history
-                    let assistant_notification = crate::models::user_models::NewMessageHistory {
+                    let assistant_notification = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
                         role: "assistant".to_string(),
                         encrypted_content: notification.to_string(),
@@ -2452,7 +2452,7 @@ pub async fn resolve_read_email_items(
         .filter_map(|item| {
             let source = item.source_id.as_deref()?;
             let uid = source.strip_prefix("email_")?;
-            Some((uid.to_string(), item.id?))
+            Some((uid.to_string(), item.id))
         })
         .collect();
 

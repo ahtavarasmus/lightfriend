@@ -345,7 +345,7 @@ pub async fn check_all_bridges_health(
                     other => other,
                 };
 
-                let new_item = crate::models::user_models::NewItem {
+                let new_item = crate::pg_models::NewPgItem {
                     user_id,
                     summary: format!("System: {} bridge disconnected.", bridge_name),
                     due_at: None,
@@ -404,7 +404,7 @@ pub async fn check_all_bridges_health(
 async fn is_bridge_healthy(
     state: &Arc<AppState>,
     user_id: i32,
-    bridge: &crate::models::user_models::Bridge,
+    bridge: &crate::pg_models::PgBridge,
 ) -> bool {
     // Try to get Matrix client and fetch rooms for this bridge type
     // Note: Empty rooms is OK (user might not have any chats yet)
@@ -672,7 +672,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         }).collect();
                                         if !email_tracking.is_empty() {
                                             // Extract data from Result immediately to drop non-Send Box<dyn Error>
-                                            let maybe_match: Option<crate::models::user_models::Item> =
+                                            let maybe_match: Option<crate::pg_models::PgItem> =
                                                 crate::proactive::utils::check_item_monitor_match(
                                                     &state,
                                                     user.id,
@@ -680,10 +680,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     &email_tracking,
                                                 ).await.ok().flatten().and_then(|resp| {
                                                     let item_id = resp.task_id.unwrap_or(0);
-                                                    email_tracking.iter().find(|i| i.id == Some(item_id)).cloned()
+                                                    email_tracking.iter().find(|i| i.id == item_id).cloned()
                                                 });
                                             if let Some(matched_item) = maybe_match {
-                                                let item_id = matched_item.id.unwrap_or(0);
+                                                let item_id = matched_item.id;
                                                 let priority = matched_item.priority;
                                                 let result: Result<crate::proactive::utils::TriggeredItemResult, String> =
                                                     crate::proactive::utils::process_triggered_item(
@@ -826,7 +826,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Ok(items) => {
                     debug!("Found {} triggered items", items.len());
                     for item in items {
-                        let item_id = item.id.unwrap_or(0);
+                        let item_id = item.id;
                         let user_id = item.user_id;
                         let state = state.clone();
                         let item_clone = item.clone();
@@ -947,7 +947,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     .collect();
 
                 for item in interval_items {
-                    let item_id = item.id.unwrap_or(0);
+                    let item_id = item.id;
                     let user_id = item.user_id;
                     let priority = item.priority;
                     let state = state.clone();

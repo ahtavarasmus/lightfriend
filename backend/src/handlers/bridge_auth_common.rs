@@ -42,7 +42,7 @@ pub async fn reset_matrix_connection(
         .and_then(|u| u.matrix_username);
 
     // Clear the Matrix credentials from the database
-    let user_repo = UserRepository::new(state.db_pool.clone());
+    let user_repo = UserRepository::new(state.pg_pool.clone(), state.db_pool.clone());
     user_repo.clear_matrix_credentials(user_id).map_err(|e| {
         tracing::error!(
             "Failed to clear Matrix credentials for user {}: {}",

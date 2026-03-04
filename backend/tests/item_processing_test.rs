@@ -13,7 +13,8 @@
 //! - TINFOIL_API_KEY and OPENROUTER_API_KEY set in backend/.env
 //! - Network access to Tinfoil API
 
-use backend::models::user_models::{Item, User};
+use backend::models::user_models::User;
+use backend::pg_models::PgItem;
 use backend::proactive::utils::{
     check_item_monitor_match, process_triggered_item, TriggeredItemResult,
 };
@@ -62,14 +63,14 @@ fn setup_user(state: &Arc<AppState>) -> User {
     user
 }
 
-/// Build a minimal Item struct for process_triggered_item
-fn make_item(user_id: i32, summary: &str, priority: i32) -> Item {
+/// Build a minimal PgItem struct for process_triggered_item
+fn make_item(user_id: i32, summary: &str, priority: i32) -> PgItem {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
-    Item {
-        id: Some(9999),
+    PgItem {
+        id: 9999,
         user_id,
         summary: summary.to_string(),
         due_at: Some(now),
@@ -79,15 +80,15 @@ fn make_item(user_id: i32, summary: &str, priority: i32) -> Item {
     }
 }
 
-/// Build a tracking Item with due_at set in the future (5 days).
+/// Build a tracking PgItem with due_at set in the future (5 days).
 /// Tracking items auto-delete at deadline, so tests must use a future due_at.
-fn make_tracking_item(user_id: i32, summary: &str, priority: i32) -> Item {
+fn make_tracking_item(user_id: i32, summary: &str, priority: i32) -> PgItem {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
-    Item {
-        id: Some(9999),
+    PgItem {
+        id: 9999,
         user_id,
         summary: summary.to_string(),
         due_at: Some(now + 5 * 86400), // 5 days in the future
@@ -101,7 +102,7 @@ fn make_tracking_item(user_id: i32, summary: &str, priority: i32) -> Item {
 async fn process_item_with_retry(
     state: &Arc<AppState>,
     user_id: i32,
-    item: &Item,
+    item: &PgItem,
 ) -> TriggeredItemResult {
     let mut last_err = None;
     for attempt in 1..=MAX_RETRIES {
@@ -127,7 +128,7 @@ async fn process_item_with_retry(
 async fn process_item_with_retry_matched(
     state: &Arc<AppState>,
     user_id: i32,
-    item: &Item,
+    item: &PgItem,
     matched_message: Option<&str>,
 ) -> TriggeredItemResult {
     let mut last_err = None;
@@ -1648,7 +1649,7 @@ async fn test_monitor_match_email_from_hr() {
             "[platform:email] [sender:HR] [topic:job offer]\nWatch for emails from HR about the job offer.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: hr@company.com\nChat: inbox\nContent: \
         Hi, we're happy to inform you that we'd like to extend an offer for the Senior Engineer position.";
@@ -1681,7 +1682,7 @@ async fn test_monitor_match_mom_texts() {
             "[platform:whatsapp] [sender:mom] [scope:any]\nWatch for messages from mom.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: \
         Hey, are you coming for dinner tonight?";
@@ -1710,7 +1711,7 @@ async fn test_monitor_match_package_delivered() {
             "[platform:email] [sender:Amazon] [topic:headphones shipping]\nWatch for shipping update from Amazon about the new headphones.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: amazon-notifications\nChat: inbox\nContent: \
         Your package with Sony WH-1000XM5 headphones has been delivered to your front door.";
@@ -1840,7 +1841,7 @@ async fn test_monitor_match_correct_item_among_multiple() {
         ),
     );
 
-    let mom_item_id = item_mom.id.unwrap();
+    let mom_item_id = item_mom.id;
     let all_items = vec![item_hr, item_mom, item_package];
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: \
@@ -1880,7 +1881,7 @@ async fn test_match_email_sender_and_topic() {
             "[platform:email] [sender:boss] [topic:quarterly report]\nWatch for emails from boss about the quarterly report.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: boss@company.com\nChat: inbox\nContent: \
         Hi, the Q1 quarterly report is ready for your review. Please check the numbers by Friday.";
@@ -1906,7 +1907,7 @@ async fn test_match_whatsapp_scope_any() {
             "[platform:whatsapp] [sender:mom] [scope:any]\nNotify whenever mom sends any WhatsApp message.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: \
         Did you see the sunset today? It was beautiful!";
@@ -1932,7 +1933,7 @@ async fn test_match_telegram_with_topic() {
             "[platform:telegram] [sender:Alice] [topic:birthday party]\nWatch for messages from Alice about the birthday party.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: telegram\nFrom: alice\nChat: Alice\nContent: \
         Hey! I booked the venue for the birthday party. Saturday at 6pm works for everyone.";
@@ -1962,7 +1963,7 @@ async fn test_match_cross_platform_boss_report() {
             "[platform:email] [sender:boss] [topic:quarterly report]\nWatch for emails from boss about the quarterly report.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: boss\nChat: Boss\nContent: \
         Hey, I just sent you the quarterly report via the shared drive. Take a look when you can.";
@@ -1988,7 +1989,7 @@ async fn test_match_cross_platform_chat_to_email() {
             "[platform:chat] [sender:John] [topic:project deadline]\nWatch for messages from John about the project deadline.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: John\nChat: inbox\nContent: \
         Hi, just wanted to let you know the project deadline has been moved to next Friday.";
@@ -2134,7 +2135,7 @@ async fn test_match_sender_in_group_chat() {
             "[platform:whatsapp] [sender:John] [topic:project update]\nWatch for messages from John about project updates.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: john\nChat: Team Project Group\nContent: \
         Just pushed the latest project update. The backend is ready for testing.";
@@ -2191,7 +2192,7 @@ async fn test_match_finnish_message_scope_any() {
             "[platform:whatsapp] [sender:mom] [scope:any]\nWatch for any message from mom.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: \
         Hei kulta, muista ottaa takki mukaan, huomenna tulee kylma!";
@@ -2217,7 +2218,7 @@ async fn test_match_spanish_message_topic() {
             "[platform:chat] [sender:Carlos] [topic:meeting]\nWatch for messages from Carlos about the meeting.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: carlos\nChat: Carlos\nContent: \
         Oye, la reunion se cambio para las 3 de la tarde. No te olvides!";
@@ -2247,7 +2248,7 @@ async fn test_match_image_from_mom_scope_any() {
             "[platform:whatsapp] [sender:mom] [scope:any]\nNotify whenever mom sends any WhatsApp message.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: IMAGE";
 
@@ -2317,7 +2318,7 @@ async fn test_match_correct_among_three_items() {
         ),
     );
 
-    let mom_id = item_mom.id.unwrap();
+    let mom_id = item_mom.id;
     let all_items = vec![item_hr, item_mom, item_hackathon];
 
     let message = "Platform: whatsapp\nFrom: mom\nChat: Mom\nContent: \
@@ -2356,7 +2357,7 @@ async fn test_match_correct_amazon_item_among_two() {
         ),
     );
 
-    let refund_id = item_refund.id.unwrap();
+    let refund_id = item_refund.id;
     let all_items = vec![item_headphones, item_refund];
 
     let message = "Platform: email\nFrom: amazon-notifications\nChat: inbox\nContent: \
@@ -2391,7 +2392,7 @@ async fn test_match_short_message_scope_any() {
             "[platform:whatsapp] [sender:boss] [scope:any]\nWatch for any message from boss.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: whatsapp\nFrom: boss\nChat: Boss\nContent: ok";
 
@@ -2477,7 +2478,7 @@ async fn test_match_platform_any_email() {
             "[platform:any] [sender:any] [topic:hackathon]\nWatch for any messages about the hackathon.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: organizers@hackathon.dev\nChat: inbox\nSubject: Hackathon Registration Confirmed\nContent: \
         Your registration for the Spring Hackathon 2026 has been confirmed. See you there!";
@@ -2503,7 +2504,7 @@ async fn test_match_platform_chat_matches_signal() {
             "[platform:chat] [sender:any] [topic:hackathon]\nWatch for chat messages about the hackathon.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: signal\nFrom: dave\nChat: Dave\nContent: \
         Are you joining the hackathon this weekend? We need a fourth team member!";
@@ -2533,7 +2534,7 @@ async fn test_match_legacy_format_mom_email() {
             "Watch for emails from mom. Notify the user when one arrives.",
         ),
     );
-    let item_id = item.id.unwrap();
+    let item_id = item.id;
 
     let message = "Platform: email\nFrom: mom@gmail.com\nChat: inbox\nContent: \
         Hi sweetie, just wanted to check in. How is work going?";

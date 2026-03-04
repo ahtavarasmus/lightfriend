@@ -1,10 +1,10 @@
 use crate::utils::encryption::{decrypt, encrypt};
 use crate::{
-    models::user_models::{
-        NewWebauthnChallenge, NewWebauthnCredential, WebauthnChallenge, WebauthnCredential,
+    pg_models::{
+        NewPgWebauthnChallenge, NewPgWebauthnCredential, PgWebauthnChallenge, PgWebauthnCredential,
     },
-    schema::{webauthn_challenges, webauthn_credentials},
-    DbPool,
+    pg_schema::{webauthn_challenges, webauthn_credentials},
+    PgDbPool,
 };
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -22,11 +22,11 @@ pub struct CreateCredentialParams {
 }
 
 pub struct WebauthnRepository {
-    pool: DbPool,
+    pool: PgDbPool,
 }
 
 impl WebauthnRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 
@@ -47,7 +47,7 @@ impl WebauthnRepository {
             .unwrap()
             .as_secs() as i32;
 
-        let new_credential = NewWebauthnCredential {
+        let new_credential = NewPgWebauthnCredential {
             user_id: params.user_id,
             credential_id: params.credential_id,
             encrypted_public_key,
@@ -70,20 +70,20 @@ impl WebauthnRepository {
     pub fn get_credentials_by_user(
         &self,
         user_id: i32,
-    ) -> Result<Vec<WebauthnCredential>, DieselError> {
+    ) -> Result<Vec<PgWebauthnCredential>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         webauthn_credentials::table
             .filter(webauthn_credentials::user_id.eq(user_id))
             .filter(webauthn_credentials::enabled.eq(1))
-            .select(WebauthnCredential::as_select())
-            .load::<WebauthnCredential>(&mut conn)
+            .select(PgWebauthnCredential::as_select())
+            .load::<PgWebauthnCredential>(&mut conn)
     }
 
     /// Get decrypted public key for a credential
     pub fn get_decrypted_public_key(
         &self,
-        credential: &WebauthnCredential,
+        credential: &PgWebauthnCredential,
     ) -> Result<String, DieselError> {
         decrypt(&credential.encrypted_public_key).map_err(|e| {
             DieselError::QueryBuilderError(Box::new(std::io::Error::other(format!(
@@ -205,7 +205,7 @@ impl WebauthnRepository {
         )
         .execute(&mut conn)?;
 
-        let new_challenge = NewWebauthnChallenge {
+        let new_challenge = NewPgWebauthnChallenge {
             user_id,
             challenge: challenge.to_string(),
             challenge_type: challenge_type.to_string(),
@@ -226,7 +226,7 @@ impl WebauthnRepository {
         &self,
         user_id: i32,
         challenge_type: &str,
-    ) -> Result<Option<WebauthnChallenge>, DieselError> {
+    ) -> Result<Option<PgWebauthnChallenge>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let current_time = SystemTime::now()
@@ -238,8 +238,8 @@ impl WebauthnRepository {
             .filter(webauthn_challenges::user_id.eq(user_id))
             .filter(webauthn_challenges::challenge_type.eq(challenge_type))
             .filter(webauthn_challenges::expires_at.gt(current_time))
-            .select(WebauthnChallenge::as_select())
-            .first::<WebauthnChallenge>(&mut conn)
+            .select(PgWebauthnChallenge::as_select())
+            .first::<PgWebauthnChallenge>(&mut conn)
             .optional()
     }
 

@@ -81,16 +81,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    critical_categories (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        category_name -> Text,
-        definition -> Nullable<Text>,
-        active -> Bool,
-    }
-}
-
-diesel::table! {
     disabled_alert_types (id) {
         id -> Nullable<Integer>,
         alert_type -> Text,
@@ -277,26 +267,17 @@ diesel::table! {
         agent_language -> Text,
         sub_country -> Nullable<Text>,
         save_context -> Nullable<Integer>,
-        morning_digest -> Nullable<Text>,
-        day_digest -> Nullable<Text>,
-        evening_digest -> Nullable<Text>,
         critical_enabled -> Nullable<Text>,
         encrypted_twilio_account_sid -> Nullable<Text>,
         encrypted_twilio_auth_token -> Nullable<Text>,
-        encrypted_openrouter_api_key -> Nullable<Text>,
-        encrypted_textbee_device_id -> Nullable<Text>,
-        encrypted_textbee_api_key -> Nullable<Text>,
         elevenlabs_phone_number_id -> Nullable<Text>,
-        proactive_agent_on -> Bool,
         notify_about_calls -> Bool,
         action_on_critical_message -> Nullable<Text>,
-        last_instant_digest_time -> Nullable<Integer>,
         phone_service_active -> Bool,
         default_notification_mode -> Nullable<Text>,
         default_notification_type -> Nullable<Text>,
         default_notify_on_call -> Integer,
         llm_provider -> Nullable<Text>,
-        quiet_mode_until -> Nullable<Integer>,
         phone_contact_notification_mode -> Nullable<Text>,
         phone_contact_notification_type -> Nullable<Text>,
         phone_contact_notify_on_call -> Integer,
@@ -312,7 +293,6 @@ diesel::table! {
         phone_number -> Text,
         nickname -> Nullable<Text>,
         time_to_live -> Nullable<Integer>,
-        verified -> Bool,
         credits -> Float,
         preferred_number -> Nullable<Text>,
         charge_when_under -> Bool,
@@ -328,8 +308,6 @@ diesel::table! {
         encrypted_matrix_password -> Nullable<Text>,
         encrypted_matrix_secret_storage_recovery_key -> Nullable<Text>,
         last_credits_notification -> Nullable<Integer>,
-        discount -> Bool,
-        discount_tier -> Nullable<Text>,
         next_billing_date_timestamp -> Nullable<Integer>,
         magic_token -> Nullable<Text>,
         plan_type -> Nullable<Text>,
@@ -415,7 +393,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     contact_profile_exceptions,
     contact_profiles,
     country_availability,
-    critical_categories,
     disabled_alert_types,
     imap_connection,
     items,

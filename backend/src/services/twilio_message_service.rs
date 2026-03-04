@@ -278,7 +278,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         user: &User,
     ) -> Result<String, TwilioMessageError> {
         // Log to message history using repository
-        let history_entry = crate::models::user_models::NewMessageHistory {
+        let history_entry = crate::pg_models::NewPgMessageHistory {
             user_id: user.id,
             role: "assistant".to_string(),
             encrypted_content: body.to_string(),
@@ -548,10 +548,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
     /// Log message to user's message history.
     fn log_message_history(&self, user_id: i32, body: &str) -> Result<(), TwilioMessageError> {
-        use crate::models::user_models::NewMessageHistory;
-        use crate::schema::message_history;
-
-        let history_entry = NewMessageHistory {
+        let history_entry = crate::pg_models::NewPgMessageHistory {
             user_id,
             role: "assistant".to_string(),
             encrypted_content: body.to_string(),
@@ -562,14 +559,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             conversation_id: "".to_string(),
         };
 
-        let mut conn = self
-            .db_pool
-            .get()
-            .map_err(|e| TwilioMessageError::Database(e.to_string()))?;
-
-        diesel::insert_into(message_history::table)
-            .values(&history_entry)
-            .execute(&mut conn)
+        self.user_repository
+            .create_message_history(&history_entry)
             .map_err(|e| {
                 tracing::error!("Failed to store message in history: {}", e);
                 TwilioMessageError::Database(e.to_string())

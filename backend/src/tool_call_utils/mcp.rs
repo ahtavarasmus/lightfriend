@@ -24,7 +24,7 @@ pub async fn get_mcp_tools_for_user(
 ) -> Vec<chat_completion::Tool> {
     let mut tools = Vec::new();
 
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     // Get user's enabled MCP servers
     let servers = match mcp_repository.get_enabled_servers_for_user(user_id) {
@@ -144,7 +144,7 @@ pub async fn handle_mcp_tool_call(
         server_name, actual_tool_name, user_id
     );
 
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     // Look up server config
     let server = match mcp_repository.get_server_by_name(user_id, server_name) {

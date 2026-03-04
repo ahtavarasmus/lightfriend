@@ -1,0 +1,263 @@
+// PostgreSQL schema for sensitive/user-content tables.
+// Hand-written to match pg_migrations/00000000000001_initial/up.sql
+
+diesel::table! {
+    user_secrets (id) {
+        id -> Int4,
+        user_id -> Int4,
+        matrix_username -> Nullable<Text>,
+        matrix_device_id -> Nullable<Text>,
+        encrypted_matrix_access_token -> Nullable<Text>,
+        encrypted_matrix_password -> Nullable<Text>,
+        encrypted_matrix_secret_storage_recovery_key -> Nullable<Text>,
+        encrypted_twilio_account_sid -> Nullable<Text>,
+        encrypted_twilio_auth_token -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    user_info (id) {
+        id -> Int4,
+        user_id -> Int4,
+        location -> Nullable<Text>,
+        info -> Nullable<Text>,
+        timezone -> Nullable<Text>,
+        nearby_places -> Nullable<Text>,
+        latitude -> Nullable<Float4>,
+        longitude -> Nullable<Float4>,
+    }
+}
+
+diesel::table! {
+    contact_profiles (id) {
+        id -> Int4,
+        user_id -> Int4,
+        nickname -> Text,
+        whatsapp_chat -> Nullable<Text>,
+        telegram_chat -> Nullable<Text>,
+        signal_chat -> Nullable<Text>,
+        email_addresses -> Nullable<Text>,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Int4,
+        created_at -> Int4,
+        whatsapp_room_id -> Nullable<Text>,
+        telegram_room_id -> Nullable<Text>,
+        signal_room_id -> Nullable<Text>,
+        notes -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    contact_profile_exceptions (id) {
+        id -> Int4,
+        profile_id -> Int4,
+        platform -> Text,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Int4,
+    }
+}
+
+diesel::table! {
+    imap_connection (id) {
+        id -> Int4,
+        user_id -> Int4,
+        method -> Text,
+        encrypted_password -> Text,
+        status -> Text,
+        last_update -> Int4,
+        created_on -> Int4,
+        description -> Text,
+        imap_server -> Nullable<Text>,
+        imap_port -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    message_history (id) {
+        id -> Int4,
+        user_id -> Int4,
+        role -> Text,
+        encrypted_content -> Text,
+        tool_name -> Nullable<Text>,
+        tool_call_id -> Nullable<Text>,
+        created_at -> Int4,
+        conversation_id -> Text,
+        tool_calls_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    tesla (id) {
+        id -> Int4,
+        user_id -> Int4,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        last_update -> Int4,
+        created_on -> Int4,
+        expires_in -> Int4,
+        region -> Text,
+        selected_vehicle_vin -> Nullable<Text>,
+        selected_vehicle_name -> Nullable<Text>,
+        selected_vehicle_id -> Nullable<Text>,
+        virtual_key_paired -> Int4,
+        granted_scopes -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    youtube (id) {
+        id -> Int4,
+        user_id -> Int4,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        expires_in -> Int4,
+        last_update -> Int4,
+        created_on -> Int4,
+        description -> Text,
+    }
+}
+
+diesel::table! {
+    mcp_servers (id) {
+        id -> Int4,
+        user_id -> Int4,
+        name -> Text,
+        url_encrypted -> Text,
+        auth_token_encrypted -> Nullable<Text>,
+        is_enabled -> Int4,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    totp_secrets (id) {
+        id -> Int4,
+        user_id -> Int4,
+        encrypted_secret -> Text,
+        enabled -> Int4,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    totp_backup_codes (id) {
+        id -> Int4,
+        user_id -> Int4,
+        code_hash -> Text,
+        used -> Int4,
+    }
+}
+
+diesel::table! {
+    webauthn_credentials (id) {
+        id -> Int4,
+        user_id -> Int4,
+        credential_id -> Text,
+        encrypted_public_key -> Text,
+        device_name -> Text,
+        counter -> Int4,
+        transports -> Nullable<Text>,
+        aaguid -> Nullable<Text>,
+        created_at -> Int4,
+        last_used_at -> Nullable<Int4>,
+        enabled -> Int4,
+    }
+}
+
+diesel::table! {
+    webauthn_challenges (id) {
+        id -> Int4,
+        user_id -> Int4,
+        challenge -> Text,
+        challenge_type -> Text,
+        context -> Nullable<Text>,
+        created_at -> Int4,
+        expires_at -> Int4,
+    }
+}
+
+diesel::table! {
+    items (id) {
+        id -> Int4,
+        user_id -> Int4,
+        summary -> Text,
+        due_at -> Nullable<Int4>,
+        priority -> Int4,
+        source_id -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    bridges (id) {
+        id -> Int4,
+        user_id -> Int4,
+        bridge_type -> Text,
+        status -> Text,
+        room_id -> Nullable<Text>,
+        data -> Nullable<Text>,
+        created_at -> Nullable<Int4>,
+        last_seen_online -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    bridge_disconnection_events (id) {
+        id -> Int4,
+        user_id -> Int4,
+        bridge_type -> Text,
+        detected_at -> Int4,
+    }
+}
+
+diesel::table! {
+    usage_logs (id) {
+        id -> Int4,
+        user_id -> Int4,
+        sid -> Nullable<Text>,
+        activity_type -> Text,
+        credits -> Nullable<Float4>,
+        created_at -> Int4,
+        time_consumed -> Nullable<Int4>,
+        success -> Nullable<Bool>,
+        reason -> Nullable<Text>,
+        status -> Nullable<Text>,
+        recharge_threshold_timestamp -> Nullable<Int4>,
+        zero_credits_timestamp -> Nullable<Int4>,
+        call_duration -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    processed_emails (id) {
+        id -> Int4,
+        user_id -> Int4,
+        email_uid -> Text,
+        processed_at -> Int4,
+    }
+}
+
+diesel::allow_tables_to_appear_in_same_query!(
+    user_secrets,
+    user_info,
+    contact_profiles,
+    contact_profile_exceptions,
+    imap_connection,
+    message_history,
+    tesla,
+    youtube,
+    mcp_servers,
+    totp_secrets,
+    totp_backup_codes,
+    webauthn_credentials,
+    webauthn_challenges,
+    items,
+    bridges,
+    bridge_disconnection_events,
+    usage_logs,
+    processed_emails,
+);

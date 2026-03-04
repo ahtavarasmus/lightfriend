@@ -39,23 +39,6 @@ pub struct UsageLogResponse {
 
 use crate::AppState;
 
-pub async fn verify_user(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path(user_id): axum::extract::Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Verify the user
-    state.user_core.verify_user(user_id).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
-
-    Ok(Json(json!({
-        "message": "User verified successfully"
-    })))
-}
-
 pub async fn update_preferred_number_admin(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
@@ -432,39 +415,6 @@ pub async fn broadcast_email(
     })))
 }
 
-pub async fn update_discount_tier(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path((user_id, tier)): axum::extract::Path<(i32, String)>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Convert empty string or "none" to None, otherwise Some(tier)
-    let tier = match tier.to_lowercase().as_str() {
-        "" | "none" | "null" => None,
-        _ if ["msg", "voice", "full"].contains(&tier.as_str()) => Some(tier.as_str()),
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid tier. Must be 'msg', 'voice', 'full', or 'none'"})),
-            ))
-        }
-    };
-
-    // Update the discount tier
-    state
-        .user_core
-        .update_discount_tier(user_id, tier)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
-
-    Ok(Json(json!({
-        "message": "Discount tier updated successfully",
-        "tier": tier
-    })))
-}
-
 pub async fn update_monthly_credits(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((user_id, amount)): axum::extract::Path<(f32, f32)>,
@@ -576,7 +526,7 @@ pub async fn get_usage_logs(
     let response_logs: Vec<UsageLogResponse> = logs
         .into_iter()
         .map(|log| UsageLogResponse {
-            id: log.id.unwrap_or(0),
+            id: log.id,
             user_id: log.user_id,
             activity_type: log.activity_type,
             timestamp: log.created_at,

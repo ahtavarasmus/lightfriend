@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::{
     handlers::auth_middleware::AuthUser,
-    models::user_models::{ContactProfile, ContactProfileException, NewContactProfile},
+    pg_models::{NewPgContactProfile, PgContactProfile, PgContactProfileException},
     repositories::user_repository::UpdateContactProfileParams,
     AppState,
 };
@@ -88,8 +88,8 @@ pub struct ExceptionResponse {
     pub notify_on_call: bool,
 }
 
-impl From<ContactProfileException> for ExceptionResponse {
-    fn from(e: ContactProfileException) -> Self {
+impl From<PgContactProfileException> for ExceptionResponse {
+    fn from(e: PgContactProfileException) -> Self {
         ExceptionResponse {
             platform: e.platform,
             notification_mode: e.notification_mode,
@@ -119,11 +119,11 @@ pub struct ContactProfileResponse {
 
 impl ContactProfileResponse {
     pub fn from_profile_with_exceptions(
-        p: ContactProfile,
-        exceptions: Vec<ContactProfileException>,
+        p: PgContactProfile,
+        exceptions: Vec<PgContactProfileException>,
     ) -> Self {
         ContactProfileResponse {
-            id: p.id.unwrap_or(0),
+            id: p.id,
             nickname: p.nickname,
             whatsapp_chat: p.whatsapp_chat,
             telegram_chat: p.telegram_chat,
@@ -159,7 +159,7 @@ pub async fn get_contact_profiles(
             let mut responses: Vec<ContactProfileResponse> = Vec::new();
 
             for profile in profiles {
-                let profile_id = profile.id.unwrap_or(0);
+                let profile_id = profile.id;
                 let exceptions = state
                     .user_repository
                     .get_profile_exceptions(profile_id)
@@ -306,7 +306,7 @@ pub async fn create_contact_profile(
         }
     }
 
-    let new_profile = NewContactProfile {
+    let new_profile = NewPgContactProfile {
         user_id: auth_user.user_id,
         nickname,
         whatsapp_chat: request.whatsapp_chat,
@@ -325,7 +325,7 @@ pub async fn create_contact_profile(
 
     match state.user_repository.create_contact_profile(&new_profile) {
         Ok(profile) => {
-            let profile_id = profile.id.unwrap_or(0);
+            let profile_id = profile.id;
 
             // Save exceptions if provided
             if let Some(exceptions) = request.exceptions {
@@ -434,7 +434,7 @@ pub async fn update_contact_profile(
     {
         if existing
             .iter()
-            .any(|p| p.nickname.eq_ignore_ascii_case(&request.nickname) && p.id != Some(profile_id))
+            .any(|p| p.nickname.eq_ignore_ascii_case(&request.nickname) && p.id != profile_id)
         {
             return Err((
                 StatusCode::CONFLICT,

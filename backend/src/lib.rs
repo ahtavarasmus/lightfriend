@@ -118,6 +118,8 @@ pub mod services {
     pub mod twilio_message_service;
     pub mod twilio_status_service;
 }
+pub mod pg_models;
+pub mod pg_schema;
 pub mod schema;
 pub mod jobs {
     pub mod scheduler;
@@ -161,6 +163,8 @@ use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
 
 pub type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
+pub type SqliteDbPool = DbPool; // Alias for clarity in dual-pool context
+pub type PgDbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 /// SQLite connection customizer that sets busy_timeout on each connection.
 /// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
@@ -185,6 +189,7 @@ pub type TeslaOAuthClient =
 
 pub struct AppState {
     pub db_pool: DbPool,
+    pub pg_pool: PgDbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
     pub item_repository: Arc<ItemRepository>,

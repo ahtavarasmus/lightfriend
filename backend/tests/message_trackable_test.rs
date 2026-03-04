@@ -13,12 +13,13 @@
 //! - TINFOIL_API_KEY and OPENROUTER_API_KEY set in backend/.env
 //! - Network access to Tinfoil API
 
-use backend::models::user_models::Item;
+use backend::pg_models::PgItem;
 use backend::proactive::utils::check_message_trackable_items;
 use backend::test_utils::{
     create_test_state, create_test_user, get_user_items, set_plan_type, TestUserParams,
 };
 use backend::{AiConfig, AppState, UserCoreOps};
+use serial_test::serial;
 use std::sync::Arc;
 
 const MAX_RETRIES: usize = 5;
@@ -68,7 +69,7 @@ async fn try_check_message(
     room_id: &str,
     sender: &str,
     content: &str,
-) -> Result<Vec<Item>, String> {
+) -> Result<Vec<PgItem>, String> {
     check_message_trackable_items(state, user_id, service, room_id, sender, content)
         .await
         .map_err(|e| format!("{}", e))?;
@@ -82,7 +83,7 @@ async fn check_message_expect_item(
     service: &str,
     sender: &str,
     content: &str,
-) -> (Arc<AppState>, i32, Vec<Item>) {
+) -> (Arc<AppState>, i32, Vec<PgItem>) {
     let mut last_err = None;
     for attempt in 1..=MAX_RETRIES {
         let state = create_llm_test_state();
@@ -128,7 +129,7 @@ async fn check_message_expect_no_item(
     room_id: &str,
     sender: &str,
     content: &str,
-) -> Vec<Item> {
+) -> Vec<PgItem> {
     for attempt in 1..=MAX_RETRIES {
         match try_check_message(state, user_id, service, room_id, sender, content).await {
             Ok(items) => return items,
@@ -150,7 +151,7 @@ async fn check_message_expect_no_item(
 }
 
 /// Assert that exactly one item was created with the expected properties.
-fn assert_tracking_item(items: &[Item], expected_summary_words: &[&str]) {
+fn assert_tracking_item(items: &[PgItem], expected_summary_words: &[&str]) {
     assert!(
         !items.is_empty(),
         "Expected a tracking item to be created after {} retries, got none",
@@ -234,7 +235,7 @@ fn assert_tracking_item(items: &[Item], expected_summary_words: &[&str]) {
 }
 
 /// Assert that no items were created.
-fn assert_no_item(items: &[Item], message: &str) {
+fn assert_no_item(items: &[PgItem], message: &str) {
     assert!(
         items.is_empty(),
         "Expected NO item for \"{}\", but got {} item(s): {:?}",
@@ -245,7 +246,7 @@ fn assert_no_item(items: &[Item], message: &str) {
 }
 
 /// Assert due_at is in the future and within a reasonable range.
-fn assert_due_at_in_range(item: &Item, min_offset_secs: i64, max_offset_secs: i64) {
+fn assert_due_at_in_range(item: &PgItem, min_offset_secs: i64, max_offset_secs: i64) {
     let check_at = item.due_at.expect("due_at should be set") as i64;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -269,6 +270,7 @@ fn assert_due_at_in_range(item: &Item, min_offset_secs: i64, max_offset_secs: i6
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_short_message_skip() {
     // Messages under 10 chars should be skipped without any LLM call
     let state = create_test_state();
@@ -339,6 +341,7 @@ async fn test_exactly_10_chars_not_skipped() {
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_invoice() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -352,6 +355,7 @@ async fn test_trackable_invoice() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_delivery() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -365,6 +369,7 @@ async fn test_trackable_delivery() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_question_needing_response() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -378,6 +383,7 @@ async fn test_trackable_question_needing_response() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_appointment() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -391,6 +397,7 @@ async fn test_trackable_appointment() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_deadline() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -404,6 +411,7 @@ async fn test_trackable_deadline() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_trackable_commitment_from_someone() {
     let (_state, _user_id, items) = check_message_expect_item(
@@ -421,6 +429,7 @@ async fn test_trackable_commitment_from_someone() {
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_not_trackable_greeting() {
     let state = create_llm_test_state();
@@ -440,6 +449,7 @@ async fn test_not_trackable_greeting() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_not_trackable_acknowledgement() {
     let state = create_llm_test_state();
@@ -459,6 +469,7 @@ async fn test_not_trackable_acknowledgement() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_not_trackable_casual_chat() {
     let state = create_llm_test_state();
@@ -478,6 +489,7 @@ async fn test_not_trackable_casual_chat() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_not_trackable_simple_reaction() {
     let state = create_llm_test_state();
@@ -501,6 +513,7 @@ async fn test_not_trackable_simple_reaction() {
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_item_fields_correct() {
     let (state, user_id, items) = check_message_expect_item(
@@ -566,6 +579,7 @@ async fn test_item_fields_correct() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_platform_tag_matches_service() {
     // Verify platform tag is set correctly for different services
@@ -629,6 +643,7 @@ async fn test_platform_tag_matches_service() {
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_dedup_same_topic_same_room() {
     let state = create_llm_test_state();
@@ -699,6 +714,7 @@ async fn test_dedup_same_topic_same_room() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_dedup_different_topics_same_room() {
     let state = create_llm_test_state();
@@ -769,6 +785,7 @@ async fn test_dedup_different_topics_same_room() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_dedup_same_topic_different_rooms() {
     let state = create_llm_test_state();
@@ -842,6 +859,7 @@ async fn test_dedup_same_topic_different_rooms() {
 // =============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_due_at_urgent_item() {
     // Overdue invoice - should have a near-term check (within 1-3 days)
@@ -858,6 +876,7 @@ async fn test_due_at_urgent_item() {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore]
 async fn test_due_at_non_urgent_item() {
     // Package in transit, no rush - should have a longer check window

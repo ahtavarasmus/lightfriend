@@ -449,7 +449,7 @@ async fn handle_post_call_transcription(
             let start_epoch = start_dt.timestamp() as i32;
             let end_epoch = now_dt.timestamp() as i32;
 
-            let call_start = crate::models::user_models::NewMessageHistory {
+            let call_start = crate::pg_models::NewPgMessageHistory {
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
@@ -460,7 +460,7 @@ async fn handle_post_call_transcription(
                 created_at: start_epoch,
             };
 
-            let call_end = crate::models::user_models::NewMessageHistory {
+            let call_end = crate::pg_models::NewPgMessageHistory {
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
