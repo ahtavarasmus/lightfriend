@@ -435,10 +435,81 @@ const AVATAR_ROW_STYLES: &str = r#"
     text-align: center;
 }
 
+/* Contact dot */
+.contact-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+}
+.contact-dot--unknown {
+    background: #555;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.contact-dot__question {
+    font-size: 0.55rem;
+    font-weight: bold;
+    color: #1a1a2e;
+    line-height: 1;
+}
+.contact-dot--add {
+    background: transparent;
+    border: 1.5px dashed rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.contact-dot__plus {
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.25);
+    line-height: 1;
+}
+.contact-dot--contacts {
+    background: #555;
+}
+
+/* Spinning dots loader */
+.dot-spinner {
+    width: 48px;
+    height: 48px;
+    position: relative;
+    margin: 1rem auto;
+}
+.dot-spinner.dot-spinner--done .dot-spinner__dot {
+    background: radial-gradient(circle at 35% 35%, #86efac, #4ade80 40%, #16a34a) !important;
+    opacity: 1 !important;
+}
+.dot-spinner__dot {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ccc, #888 40%, #444);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.dot-spinner__dot:nth-child(1)  { top: 0;    left: 19px; animation: dot-fade 1.2s -0.0s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(2)  { top: 3px;  left: 30px; animation: dot-fade 1.2s -0.1s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(3)  { top: 12px; left: 36px; animation: dot-fade 1.2s -0.2s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(4)  { top: 23px; left: 36px; animation: dot-fade 1.2s -0.3s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(5)  { top: 32px; left: 30px; animation: dot-fade 1.2s -0.4s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(6)  { top: 38px; left: 19px; animation: dot-fade 1.2s -0.5s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(7)  { top: 32px; left: 8px;  animation: dot-fade 1.2s -0.6s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(8)  { top: 23px; left: 2px;  animation: dot-fade 1.2s -0.7s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(9)  { top: 12px; left: 2px;  animation: dot-fade 1.2s -0.8s infinite ease-in-out; }
+.dot-spinner__dot:nth-child(10) { top: 3px;  left: 8px;  animation: dot-fade 1.2s -0.9s infinite ease-in-out; }
+
+@keyframes dot-fade {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50%      { opacity: 1;   transform: scale(1.2); }
+}
+
 /* Flying icons - use CSS custom props for per-figure targeting */
 .flying-icon {
     position: absolute;
-    top: 12px;
+    top: 4px;
     left: 50%;
     margin-left: 10px;
     font-size: 0.65rem;
@@ -632,26 +703,30 @@ fn effective_mode_for_platform<'a>(profile: &'a ContactProfile, platform_key: &s
     }
 }
 
-/// Renders an SVG stick figure with one arm raised in a throwing pose.
-/// `special`: None for normal, Some("unknown") for ? head, Some("add") for dashed/plus, Some("contacts") for plain gray
-fn render_stick_figure_svg(color: &str, special: Option<&str>) -> Html {
-    let stroke = match special {
-        Some("add") => "stroke=\"rgba(255,255,255,0.25)\" stroke-dasharray=\"3,3\"".to_string(),
-        _ => format!("stroke=\"{}\"", color),
-    };
-    let head_content = match special {
-        Some("unknown") => format!(
-            r#"<text x="15" y="11" text-anchor="middle" font-size="8" fill="{}" font-weight="bold">?</text>"#,
-            color
-        ),
-        Some("add") => r#"<text x="15" y="12" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.25)" font-weight="300">+</text>"#.to_string(),
-        _ => String::new(),
-    };
-    let svg = format!(
-        r#"<svg viewBox="0 0 30 48" width="30" height="48" xmlns="http://www.w3.org/2000/svg"><circle cx="15" cy="8" r="5" fill="none" {} stroke-width="2"/>{}<line x1="15" y1="13" x2="15" y2="30" {} stroke-width="2"/><line x1="15" y1="19" x2="24" y2="12" {} stroke-width="2"/><line x1="15" y1="19" x2="6" y2="25" {} stroke-width="2"/><line x1="15" y1="30" x2="8" y2="42" {} stroke-width="2"/><line x1="15" y1="30" x2="22" y2="42" {} stroke-width="2"/></svg>"#,
-        stroke, head_content, stroke, stroke, stroke, stroke, stroke
-    );
-    Html::from_html_unchecked(AttrValue::from(svg))
+/// Renders a colored dot for a contact.
+/// `special`: None for normal, Some("unknown") for grey+?, Some("add") for dashed+, Some("contacts") for grey
+fn render_contact_dot(color: &str, special: Option<&str>) -> Html {
+    match special {
+        Some("add") => html! {
+            <div class="contact-dot contact-dot--add">
+                <span class="contact-dot__plus">{"+"}</span>
+            </div>
+        },
+        Some("unknown") => html! {
+            <div class="contact-dot contact-dot--unknown">
+                <span class="contact-dot__question">{"?"}</span>
+            </div>
+        },
+        Some("contacts") => html! {
+            <div class="contact-dot contact-dot--contacts"></div>
+        },
+        _ => {
+            let style = format!("background: {};", color);
+            html! {
+                <div class="contact-dot" style={style}></div>
+            }
+        }
+    }
 }
 
 /// Renders flying platform icons for a contact profile.
@@ -2123,11 +2198,11 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         };
 
         let flying = render_flying_icons(profile);
-        let figure_svg = render_stick_figure_svg(color, None);
+        let dot = render_contact_dot(color, None);
 
         html! {
             <div class="figure-item" onclick={on_click}>
-                {figure_svg}
+                {dot}
                 {flying}
                 <span class="figure-label">{nick}</span>
             </div>
@@ -2138,7 +2213,7 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         let on_click = on_phone_contact_click.clone();
         html! {
             <div class="figure-item" onclick={on_click}>
-                {render_stick_figure_svg("#555", None)}
+                {render_contact_dot("#555", Some("contacts"))}
                 <span class="figure-label">{"Contacts"}</span>
             </div>
         }
@@ -2148,7 +2223,7 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         let on_click = on_default_click.clone();
         html! {
             <div class="figure-item" onclick={on_click}>
-                {render_stick_figure_svg("#555", Some("unknown"))}
+                {render_contact_dot("#555", Some("unknown"))}
                 <span class="figure-label">{"Unknown"}</span>
             </div>
         }
@@ -2158,7 +2233,7 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         let on_click = on_add_click.clone();
         html! {
             <div class="figure-item" onclick={on_click}>
-                {render_stick_figure_svg("rgba(255,255,255,0.25)", Some("add"))}
+                {render_contact_dot("rgba(255,255,255,0.25)", Some("add"))}
                 <span class="figure-label">{"Add"}</span>
             </div>
         }
@@ -3759,8 +3834,19 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         return html! {
             <>
                 <style>{AVATAR_ROW_STYLES}</style>
-                <div class="people-arena">
-                    <span style="color:#666;font-size:0.8rem;">{"Loading contacts..."}</span>
+                <div class="people-arena" style="justify-content: center;">
+                    <div class="dot-spinner">
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                        <div class="dot-spinner__dot"></div>
+                    </div>
                 </div>
             </>
         };
