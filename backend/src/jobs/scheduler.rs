@@ -3,7 +3,7 @@ use crate::UserCoreOps;
 
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::handlers::imap_handlers;
 
@@ -847,14 +847,29 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             let summary = item_clone.summary.clone();
                             let priority = item_clone.priority;
 
-                            let result = crate::proactive::utils::process_triggered_item(
-                                &state,
-                                user_id,
-                                &item_clone,
-                                None,
-                            )
-                            .await
-                            .map_err(|e| e.to_string());
+                            // Retry up to 3 times with 30s delay between attempts
+                            let mut result = Err(String::new());
+                            for attempt in 1..=3 {
+                                result = crate::proactive::utils::process_triggered_item(
+                                    &state,
+                                    user_id,
+                                    &item_clone,
+                                    None,
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+
+                                if result.is_ok() {
+                                    break;
+                                }
+                                if attempt < 3 {
+                                    warn!(
+                                        "Triggered item {} attempt {}/3 failed, retrying in 30s",
+                                        item_id, attempt
+                                    );
+                                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                                }
+                            }
 
                             match result {
                                 Ok(response) => {
@@ -864,17 +879,53 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     .await;
                                 }
                                 Err(e) => {
-                                    error!("Failed to process triggered item {}: {}", item_id, e);
-                                    // Fallback: send summary as SMS, delete item
-                                    crate::proactive::utils::send_notification(
-                                        &state,
-                                        user_id,
-                                        &summary,
-                                        "item_sms".to_string(),
-                                        Some("Hey, you have a reminder!".to_string()),
-                                    )
-                                    .await;
-                                    let _ = state.item_repository.delete_item(item_id, user_id);
+                                    error!(
+                                        "Failed to process triggered item {} after 3 attempts: {}",
+                                        item_id, e
+                                    );
+                                    let tags =
+                                        crate::proactive::utils::parse_summary_tags(&summary);
+
+                                    // For recurring items: reschedule without sending raw tags
+                                    if tags.item_type.as_deref() == Some("recurring") {
+                                        let now_ts = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs()
+                                            as i32;
+                                        let next_ts = now_ts + 86400; // retry in 24h
+                                        let _ = state
+                                            .item_repository
+                                            .update_due_at(item_id, Some(next_ts));
+                                        error!(
+                                            "Recurring item {} rescheduled after 3 failed attempts",
+                                            item_id
+                                        );
+                                    } else {
+                                        // One-shot item: send clean fallback (strip tag line), then delete
+                                        let clean_msg = if tags.has_tags {
+                                            summary
+                                                .lines()
+                                                .skip(1)
+                                                .collect::<Vec<_>>()
+                                                .join("\n")
+                                                .trim()
+                                                .to_string()
+                                        } else {
+                                            summary.clone()
+                                        };
+                                        if !clean_msg.is_empty() {
+                                            crate::proactive::utils::send_notification(
+                                                &state,
+                                                user_id,
+                                                &clean_msg,
+                                                "item_sms".to_string(),
+                                                Some("Hey, you have a reminder!".to_string()),
+                                            )
+                                            .await;
+                                        }
+                                        let _ = state.item_repository.delete_item(item_id, user_id);
+                                    }
                                 }
                             }
                         });
