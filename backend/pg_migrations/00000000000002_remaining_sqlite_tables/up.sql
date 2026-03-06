@@ -37,21 +37,21 @@ CREATE TABLE IF NOT EXISTS user_settings (
     elevenlabs_phone_number_id TEXT,
     notify_about_calls BOOLEAN NOT NULL,
     action_on_critical_message TEXT,
-    phone_service_active BOOLEAN NOT NULL,
+    phone_service_active BOOLEAN NOT NULL DEFAULT TRUE,
     default_notification_mode TEXT,
     default_notification_type TEXT,
-    default_notify_on_call INTEGER NOT NULL,
+    default_notify_on_call INTEGER NOT NULL DEFAULT 0,
     llm_provider TEXT,
     phone_contact_notification_mode TEXT,
     phone_contact_notification_type TEXT,
-    phone_contact_notify_on_call INTEGER NOT NULL,
-    auto_create_items BOOLEAN NOT NULL
+    phone_contact_notify_on_call INTEGER NOT NULL DEFAULT 0,
+    auto_create_items BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS refund_info (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL UNIQUE,
-    has_refunded INTEGER NOT NULL,
+    has_refunded INTEGER NOT NULL DEFAULT 0,
     last_credit_pack_amount REAL,
     last_credit_pack_purchase_timestamp INTEGER,
     refunded_at INTEGER
