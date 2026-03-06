@@ -749,7 +749,7 @@ pub async fn process_sms(
 ### Behavior:
 - Recurring patterns (daily, every, weekly) mean the user wants an automated schedule - create a recurring item immediately, don't do the task manually this one time.
 - Time-specific requests (at Xpm, remind me, notify me when) are scheduling requests - create items.
-- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify a time, ask them when.
+- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify an exact time, pick a reasonable default (e.g. 'morning' = 8:00, 'afternoon' = 14:00, 'evening' = 18:00, 'tonight' = 20:00). Never ask the user to clarify the time - just pick the most sensible time and go.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.

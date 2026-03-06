@@ -109,14 +109,14 @@ pub fn get_cached_notification_pricing_sync(
     country_code: &str,
 ) -> Option<NotificationPricing> {
     use crate::models::user_models::CountryAvailability;
-    use crate::schema::country_availability;
+    use crate::pg_schema::country_availability;
     use chrono::Utc;
     use diesel::prelude::*;
 
     let now = Utc::now().timestamp() as i32;
     let cache_duration = 86400; // 24 hours
 
-    let mut conn = state.db_pool.get().ok()?;
+    let mut conn = state.pg_pool.get().ok()?;
 
     let cached: CountryAvailability = country_availability::table
         .filter(country_availability::country_code.eq(country_code.to_uppercase()))

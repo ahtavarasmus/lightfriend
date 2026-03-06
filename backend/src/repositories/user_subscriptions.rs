@@ -1,6 +1,6 @@
 use crate::{
     models::user_models::{NewRefundInfo, RefundInfo, User},
-    schema::{refund_info, users},
+    pg_schema::{refund_info, users},
 };
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -8,11 +8,11 @@ use diesel::result::Error as DieselError;
 impl crate::repositories::user_repository::UserRepository {
     // Subscription related methods
     pub fn get_subscription_tier(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let sub_tier = users::table
             .find(user_id)
             .select(users::sub_tier)
-            .first::<Option<String>>(&mut conn)?;
+            .first::<Option<String>>(&mut pg_conn)?;
         Ok(sub_tier)
     }
 
@@ -21,19 +21,19 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         tier: Option<&str>,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::sub_tier.eq(tier))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
     // Credits management
     pub fn update_user_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::credits.eq(new_credits))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
@@ -42,16 +42,16 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         new_credits_left: f32,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::credits_left.eq(new_credits_left))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
     pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
-        let user = users::table.find(user_id).first::<User>(&mut conn)?;
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
+        let user = users::table.find(user_id).first::<User>(&mut pg_conn)?;
 
         let new_credits = user.credits + amount;
 
@@ -62,17 +62,17 @@ impl crate::repositories::user_repository::UserRepository {
                 users::credits.eq(new_credits),
                 users::last_credits_notification.eq(None::<i32>),
             ))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
     // Stripe related methods
     pub fn get_stripe_customer_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let stripe_id = users::table
             .find(user_id)
             .select(users::stripe_customer_id)
-            .first::<Option<String>>(&mut conn)?;
+            .first::<Option<String>>(&mut pg_conn)?;
         Ok(stripe_id)
     }
 
@@ -81,10 +81,10 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         customer_id: &str,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_customer_id.eq(customer_id))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
@@ -92,11 +92,11 @@ impl crate::repositories::user_repository::UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<String>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let payment_method_id = users::table
             .find(user_id)
             .select(users::stripe_payment_method_id)
-            .first::<Option<String>>(&mut conn)?;
+            .first::<Option<String>>(&mut pg_conn)?;
         Ok(payment_method_id)
     }
 
@@ -105,10 +105,10 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         payment_method_id: &str,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_payment_method_id.eq(payment_method_id))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
@@ -116,10 +116,10 @@ impl crate::repositories::user_repository::UserRepository {
         &self,
         customer_id: &str,
     ) -> Result<Option<User>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let user = users::table
             .filter(users::stripe_customer_id.eq(customer_id))
-            .first::<User>(&mut conn)
+            .first::<User>(&mut pg_conn)
             .optional()?;
         Ok(user)
     }
@@ -129,18 +129,18 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         session_id: &str,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::stripe_checkout_session_id.eq(session_id))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
     pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::credits_left.eq(new_credits))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
@@ -150,20 +150,20 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         plan_type: Option<&str>,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::plan_type.eq(plan_type))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
     /// Get the user's plan type
     pub fn get_plan_type(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         users::table
             .find(user_id)
             .select(users::plan_type)
-            .first::<Option<String>>(&mut conn)
+            .first::<Option<String>>(&mut pg_conn)
     }
 
     // Check if user has a specific subscription tier and has messages left
@@ -172,11 +172,11 @@ impl crate::repositories::user_repository::UserRepository {
         user_id: i32,
         tier: &str,
     ) -> Result<bool, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let sub_tier = users::table
             .find(user_id)
             .select(users::sub_tier)
-            .first::<Option<String>>(&mut conn)?;
+            .first::<Option<String>>(&mut pg_conn)?;
 
         // Check subscription tier
         Ok(sub_tier.is_some_and(|t| t == tier))
@@ -184,22 +184,22 @@ impl crate::repositories::user_repository::UserRepository {
 
     // Refund info methods
     pub fn get_refund_info(&self, user_id: i32) -> Result<Option<RefundInfo>, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         refund_info::table
             .filter(refund_info::user_id.eq(user_id))
             .select(RefundInfo::as_select())
-            .first::<RefundInfo>(&mut conn)
+            .first::<RefundInfo>(&mut pg_conn)
             .optional()
     }
 
     pub fn get_or_create_refund_info(&self, user_id: i32) -> Result<RefundInfo, DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
 
         // Try to get existing
         if let Some(info) = refund_info::table
             .filter(refund_info::user_id.eq(user_id))
             .select(RefundInfo::as_select())
-            .first::<RefundInfo>(&mut conn)
+            .first::<RefundInfo>(&mut pg_conn)
             .optional()?
         {
             return Ok(info);
@@ -212,17 +212,17 @@ impl crate::repositories::user_repository::UserRepository {
         };
         diesel::insert_into(refund_info::table)
             .values(&new_info)
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
 
         // Return the created row
         refund_info::table
             .filter(refund_info::user_id.eq(user_id))
             .select(RefundInfo::as_select())
-            .first::<RefundInfo>(&mut conn)
+            .first::<RefundInfo>(&mut pg_conn)
     }
 
     pub fn set_has_refunded(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
 
         // Ensure row exists
         self.get_or_create_refund_info(user_id)?;
@@ -232,7 +232,7 @@ impl crate::repositories::user_repository::UserRepository {
                 refund_info::has_refunded.eq(1),
                 refund_info::refunded_at.eq(Some(timestamp)),
             ))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 
@@ -242,7 +242,7 @@ impl crate::repositories::user_repository::UserRepository {
         amount: f32,
         timestamp: i32,
     ) -> Result<(), DieselError> {
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
 
         // Ensure row exists
         self.get_or_create_refund_info(user_id)?;
@@ -252,7 +252,7 @@ impl crate::repositories::user_repository::UserRepository {
                 refund_info::last_credit_pack_amount.eq(Some(amount)),
                 refund_info::last_credit_pack_purchase_timestamp.eq(Some(timestamp)),
             ))
-            .execute(&mut conn)?;
+            .execute(&mut pg_conn)?;
         Ok(())
     }
 }

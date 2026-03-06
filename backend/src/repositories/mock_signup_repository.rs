@@ -40,21 +40,13 @@ impl MockUser {
             stripe_customer_id: self.stripe_customer_id.clone(),
             stripe_payment_method_id: None,
             stripe_checkout_session_id: None,
-            matrix_username: None,
-            encrypted_matrix_access_token: None,
             sub_tier: None,
-            matrix_device_id: None,
             credits_left: 0.0,
-            encrypted_matrix_password: None,
-            encrypted_matrix_secret_storage_recovery_key: None,
             last_credits_notification: None,
             next_billing_date_timestamp: None,
             magic_token: self.magic_token.clone(),
             plan_type: None,
             matrix_e2ee_enabled: false,
-            migrated_to_new_server: true,
-            last_backup_at: None,
-            backup_session_active: false,
         }
     }
 }

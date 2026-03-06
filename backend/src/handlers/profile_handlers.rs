@@ -109,6 +109,7 @@ pub async fn get_profile(
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get user profile and settings from database
     let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| {
+        tracing::error!("get_profile: find_by_id failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
@@ -120,6 +121,7 @@ pub async fn get_profile(
                 .user_core
                 .get_user_settings(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_user_settings failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
@@ -129,6 +131,7 @@ pub async fn get_profile(
                 .user_core
                 .get_user_info(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_user_info failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
@@ -169,6 +172,7 @@ pub async fn get_profile(
                 .user_core
                 .get_critical_notification_info(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_critical_notification_info failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
@@ -1331,7 +1335,7 @@ pub struct AddQuietRuleRequest {
 
 /// Parse quiet rule info from an item's tagged summary.
 fn parse_rule_info_from_item(
-    item: &crate::models::user_models::Item,
+    item: &crate::pg_models::PgItem,
     user_id: i32,
     state: &Arc<AppState>,
 ) -> Option<QuietRuleInfo> {
@@ -1344,7 +1348,7 @@ fn parse_rule_info_from_item(
         .map(|ts| format_quiet_until_display(ts, user_id, state));
 
     Some(QuietRuleInfo {
-        id: item.id.unwrap_or(0),
+        id: item.id,
         rule_type,
         platform: tags.platform,
         sender: tags.sender,
