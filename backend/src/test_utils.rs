@@ -76,7 +76,10 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         // Truncate all PG tables so each test starts clean
         use diesel::RunQueryDsl;
         let _ = diesel::sql_query(
-            "TRUNCATE items, message_history, usage_logs, contact_profiles, \
+            "TRUNCATE users, user_settings, refund_info, \
+             country_availability, message_status_log, admin_alerts, \
+             disabled_alert_types, site_metrics, waitlist, \
+             items, message_history, usage_logs, contact_profiles, \
              contact_profile_exceptions, bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
