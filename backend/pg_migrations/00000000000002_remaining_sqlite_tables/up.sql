@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
     next_billing_date_timestamp INTEGER,
     magic_token TEXT,
     plan_type TEXT,
-    matrix_e2ee_enabled BOOLEAN NOT NULL
+    matrix_e2ee_enabled BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS user_settings (
