@@ -56,13 +56,11 @@ pub struct UpdateContactProfileParams {
 
 pub struct UserRepository {
     pub pool: PgDbPool,
-    /// SQLite pool for subscription/billing methods that access users/refund_info tables
-    pub db_pool: crate::DbPool,
 }
 
 impl UserRepository {
-    pub fn new(pool: PgDbPool, db_pool: crate::DbPool) -> Self {
-        Self { pool, db_pool }
+    pub fn new(pool: PgDbPool) -> Self {
+        Self { pool }
     }
 
     pub fn get_conversation_history(
@@ -1128,8 +1126,6 @@ impl UserRepository {
         Ok(rows)
     }
 
-    // NOTE(pg-migration): The "mark user as migrated" step was removed because the
-    // users table is in SQLite. Callers should update migrated_to_new_server via UserCore.
     pub fn create_bridge(&self, new_bridge: NewPgBridge) -> Result<(), DieselError> {
         use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1228,10 +1224,9 @@ impl UserRepository {
     /// Check if user credits are below their auto-charge threshold.
     /// Returns true when `charge_when_under` is enabled and credits are at or
     /// below the `charge_back_to` target (meaning the user should be auto-charged).
-    /// Queries SQLite `users` table.
     pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::users;
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        use crate::pg_schema::users;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
         let (credits, charge_enabled, charge_back_to): (f32, bool, Option<f32>) = users::table
             .find(user_id)
             .select((
@@ -1248,13 +1243,12 @@ impl UserRepository {
     }
 
     /// Delete old message status logs older than a given timestamp.
-    /// Queries SQLite `message_status_log` table.
     pub fn delete_old_message_status_logs(
         &self,
         before_timestamp: i32,
     ) -> Result<usize, DieselError> {
-        use crate::schema::message_status_log;
-        let mut conn = self.db_pool.get().expect("Failed to get DB connection");
+        use crate::pg_schema::message_status_log;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
         diesel::delete(
             message_status_log::table.filter(message_status_log::created_at.lt(before_timestamp)),
         )
@@ -1399,6 +1393,46 @@ impl UserRepository {
         Ok(())
     }
 
+    /// Get Matrix credentials from PG `user_secrets` table.
+    /// Returns (username, encrypted_password, device_id, encrypted_access_token, encrypted_recovery_key).
+    #[allow(clippy::type_complexity)]
+    pub fn get_matrix_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<
+        Option<(
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )>,
+        DieselError,
+    > {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let result = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::matrix_username,
+                user_secrets::encrypted_matrix_password,
+                user_secrets::matrix_device_id,
+                user_secrets::encrypted_matrix_access_token,
+                user_secrets::encrypted_matrix_secret_storage_recovery_key,
+            ))
+            .first::<(
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )>(&mut conn)
+            .optional()?;
+
+        Ok(result)
+    }
+
     /// Get Twilio credentials from PG `user_secrets` table.
     pub fn get_twilio_credentials(
         &self,
@@ -1507,10 +1541,10 @@ impl UserRepository {
         Ok(())
     }
 
-    /// Set matrix_e2ee_enabled flag in SQLite `users` table.
+    /// Set matrix_e2ee_enabled flag.
     pub fn set_matrix_e2ee_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
-        use crate::schema::users;
-        let mut conn = self.db_pool.get().expect("Failed to get SQLite connection");
+        use crate::pg_schema::users;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::matrix_e2ee_enabled.eq(enabled))
             .execute(&mut conn)?;
@@ -1518,12 +1552,12 @@ impl UserRepository {
     }
 
     /// Look up a user by their Matrix username.
-    /// Queries PG `user_secrets` for the user_id, then SQLite `users` for the full User.
+    /// Queries PG `user_secrets` for the user_id, then PG `users` for the full User.
     pub fn get_user_by_matrix_user_id(
         &self,
         matrix_user_id: &str,
     ) -> Result<Option<crate::models::user_models::User>, DieselError> {
-        use crate::pg_schema::user_secrets;
+        use crate::pg_schema::{user_secrets, users};
         let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
 
         let maybe_uid: Option<i32> = user_secrets::table
@@ -1534,11 +1568,9 @@ impl UserRepository {
 
         match maybe_uid {
             Some(uid) => {
-                use crate::schema::users;
-                let mut sqlite_conn = self.db_pool.get().expect("Failed to get SQLite connection");
                 let user = users::table
                     .find(uid)
-                    .first::<crate::models::user_models::User>(&mut sqlite_conn)
+                    .first::<crate::models::user_models::User>(&mut pg_conn)
                     .optional()?;
                 Ok(user)
             }

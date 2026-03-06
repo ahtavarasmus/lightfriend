@@ -236,19 +236,19 @@ async fn main() {
         tracing::info!("PG migrations applied successfully");
     }
 
-    let user_core = Arc::new(UserCore::new(pool.clone()));
+    let user_core = Arc::new(UserCore::new(pg_pool.clone()));
 
     // Bootstrap admin user on first startup (only if database is empty)
     if let Err(e) = bootstrap_admin_if_needed(&user_core).await {
         tracing::warn!("Admin bootstrap failed (app will continue): {}", e);
     }
 
-    let user_repository = Arc::new(UserRepository::new(pg_pool.clone(), pool.clone()));
+    let user_repository = Arc::new(UserRepository::new(pg_pool.clone()));
     let item_repository = Arc::new(ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pg_pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
-    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
-    let metrics_repository = Arc::new(backend::MetricsRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
+    let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -306,7 +306,7 @@ async fn main() {
     let twilio_client = Arc::new(backend::RealTwilioClient::new());
     let twilio_message_service = Arc::new(backend::TwilioMessageService::new(
         twilio_client.clone(),
-        pool.clone(),
+        pg_pool.clone(),
         user_core.clone(),
         user_repository.clone(),
     ));

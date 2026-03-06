@@ -91,7 +91,7 @@ pub async fn twilio_status_callback(
     };
 
     // Create real implementations
-    let repository = Arc::new(DieselTwilioStatusRepository::new(state.db_pool.clone()));
+    let repository = Arc::new(DieselTwilioStatusRepository::new(state.pg_pool.clone()));
 
     // Check if Twilio credentials are available
     match TwilioCredentials::from_env() {

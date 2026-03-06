@@ -4,10 +4,11 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    bridge_disconnection_events, bridges, contact_profile_exceptions, contact_profiles,
-    imap_connection, items, mcp_servers, message_history, processed_emails, tesla,
-    totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, webauthn_challenges,
-    webauthn_credentials, youtube,
+    admin_alerts, bridge_disconnection_events, bridges, contact_profile_exceptions,
+    contact_profiles, country_availability, disabled_alert_types, imap_connection, items,
+    mcp_servers, message_history, message_status_log, processed_emails, refund_info, site_metrics,
+    tesla, totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, waitlist,
+    webauthn_challenges, webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -498,4 +499,177 @@ pub struct NewPgProcessedEmail {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32,
+}
+
+// -- refund_info --
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = refund_info)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgRefundInfo {
+    pub id: i32,
+    pub user_id: i32,
+    pub has_refunded: i32,
+    pub last_credit_pack_amount: Option<f32>,
+    pub last_credit_pack_purchase_timestamp: Option<i32>,
+    pub refunded_at: Option<i32>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = refund_info)]
+pub struct NewPgRefundInfo {
+    pub user_id: i32,
+    pub has_refunded: i32,
+}
+
+// -- country_availability --
+
+#[derive(Queryable, Selectable, Debug, Clone)]
+#[diesel(table_name = country_availability)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgCountryAvailability {
+    pub id: i32,
+    pub country_code: String,
+    pub has_local_numbers: bool,
+    pub outbound_sms_price: Option<f32>,
+    pub inbound_sms_price: Option<f32>,
+    pub outbound_voice_price_per_min: Option<f32>,
+    pub inbound_voice_price_per_min: Option<f32>,
+    pub last_checked: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = country_availability)]
+pub struct NewPgCountryAvailability {
+    pub country_code: String,
+    pub has_local_numbers: bool,
+    pub outbound_sms_price: Option<f32>,
+    pub inbound_sms_price: Option<f32>,
+    pub outbound_voice_price_per_min: Option<f32>,
+    pub inbound_voice_price_per_min: Option<f32>,
+    pub last_checked: i32,
+    pub created_at: i32,
+}
+
+// -- message_status_log --
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = message_status_log)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgMessageStatusLog {
+    pub id: i32,
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = message_status_log)]
+pub struct NewPgMessageStatusLog {
+    pub message_sid: String,
+    pub user_id: i32,
+    pub direction: String,
+    pub to_number: String,
+    pub from_number: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub price: Option<f32>,
+    pub price_unit: Option<String>,
+}
+
+// -- admin_alerts --
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = admin_alerts)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgAdminAlert {
+    pub id: i32,
+    pub alert_type: String,
+    pub severity: String,
+    pub message: String,
+    pub location: String,
+    pub module: String,
+    pub acknowledged: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = admin_alerts)]
+pub struct NewPgAdminAlert {
+    pub alert_type: String,
+    pub severity: String,
+    pub message: String,
+    pub location: String,
+    pub module: String,
+    pub acknowledged: i32,
+    pub created_at: i32,
+}
+
+// -- disabled_alert_types --
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = disabled_alert_types)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgDisabledAlertType {
+    pub id: i32,
+    pub alert_type: String,
+    pub disabled_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = disabled_alert_types)]
+pub struct NewPgDisabledAlertType {
+    pub alert_type: String,
+    pub disabled_at: i32,
+}
+
+// -- site_metrics --
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = site_metrics)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgSiteMetric {
+    pub id: i32,
+    pub metric_key: String,
+    pub metric_value: String,
+    pub updated_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = site_metrics)]
+pub struct NewPgSiteMetric {
+    pub metric_key: String,
+    pub metric_value: String,
+    pub updated_at: i32,
+}
+
+// -- waitlist --
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = waitlist)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgWaitlistEntry {
+    pub id: i32,
+    pub email: String,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = waitlist)]
+pub struct NewPgWaitlistEntry {
+    pub email: String,
+    pub created_at: i32,
 }

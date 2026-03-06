@@ -44,7 +44,7 @@ fn create_test_service(
     let mock_client = Arc::new(MockTwilioClient::new());
     let service = TwilioMessageService::new(
         mock_client.clone(),
-        state.db_pool.clone(),
+        state.pg_pool.clone(),
         state.user_core.clone(),
         state.user_repository.clone(),
     );
@@ -472,7 +472,7 @@ async fn test_fetch_message_price_success() {
 
     let service = TwilioMessageService::new(
         mock_client.clone(),
-        state.db_pool.clone(),
+        state.pg_pool.clone(),
         state.user_core.clone(),
         state.user_repository.clone(),
     );

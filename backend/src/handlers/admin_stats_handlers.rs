@@ -3,13 +3,13 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use diesel::dsl::{count, sum};
+use diesel::dsl::count;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
-use crate::schema::{message_status_log, usage_logs, users};
+use crate::pg_schema::{message_status_log, usage_logs, users};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -85,8 +85,8 @@ pub async fn get_cost_stats(
     let from_30d = now - (30 * 86400);
     let from_7d = now - (7 * 86400);
 
-    let conn = &mut state.db_pool.get().map_err(|e| {
-        tracing::error!("Failed to get DB connection: {}", e);
+    let pg_conn = &mut state.pg_pool.get().map_err(|e| {
+        tracing::error!("Failed to get PG connection: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database connection error"})),
@@ -101,7 +101,7 @@ pub async fn get_cost_stats(
             message_status_log::price,
             message_status_log::created_at,
         ))
-        .load(conn)
+        .load(pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to get SMS stats: {}", e);
             (
@@ -121,7 +121,7 @@ pub async fn get_cost_stats(
         .filter(usage_logs::created_at.ge(from_30d))
         .filter(usage_logs::activity_type.eq("call"))
         .select(usage_logs::credits)
-        .load::<Option<f32>>(conn)
+        .load::<Option<f32>>(pg_conn)
         .unwrap_or_default()
         .iter()
         .filter_map(|p| *p)
@@ -132,7 +132,7 @@ pub async fn get_cost_stats(
     let user_data: Vec<(i32, String, Option<String>)> = users::table
         .filter(users::id.eq_any(&user_ids))
         .select((users::id, users::phone_number, users::plan_type))
-        .load(conn)
+        .load(pg_conn)
         .unwrap_or_default();
 
     // Build maps for country (detected from phone) and identify BYOT users to exclude
@@ -292,8 +292,8 @@ pub async fn get_usage_stats(
     let now = chrono::Utc::now().timestamp() as i32;
     let from_timestamp = now - (days * 86400);
 
-    let conn = &mut state.db_pool.get().map_err(|e| {
-        tracing::error!("Failed to get DB connection: {}", e);
+    let pg_conn = &mut state.pg_pool.get().map_err(|e| {
+        tracing::error!("Failed to get PG connection: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database connection error"})),
@@ -304,7 +304,7 @@ pub async fn get_usage_stats(
     let sms_records: Vec<(i32, Option<f32>)> = message_status_log::table
         .filter(message_status_log::created_at.ge(from_timestamp))
         .select((message_status_log::created_at, message_status_log::price))
-        .load(conn)
+        .load(pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to get SMS records: {}", e);
             (
@@ -318,7 +318,7 @@ pub async fn get_usage_stats(
         .filter(usage_logs::created_at.ge(from_timestamp))
         .filter(usage_logs::activity_type.eq("call"))
         .select(usage_logs::created_at)
-        .load(conn)
+        .load(pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to get call records: {}", e);
             (
@@ -407,11 +407,11 @@ pub async fn get_usage_stats(
         0.0
     };
 
-    // Active users
+    // Active users (PG)
     let active_user_ids_7d: std::collections::HashSet<i32> = usage_logs::table
         .filter(usage_logs::created_at.ge(seven_days_ago))
         .select(usage_logs::user_id)
-        .load::<i32>(conn)
+        .load::<i32>(pg_conn)
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -419,7 +419,7 @@ pub async fn get_usage_stats(
     let active_user_ids_30d: std::collections::HashSet<i32> = usage_logs::table
         .filter(usage_logs::created_at.ge(thirty_days_ago))
         .select(usage_logs::user_id)
-        .load::<i32>(conn)
+        .load::<i32>(pg_conn)
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -427,16 +427,16 @@ pub async fn get_usage_stats(
     let active_users_7d = active_user_ids_7d.len() as i64;
     let active_users_30d = active_user_ids_30d.len() as i64;
 
-    // Breakdown by activity type
+    // Breakdown by activity type (PG)
     let activity_breakdown: Vec<(String, i64, Option<f32>)> = usage_logs::table
         .filter(usage_logs::created_at.ge(from_timestamp))
         .group_by(usage_logs::activity_type)
         .select((
             usage_logs::activity_type,
             count(usage_logs::id),
-            sum(usage_logs::credits),
+            diesel::dsl::sum(usage_logs::credits),
         ))
-        .load(conn)
+        .load(pg_conn)
         .unwrap_or_default();
 
     let breakdown_by_type: Vec<ActivityTypeBreakdown> = activity_breakdown

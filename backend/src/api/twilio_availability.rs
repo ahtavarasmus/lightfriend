@@ -1,6 +1,6 @@
 use crate::api::twilio_client::{TwilioClient, TwilioCredentials};
 use crate::models::user_models::{CountryAvailability, NewCountryAvailability};
-use crate::schema::country_availability;
+use crate::pg_schema::country_availability;
 use crate::AppState;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -161,7 +161,7 @@ pub async fn get_country_capability(
     // Try to get from cache first
     let cached: Option<CountryAvailability> = {
         let mut conn = state
-            .db_pool
+            .pg_pool
             .get()
             .map_err(|e| format!("DB connection error: {}", e))?;
 
@@ -215,7 +215,7 @@ pub async fn get_country_capability(
     };
 
     let mut conn = state
-        .db_pool
+        .pg_pool
         .get()
         .map_err(|e| format!("DB connection error: {}", e))?;
 

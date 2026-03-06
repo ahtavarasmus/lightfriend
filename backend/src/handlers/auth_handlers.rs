@@ -847,7 +847,7 @@ pub async fn get_token_from_session(
 // ==================== Waitlist Handler ====================
 
 use crate::models::user_models::NewWaitlistEntry;
-use crate::schema::waitlist;
+use crate::pg_schema::waitlist;
 use diesel::prelude::*;
 
 #[derive(Deserialize)]
@@ -883,8 +883,8 @@ pub async fn add_to_waitlist(
         created_at: now,
     };
 
-    let mut conn = state.db_pool.get().map_err(|e| {
-        tracing::error!("Failed to get DB connection: {}", e);
+    let mut pg_conn = state.pg_pool.get().map_err(|e| {
+        tracing::error!("Failed to get PG connection: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database error"})),
@@ -896,7 +896,7 @@ pub async fn add_to_waitlist(
         .values(&entry)
         .on_conflict(waitlist::email)
         .do_nothing()
-        .execute(&mut conn)
+        .execute(&mut pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to insert waitlist entry: {}", e);
             (
