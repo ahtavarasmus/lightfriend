@@ -200,7 +200,11 @@
       "Bash(pg_isready:*)",
       "Bash(psql postgres:*)",
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib\" TEST_PG_DATABASE_URL=\"postgres://lightfriend:test@localhost:5432/lightfriend_test\" cargo test:*)",
-      "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib\" cargo run:*)"
+      "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib\" cargo run:*)",
+      "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib:$DYLD_LIBRARY_PATH\" cargo run:*)",
+      "Bash(unzip:*)",
+      "Bash(lsof:*)",
+      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo run:*)"
     ],
     "deny": [
       "Read(.env)",
