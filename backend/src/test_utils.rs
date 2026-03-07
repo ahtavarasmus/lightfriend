@@ -14,41 +14,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_sessions::MemoryStore;
 
-/// Embedded migrations for in-memory test database
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
-
 /// Embedded PG migrations for test database
 pub const PG_MIGRATIONS: EmbeddedMigrations = embed_migrations!("./pg_migrations");
-
-/// Create an in-memory SQLite connection pool with migrations applied
-///
-/// Uses shared cache mode with a unique database name so all connections
-/// from this pool share the same in-memory database, but different tests
-/// get isolated databases.
-pub fn create_test_pool() -> crate::DbPool {
-    use diesel::r2d2::{self, ConnectionManager};
-    use diesel::SqliteConnection;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    // Generate unique database name for this test
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let db_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let db_url = format!("file:testdb_{}?mode=memory&cache=shared", db_id);
-
-    let manager = ConnectionManager::<SqliteConnection>::new(&db_url);
-    let pool = r2d2::Pool::builder()
-        .max_size(5) // Allow multiple connections with shared cache
-        .connection_customizer(Box::new(crate::SqliteConnectionCustomizer))
-        .build(manager)
-        .expect("Failed to create test pool");
-
-    // Run migrations
-    let mut conn = pool.get().expect("Failed to get connection");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Create a test PG connection pool.
 ///
@@ -112,7 +79,6 @@ fn create_dummy_tesla_oauth_client() -> crate::TeslaOAuthClient {
 /// This creates a real in-memory database with UserCore and UserRepository,
 /// but stubs out OAuth clients and other services not needed for credit tests.
 pub fn create_test_state() -> Arc<crate::AppState> {
-    let pool = create_test_pool();
     let pg_pool = create_test_pg_pool();
 
     let user_core = Arc::new(crate::UserCore::new(pg_pool.clone()));
@@ -141,7 +107,6 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     ));
 
     Arc::new(crate::AppState {
-        db_pool: pool,
         pg_pool,
         user_core,
         user_repository,
