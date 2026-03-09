@@ -25,7 +25,9 @@ pub async fn check_user_credits(
     }
 
     // Check if user has an active subscription (tier 2 required)
-    if user.sub_tier.as_deref() != Some("tier 2") {
+    // Skip in development environment
+    let is_dev = std::env::var("ENVIRONMENT").as_deref() == Ok("development");
+    if !is_dev && user.sub_tier.as_deref() != Some("tier 2") {
         return Err(
             "Active subscription required. Please subscribe to continue using the service."
                 .to_string(),
@@ -33,7 +35,7 @@ pub async fn check_user_credits(
     }
 
     // BYOT users pay Twilio directly - no credit check
-    if state.user_core.is_byot_user(user.id) {
+    if is_dev || state.user_core.is_byot_user(user.id) {
         return Ok(());
     }
 
