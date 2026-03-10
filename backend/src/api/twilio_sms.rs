@@ -1244,7 +1244,11 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
 
                     match state
                         .ai_config
-                        .chat_completion_streaming(ctx.provider, &follow_up_req, reasoning_tx.clone())
+                        .chat_completion_streaming(
+                            ctx.provider,
+                            &follow_up_req,
+                            reasoning_tx.clone(),
+                        )
                         .await
                     {
                         Ok(result) => {
@@ -1284,21 +1288,24 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
 
                         // If we got an empty response, fall back to the tool answer
                         if response.trim().is_empty() {
-                            tracing::warn!("Follow-up response was empty, using tool answer directly");
+                            tracing::warn!(
+                                "Follow-up response was empty, using tool answer directly"
+                            );
                             // Check if direct_response - don't return internal hint
                             let was_direct_response = result.choices[0]
                                 .message
                                 .tool_calls
                                 .as_ref()
                                 .map(|calls| {
-                                    calls
-                                        .iter()
-                                        .any(|c| c.function.name.as_deref() == Some("direct_response"))
+                                    calls.iter().any(|c| {
+                                        c.function.name.as_deref() == Some("direct_response")
+                                    })
                                 })
                                 .unwrap_or(false);
 
                             if was_direct_response {
-                                "I processed your request but couldn't generate a response.".to_string()
+                                "I processed your request but couldn't generate a response."
+                                    .to_string()
                             } else {
                                 tool_answers
                                     .values()
