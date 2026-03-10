@@ -347,6 +347,28 @@ const AVATAR_ROW_STYLES: &str = r#"
     overflow: visible;
 }
 
+@keyframes contacts-fade-in {
+    0%   { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+.people-arena--loaded {
+    animation: contacts-fade-in 0.4s ease-out;
+}
+.people-arena--loaded .figure-item {
+    opacity: 0;
+    animation: contacts-fade-in 0.3s ease-out forwards;
+}
+.people-arena--loaded .figure-item:nth-child(1) { animation-delay: 0.05s; }
+.people-arena--loaded .figure-item:nth-child(2) { animation-delay: 0.1s; }
+.people-arena--loaded .figure-item:nth-child(3) { animation-delay: 0.15s; }
+.people-arena--loaded .figure-item:nth-child(4) { animation-delay: 0.2s; }
+.people-arena--loaded .figure-item:nth-child(5) { animation-delay: 0.25s; }
+.people-arena--loaded .figure-item:nth-child(6) { animation-delay: 0.3s; }
+.people-arena--loaded .figure-item:nth-child(7) { animation-delay: 0.35s; }
+.people-arena--loaded .figure-item:nth-child(8) { animation-delay: 0.4s; }
+.people-arena--loaded .figure-item:nth-child(9) { animation-delay: 0.45s; }
+.people-arena--loaded .figure-item:nth-child(10) { animation-delay: 0.5s; }
+
 .people-target {
     display: flex;
     flex-direction: column;
@@ -410,6 +432,62 @@ const AVATAR_ROW_STYLES: &str = r#"
     align-items: center;
     gap: 0;
     padding: 0.15rem 0;
+}
+.people-figures--left {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+}
+.people-figures-outer--left {
+    flex: 1;
+}
+.people-figures-outer--left::after {
+    display: none;
+}
+.figure-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+}
+.figure-row-targets {
+    display: flex;
+    flex-direction: row;
+    gap: 0.2rem;
+    flex-shrink: 0;
+}
+.figure-row-target {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.55rem;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.15s;
+    opacity: 0.7;
+}
+.figure-row-target:hover {
+    transform: scale(1.15);
+    opacity: 1;
+}
+.figure-row-target--sms {
+    background: rgba(74,222,128,0.12);
+    border: 1px solid rgba(74,222,128,0.3);
+    color: #4ade80;
+}
+.figure-row-target--call {
+    background: rgba(251,191,36,0.12);
+    border: 1px solid rgba(251,191,36,0.3);
+    color: #fbbf24;
+}
+.people-targets-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
 }
 
 .figure-item {
@@ -2201,10 +2279,20 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         let dot = render_contact_dot(color, None);
 
         html! {
-            <div class="figure-item" onclick={on_click}>
-                {dot}
-                {flying}
-                <span class="figure-label">{nick}</span>
+            <div class="figure-row">
+                <div class="figure-item" onclick={on_click}>
+                    {dot}
+                    {flying}
+                    <span class="figure-label">{nick}</span>
+                </div>
+                <div class="figure-row-targets">
+                    <div class="figure-row-target figure-row-target--sms">
+                        <i class="fa-solid fa-comment-sms"></i>
+                    </div>
+                    <div class="figure-row-target figure-row-target--call">
+                        <i class="fa-solid fa-phone"></i>
+                    </div>
+                </div>
             </div>
         }
     };
@@ -2212,9 +2300,19 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let render_phone_contact_figure = {
         let on_click = on_phone_contact_click.clone();
         html! {
-            <div class="figure-item" onclick={on_click}>
-                {render_contact_dot("#555", Some("contacts"))}
-                <span class="figure-label">{"Contacts"}</span>
+            <div class="figure-row">
+                <div class="figure-item" onclick={on_click}>
+                    {render_contact_dot("#555", Some("contacts"))}
+                    <span class="figure-label">{"Contacts"}</span>
+                </div>
+                <div class="figure-row-targets">
+                    <div class="figure-row-target figure-row-target--sms">
+                        <i class="fa-solid fa-comment-sms"></i>
+                    </div>
+                    <div class="figure-row-target figure-row-target--call">
+                        <i class="fa-solid fa-phone"></i>
+                    </div>
+                </div>
             </div>
         }
     };
@@ -2222,9 +2320,19 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let render_unknown_figure = {
         let on_click = on_default_click.clone();
         html! {
-            <div class="figure-item" onclick={on_click}>
-                {render_contact_dot("#555", Some("unknown"))}
-                <span class="figure-label">{"Unknown"}</span>
+            <div class="figure-row">
+                <div class="figure-item" onclick={on_click}>
+                    {render_contact_dot("#555", Some("unknown"))}
+                    <span class="figure-label">{"Unknown"}</span>
+                </div>
+                <div class="figure-row-targets">
+                    <div class="figure-row-target figure-row-target--sms">
+                        <i class="fa-solid fa-comment-sms"></i>
+                    </div>
+                    <div class="figure-row-target figure-row-target--call">
+                        <i class="fa-solid fa-phone"></i>
+                    </div>
+                </div>
             </div>
         }
     };
@@ -2232,9 +2340,19 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     let render_add_figure = {
         let on_click = on_add_click.clone();
         html! {
-            <div class="figure-item" onclick={on_click}>
-                {render_contact_dot("rgba(255,255,255,0.25)", Some("add"))}
-                <span class="figure-label">{"Add"}</span>
+            <div class="figure-row">
+                <div class="figure-item" onclick={on_click}>
+                    {render_contact_dot("rgba(255,255,255,0.25)", Some("add"))}
+                    <span class="figure-label">{"Add"}</span>
+                </div>
+                <div class="figure-row-targets">
+                    <div class="figure-row-target figure-row-target--sms">
+                        <i class="fa-solid fa-comment-sms"></i>
+                    </div>
+                    <div class="figure-row-target figure-row-target--call">
+                        <i class="fa-solid fa-phone"></i>
+                    </div>
+                </div>
             </div>
         }
     };
@@ -3857,31 +3975,17 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     html! {
         <>
             <style>{AVATAR_ROW_STYLES}</style>
-            <div class="people-arena">
-                // SMS target - left side
-                <div class="people-target">
-                    <div class="target-circle" style="background: rgba(74,222,128,0.12); border: 1.5px solid rgba(74,222,128,0.35);">
-                        <i class="fa-solid fa-comment-sms" style="color: #4ade80;"></i>
-                    </div>
-                    <span class="target-label">{"SMS"}</span>
-                </div>
-                // Figures stacked vertically in center
-                <div class="people-figures-outer">
+            <div class="people-arena people-arena--loaded">
+                // Figures on the left
+                <div class="people-figures-outer people-figures-outer--left">
                     <div class="people-figures-wrap">
-                        <div class="people-figures">
+                        <div class="people-figures people-figures--left">
                             {profile_figures}
                             {render_phone_contact_figure}
                             {render_unknown_figure}
                             {render_add_figure}
                         </div>
                     </div>
-                </div>
-                // Call target - right side
-                <div class="people-target">
-                    <div class="target-circle" style="background: rgba(251,191,36,0.12); border: 1.5px solid rgba(251,191,36,0.35);">
-                        <i class="fa-solid fa-phone" style="color: #fbbf24;"></i>
-                    </div>
-                    <span class="target-label">{"Call"}</span>
                 </div>
             </div>
             {render_modal()}

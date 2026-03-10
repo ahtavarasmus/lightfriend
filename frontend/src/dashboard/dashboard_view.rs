@@ -154,6 +154,29 @@ const DASHBOARD_STYLES: &str = r#"
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
+.people-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(74,222,128,0.12);
+    border: 1px solid rgba(74,222,128,0.3);
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.people-tab:hover {
+    background: rgba(74,222,128,0.2);
+}
+.people-tab span {
+    font-size: 0.75rem;
+    color: #4ade80;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.people-tab i {
+    color: #4ade80;
+}
 .info-icon-btn {
     background: transparent;
     border: none;
@@ -773,6 +796,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Chat prefill state (for digest suggestion hint)
     let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
     let people_info_seq = use_state(|| 0u32);
+    let people_expanded = use_state(|| false);
 
     // Digest prefill callback - pre-fills chatbox with prompt from digest creator
     let on_digest_prefill = {
@@ -984,8 +1008,16 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 />
 
                 // People section with contact avatars
-                <div class="section-label">
-                    <span>{"People"}</span>
+                <div class="section-label" style="gap: 0.5rem;">
+                    <button class="people-tab" onclick={{
+                        let people_expanded = people_expanded.clone();
+                        Callback::from(move |_: MouseEvent| {
+                            people_expanded.set(!*people_expanded);
+                        })
+                    }}>
+                        <i class={if *people_expanded { "fa-solid fa-chevron-down" } else { "fa-solid fa-chevron-right" }} style="font-size: 0.55rem;"></i>
+                        <span>{"People"}</span>
+                    </button>
                     <button class="info-icon-btn" onclick={{
                         let people_info_seq = people_info_seq.clone();
                         Callback::from(move |e: MouseEvent| {
@@ -996,7 +1028,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <i class="fa-solid fa-circle-info"></i>
                     </button>
                 </div>
-                <ContactAvatarRow open_info_seq={*people_info_seq} />
+                if *people_expanded {
+                    <ContactAvatarRow open_info_seq={*people_info_seq} />
+                }
 
                 <div class="peace-separator"></div>
             </div>
