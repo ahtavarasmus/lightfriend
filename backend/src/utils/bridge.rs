@@ -1764,33 +1764,6 @@ pub async fn handle_bridge_message(
         }
     }
 
-    // Auto-create tracking items from actionable messages (non-blocking)
-    if state
-        .user_core
-        .get_auto_create_items(user_id)
-        .unwrap_or(false)
-    {
-        let state_clone = state.clone();
-        let service_clone = service.clone();
-        let room_id_clone = room.room_id().to_string();
-        let sender_clone = sender_localpart.clone();
-        let content_clone = content.clone();
-        tokio::spawn(async move {
-            if let Err(e) = crate::proactive::utils::check_message_trackable_items(
-                &state_clone,
-                user_id,
-                &service_clone,
-                &room_id_clone,
-                &sender_clone,
-                &content_clone,
-            )
-            .await
-            {
-                tracing::debug!("Message trackable check failed for user {}: {}", user_id, e);
-            }
-        });
-    }
-
     // Extract chat_name early for contact profile matching
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
@@ -1929,6 +1902,35 @@ pub async fn handle_bridge_message(
             );
         }
     }
+
+    // Auto-create tracking items from actionable messages (non-blocking)
+    // Placed after group check so unmentioned group messages skip this
+    if state
+        .user_core
+        .get_auto_create_items(user_id)
+        .unwrap_or(false)
+    {
+        let state_clone = state.clone();
+        let service_clone = service.clone();
+        let room_id_clone = room.room_id().to_string();
+        let sender_clone = sender_localpart.clone();
+        let content_clone = content.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::proactive::utils::check_message_trackable_items(
+                &state_clone,
+                user_id,
+                &service_clone,
+                &room_id_clone,
+                &sender_clone,
+                &content_clone,
+            )
+            .await
+            {
+                tracing::debug!("Message trackable check failed for user {}: {}", user_id, e);
+            }
+        });
+    }
+
     // Skip error messages using pure function
     if is_error_message(&content) {
         tracing::debug!("Skipping error message because content contained error messages");
