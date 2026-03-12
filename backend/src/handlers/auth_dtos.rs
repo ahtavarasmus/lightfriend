@@ -1,4 +1,4 @@
-use crate::schema::users;
+use crate::pg_schema::users;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;

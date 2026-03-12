@@ -14,41 +14,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_sessions::MemoryStore;
 
-/// Embedded migrations for in-memory test database
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
-
 /// Embedded PG migrations for test database
 pub const PG_MIGRATIONS: EmbeddedMigrations = embed_migrations!("./pg_migrations");
-
-/// Create an in-memory SQLite connection pool with migrations applied
-///
-/// Uses shared cache mode with a unique database name so all connections
-/// from this pool share the same in-memory database, but different tests
-/// get isolated databases.
-pub fn create_test_pool() -> crate::DbPool {
-    use diesel::r2d2::{self, ConnectionManager};
-    use diesel::SqliteConnection;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    // Generate unique database name for this test
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let db_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let db_url = format!("file:testdb_{}?mode=memory&cache=shared", db_id);
-
-    let manager = ConnectionManager::<SqliteConnection>::new(&db_url);
-    let pool = r2d2::Pool::builder()
-        .max_size(5) // Allow multiple connections with shared cache
-        .connection_customizer(Box::new(crate::SqliteConnectionCustomizer))
-        .build(manager)
-        .expect("Failed to create test pool");
-
-    // Run migrations
-    let mut conn = pool.get().expect("Failed to get connection");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Create a test PG connection pool.
 ///
@@ -76,7 +43,10 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         // Truncate all PG tables so each test starts clean
         use diesel::RunQueryDsl;
         let _ = diesel::sql_query(
-            "TRUNCATE items, message_history, usage_logs, contact_profiles, \
+            "TRUNCATE users, user_settings, refund_info, \
+             country_availability, message_status_log, admin_alerts, \
+             disabled_alert_types, site_metrics, waitlist, \
+             items, message_history, usage_logs, contact_profiles, \
              contact_profile_exceptions, bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
@@ -109,11 +79,10 @@ fn create_dummy_tesla_oauth_client() -> crate::TeslaOAuthClient {
 /// This creates a real in-memory database with UserCore and UserRepository,
 /// but stubs out OAuth clients and other services not needed for credit tests.
 pub fn create_test_state() -> Arc<crate::AppState> {
-    let pool = create_test_pool();
     let pg_pool = create_test_pg_pool();
 
-    let user_core = Arc::new(crate::UserCore::new(pool.clone()));
-    let user_repository = Arc::new(crate::UserRepository::new(pg_pool.clone(), pool.clone()));
+    let user_core = Arc::new(crate::UserCore::new(pg_pool.clone()));
+    let user_repository = Arc::new(crate::UserRepository::new(pg_pool.clone()));
     let item_repository = Arc::new(crate::ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
         pg_pool.clone(),
@@ -122,23 +91,22 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         crate::repositories::webauthn_repository::WebauthnRepository::new(pg_pool.clone()),
     );
     let admin_alert_repository = Arc::new(
-        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
+        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pg_pool.clone()),
     );
     let metrics_repository =
-        Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pool.clone()));
+        Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
     let twilio_client = Arc::new(crate::RealTwilioClient::new());
     let twilio_message_service = Arc::new(crate::TwilioMessageService::new(
         twilio_client.clone(),
-        pool.clone(),
+        pg_pool.clone(),
         user_core.clone(),
         user_repository.clone(),
     ));
 
     Arc::new(crate::AppState {
-        db_pool: pool,
         pg_pool,
         user_core,
         user_repository,
@@ -543,10 +511,10 @@ pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
 
 /// Set the plan_type for a user (used for BYOT testing)
 pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str) {
-    use crate::schema::users;
+    use crate::pg_schema::users;
     use diesel::prelude::*;
 
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
     diesel::update(users::table.filter(users::id.eq(user_id)))
         .set(users::plan_type.eq(Some(plan_type.to_string())))
         .execute(&mut conn)
@@ -555,10 +523,10 @@ pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str
 
 /// Set the preferred_number for a user
 pub fn set_preferred_number(state: &Arc<crate::AppState>, user_id: i32, number: &str) {
-    use crate::schema::users;
+    use crate::pg_schema::users;
     use diesel::prelude::*;
 
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
     diesel::update(users::table.filter(users::id.eq(user_id)))
         .set(users::preferred_number.eq(Some(number.to_string())))
         .execute(&mut conn)
@@ -627,7 +595,8 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
 
 pub mod mock_user_core {
     use crate::handlers::profile_handlers::CriticalNotificationInfo;
-    use crate::models::user_models::{User, UserInfo, UserSettings};
+    use crate::models::user_models::{User, UserSettings};
+    use crate::pg_models::{PgItem, PgUserInfo};
     use crate::repositories::user_core::{UpdateProfileParams, UserCoreOps};
     use diesel::result::Error as DieselError;
     use std::collections::HashMap;
@@ -657,11 +626,11 @@ pub mod mock_user_core {
         pub users_by_phone: Mutex<HashMap<String, User>>,
         pub users_by_email: Mutex<HashMap<String, User>>,
         pub user_settings: Mutex<HashMap<i32, UserSettings>>,
-        pub user_info: Mutex<HashMap<i32, UserInfo>>,
+        pub user_info: Mutex<HashMap<i32, PgUserInfo>>,
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
-        pub quiet_rules: Mutex<HashMap<i32, Vec<crate::models::user_models::Item>>>,
+        pub quiet_rules: Mutex<HashMap<i32, Vec<PgItem>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -726,7 +695,7 @@ pub mod mock_user_core {
             self
         }
 
-        pub fn with_user_info(self, user_id: i32, info: UserInfo) -> Self {
+        pub fn with_user_info(self, user_id: i32, info: PgUserInfo) -> Self {
             self.user_info.lock().unwrap().insert(user_id, info);
             self
         }
@@ -831,7 +800,7 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError> {
+        fn get_user_info(&self, user_id: i32) -> Result<PgUserInfo, DieselError> {
             self.calls.lock().unwrap().get_user_info_calls.push(user_id);
             self.user_info
                 .lock()
@@ -1175,8 +1144,8 @@ pub mod mock_user_core {
                     .unwrap()
                     .as_secs() as i32;
                 let end_time = if ts == 0 { None } else { Some(ts) };
-                let item = crate::models::user_models::Item {
-                    id: Some(now), // use timestamp as fake id
+                let item = PgItem {
+                    id: now, // use timestamp as fake id
                     user_id,
                     summary: "Quiet mode.".to_string(),
                     due_at: end_time,
@@ -1233,8 +1202,8 @@ pub mod mock_user_core {
             let summary = format!("{}\n{}", tags, description);
 
             let id = now; // use timestamp as fake id
-            let item = crate::models::user_models::Item {
-                id: Some(id),
+            let item = PgItem {
+                id,
                 user_id,
                 summary,
                 due_at: Some(until),
@@ -1251,10 +1220,7 @@ pub mod mock_user_core {
             Ok(id)
         }
 
-        fn get_quiet_rules(
-            &self,
-            user_id: i32,
-        ) -> Result<Vec<crate::models::user_models::Item>, DieselError> {
+        fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

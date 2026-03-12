@@ -16,10 +16,10 @@ use crate::api::twilio_client::{
     MessagePrice, SendMessageOptions, TwilioClient, TwilioClientError, TwilioCredentials,
 };
 use crate::models::user_models::{NewMessageStatusLog, User};
+use crate::pg_schema::message_status_log;
 use crate::repositories::user_core::UserCore;
 use crate::repositories::user_repository::UserRepository;
-use crate::schema::message_status_log;
-use crate::DbPool;
+use crate::PgDbPool;
 
 /// Errors that can occur during message operations.
 #[derive(Debug, Error)]
@@ -71,7 +71,7 @@ pub struct MessageSendResult {
 /// - Database logging for message status tracking
 pub struct TwilioMessageService<T: TwilioClient> {
     twilio_client: Arc<T>,
-    db_pool: DbPool,
+    db_pool: PgDbPool,
     user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
 }
@@ -80,7 +80,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     /// Create a new TwilioMessageService.
     pub fn new(
         twilio_client: Arc<T>,
-        db_pool: DbPool,
+        db_pool: PgDbPool,
         user_core: Arc<UserCore>,
         user_repository: Arc<UserRepository>,
     ) -> Self {

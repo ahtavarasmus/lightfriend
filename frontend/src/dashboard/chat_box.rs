@@ -490,6 +490,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let focused_item = props.focused_item.clone();
         let on_item_cleared = props.on_item_cleared.clone();
         let on_item_created = props.on_item_created.clone();
+        let on_preview_close = props.on_preview_close.clone();
         let chat_input_ref = chat_input_ref.clone();
 
         Callback::from(move |_| {
@@ -537,6 +538,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             chat_status.set("Thinking...".to_string());
             chat_error.set(None);
             chat_input.set(String::new());
+            on_preview_close.emit(());
 
             // Use SSE streaming for text-only messages and item edits (POST only for image uploads)
             let use_sse = is_item_edit || image_file.is_none();
@@ -552,6 +554,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let media_playing = media_playing.clone();
                 let on_item_created = on_item_created.clone();
                 let focused_item_sse = focused_item.clone();
+                let chat_input_ref_sse = chat_input_ref.clone();
                 spawn_local(async move {
                 use wasm_bindgen::JsCast;
                 use wasm_bindgen::closure::Closure;
@@ -587,6 +590,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         let detected_media = detected_media.clone();
                         let media_playing = media_playing.clone();
                         let on_item_created = on_item_created.clone();
+                        let chat_input_ref_post = chat_input_ref_sse.clone();
                         spawn_local(async move {
                             match Api::post("/api/chat/web")
                                 .json(&json!({ "message": message })).unwrap()
@@ -613,6 +617,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 }
                             }
                             chat_loading.set(false);
+                            if let Some(input) = chat_input_ref_post.cast::<web_sys::HtmlTextAreaElement>() {
+                                let _ = input.focus();
+                            }
                         });
                         return;
                     }
@@ -627,6 +634,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let detected_media_msg = detected_media.clone();
                 let media_playing_msg = media_playing.clone();
                 let on_item_created_msg = on_item_created.clone();
+                let chat_input_ref_msg = chat_input_ref_sse.clone();
                 let es_ref = es.clone();
 
                 let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
@@ -675,12 +683,18 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     }
 
                                     chat_loading_msg.set(false);
+                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
+                                        let _ = input.focus();
+                                    }
                                     es_ref.close();
                                 }
                                 "error" => {
                                     let msg = data["message"].as_str().unwrap_or("An error occurred").to_string();
                                     chat_error_msg.set(Some(msg));
                                     chat_loading_msg.set(false);
+                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
+                                        let _ = input.focus();
+                                    }
                                     es_ref.close();
                                 }
                                 _ => {}
@@ -803,6 +817,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         }
                     }
                     chat_loading.set(false);
+                    if let Some(input) = chat_input_ref.cast::<web_sys::HtmlTextAreaElement>() {
+                        let _ = input.focus();
+                    }
                 });
             }
         })

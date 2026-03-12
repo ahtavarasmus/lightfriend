@@ -1,18 +1,18 @@
 use crate::{
     models::user_models::{AdminAlert, DisabledAlertType, NewAdminAlert, NewDisabledAlertType},
-    schema::{admin_alerts, disabled_alert_types},
-    DbPool,
+    pg_schema::{admin_alerts, disabled_alert_types},
+    PgDbPool,
 };
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct AdminAlertRepository {
-    pool: DbPool,
+    pool: PgDbPool,
 }
 
 impl AdminAlertRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 
@@ -42,15 +42,10 @@ impl AdminAlertRepository {
             created_at: current_time,
         };
 
-        diesel::insert_into(admin_alerts::table)
+        let id: i32 = diesel::insert_into(admin_alerts::table)
             .values(&new_alert)
-            .execute(&mut conn)?;
-
-        // Get the last inserted id
-        let id: i32 = diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>(
-            "last_insert_rowid()",
-        ))
-        .get_result(&mut conn)?;
+            .returning(admin_alerts::id)
+            .get_result(&mut conn)?;
 
         Ok(id)
     }
@@ -137,9 +132,11 @@ impl AdminAlertRepository {
             disabled_at: current_time,
         };
 
-        // Use INSERT OR IGNORE to handle duplicates gracefully
-        diesel::insert_or_ignore_into(disabled_alert_types::table)
+        // Use ON CONFLICT DO NOTHING to handle duplicates gracefully
+        diesel::insert_into(disabled_alert_types::table)
             .values(&new_disabled)
+            .on_conflict(disabled_alert_types::alert_type)
+            .do_nothing()
             .execute(&mut conn)?;
 
         Ok(())

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::user_models::{AdminAlert, DisabledAlertType, MessageStatusLog, WaitlistEntry};
-use crate::schema::{message_status_log, waitlist};
+use crate::pg_schema::{message_status_log, waitlist};
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -119,8 +119,8 @@ pub async fn unsubscribe(
                 params.email
             );
 
-            let mut conn = state.db_pool.get().map_err(|e| {
-                tracing::error!("Failed to get DB connection: {}", e);
+            let mut pg_conn = state.pg_pool.get().map_err(|e| {
+                tracing::error!("Failed to get PG connection: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
@@ -131,7 +131,7 @@ pub async fn unsubscribe(
             let deleted = diesel::delete(
                 waitlist::table.filter(waitlist::email.eq(&params.email.to_lowercase())),
             )
-            .execute(&mut conn)
+            .execute(&mut pg_conn)
             .map_err(|e| {
                 tracing::error!("Failed to delete from waitlist: {}", e);
                 (
@@ -184,8 +184,8 @@ pub async fn broadcast_email(
 
     // Fetch waitlist entries (updates-only subscribers who haven't signed up yet)
     let waitlist_entries: Vec<WaitlistEntry> = {
-        let mut conn = state.db_pool.get().map_err(|e| {
-            tracing::error!("Failed to get DB connection for waitlist: {}", e);
+        let mut pg_conn = state.pg_pool.get().map_err(|e| {
+            tracing::error!("Failed to get PG connection for waitlist: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Database error"})),
@@ -193,7 +193,7 @@ pub async fn broadcast_email(
         })?;
         waitlist::table
             .select(WaitlistEntry::as_select())
-            .load(&mut conn)
+            .load(&mut pg_conn)
             .map_err(|e| {
                 tracing::error!("Failed to fetch waitlist entries: {}", e);
                 (
@@ -718,8 +718,8 @@ pub async fn get_user_message_stats(
 ) -> Result<Json<MessageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Getting message stats for user_id={}", user_id);
 
-    let conn = &mut state.db_pool.get().map_err(|e| {
-        tracing::error!("Failed to get DB connection: {}", e);
+    let pg_conn = &mut state.pg_pool.get().map_err(|e| {
+        tracing::error!("Failed to get PG connection: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database connection error"})),
@@ -731,7 +731,7 @@ pub async fn get_user_message_stats(
         .filter(message_status_log::user_id.eq(user_id))
         .order(message_status_log::created_at.desc())
         .limit(50)
-        .load(conn)
+        .load(pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to get message stats: {}", e);
             (
@@ -802,7 +802,7 @@ pub async fn get_user_message_stats(
 /// Message status log with user info for global stats
 #[derive(Serialize)]
 pub struct MessageStatusLogWithUser {
-    pub id: Option<i32>,
+    pub id: i32,
     pub message_sid: String,
     pub user_id: i32,
     pub user_email: Option<String>,
@@ -836,10 +836,10 @@ pub struct GlobalMessageStatsResponse {
 pub async fn get_global_message_stats(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<GlobalMessageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    use crate::schema::users;
+    use crate::pg_schema::users;
 
-    let conn = &mut state.db_pool.get().map_err(|e| {
-        tracing::error!("Failed to get DB connection: {}", e);
+    let pg_conn = &mut state.pg_pool.get().map_err(|e| {
+        tracing::error!("Failed to get PG connection: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database connection error"})),
@@ -850,7 +850,7 @@ pub async fn get_global_message_stats(
     let all_messages: Vec<MessageStatusLog> = message_status_log::table
         .order(message_status_log::created_at.desc())
         .limit(1000)
-        .load(conn)
+        .load(pg_conn)
         .map_err(|e| {
             tracing::error!("Failed to get global message stats: {}", e);
             (
@@ -886,7 +886,7 @@ pub async fn get_global_message_stats(
     let users_info: Vec<(i32, String, String)> = users::table
         .filter(users::id.eq_any(&user_ids))
         .select((users::id, users::email, users::phone_number))
-        .load(conn)
+        .load(pg_conn)
         .unwrap_or_default();
 
     let users_map: std::collections::HashMap<i32, (String, String)> = users_info

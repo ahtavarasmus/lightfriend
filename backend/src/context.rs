@@ -11,8 +11,9 @@ use chrono::{FixedOffset, Utc};
 use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
-use crate::models::user_models::{User, UserInfo, UserSettings};
+use crate::models::user_models::{User, UserSettings};
 use crate::pg_models::PgContactProfile;
+use crate::pg_models::PgUserInfo;
 use crate::{AiProvider, AppState, ModelPurpose, UserCoreOps};
 
 // ---------------------------------------------------------------------------
@@ -101,7 +102,7 @@ pub struct AgentContext {
 
     // Opt-in via .with_user_context()
     pub user_settings: Option<UserSettings>,
-    pub user_info: Option<UserInfo>,
+    pub user_info: Option<PgUserInfo>,
     pub timezone: Option<TimezoneInfo>,
     pub contact_profiles: Option<Vec<PgContactProfile>>,
     pub user_given_info: Option<String>,

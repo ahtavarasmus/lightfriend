@@ -749,7 +749,7 @@ pub async fn process_sms(
 ### Behavior:
 - Recurring patterns (daily, every, weekly) mean the user wants an automated schedule - create a recurring item immediately, don't do the task manually this one time.
 - Time-specific requests (at Xpm, remind me, notify me when) are scheduling requests - create items.
-- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify a time, ask them when.
+- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify an exact time, pick a reasonable default (e.g. 'morning' = 8:00, 'afternoon' = 14:00, 'evening' = 18:00, 'tonight' = 20:00). Never ask the user to clarify the time - just pick the most sensible time and go.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
@@ -1162,39 +1162,6 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                 }
             }
 
-            let mut follow_up_messages = completion_messages.clone();
-            // Add the assistant's message with tool calls
-            follow_up_messages.push(chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::assistant,
-                content: chat_completion::Content::Text(
-                    result.choices[0]
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or_default(),
-                ),
-                name: None,
-                tool_calls: result.choices[0].message.tool_calls.clone(),
-                tool_call_id: None,
-            });
-
-            // Add the tool response
-            if let Some(tool_calls) = &result.choices[0].message.tool_calls {
-                for tool_call in tool_calls {
-                    let tool_answer = match tool_answers.get(&tool_call.id) {
-                        Some(ans) => ans.clone(),
-                        None => "".to_string(),
-                    };
-                    follow_up_messages.push(chat_completion::ChatCompletionMessage {
-                        role: chat_completion::MessageRole::tool,
-                        content: chat_completion::Content::Text(tool_answer),
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: Some(tool_call.id.clone()),
-                    });
-                }
-            }
-
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -1218,64 +1185,149 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                 }
             }
 
-            tracing::debug!("Making follow-up request to model with tool call answers");
-            options.emit_status(ChatStatus::Thinking);
+            // Skip follow-up LLM call for create_item - the tool already returns
+            // a good confirmation message and the frontend shows the item preview
+            if created_item_id.is_some() {
+                tracing::debug!("Skipping follow-up LLM call for create_item");
+                if let Some(msg) = tool_answers.values().next() {
+                    msg.clone()
+                } else {
+                    "Item created.".to_string()
+                }
+            } else {
+                let mut follow_up_messages = completion_messages.clone();
+                // Add the assistant's message with tool calls
+                follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::assistant,
+                    content: chat_completion::Content::Text(
+                        result.choices[0]
+                            .message
+                            .content
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
+                    name: None,
+                    tool_calls: result.choices[0].message.tool_calls.clone(),
+                    tool_call_id: None,
+                });
 
-            // Retry logic for follow-up call
-            const FOLLOWUP_MAX_RETRIES: u32 = 3;
-            let mut followup_last_error = String::new();
-            let mut followup_result = None;
-
-            for attempt in 1..=FOLLOWUP_MAX_RETRIES {
-                let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                    model.clone(),
-                    follow_up_messages.clone(),
-                );
-
-                match state
-                    .ai_config
-                    .chat_completion_streaming(ctx.provider, &follow_up_req, reasoning_tx.clone())
-                    .await
-                {
-                    Ok(result) => {
-                        followup_result = Some(result);
-                        break;
+                // Add the tool response
+                if let Some(tool_calls) = &result.choices[0].message.tool_calls {
+                    for tool_call in tool_calls {
+                        let tool_answer = match tool_answers.get(&tool_call.id) {
+                            Some(ans) => ans.clone(),
+                            None => "".to_string(),
+                        };
+                        follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                            role: chat_completion::MessageRole::tool,
+                            content: chat_completion::Content::Text(tool_answer),
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: Some(tool_call.id.clone()),
+                        });
                     }
-                    Err(e) => {
-                        followup_last_error = format!("{}", e);
-                        tracing::warn!(
-                            "Follow-up completion attempt {}/{} failed: {}",
-                            attempt,
-                            FOLLOWUP_MAX_RETRIES,
-                            e
-                        );
-                        if attempt < FOLLOWUP_MAX_RETRIES {
-                            options.emit_status(ChatStatus::RetryingFollowup {
-                                attempt: attempt + 1,
-                                max: FOLLOWUP_MAX_RETRIES,
-                            });
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                500 * attempt as u64,
-                            ))
-                            .await;
+                }
+
+                tracing::debug!("Making follow-up request to model with tool call answers");
+                options.emit_status(ChatStatus::Thinking);
+
+                // Retry logic for follow-up call
+                const FOLLOWUP_MAX_RETRIES: u32 = 3;
+                let mut followup_last_error = String::new();
+                let mut followup_result = None;
+
+                for attempt in 1..=FOLLOWUP_MAX_RETRIES {
+                    let follow_up_req = chat_completion::ChatCompletionRequest::new(
+                        model.clone(),
+                        follow_up_messages.clone(),
+                    );
+
+                    match state
+                        .ai_config
+                        .chat_completion_streaming(
+                            ctx.provider,
+                            &follow_up_req,
+                            reasoning_tx.clone(),
+                        )
+                        .await
+                    {
+                        Ok(result) => {
+                            followup_result = Some(result);
+                            break;
+                        }
+                        Err(e) => {
+                            followup_last_error = format!("{}", e);
+                            tracing::warn!(
+                                "Follow-up completion attempt {}/{} failed: {}",
+                                attempt,
+                                FOLLOWUP_MAX_RETRIES,
+                                e
+                            );
+                            if attempt < FOLLOWUP_MAX_RETRIES {
+                                options.emit_status(ChatStatus::RetryingFollowup {
+                                    attempt: attempt + 1,
+                                    max: FOLLOWUP_MAX_RETRIES,
+                                });
+                                tokio::time::sleep(tokio::time::Duration::from_millis(
+                                    500 * attempt as u64,
+                                ))
+                                .await;
+                            }
                         }
                     }
                 }
-            }
 
-            match followup_result {
-                Some(follow_up_result) => {
-                    tracing::debug!("Received follow-up response from model");
-                    let response = follow_up_result.choices[0]
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or_default();
+                match followup_result {
+                    Some(follow_up_result) => {
+                        tracing::debug!("Received follow-up response from model");
+                        let response = follow_up_result.choices[0]
+                            .message
+                            .content
+                            .clone()
+                            .unwrap_or_default();
 
-                    // If we got an empty response, fall back to the tool answer
-                    if response.trim().is_empty() {
-                        tracing::warn!("Follow-up response was empty, using tool answer directly");
-                        // Check if direct_response - don't return internal hint
+                        // If we got an empty response, fall back to the tool answer
+                        if response.trim().is_empty() {
+                            tracing::warn!(
+                                "Follow-up response was empty, using tool answer directly"
+                            );
+                            // Check if direct_response - don't return internal hint
+                            let was_direct_response = result.choices[0]
+                                .message
+                                .tool_calls
+                                .as_ref()
+                                .map(|calls| {
+                                    calls.iter().any(|c| {
+                                        c.function.name.as_deref() == Some("direct_response")
+                                    })
+                                })
+                                .unwrap_or(false);
+
+                            if was_direct_response {
+                                "I processed your request but couldn't generate a response."
+                                    .to_string()
+                            } else {
+                                tool_answers
+                                    .values()
+                                    .next()
+                                    .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
+                                    .unwrap_or_else(|| {
+                                        "I processed your request but couldn't generate a response."
+                                            .to_string()
+                                    })
+                            }
+                        } else {
+                            response
+                        }
+                    }
+                    None => {
+                        tracing::error!(
+                            "Failed to get follow-up completion after {} attempts: {}",
+                            FOLLOWUP_MAX_RETRIES,
+                            followup_last_error
+                        );
+
+                        // Check if this was a direct_response tool - don't return the internal hint
                         let was_direct_response = result.choices[0]
                             .message
                             .tool_calls
@@ -1288,51 +1340,17 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                             .unwrap_or(false);
 
                         if was_direct_response {
-                            "I processed your request but couldn't generate a response.".to_string()
+                            "I apologize, but I encountered an error. Please try again.".to_string()
                         } else {
+                            // Return the tool answer directly, truncated to SMS limit
                             tool_answers
                                 .values()
                                 .next()
                                 .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
                                 .unwrap_or_else(|| {
-                                    "I processed your request but couldn't generate a response."
-                                        .to_string()
+                                    "I apologize, but I encountered an error processing your request. Please try again.".to_string()
                                 })
                         }
-                    } else {
-                        response
-                    }
-                }
-                None => {
-                    tracing::error!(
-                        "Failed to get follow-up completion after {} attempts: {}",
-                        FOLLOWUP_MAX_RETRIES,
-                        followup_last_error
-                    );
-
-                    // Check if this was a direct_response tool - don't return the internal hint
-                    let was_direct_response = result.choices[0]
-                        .message
-                        .tool_calls
-                        .as_ref()
-                        .map(|calls| {
-                            calls
-                                .iter()
-                                .any(|c| c.function.name.as_deref() == Some("direct_response"))
-                        })
-                        .unwrap_or(false);
-
-                    if was_direct_response {
-                        "I apologize, but I encountered an error. Please try again.".to_string()
-                    } else {
-                        // Return the tool answer directly, truncated to SMS limit
-                        tool_answers
-                            .values()
-                            .next()
-                            .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
-                            .unwrap_or_else(|| {
-                                "I apologize, but I encountered an error processing your request. Please try again.".to_string()
-                            })
                     }
                 }
             }

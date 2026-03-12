@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS waitlist;
+DROP TABLE IF EXISTS site_metrics;
+DROP TABLE IF EXISTS disabled_alert_types;
+DROP TABLE IF EXISTS admin_alerts;
+DROP TABLE IF EXISTS message_status_log;
+DROP TABLE IF EXISTS country_availability;
+DROP TABLE IF EXISTS refund_info;
+DROP TABLE IF EXISTS user_settings;
+DROP TABLE IF EXISTS users;

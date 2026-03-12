@@ -39,7 +39,6 @@ pub mod utils {
     pub mod email;
     pub mod encryption;
     pub mod matrix_auth;
-    pub mod migration_proxy;
     pub mod notification_utils;
     pub mod plan_features;
     pub mod tesla_keys;
@@ -64,7 +63,6 @@ pub mod cli;
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
-    pub mod internal_routing;
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;
@@ -120,7 +118,6 @@ pub mod services {
 }
 pub mod pg_models;
 pub mod pg_schema;
-pub mod schema;
 pub mod jobs {
     pub mod scheduler;
 }
@@ -162,25 +159,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
 
-pub type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
-pub type SqliteDbPool = DbPool; // Alias for clarity in dual-pool context
 pub type PgDbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-
-/// SQLite connection customizer that sets busy_timeout on each connection.
-/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
-#[derive(Debug)]
-pub struct SqliteConnectionCustomizer;
-
-impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error>
-    for SqliteConnectionCustomizer
-{
-    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-        diesel::sql_query("PRAGMA busy_timeout = 5000;")
-            .execute(conn)
-            .map_err(diesel::r2d2::Error::QueryError)?;
-        Ok(())
-    }
-}
 
 pub type GoogleOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
@@ -188,7 +167,6 @@ pub type TeslaOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 pub struct AppState {
-    pub db_pool: DbPool,
     pub pg_pool: PgDbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,

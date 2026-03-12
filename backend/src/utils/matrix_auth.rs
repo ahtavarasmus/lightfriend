@@ -432,28 +432,29 @@ async fn try_bootstrap_cross_signing(
 pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
     tracing::info!("🔄 Starting get_client for user_id: {}", user_id);
 
-    // Get user profile from database
+    // Get user profile from database (needed for user.id)
     let user = state.user_core.find_by_id(user_id).unwrap().unwrap();
-    tracing::debug!("👤 Found user: id={}", user.id);
+    tracing::debug!("Found user: id={}", user.id);
 
     // Initialize the Matrix client
     let homeserver_url =
         std::env::var("MATRIX_HOMESERVER").map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
 
-    // Get or register Matrix credentials
+    // Get or register Matrix credentials (from PG)
+    let pg_creds = state
+        .user_repository
+        .get_matrix_credentials(user.id)
+        .map_err(|e| anyhow!("Failed to get matrix credentials from PG: {}", e))?;
+
     let (username, password, device_id, access_token) =
-        match (&user.matrix_username, &user.encrypted_matrix_password) {
-            (Some(existing_username), Some(encrypted_password)) => {
+        match pg_creds.and_then(|(u, p, d, a, _)| u.zip(p).map(|(u2, p2)| (u2, p2, d, a))) {
+            Some((existing_username, encrypted_password, dev_id, enc_access_token)) => {
                 tracing::debug!("Existing Matrix credentials found");
-                let access_token = user
-                    .encrypted_matrix_access_token
-                    .as_ref()
-                    .map(|t| decrypt(t))
-                    .transpose()?;
+                let access_token = enc_access_token.as_ref().map(|t| decrypt(t)).transpose()?;
                 (
-                    existing_username.clone(),
-                    decrypt(encrypted_password)?,
-                    user.matrix_device_id.clone(),
+                    existing_username,
+                    decrypt(&encrypted_password)?,
+                    dev_id,
                     access_token,
                 )
             }
@@ -592,12 +593,19 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         );
         let mut redo_secret_storage = false;
 
+        // Get the encrypted recovery key from PG
+        let encrypted_recovery_key = state
+            .user_repository
+            .get_matrix_credentials(user.id)
+            .map_err(|e| anyhow!("Failed to get matrix credentials from PG: {}", e))?
+            .and_then(|(_, _, _, _, rk)| rk);
+
         // Handle cross-signing setup
         match setup_cross_signing(
             &client,
             &username,
             &password,
-            user.encrypted_matrix_secret_storage_recovery_key.as_ref(),
+            encrypted_recovery_key.as_ref(),
         )
         .await
         {
@@ -610,12 +618,7 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         }
 
         // Handle backups setup
-        match setup_backups(
-            &client,
-            user.encrypted_matrix_secret_storage_recovery_key.as_ref(),
-        )
-        .await
-        {
+        match setup_backups(&client, encrypted_recovery_key.as_ref()).await {
             Ok(should_update_storage) => {
                 if should_update_storage {
                     redo_secret_storage = true;
@@ -625,8 +628,8 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         }
 
         if redo_secret_storage {
-            if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
-                let passphrase = decrypt(&encrypted_key)?;
+            if let Some(ref encrypted_key) = encrypted_recovery_key {
+                let passphrase = decrypt(encrypted_key)?;
                 client
                     .encryption()
                     .recovery()

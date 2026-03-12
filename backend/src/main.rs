@@ -6,7 +6,6 @@ use axum::{
 };
 use dashmap::DashMap;
 use diesel::r2d2::{self, ConnectionManager};
-use diesel::SqliteConnection;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,8 +21,7 @@ use tracing::Level;
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
     api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
-    SqliteConnectionCustomizer, TotpRepository, UserCore, UserCoreOps, UserRepository,
-    WebauthnRepository,
+    TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
     admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
@@ -42,7 +40,6 @@ pub fn validate_env() {
     let core_vars = [
         "JWT_SECRET_KEY",
         "JWT_REFRESH_KEY",
-        "DATABASE_URL",
         "PG_DATABASE_URL",
         "ENCRYPTION_KEY",
         "MATRIX_SHARED_SECRET",
@@ -208,15 +205,6 @@ async fn main() {
     }
     tracing::info!("Admin emails configured: {:?}", admin_list);
 
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in environment");
-    let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-    let pool = r2d2::Pool::builder()
-        .connection_customizer(Box::new(SqliteConnectionCustomizer))
-        .build(manager)
-        .expect("Failed to create pool");
-
-    // PostgreSQL pool for sensitive data
     let pg_database_url =
         std::env::var("PG_DATABASE_URL").expect("PG_DATABASE_URL must be set in environment");
     let pg_manager = ConnectionManager::<diesel::PgConnection>::new(pg_database_url);
@@ -236,19 +224,19 @@ async fn main() {
         tracing::info!("PG migrations applied successfully");
     }
 
-    let user_core = Arc::new(UserCore::new(pool.clone()));
+    let user_core = Arc::new(UserCore::new(pg_pool.clone()));
 
     // Bootstrap admin user on first startup (only if database is empty)
     if let Err(e) = bootstrap_admin_if_needed(&user_core).await {
         tracing::warn!("Admin bootstrap failed (app will continue): {}", e);
     }
 
-    let user_repository = Arc::new(UserRepository::new(pg_pool.clone(), pool.clone()));
+    let user_repository = Arc::new(UserRepository::new(pg_pool.clone()));
     let item_repository = Arc::new(ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pg_pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
-    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pool.clone()));
-    let metrics_repository = Arc::new(backend::MetricsRepository::new(pool.clone()));
+    let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
+    let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -306,12 +294,11 @@ async fn main() {
     let twilio_client = Arc::new(backend::RealTwilioClient::new());
     let twilio_message_service = Arc::new(backend::TwilioMessageService::new(
         twilio_client.clone(),
-        pool.clone(),
+        pg_pool.clone(),
         user_core.clone(),
         user_repository.clone(),
     ));
     let state = Arc::new(AppState {
-        db_pool: pool,
         pg_pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),

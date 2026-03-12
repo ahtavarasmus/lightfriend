@@ -10,7 +10,7 @@
 
 use diesel::prelude::*;
 use diesel::sql_query;
-use diesel::sql_types::{Float, Integer, Nullable, Text};
+use diesel::sql_types::{Bool, Float, Integer, Nullable, Text};
 use std::env;
 
 fn main() {
@@ -25,10 +25,17 @@ fn main() {
 
     println!("Connected to both databases. Starting migration...");
 
-    // 1. Migrate user_secrets (extracted from users + user_settings)
-    migrate_user_secrets(&mut sqlite_conn, &mut pg_conn);
+    // Migrate whole tables - users first (other tables reference it via FK)
+    migrate_users(&mut sqlite_conn, &mut pg_conn);
+    migrate_user_settings(&mut sqlite_conn, &mut pg_conn);
+    migrate_waitlist(&mut sqlite_conn, &mut pg_conn);
+    migrate_refund_info(&mut sqlite_conn, &mut pg_conn);
+    migrate_message_status_log(&mut sqlite_conn, &mut pg_conn);
+    migrate_country_availability(&mut sqlite_conn, &mut pg_conn);
+    migrate_admin_alerts(&mut sqlite_conn, &mut pg_conn);
+    migrate_disabled_alert_types(&mut sqlite_conn, &mut pg_conn);
+    migrate_site_metrics(&mut sqlite_conn, &mut pg_conn);
 
-    // 2. Migrate whole tables
     migrate_user_info(&mut sqlite_conn, &mut pg_conn);
     migrate_contact_profiles(&mut sqlite_conn, &mut pg_conn);
     migrate_contact_profile_exceptions(&mut sqlite_conn, &mut pg_conn);
@@ -55,96 +62,6 @@ fn main() {
 
 // Helper macro: read from SQLite with raw SQL, insert into PG with raw SQL.
 // This avoids needing both SQLite and PG schema modules to compile against both backends.
-
-fn migrate_user_secrets(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
-    // Extract secrets from users table
-    #[derive(QueryableByName, Debug)]
-    struct UserSecret {
-        #[diesel(sql_type = Integer)]
-        user_id: i32,
-        #[diesel(sql_type = Nullable<Text>)]
-        matrix_username: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        matrix_device_id: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        encrypted_matrix_access_token: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        encrypted_matrix_password: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        encrypted_matrix_secret_storage_recovery_key: Option<String>,
-    }
-
-    #[derive(QueryableByName, Debug)]
-    struct UserTwilio {
-        #[diesel(sql_type = Integer)]
-        user_id: i32,
-        #[diesel(sql_type = Nullable<Text>)]
-        encrypted_twilio_account_sid: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        encrypted_twilio_auth_token: Option<String>,
-    }
-
-    let users: Vec<UserSecret> = sql_query(
-        "SELECT id as user_id, matrix_username, matrix_device_id, \
-         encrypted_matrix_access_token, encrypted_matrix_password, \
-         encrypted_matrix_secret_storage_recovery_key FROM users",
-    )
-    .load(sqlite)
-    .expect("Failed to read users");
-
-    let settings: Vec<UserTwilio> = sql_query(
-        "SELECT user_id, encrypted_twilio_account_sid, encrypted_twilio_auth_token FROM user_settings",
-    )
-    .load(sqlite)
-    .expect("Failed to read user_settings");
-
-    // Build a map of user_id -> twilio creds
-    let twilio_map: std::collections::HashMap<i32, (Option<String>, Option<String>)> = settings
-        .into_iter()
-        .map(|s| {
-            (
-                s.user_id,
-                (
-                    s.encrypted_twilio_account_sid,
-                    s.encrypted_twilio_auth_token,
-                ),
-            )
-        })
-        .collect();
-
-    let mut count = 0;
-    for u in &users {
-        let (twilio_sid, twilio_token) =
-            twilio_map.get(&u.user_id).cloned().unwrap_or((None, None));
-
-        let result = diesel::sql_query(
-            "INSERT INTO user_secrets (user_id, matrix_username, matrix_device_id, \
-             encrypted_matrix_access_token, encrypted_matrix_password, \
-             encrypted_matrix_secret_storage_recovery_key, \
-             encrypted_twilio_account_sid, encrypted_twilio_auth_token) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
-             ON CONFLICT (user_id) DO NOTHING",
-        )
-        .bind::<Integer, _>(u.user_id)
-        .bind::<Nullable<Text>, _>(&u.matrix_username)
-        .bind::<Nullable<Text>, _>(&u.matrix_device_id)
-        .bind::<Nullable<Text>, _>(&u.encrypted_matrix_access_token)
-        .bind::<Nullable<Text>, _>(&u.encrypted_matrix_password)
-        .bind::<Nullable<Text>, _>(&u.encrypted_matrix_secret_storage_recovery_key)
-        .bind::<Nullable<Text>, _>(&twilio_sid)
-        .bind::<Nullable<Text>, _>(&twilio_token)
-        .execute(pg);
-
-        match result {
-            Ok(_) => count += 1,
-            Err(e) => eprintln!(
-                "  Error inserting user_secrets for user {}: {}",
-                u.user_id, e
-            ),
-        }
-    }
-    println!("user_secrets: migrated {} rows", count);
-}
 
 fn migrate_user_info(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
     #[derive(QueryableByName, Debug)]
@@ -1042,8 +959,559 @@ fn migrate_processed_emails(sqlite: &mut SqliteConnection, pg: &mut PgConnection
     println!("processed_emails: migrated {} rows", count);
 }
 
+fn migrate_users(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        email: String,
+        #[diesel(sql_type = Text)]
+        password_hash: String,
+        #[diesel(sql_type = Text)]
+        phone_number: String,
+        #[diesel(sql_type = Nullable<Text>)]
+        nickname: Option<String>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        time_to_live: Option<i32>,
+        #[diesel(sql_type = Float)]
+        credits: f32,
+        #[diesel(sql_type = Nullable<Text>)]
+        preferred_number: Option<String>,
+        #[diesel(sql_type = Integer)]
+        charge_when_under_int: i32,
+        #[diesel(sql_type = Nullable<Float>)]
+        charge_back_to: Option<f32>,
+        #[diesel(sql_type = Nullable<Text>)]
+        stripe_customer_id: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        stripe_payment_method_id: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        stripe_checkout_session_id: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        sub_tier: Option<String>,
+        #[diesel(sql_type = Float)]
+        credits_left: f32,
+        #[diesel(sql_type = Nullable<Integer>)]
+        last_credits_notification: Option<i32>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        next_billing_date_timestamp: Option<i32>,
+        #[diesel(sql_type = Nullable<Text>)]
+        magic_token: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        plan_type: Option<String>,
+        #[diesel(sql_type = Integer)]
+        matrix_e2ee_enabled_int: i32,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, email, password_hash, phone_number, nickname, time_to_live, credits, \
+         preferred_number, charge_when_under AS charge_when_under_int, charge_back_to, \
+         stripe_customer_id, stripe_payment_method_id, stripe_checkout_session_id, \
+         sub_tier, credits_left, last_credits_notification, next_billing_date_timestamp, \
+         magic_token, plan_type, matrix_e2ee_enabled AS matrix_e2ee_enabled_int FROM users",
+    )
+    .load(sqlite)
+    .expect("Failed to read users");
+
+    let mut count = 0;
+    for r in &rows {
+        let charge_when_under = r.charge_when_under_int != 0;
+        let matrix_e2ee_enabled = r.matrix_e2ee_enabled_int != 0;
+        let result = diesel::sql_query(
+            "INSERT INTO users (id, email, password_hash, phone_number, nickname, time_to_live, \
+             credits, preferred_number, charge_when_under, charge_back_to, stripe_customer_id, \
+             stripe_payment_method_id, stripe_checkout_session_id, sub_tier, credits_left, \
+             last_credits_notification, next_billing_date_timestamp, magic_token, plan_type, \
+             matrix_e2ee_enabled) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.email)
+        .bind::<Text, _>(&r.password_hash)
+        .bind::<Text, _>(&r.phone_number)
+        .bind::<Nullable<Text>, _>(&r.nickname)
+        .bind::<Nullable<Integer>, _>(r.time_to_live)
+        .bind::<Float, _>(r.credits)
+        .bind::<Nullable<Text>, _>(&r.preferred_number)
+        .bind::<Bool, _>(charge_when_under)
+        .bind::<Nullable<Float>, _>(r.charge_back_to)
+        .bind::<Nullable<Text>, _>(&r.stripe_customer_id)
+        .bind::<Nullable<Text>, _>(&r.stripe_payment_method_id)
+        .bind::<Nullable<Text>, _>(&r.stripe_checkout_session_id)
+        .bind::<Nullable<Text>, _>(&r.sub_tier)
+        .bind::<Float, _>(r.credits_left)
+        .bind::<Nullable<Integer>, _>(r.last_credits_notification)
+        .bind::<Nullable<Integer>, _>(r.next_billing_date_timestamp)
+        .bind::<Nullable<Text>, _>(&r.magic_token)
+        .bind::<Nullable<Text>, _>(&r.plan_type)
+        .bind::<Bool, _>(matrix_e2ee_enabled)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating users row: {}", e),
+        }
+    }
+    println!("users: migrated {} rows", count);
+}
+
+fn migrate_user_settings(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Integer)]
+        user_id: i32,
+        #[diesel(sql_type = Integer)]
+        notify_int: i32,
+        #[diesel(sql_type = Nullable<Text>)]
+        notification_type: Option<String>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        timezone_auto_int: Option<i32>,
+        #[diesel(sql_type = Text)]
+        agent_language: String,
+        #[diesel(sql_type = Nullable<Text>)]
+        sub_country: Option<String>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        save_context: Option<i32>,
+        #[diesel(sql_type = Nullable<Text>)]
+        critical_enabled: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        elevenlabs_phone_number_id: Option<String>,
+        #[diesel(sql_type = Integer)]
+        notify_about_calls_int: i32,
+        #[diesel(sql_type = Nullable<Text>)]
+        action_on_critical_message: Option<String>,
+        #[diesel(sql_type = Integer)]
+        phone_service_active_int: i32,
+        #[diesel(sql_type = Nullable<Text>)]
+        default_notification_mode: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        default_notification_type: Option<String>,
+        #[diesel(sql_type = Integer)]
+        default_notify_on_call: i32,
+        #[diesel(sql_type = Nullable<Text>)]
+        llm_provider: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        phone_contact_notification_mode: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        phone_contact_notification_type: Option<String>,
+        #[diesel(sql_type = Integer)]
+        phone_contact_notify_on_call: i32,
+        #[diesel(sql_type = Integer)]
+        auto_create_items_int: i32,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, user_id, notify AS notify_int, notification_type, \
+         timezone_auto AS timezone_auto_int, agent_language, sub_country, save_context, \
+         critical_enabled, elevenlabs_phone_number_id, \
+         notify_about_calls AS notify_about_calls_int, action_on_critical_message, \
+         phone_service_active AS phone_service_active_int, default_notification_mode, \
+         default_notification_type, default_notify_on_call, llm_provider, \
+         phone_contact_notification_mode, phone_contact_notification_type, \
+         phone_contact_notify_on_call, auto_create_items AS auto_create_items_int \
+         FROM user_settings",
+    )
+    .load(sqlite)
+    .expect("Failed to read user_settings");
+
+    let mut count = 0;
+    for r in &rows {
+        let notify = r.notify_int != 0;
+        let timezone_auto: Option<bool> = r.timezone_auto_int.map(|v| v != 0);
+        let notify_about_calls = r.notify_about_calls_int != 0;
+        let phone_service_active = r.phone_service_active_int != 0;
+        let auto_create_items = r.auto_create_items_int != 0;
+        let result = diesel::sql_query(
+            "INSERT INTO user_settings (id, user_id, notify, notification_type, timezone_auto, \
+             agent_language, sub_country, save_context, critical_enabled, \
+             elevenlabs_phone_number_id, notify_about_calls, action_on_critical_message, \
+             phone_service_active, default_notification_mode, default_notification_type, \
+             default_notify_on_call, llm_provider, phone_contact_notification_mode, \
+             phone_contact_notification_type, phone_contact_notify_on_call, auto_create_items) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Integer, _>(r.user_id)
+        .bind::<Bool, _>(notify)
+        .bind::<Nullable<Text>, _>(&r.notification_type)
+        .bind::<Nullable<Bool>, _>(timezone_auto)
+        .bind::<Text, _>(&r.agent_language)
+        .bind::<Nullable<Text>, _>(&r.sub_country)
+        .bind::<Nullable<Integer>, _>(r.save_context)
+        .bind::<Nullable<Text>, _>(&r.critical_enabled)
+        .bind::<Nullable<Text>, _>(&r.elevenlabs_phone_number_id)
+        .bind::<Bool, _>(notify_about_calls)
+        .bind::<Nullable<Text>, _>(&r.action_on_critical_message)
+        .bind::<Bool, _>(phone_service_active)
+        .bind::<Nullable<Text>, _>(&r.default_notification_mode)
+        .bind::<Nullable<Text>, _>(&r.default_notification_type)
+        .bind::<Integer, _>(r.default_notify_on_call)
+        .bind::<Nullable<Text>, _>(&r.llm_provider)
+        .bind::<Nullable<Text>, _>(&r.phone_contact_notification_mode)
+        .bind::<Nullable<Text>, _>(&r.phone_contact_notification_type)
+        .bind::<Integer, _>(r.phone_contact_notify_on_call)
+        .bind::<Bool, _>(auto_create_items)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating user_settings row: {}", e),
+        }
+    }
+    println!("user_settings: migrated {} rows", count);
+}
+
+fn migrate_waitlist(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        email: String,
+        #[diesel(sql_type = Integer)]
+        created_at: i32,
+    }
+
+    let rows: Vec<Row> = sql_query("SELECT id, email, created_at FROM waitlist")
+        .load(sqlite)
+        .expect("Failed to read waitlist");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO waitlist (id, email, created_at) VALUES ($1, $2, $3) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.email)
+        .bind::<Integer, _>(r.created_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating waitlist row: {}", e),
+        }
+    }
+    println!("waitlist: migrated {} rows", count);
+}
+
+fn migrate_refund_info(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Integer)]
+        user_id: i32,
+        #[diesel(sql_type = Integer)]
+        has_refunded: i32,
+        #[diesel(sql_type = Nullable<Float>)]
+        last_credit_pack_amount: Option<f32>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        last_credit_pack_purchase_timestamp: Option<i32>,
+        #[diesel(sql_type = Nullable<Integer>)]
+        refunded_at: Option<i32>,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, user_id, has_refunded, last_credit_pack_amount, \
+         last_credit_pack_purchase_timestamp, refunded_at FROM refund_info",
+    )
+    .load(sqlite)
+    .expect("Failed to read refund_info");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO refund_info (id, user_id, has_refunded, last_credit_pack_amount, \
+             last_credit_pack_purchase_timestamp, refunded_at) \
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Integer, _>(r.user_id)
+        .bind::<Integer, _>(r.has_refunded)
+        .bind::<Nullable<Float>, _>(r.last_credit_pack_amount)
+        .bind::<Nullable<Integer>, _>(r.last_credit_pack_purchase_timestamp)
+        .bind::<Nullable<Integer>, _>(r.refunded_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating refund_info row: {}", e),
+        }
+    }
+    println!("refund_info: migrated {} rows", count);
+}
+
+fn migrate_message_status_log(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        message_sid: String,
+        #[diesel(sql_type = Integer)]
+        user_id: i32,
+        #[diesel(sql_type = Text)]
+        direction: String,
+        #[diesel(sql_type = Text)]
+        to_number: String,
+        #[diesel(sql_type = Nullable<Text>)]
+        from_number: Option<String>,
+        #[diesel(sql_type = Text)]
+        status: String,
+        #[diesel(sql_type = Nullable<Text>)]
+        error_code: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        error_message: Option<String>,
+        #[diesel(sql_type = Integer)]
+        created_at: i32,
+        #[diesel(sql_type = Integer)]
+        updated_at: i32,
+        #[diesel(sql_type = Nullable<Float>)]
+        price: Option<f32>,
+        #[diesel(sql_type = Nullable<Text>)]
+        price_unit: Option<String>,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, message_sid, user_id, direction, to_number, from_number, status, \
+         error_code, error_message, created_at, updated_at, price, price_unit \
+         FROM message_status_log",
+    )
+    .load(sqlite)
+    .expect("Failed to read message_status_log");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO message_status_log (id, message_sid, user_id, direction, to_number, \
+             from_number, status, error_code, error_message, created_at, updated_at, price, \
+             price_unit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.message_sid)
+        .bind::<Integer, _>(r.user_id)
+        .bind::<Text, _>(&r.direction)
+        .bind::<Text, _>(&r.to_number)
+        .bind::<Nullable<Text>, _>(&r.from_number)
+        .bind::<Text, _>(&r.status)
+        .bind::<Nullable<Text>, _>(&r.error_code)
+        .bind::<Nullable<Text>, _>(&r.error_message)
+        .bind::<Integer, _>(r.created_at)
+        .bind::<Integer, _>(r.updated_at)
+        .bind::<Nullable<Float>, _>(r.price)
+        .bind::<Nullable<Text>, _>(&r.price_unit)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating message_status_log row: {}", e),
+        }
+    }
+    println!("message_status_log: migrated {} rows", count);
+}
+
+fn migrate_country_availability(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        country_code: String,
+        #[diesel(sql_type = Integer)]
+        has_local_numbers_int: i32,
+        #[diesel(sql_type = Nullable<Float>)]
+        outbound_sms_price: Option<f32>,
+        #[diesel(sql_type = Nullable<Float>)]
+        inbound_sms_price: Option<f32>,
+        #[diesel(sql_type = Nullable<Float>)]
+        outbound_voice_price_per_min: Option<f32>,
+        #[diesel(sql_type = Nullable<Float>)]
+        inbound_voice_price_per_min: Option<f32>,
+        #[diesel(sql_type = Integer)]
+        last_checked: i32,
+        #[diesel(sql_type = Integer)]
+        created_at: i32,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, country_code, has_local_numbers AS has_local_numbers_int, \
+         outbound_sms_price, inbound_sms_price, outbound_voice_price_per_min, \
+         inbound_voice_price_per_min, last_checked, created_at FROM country_availability",
+    )
+    .load(sqlite)
+    .expect("Failed to read country_availability");
+
+    let mut count = 0;
+    for r in &rows {
+        let has_local_numbers = r.has_local_numbers_int != 0;
+        let result = diesel::sql_query(
+            "INSERT INTO country_availability (id, country_code, has_local_numbers, \
+             outbound_sms_price, inbound_sms_price, outbound_voice_price_per_min, \
+             inbound_voice_price_per_min, last_checked, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.country_code)
+        .bind::<Bool, _>(has_local_numbers)
+        .bind::<Nullable<Float>, _>(r.outbound_sms_price)
+        .bind::<Nullable<Float>, _>(r.inbound_sms_price)
+        .bind::<Nullable<Float>, _>(r.outbound_voice_price_per_min)
+        .bind::<Nullable<Float>, _>(r.inbound_voice_price_per_min)
+        .bind::<Integer, _>(r.last_checked)
+        .bind::<Integer, _>(r.created_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating country_availability row: {}", e),
+        }
+    }
+    println!("country_availability: migrated {} rows", count);
+}
+
+fn migrate_admin_alerts(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        alert_type: String,
+        #[diesel(sql_type = Text)]
+        severity: String,
+        #[diesel(sql_type = Text)]
+        message: String,
+        #[diesel(sql_type = Text)]
+        location: String,
+        #[diesel(sql_type = Text)]
+        module: String,
+        #[diesel(sql_type = Integer)]
+        acknowledged: i32,
+        #[diesel(sql_type = Integer)]
+        created_at: i32,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        "SELECT id, alert_type, severity, message, location, module, acknowledged, created_at \
+         FROM admin_alerts",
+    )
+    .load(sqlite)
+    .expect("Failed to read admin_alerts");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO admin_alerts (id, alert_type, severity, message, location, module, \
+             acknowledged, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.alert_type)
+        .bind::<Text, _>(&r.severity)
+        .bind::<Text, _>(&r.message)
+        .bind::<Text, _>(&r.location)
+        .bind::<Text, _>(&r.module)
+        .bind::<Integer, _>(r.acknowledged)
+        .bind::<Integer, _>(r.created_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating admin_alerts row: {}", e),
+        }
+    }
+    println!("admin_alerts: migrated {} rows", count);
+}
+
+fn migrate_disabled_alert_types(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        alert_type: String,
+        #[diesel(sql_type = Integer)]
+        disabled_at: i32,
+    }
+
+    let rows: Vec<Row> = sql_query("SELECT id, alert_type, disabled_at FROM disabled_alert_types")
+        .load(sqlite)
+        .expect("Failed to read disabled_alert_types");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO disabled_alert_types (id, alert_type, disabled_at) \
+             VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.alert_type)
+        .bind::<Integer, _>(r.disabled_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating disabled_alert_types row: {}", e),
+        }
+    }
+    println!("disabled_alert_types: migrated {} rows", count);
+}
+
+fn migrate_site_metrics(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Integer)]
+        id: i32,
+        #[diesel(sql_type = Text)]
+        metric_key: String,
+        #[diesel(sql_type = Text)]
+        metric_value: String,
+        #[diesel(sql_type = Integer)]
+        updated_at: i32,
+    }
+
+    let rows: Vec<Row> =
+        sql_query("SELECT id, metric_key, metric_value, updated_at FROM site_metrics")
+            .load(sqlite)
+            .expect("Failed to read site_metrics");
+
+    let mut count = 0;
+    for r in &rows {
+        let result = diesel::sql_query(
+            "INSERT INTO site_metrics (id, metric_key, metric_value, updated_at) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind::<Integer, _>(r.id)
+        .bind::<Text, _>(&r.metric_key)
+        .bind::<Text, _>(&r.metric_value)
+        .bind::<Integer, _>(r.updated_at)
+        .execute(pg);
+
+        match result {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("  Error migrating site_metrics row: {}", e),
+        }
+    }
+    println!("site_metrics: migrated {} rows", count);
+}
+
 fn reset_sequences(pg: &mut PgConnection) {
     let tables = [
+        "users",
+        "user_settings",
+        "waitlist",
+        "refund_info",
+        "message_status_log",
+        "country_availability",
+        "admin_alerts",
+        "disabled_alert_types",
+        "site_metrics",
         "contact_profiles",
         "contact_profile_exceptions",
         "message_history",

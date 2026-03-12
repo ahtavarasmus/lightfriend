@@ -1,4 +1,3 @@
-use crate::UserCoreOps;
 use anyhow::{anyhow, Result};
 use axum::{extract::State, http::StatusCode, response::Json as AxumJson};
 use serde_json::json;
@@ -7,7 +6,6 @@ use std::sync::Arc;
 use tokio::fs;
 
 use crate::handlers::auth_middleware::AuthUser;
-use crate::repositories::user_core::UserCore;
 use crate::repositories::user_repository::UserRepository;
 use crate::AppState;
 
@@ -28,21 +26,24 @@ pub async fn reset_matrix_connection(
 
     tracing::info!("User {} requested Matrix connection reset", user_id);
 
-    // Get the user's Matrix username before clearing (if it exists)
-    let user_core = UserCore::new(state.db_pool.clone());
-    let matrix_username = user_core
-        .find_by_id(user_id)
+    // Get the user's Matrix username from PG before clearing (if it exists)
+    let user_repo = UserRepository::new(state.pg_pool.clone());
+    let matrix_username = user_repo
+        .get_matrix_credentials(user_id)
         .map_err(|e| {
-            tracing::error!("Failed to get user {}: {}", user_id, e);
+            tracing::error!(
+                "Failed to get matrix credentials for user {}: {}",
+                user_id,
+                e
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to get user".to_string(),
             )
         })?
-        .and_then(|u| u.matrix_username);
+        .and_then(|(username, _, _, _, _)| username);
 
     // Clear the Matrix credentials from the database
-    let user_repo = UserRepository::new(state.pg_pool.clone(), state.db_pool.clone());
     user_repo.clear_matrix_credentials(user_id).map_err(|e| {
         tracing::error!(
             "Failed to clear Matrix credentials for user {}: {}",
