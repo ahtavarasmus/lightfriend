@@ -195,6 +195,11 @@
       "Bash(bash:*)",
       "Bash(git:*)",
       "Bash(chmod +x:*)",
+      "Bash(brew tap getsentry/xcodebuildmcp 2>&1 && brew install xcodebuildmcp 2>&1)",
+      "Bash(tail:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(gh pr:*)",
+      "Bash(xcrun simctl:*)",
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib:$DYLD_LIBRARY_PATH\" cargo test:*)",
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib:$DYLD_LIBRARY_PATH\" cargo test --lib --test bridge_test --test bridge_integration_test --test country_service_test --test country_test --test elevenlabs_test --test imap_auth_test --test internal_routing_test --test llm_integration_test --test management_test --test matrix_mock_test --test quiet_mode_rules_test --test quiet_mode_test --test signup_service_test --test tesla_test --test twilio_client_test --test twilio_handlers_test --test twilio_status_service_test)",
       "Bash(pg_isready:*)",
@@ -247,6 +252,10 @@
       "Bash(rm*)"
     ]
   },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "XcodeBuildMCP"
+  ],
   "hooks": {
     "PreToolUse": [
       {
