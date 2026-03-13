@@ -566,13 +566,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         b_date.cmp(&a_date)
                                     });
 
-                                    let contact_profiles = match state.user_repository.get_contact_profiles(user.id) {
-                                        Ok(profiles) => profiles,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get contact profiles for user {}: {}", user.id, e);
-                                            Vec::new()
-                                        }
-                                    };
                                     // Check if user has auto_create_items enabled
                                     let auto_create_items = state.user_core.get_auto_create_items(user.id).unwrap_or(false);
 
@@ -604,53 +597,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             });
                                         }
 
-                                        // Check if sender matches contact profiles with "all" notification mode
-                                        if let Some(matched_profile) = contact_profiles.iter().filter(|p| p.notification_mode == "all").find(|profile| {
-                                            if let Some(ref emails) = profile.email_addresses {
-                                                let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
-                                                let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
-                                                emails.split(',').any(|addr| {
-                                                    let addr_lower = addr.trim().to_lowercase();
-                                                    from_lower.contains(&addr_lower) || from_name_lower.contains(&addr_lower)
-                                                })
-                                            } else {
-                                                false
-                                            }
-                                        }) {
-                                            tracing::info!("Fast check: Contact profile matched for user {}", user.id);
-
-                                            // Determine suffix based on notification_type
-                                            let suffix = match matched_profile.notification_type.as_str() {
-                                                "call" => "_call",
-                                                _ => "_sms",
-                                            };
-                                            let notification_type = format!("email_priority{}", suffix);
-
-                                            // Format the notification message with sender and content
-                                            let message = format!(
-                                                "Email from: {}\nSubject: {}\nContent: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject"),
-                                                email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
-                                            );
-                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject")
-                                            );
-
-                                            // Spawn a new task for sending notification
-                                            let state_clone = state.clone();
-                                            tokio::spawn(async move {
-                                                crate::proactive::utils::send_notification(
-                                                    &state_clone,
-                                                    user.id,
-                                                    &message,
-                                                    notification_type,
-                                                    Some(first_message),
-                                                ).await;
-                                            });
-                                            continue;
-                                        }
                                         // Check ontology Person email channels with "all" notification mode
                                         if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id) {
                                             let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();

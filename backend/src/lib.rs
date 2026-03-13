@@ -7,7 +7,7 @@ pub mod handlers {
     pub mod auth_middleware;
     pub mod billing_handlers;
     pub mod bridge_auth_common;
-    pub mod contact_profile_handlers;
+    pub mod person_handlers;
     pub mod dashboard_handlers;
     pub mod filter_handlers;
     pub mod imap_auth;

@@ -1764,11 +1764,11 @@ pub async fn handle_bridge_message(
         }
     }
 
-    // Extract chat_name early for contact profile matching
+    // Extract chat_name early for Person lookup and notification routing
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
-    // --- Ontology Person + Channel lookup (takes priority over contact_profiles) ---
+    // --- Ontology Person + Channel lookup ---
     let matching_person = state
         .ontology_repository
         .find_person_by_room_id(user_id, &current_room_id)
@@ -1777,91 +1777,8 @@ pub async fn handle_bridge_message(
             None
         });
 
-    // Load contact profiles for matching (legacy fallback)
-    let contact_profiles = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default();
-
-    // Find matching contact profile - try room_id first (stable), then display name
-    let matching_profile = contact_profiles
-        .iter()
-        .find(|p| {
-            // Try room_id match first
-            let profile_room_id = match service.as_str() {
-                "whatsapp" => p.whatsapp_room_id.as_deref(),
-                "telegram" => p.telegram_room_id.as_deref(),
-                "signal" => p.signal_room_id.as_deref(),
-                _ => None,
-            };
-            profile_room_id == Some(current_room_id.as_str())
-        })
-        .or_else(|| {
-            // Fall back to display name matching for legacy/proactive profiles
-            let name_match = contact_profiles.iter().find(|p| {
-                let chat_lower = chat_name.to_lowercase();
-                match service.as_str() {
-                    "whatsapp" => p
-                        .whatsapp_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    "telegram" => p
-                        .telegram_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    "signal" => p
-                        .signal_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    _ => false,
-                }
-            });
-
-            // Auto-save room_id on name-based match so future messages use room_id directly
-            if let Some(profile) = name_match {
-                let profile_room_id = match service.as_str() {
-                    "whatsapp" => profile.whatsapp_room_id.as_deref(),
-                    "telegram" => profile.telegram_room_id.as_deref(),
-                    "signal" => profile.signal_room_id.as_deref(),
-                    _ => None,
-                };
-                if profile_room_id.is_none() || profile_room_id == Some("") {
-                    let pid = profile.id;
-                    if let Err(e) = state.user_repository.update_profile_room_id(
-                        pid,
-                        &service,
-                        &current_room_id,
-                    ) {
-                        tracing::warn!("Failed to auto-save room_id for profile {}: {}", pid, e);
-                    } else {
-                        tracing::info!(
-                            "Auto-saved {} room_id {} for profile {} ({})",
-                            service,
-                            current_room_id,
-                            pid,
-                            profile.nickname
-                        );
-                    }
-                }
-            }
-
-            name_match
-        });
-
     // Auto-create Person+Channel for recognized phone contacts not yet in ontology
-    if matching_person.is_none() && matching_profile.is_none() {
+    if matching_person.is_none() {
         if let Some(true) = is_phone_contact_from_room_name(room_name.as_str()) {
             let platform = service.clone();
             match state.ontology_repository.upsert_person(
@@ -1913,7 +1830,6 @@ pub async fn handle_bridge_message(
 
     // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
-        // Check ontology Person+Channel first, then fall back to contact_profile
         let effective_mode = if let Some(ref person_with_channels) = matching_person {
             if let Some(channel) = person_with_channels.channels.iter().find(|c| c.room_id.as_deref() == Some(current_room_id.as_str())) {
                 let user_default_mode = user_settings
@@ -1925,19 +1841,11 @@ pub async fn handle_bridge_message(
                 String::new()
             }
         } else {
-            // Fall back to contact_profile
-            matching_profile
-                .and_then(|p| {
-                    let profile_id = p.id;
-                    state
-                        .user_repository
-                        .get_profile_exception_for_platform(profile_id, &service)
-                        .ok()
-                        .flatten()
-                        .map(|exc| exc.notification_mode)
-                        .or_else(|| Some(p.notification_mode.clone()))
-                })
-                .unwrap_or_default()
+            // No Person found - use user defaults
+            user_settings
+                .phone_contact_notification_mode
+                .clone()
+                .unwrap_or_else(|| "critical".to_string())
         };
         let is_priority_group = effective_mode == "all";
 
@@ -2064,7 +1972,7 @@ pub async fn handle_bridge_message(
             }
         }
     }
-    // chat_name and sender_name already defined earlier for contact profile matching
+    // chat_name already defined earlier for Person lookup
 
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
         let prefix = format!("{} from ", capitalize(service));
@@ -2090,13 +1998,16 @@ pub async fn handle_bridge_message(
 
     let service_cap = capitalize(&service);
 
-    // Extract contact notes before the match consumes matching_profile
-    let contact_notes = matching_profile.as_ref().and_then(|p| p.notes.clone());
+    // Extract contact notes from ontology Person edits
+    let contact_notes = matching_person.as_ref().and_then(|p| {
+        p.edits.iter()
+            .find(|e| e.property_name == "notes")
+            .map(|e| e.value.clone())
+    });
 
     // Determine notification mode and type.
-    // Priority: ontology Person+Channel -> contact_profile -> user defaults
+    // Priority: ontology Person+Channel -> user defaults
     let (notification_mode, notification_type_str, notify_on_call, profile_nickname) = {
-        // Try ontology Person+Channel first
         let ontology_settings = matching_person.as_ref().and_then(|pwc| {
             pwc.channels
                 .iter()
@@ -2132,66 +2043,30 @@ pub async fn handle_bridge_message(
         if let Some(settings) = ontology_settings {
             settings
         } else {
-            // Fall back to contact_profile or user defaults
-            match matching_profile {
-                Some(profile) => {
-                    let profile_id = profile.id;
-                    let exception = state
-                        .user_repository
-                        .get_profile_exception_for_platform(profile_id, &service)
-                        .ok()
-                        .flatten();
-
-                    match exception {
-                        Some(exc) => {
-                            tracing::info!(
-                                "Using {} exception for profile '{}': mode={}, type={}",
-                                service,
-                                profile.nickname,
-                                exc.notification_mode,
-                                exc.notification_type
-                            );
-                            (
-                                exc.notification_mode.clone(),
-                                exc.notification_type.clone(),
-                                exc.notify_on_call != 0,
-                                Some(profile.nickname.clone()),
-                            )
-                        }
-                        None => (
-                            profile.notification_mode.clone(),
-                            profile.notification_type.clone(),
-                            profile.notify_on_call != 0,
-                            Some(profile.nickname.clone()),
-                        ),
-                    }
-                }
-                None => {
-                    let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
-                    if is_phone_contact.unwrap_or(true) {
-                        let mode = user_settings
-                            .phone_contact_notification_mode
-                            .clone()
-                            .unwrap_or_else(|| "critical".to_string());
-                        let ntype = user_settings
-                            .phone_contact_notification_type
-                            .clone()
-                            .unwrap_or_else(|| "sms".to_string());
-                        let notify = user_settings.phone_contact_notify_on_call != 0;
-                        (mode, ntype, notify, None)
-                    } else {
-                        let mode = user_settings
-                            .default_notification_mode
-                            .clone()
-                            .unwrap_or_else(|| "critical".to_string());
-                        let ntype = user_settings
-                            .default_notification_type
-                            .clone()
-                            .unwrap_or_else(|| "sms".to_string());
-                        let notify = user_settings.default_notify_on_call != 0;
-                        (mode, ntype, notify, None)
-                    }
-                }
+            // No Person found - use user defaults based on contact type
+            let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
+            if is_phone_contact.unwrap_or(true) {
+                let mode = user_settings
+                    .phone_contact_notification_mode
+                    .clone()
+                    .unwrap_or_else(|| "critical".to_string());
+                let ntype = user_settings
+                    .phone_contact_notification_type
+                    .clone()
+                    .unwrap_or_else(|| "sms".to_string());
+                let notify = user_settings.phone_contact_notify_on_call != 0;
+                (mode, ntype, notify, None)
+            } else {
+                let mode = user_settings
+                    .default_notification_mode
+                    .clone()
+                    .unwrap_or_else(|| "critical".to_string());
+                let ntype = user_settings
+                    .default_notification_type
+                    .clone()
+                    .unwrap_or_else(|| "sms".to_string());
+                let notify = user_settings.default_notify_on_call != 0;
+                (mode, ntype, notify, None)
             }
         }
     };

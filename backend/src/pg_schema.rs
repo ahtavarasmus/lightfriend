@@ -29,37 +29,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    contact_profiles (id) {
-        id -> Int4,
-        user_id -> Int4,
-        nickname -> Text,
-        whatsapp_chat -> Nullable<Text>,
-        telegram_chat -> Nullable<Text>,
-        signal_chat -> Nullable<Text>,
-        email_addresses -> Nullable<Text>,
-        notification_mode -> Text,
-        notification_type -> Text,
-        notify_on_call -> Int4,
-        created_at -> Int4,
-        whatsapp_room_id -> Nullable<Text>,
-        telegram_room_id -> Nullable<Text>,
-        signal_room_id -> Nullable<Text>,
-        notes -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
-    contact_profile_exceptions (id) {
-        id -> Int4,
-        profile_id -> Int4,
-        platform -> Text,
-        notification_mode -> Text,
-        notification_type -> Text,
-        notify_on_call -> Int4,
-    }
-}
-
-diesel::table! {
     imap_connection (id) {
         id -> Int4,
         user_id -> Int4,
@@ -435,8 +404,6 @@ diesel::joinable!(user_settings -> users (user_id));
 diesel::allow_tables_to_appear_in_same_query!(
     user_secrets,
     user_info,
-    contact_profiles,
-    contact_profile_exceptions,
     imap_connection,
     message_history,
     tesla,

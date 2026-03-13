@@ -24,7 +24,7 @@ use backend::{
     TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
-    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
+    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, person_handlers,
     dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
     self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
     telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
@@ -1010,58 +1010,33 @@ async fn main() {
             "/api/items/{id}",
             get(dashboard_handlers::get_item_detail).delete(dashboard_handlers::dismiss_item),
         )
-        // Contact Profiles routes
-        .route(
-            "/api/contact-profiles",
-            get(contact_profile_handlers::get_contact_profiles),
-        )
-        .route(
-            "/api/contact-profiles",
-            post(contact_profile_handlers::create_contact_profile),
-        )
-        .route(
-            "/api/contact-profiles/default-mode",
-            put(contact_profile_handlers::update_default_mode),
-        )
-        .route(
-            "/api/contact-profiles/phone-contact-mode",
-            put(contact_profile_handlers::update_phone_contact_mode),
-        )
-        .route(
-            "/api/contact-profiles/search/{service}",
-            get(contact_profile_handlers::search_chats),
-        )
-        .route(
-            "/api/contact-profiles/{id}",
-            put(contact_profile_handlers::update_contact_profile),
-        )
-        .route(
-            "/api/contact-profiles/{id}",
-            delete(contact_profile_handlers::delete_contact_profile),
-        )
         // Person + Channel (ontology) routes
         .route(
             "/api/persons",
-            get(contact_profile_handlers::get_persons)
-                .post(contact_profile_handlers::create_person),
+            get(person_handlers::get_persons)
+                .post(person_handlers::create_person),
         )
         .route(
             "/api/persons/{id}",
-            put(contact_profile_handlers::update_person)
-                .delete(contact_profile_handlers::delete_person),
+            put(person_handlers::update_person)
+                .delete(person_handlers::delete_person),
         )
         .route(
             "/api/persons/{id}/channels",
-            post(contact_profile_handlers::add_person_channel),
+            post(person_handlers::add_person_channel),
         )
         .route(
             "/api/persons/{person_id}/channels/{channel_id}",
-            put(contact_profile_handlers::update_person_channel)
-                .delete(contact_profile_handlers::delete_person_channel),
+            put(person_handlers::update_person_channel)
+                .delete(person_handlers::delete_person_channel),
         )
         .route(
             "/api/persons/merge",
-            post(contact_profile_handlers::merge_persons),
+            post(person_handlers::merge_persons),
+        )
+        .route(
+            "/api/persons/search/{service}",
+            get(person_handlers::search_chats),
         )
         // Web-based voice call routes (browser to ElevenLabs)
         .route(

@@ -4,11 +4,11 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    admin_alerts, bridge_disconnection_events, bridges, contact_profile_exceptions,
-    contact_profiles, country_availability, disabled_alert_types, imap_connection, items,
-    mcp_servers, message_history, message_status_log, processed_emails, refund_info, site_metrics,
-    tesla, totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, waitlist,
-    webauthn_challenges, webauthn_credentials, youtube,
+    admin_alerts, bridge_disconnection_events, bridges, country_availability,
+    disabled_alert_types, imap_connection, items, mcp_servers, message_history,
+    message_status_log, processed_emails, refund_info, site_metrics, tesla, totp_backup_codes,
+    totp_secrets, usage_logs, user_info, user_secrets, waitlist, webauthn_challenges,
+    webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -67,70 +67,6 @@ pub struct NewPgUserInfo {
     pub info: Option<String>,
     pub timezone: Option<String>,
     pub nearby_places: Option<String>,
-}
-
-// -- contact_profiles --
-
-#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
-#[diesel(table_name = contact_profiles)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct PgContactProfile {
-    pub id: i32,
-    pub user_id: i32,
-    pub nickname: String,
-    pub whatsapp_chat: Option<String>,
-    pub telegram_chat: Option<String>,
-    pub signal_chat: Option<String>,
-    pub email_addresses: Option<String>,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
-    pub created_at: i32,
-    pub whatsapp_room_id: Option<String>,
-    pub telegram_room_id: Option<String>,
-    pub signal_room_id: Option<String>,
-    pub notes: Option<String>,
-}
-
-#[derive(Insertable, Debug)]
-#[diesel(table_name = contact_profiles)]
-pub struct NewPgContactProfile {
-    pub user_id: i32,
-    pub nickname: String,
-    pub whatsapp_chat: Option<String>,
-    pub telegram_chat: Option<String>,
-    pub signal_chat: Option<String>,
-    pub email_addresses: Option<String>,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
-    pub created_at: i32,
-    pub whatsapp_room_id: Option<String>,
-    pub telegram_room_id: Option<String>,
-    pub signal_room_id: Option<String>,
-    pub notes: Option<String>,
-}
-
-// -- contact_profile_exceptions --
-
-#[derive(Queryable, Selectable, Debug, Clone)]
-#[diesel(table_name = contact_profile_exceptions)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct PgContactProfileException {
-    pub platform: String,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = contact_profile_exceptions)]
-pub struct NewPgContactProfileException {
-    pub profile_id: i32,
-    pub platform: String,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
 }
 
 // -- imap_connection --

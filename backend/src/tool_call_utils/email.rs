@@ -39,7 +39,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         "query".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The search query to find a specific email. Can be a topic, sender name, or contact profile nickname (e.g., 'Mom', 'Boss').".to_string()),
+            description: Some("The search query to find a specific email. Can be a topic or sender name (e.g., 'Mom', 'Boss').".to_string()),
             ..Default::default()
         }),
     );
@@ -48,7 +48,7 @@ pub fn get_fetch_specific_email_tool() -> openai_api_rs::v1::chat_completion::To
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("fetch_specific_email"),
-            description: Some(String::from("Search and fetch a specific email by person or topic. Supports contact profile nicknames. Returns full message body for the most relevant match.")),
+            description: Some(String::from("Search and fetch a specific email by person or topic. Returns full message body for the most relevant match.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(specific_email_properties),
@@ -66,7 +66,7 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "to".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The recipient's email address or contact profile nickname (e.g., 'mom@email.com' or 'Mom'). If a nickname is used, the first email address from their profile will be used.".to_string()),
+            description: Some("The recipient's email address or contact name (e.g., 'mom@email.com' or 'Mom'). If a name is used, the email address from their contact record will be used.".to_string()),
             ..Default::default()
         }),
     );
@@ -163,66 +163,41 @@ pub async fn handle_send_email(
 > {
     let args: SendEmailArgs = serde_json::from_str(args)?;
 
-    // Check if 'to' is a contact profile nickname and resolve to email address
+    // Check if 'to' is a contact name and resolve to email address
     let recipient_email = if args.to.contains('@') {
         // Already an email address
         args.to.clone()
     } else {
-        // Try ontology Person email channel first
-        let ont_email = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.to) {
-            person.channels.iter()
+        // Try ontology Person email channel
+        if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.to) {
+            if let Some(email_addr) = person.channels.iter()
                 .find(|c| c.platform == "email")
                 .and_then(|c| c.handle.clone())
-        } else {
-            None
-        };
-
-        if let Some(email_addr) = ont_email {
-            email_addr
-        } else {
-            // Fall back to contact profile lookup
-            let profiles = state
-                .user_repository
-                .get_contact_profiles(user_id)
-                .unwrap_or_default();
-            let matching_profile = profiles.iter().find(|p| {
-                let nickname_lower = p.nickname.to_lowercase();
-                let to_lower = args.to.to_lowercase();
-                nickname_lower.contains(&to_lower) || to_lower.contains(&nickname_lower)
-            });
-
-            if let Some(profile) = matching_profile {
-                if let Some(ref emails) = profile.email_addresses {
-                    // Use the first email address from the profile
-                    emails
-                        .split(',')
-                        .next()
-                        .map(|e| e.trim().to_string())
-                        .unwrap_or(args.to.clone())
-                } else {
-                    return Ok((
-                        axum::http::StatusCode::OK,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(crate::api::twilio_sms::TwilioResponse {
-                            message: format!(
-                                "Contact '{}' doesn't have an email address in their profile.",
-                                args.to
-                            ),
-                            created_item_id: None,
-                        }),
-                    ));
-                }
+            {
+                email_addr
             } else {
-                // Not a valid email and no matching profile
                 return Ok((
                     axum::http::StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
+                        message: format!(
+                            "Contact '{}' doesn't have an email address.",
+                            args.to
+                        ),
                         created_item_id: None,
-                    })
+                    }),
                 ));
             }
+        } else {
+            // Not a valid email and no matching contact
+            return Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: format!("'{}' is not a valid email address and no matching contact was found. Please provide an email address.", args.to),
+                    created_item_id: None,
+                })
+            ));
         }
     };
 
@@ -578,7 +553,7 @@ pub async fn handle_fetch_specific_email(
     user_id: i32,
     query: &str,
 ) -> String {
-    // Build context for LLM client and contact profiles
+    // Build context for LLM client
     let ctx = match crate::context::ContextBuilder::for_user(state, user_id)
         .with_user_context()
         .build()
@@ -591,29 +566,13 @@ pub async fn handle_fetch_specific_email(
         }
     };
 
-    // Try ontology Person email channel first
-    let ont_email = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, query) {
-        person.channels.iter()
+    // Try ontology Person email channel to enhance query with email address
+    let enhanced_query = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, query) {
+        if let Some(email_addr) = person.channels.iter()
             .find(|c| c.platform == "email")
             .and_then(|c| c.handle.clone())
-    } else {
-        None
-    };
-
-    // Check if query matches a contact profile nickname and get their email addresses
-    let profiles = ctx.contact_profiles.as_deref().unwrap_or(&[]);
-    let matching_profile = profiles.iter().find(|p| {
-        let nickname_lower = p.nickname.to_lowercase();
-        let query_lower = query.to_lowercase();
-        nickname_lower.contains(&query_lower) || query_lower.contains(&nickname_lower)
-    });
-
-    // Enhance query with email addresses: ontology takes priority, then contact profile
-    let enhanced_query = if let Some(ref email_addr) = ont_email {
-        format!("{} (email addresses: {})", query, email_addr)
-    } else if let Some(profile) = matching_profile {
-        if let Some(ref emails) = profile.email_addresses {
-            format!("{} (email addresses: {})", query, emails)
+        {
+            format!("{} (email addresses: {})", query, email_addr)
         } else {
             query.to_string()
         }

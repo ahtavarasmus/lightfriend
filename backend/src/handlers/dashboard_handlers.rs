@@ -395,19 +395,8 @@ fn find_items_beyond(
 }
 
 fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedContact> {
-    let mut contacts: Vec<WatchedContact> = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| p.notification_mode != "digest") // Only show those with active watching
-        .map(|p| WatchedContact {
-            nickname: p.nickname,
-            notification_mode: p.notification_mode,
-        })
-        .collect();
+    let mut contacts: Vec<WatchedContact> = Vec::new();
 
-    // Add Person+Channel data from ontology
     let persons = state
         .ontology_repository
         .get_persons_with_channels(user_id)

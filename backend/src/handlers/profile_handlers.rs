@@ -2248,51 +2248,26 @@ pub async fn get_instant_digest(
         }));
     }
 
-    // Build priority map from contact profiles for digest generation
+    // Build priority map from Person channels for digest generation
     let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
     priority_map.insert("email".to_string(), HashSet::new());
     priority_map.insert("whatsapp".to_string(), HashSet::new());
     priority_map.insert("telegram".to_string(), HashSet::new());
     priority_map.insert("signal".to_string(), HashSet::new());
 
-    if let Ok(profiles) = state
-        .user_repository
-        .get_contact_profiles(auth_user.user_id)
+    if let Ok(persons) = state
+        .ontology_repository
+        .get_persons_with_channels(auth_user.user_id)
     {
-        for profile in profiles {
-            if let Some(ref emails) = profile.email_addresses {
-                for addr in emails.split(',') {
-                    let addr = addr.trim().to_string();
-                    if !addr.is_empty() {
+        for person in &persons {
+            for channel in &person.channels {
+                if let Some(ref handle) = channel.handle {
+                    if !handle.is_empty() {
                         priority_map
-                            .entry("email".to_string())
+                            .entry(channel.platform.clone())
                             .or_default()
-                            .insert(addr);
+                            .insert(handle.clone());
                     }
-                }
-            }
-            if let Some(ref chat) = profile.whatsapp_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("whatsapp".to_string())
-                        .or_default()
-                        .insert(chat.clone());
-                }
-            }
-            if let Some(ref chat) = profile.telegram_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("telegram".to_string())
-                        .or_default()
-                        .insert(chat.clone());
-                }
-            }
-            if let Some(ref chat) = profile.signal_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("signal".to_string())
-                        .or_default()
-                        .insert(chat.clone());
                 }
             }
         }

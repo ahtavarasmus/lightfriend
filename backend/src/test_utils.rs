@@ -46,8 +46,8 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
             "TRUNCATE users, user_settings, refund_info, \
              country_availability, message_status_log, admin_alerts, \
              disabled_alert_types, site_metrics, waitlist, \
-             items, message_history, usage_logs, contact_profiles, \
-             contact_profile_exceptions, bridges, bridge_disconnection_events, \
+             items, message_history, usage_logs, \
+             bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
              user_secrets, user_info, processed_emails, \

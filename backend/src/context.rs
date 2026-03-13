@@ -12,7 +12,6 @@ use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
 use crate::models::user_models::{User, UserSettings};
-use crate::pg_models::PgContactProfile;
 use crate::pg_models::PgUserInfo;
 use crate::{AiProvider, AppState, ModelPurpose, UserCoreOps};
 
@@ -104,7 +103,6 @@ pub struct AgentContext {
     pub user_settings: Option<UserSettings>,
     pub user_info: Option<PgUserInfo>,
     pub timezone: Option<TimezoneInfo>,
-    pub contact_profiles: Option<Vec<PgContactProfile>>,
     pub persons: Option<Vec<crate::models::ontology_models::PersonWithChannels>>,
     pub user_given_info: Option<String>,
     pub contacts_prompt_fragment: Option<String>,
@@ -257,7 +255,6 @@ impl ContextBuilder {
             user_settings,
             user_info,
             timezone,
-            contact_profiles,
             persons,
             user_given_info,
             contacts_prompt_fragment,
@@ -268,43 +265,28 @@ impl ContextBuilder {
             let tz_str = info.timezone.as_deref().unwrap_or("UTC");
             let tz = TimezoneInfo::compute(tz_str);
 
-            let profiles = self
-                .state
-                .user_repository
-                .get_contact_profiles(user_id)
-                .unwrap_or_default();
-
             let persons = self
                 .state
                 .ontology_repository
                 .get_persons_with_channels(user_id)
                 .ok();
 
-            let mut fragment = if profiles.is_empty() {
-                String::new()
-            } else {
-                let nicknames: Vec<&str> = profiles.iter().map(|p| p.nickname.as_str()).collect();
-                format!(
-                        "\n\nYour contacts: {}. When the user refers to a contact by name, use the matching nickname in tool calls.",
-                        nicknames.join(", ")
-                    )
-            };
-
-            if let Some(ref persons_list) = persons {
+            let fragment = if let Some(ref persons_list) = persons {
                 if !persons_list.is_empty() {
-                    if fragment.is_empty() {
-                        fragment.push_str("\n\nYour contacts:\n");
-                    } else {
-                        fragment.push('\n');
-                    }
+                    let mut f = String::from("\n\nYour contacts:\n");
                     for p in persons_list {
                         let name = p.display_name();
                         let platforms: Vec<&str> =
                             p.channels.iter().map(|c| c.platform.as_str()).collect();
-                        fragment.push_str(&format!("- {} ({})\n", name, platforms.join(", ")));
+                        f.push_str(&format!("- {} ({})\n", name, platforms.join(", ")));
                     }
+                    f
+                } else {
+                    String::new()
                 }
-            }
+            } else {
+                String::new()
+            };
 
             let given_info = info.info.clone().unwrap_or_default();
 
@@ -312,13 +294,12 @@ impl ContextBuilder {
                 Some(settings),
                 Some(info),
                 Some(tz),
-                Some(profiles),
                 persons,
                 Some(given_info),
                 Some(fragment),
             )
         } else {
-            (None, None, None, None, None, None, None)
+            (None, None, None, None, None, None)
         };
 
         // 4. Tools (opt-in)
@@ -367,7 +348,6 @@ impl ContextBuilder {
             user_settings,
             user_info,
             timezone,
-            contact_profiles,
             persons,
             user_given_info,
             contacts_prompt_fragment,

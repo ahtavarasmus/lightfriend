@@ -37,8 +37,6 @@ fn main() {
     migrate_site_metrics(&mut sqlite_conn, &mut pg_conn);
 
     migrate_user_info(&mut sqlite_conn, &mut pg_conn);
-    migrate_contact_profiles(&mut sqlite_conn, &mut pg_conn);
-    migrate_contact_profile_exceptions(&mut sqlite_conn, &mut pg_conn);
     migrate_imap_connection(&mut sqlite_conn, &mut pg_conn);
     migrate_message_history(&mut sqlite_conn, &mut pg_conn);
     migrate_tesla(&mut sqlite_conn, &mut pg_conn);
@@ -108,131 +106,6 @@ fn migrate_user_info(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
         }
     }
     println!("user_info: migrated {} rows", count);
-}
-
-fn migrate_contact_profiles(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
-    #[derive(QueryableByName, Debug)]
-    struct Row {
-        #[diesel(sql_type = Integer)]
-        id: i32,
-        #[diesel(sql_type = Integer)]
-        user_id: i32,
-        #[diesel(sql_type = Text)]
-        nickname: String,
-        #[diesel(sql_type = Nullable<Text>)]
-        whatsapp_chat: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        telegram_chat: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        signal_chat: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        email_addresses: Option<String>,
-        #[diesel(sql_type = Text)]
-        notification_mode: String,
-        #[diesel(sql_type = Text)]
-        notification_type: String,
-        #[diesel(sql_type = Integer)]
-        notify_on_call: i32,
-        #[diesel(sql_type = Integer)]
-        created_at: i32,
-        #[diesel(sql_type = Nullable<Text>)]
-        whatsapp_room_id: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        telegram_room_id: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        signal_room_id: Option<String>,
-        #[diesel(sql_type = Nullable<Text>)]
-        notes: Option<String>,
-    }
-
-    let rows: Vec<Row> = sql_query(
-        "SELECT id, user_id, nickname, whatsapp_chat, telegram_chat, signal_chat, \
-         email_addresses, notification_mode, notification_type, notify_on_call, \
-         created_at, whatsapp_room_id, telegram_room_id, signal_room_id, notes \
-         FROM contact_profiles",
-    )
-    .load(sqlite)
-    .expect("Failed to read contact_profiles");
-
-    let mut count = 0;
-    for r in &rows {
-        let result = diesel::sql_query(
-            "INSERT INTO contact_profiles (id, user_id, nickname, whatsapp_chat, telegram_chat, \
-             signal_chat, email_addresses, notification_mode, notification_type, notify_on_call, \
-             created_at, whatsapp_room_id, telegram_room_id, signal_room_id, notes) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
-             ON CONFLICT (id) DO NOTHING",
-        )
-        .bind::<Integer, _>(r.id)
-        .bind::<Integer, _>(r.user_id)
-        .bind::<Text, _>(&r.nickname)
-        .bind::<Nullable<Text>, _>(&r.whatsapp_chat)
-        .bind::<Nullable<Text>, _>(&r.telegram_chat)
-        .bind::<Nullable<Text>, _>(&r.signal_chat)
-        .bind::<Nullable<Text>, _>(&r.email_addresses)
-        .bind::<Text, _>(&r.notification_mode)
-        .bind::<Text, _>(&r.notification_type)
-        .bind::<Integer, _>(r.notify_on_call)
-        .bind::<Integer, _>(r.created_at)
-        .bind::<Nullable<Text>, _>(&r.whatsapp_room_id)
-        .bind::<Nullable<Text>, _>(&r.telegram_room_id)
-        .bind::<Nullable<Text>, _>(&r.signal_room_id)
-        .bind::<Nullable<Text>, _>(&r.notes)
-        .execute(pg);
-
-        match result {
-            Ok(_) => count += 1,
-            Err(e) => eprintln!("  Error migrating contact_profiles row: {}", e),
-        }
-    }
-    println!("contact_profiles: migrated {} rows", count);
-}
-
-fn migrate_contact_profile_exceptions(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
-    #[derive(QueryableByName, Debug)]
-    struct Row {
-        #[diesel(sql_type = Integer)]
-        id: i32,
-        #[diesel(sql_type = Integer)]
-        profile_id: i32,
-        #[diesel(sql_type = Text)]
-        platform: String,
-        #[diesel(sql_type = Text)]
-        notification_mode: String,
-        #[diesel(sql_type = Text)]
-        notification_type: String,
-        #[diesel(sql_type = Integer)]
-        notify_on_call: i32,
-    }
-
-    let rows: Vec<Row> = sql_query(
-        "SELECT id, profile_id, platform, notification_mode, notification_type, notify_on_call \
-         FROM contact_profile_exceptions",
-    )
-    .load(sqlite)
-    .expect("Failed to read contact_profile_exceptions");
-
-    let mut count = 0;
-    for r in &rows {
-        let result = diesel::sql_query(
-            "INSERT INTO contact_profile_exceptions (id, profile_id, platform, notification_mode, \
-             notification_type, notify_on_call) VALUES ($1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (id) DO NOTHING",
-        )
-        .bind::<Integer, _>(r.id)
-        .bind::<Integer, _>(r.profile_id)
-        .bind::<Text, _>(&r.platform)
-        .bind::<Text, _>(&r.notification_mode)
-        .bind::<Text, _>(&r.notification_type)
-        .bind::<Integer, _>(r.notify_on_call)
-        .execute(pg);
-
-        match result {
-            Ok(_) => count += 1,
-            Err(e) => eprintln!("  Error: {}", e),
-        }
-    }
-    println!("contact_profile_exceptions: migrated {} rows", count);
 }
 
 fn migrate_imap_connection(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
@@ -1512,8 +1385,6 @@ fn reset_sequences(pg: &mut PgConnection) {
         "admin_alerts",
         "disabled_alert_types",
         "site_metrics",
-        "contact_profiles",
-        "contact_profile_exceptions",
         "message_history",
         "items",
         "bridges",

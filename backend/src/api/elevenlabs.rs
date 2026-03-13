@@ -400,24 +400,14 @@ pub async fn fetch_assistant(
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
-            // Get contact profile nicknames for voice pronunciation
-            // This is faster than fetching from Matrix and contains user's important contacts
-            let mut contact_names: Vec<String> = state
-                .user_repository
-                .get_contact_profiles(user.id)
+            // Get Person names from ontology for voice pronunciation
+            let contact_names: Vec<String> = state
+                .ontology_repository
+                .get_persons(user.id)
                 .unwrap_or_default()
                 .iter()
-                .map(|p| p.nickname.clone())
+                .map(|p| p.name.clone())
                 .collect();
-
-            // Also include Person names from ontology
-            if let Ok(persons) = state.ontology_repository.get_persons(user.id) {
-                for p in &persons {
-                    if !contact_names.iter().any(|n| n.to_lowercase() == p.name.to_lowercase()) {
-                        contact_names.push(p.name.clone());
-                    }
-                }
-            }
 
             let contact_nicknames = contact_names.join(", ");
             dynamic_variables.insert("recent_contacts".to_string(), json!(contact_nicknames));
@@ -2517,13 +2507,13 @@ pub async fn get_web_signed_url(
         }
     });
 
-    // Get contact profile nicknames for voice pronunciation
+    // Get Person names from ontology for voice pronunciation
     let contact_nicknames: String = state
-        .user_repository
-        .get_contact_profiles(user_id)
+        .ontology_repository
+        .get_persons(user_id)
         .unwrap_or_default()
         .iter()
-        .map(|p| p.nickname.clone())
+        .map(|p| p.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
 
