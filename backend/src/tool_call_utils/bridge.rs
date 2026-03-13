@@ -254,40 +254,56 @@ pub async fn handle_send_chat_message(
         }
     };
 
-    // First, try to resolve chat_name via contact profile nickname
-    let profiles = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default();
-
-    // Find matching profile by nickname
-    let matching_profile = profiles.iter().find(|p| {
-        let nickname_lower = p.nickname.to_lowercase();
-        let chat_name_lower = args.chat_name.to_lowercase();
-        nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
-    });
-
-    // If profile has a room_id, find the room directly; otherwise search by display name
-    let profile_room_id = matching_profile.and_then(|p| match args.platform.as_str() {
-        "whatsapp" => p.whatsapp_room_id.clone(),
-        "telegram" => p.telegram_room_id.clone(),
-        "signal" => p.signal_room_id.clone(),
-        _ => None,
-    });
-
-    let best_match = if let Some(ref rid) = profile_room_id {
-        // Direct room_id lookup - exact match
-        rooms.iter().find(|r| r.room_id == *rid).cloned()
+    // Try ontology Person first for room_id lookup
+    let ont_best_match = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.chat_name) {
+        if let Some(channel) = person.channels.iter().find(|c| c.platform == args.platform && c.room_id.is_some()) {
+            let rid = channel.room_id.as_ref().unwrap();
+            rooms.iter().find(|r| r.room_id == *rid).cloned()
+        } else {
+            None
+        }
     } else {
-        // Fall back to display name search
-        let profile_chat = matching_profile.and_then(|p| match args.platform.as_str() {
-            "whatsapp" => p.whatsapp_chat.clone(),
-            "telegram" => p.telegram_chat.clone(),
-            "signal" => p.signal_chat.clone(),
+        None
+    };
+
+    // Fall back to contact profile nickname lookup
+    let best_match = if ont_best_match.is_some() {
+        ont_best_match
+    } else {
+        let profiles = state
+            .user_repository
+            .get_contact_profiles(user_id)
+            .unwrap_or_default();
+
+        // Find matching profile by nickname
+        let matching_profile = profiles.iter().find(|p| {
+            let nickname_lower = p.nickname.to_lowercase();
+            let chat_name_lower = args.chat_name.to_lowercase();
+            nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
+        });
+
+        // If profile has a room_id, find the room directly; otherwise search by display name
+        let profile_room_id = matching_profile.and_then(|p| match args.platform.as_str() {
+            "whatsapp" => p.whatsapp_room_id.clone(),
+            "telegram" => p.telegram_room_id.clone(),
+            "signal" => p.signal_room_id.clone(),
             _ => None,
         });
-        let search_term = profile_chat.unwrap_or_else(|| args.chat_name.clone());
-        crate::utils::bridge::search_best_match(&rooms, &search_term)
+
+        if let Some(ref rid) = profile_room_id {
+            // Direct room_id lookup - exact match
+            rooms.iter().find(|r| r.room_id == *rid).cloned()
+        } else {
+            // Fall back to display name search
+            let profile_chat = matching_profile.and_then(|p| match args.platform.as_str() {
+                "whatsapp" => p.whatsapp_chat.clone(),
+                "telegram" => p.telegram_chat.clone(),
+                "signal" => p.signal_chat.clone(),
+                _ => None,
+            });
+            let search_term = profile_chat.unwrap_or_else(|| args.chat_name.clone());
+            crate::utils::bridge::search_best_match(&rooms, &search_term)
+        }
     };
     let best_match = match best_match {
         Some(room) => room,
@@ -430,7 +446,24 @@ pub async fn handle_search_chat_contacts(
         }
     };
 
-    // First, try to resolve search_term via contact profile nickname
+    // Search ontology Persons
+    let mut person_results = Vec::new();
+    if let Ok(persons) = state.ontology_repository.search_persons(user_id, &args.search_term) {
+        for p in persons {
+            let platforms: Vec<&str> = p.channels.iter()
+                .filter(|c| c.platform == args.platform)
+                .map(|c| c.platform.as_str())
+                .collect();
+            if !platforms.is_empty() {
+                person_results.push(format!("{} (platforms: {})",
+                    p.display_name(),
+                    p.channels.iter().map(|c| c.platform.as_str()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+    }
+
+    // Also try to resolve search_term via contact profile nickname
     let profiles = state
         .user_repository
         .get_contact_profiles(user_id)
@@ -457,7 +490,7 @@ pub async fn handle_search_chat_contacts(
         .await
     {
         Ok(rooms) => {
-            if rooms.is_empty() {
+            if rooms.is_empty() && person_results.is_empty() {
                 let capitalized_platform = args
                     .platform
                     .chars()
@@ -471,8 +504,23 @@ pub async fn handle_search_chat_contacts(
                 )
             } else {
                 let mut response = String::new();
+
+                // Show ontology person results first
+                if !person_results.is_empty() {
+                    response.push_str("Known contacts:\n");
+                    for (i, pr) in person_results.iter().enumerate() {
+                        if i > 0 {
+                            response.push('\n');
+                        }
+                        response.push_str(&format!("- {}", pr));
+                    }
+                    if !rooms.is_empty() {
+                        response.push_str("\n\nBridge results:\n");
+                    }
+                }
+
                 for (i, room) in rooms.iter().take(5).enumerate() {
-                    if i == 0 {
+                    if i == 0 && person_results.is_empty() {
                         response.push_str(&format!(
                             "{}. {} (last active: {})",
                             i + 1,
@@ -501,8 +549,20 @@ pub async fn handle_search_chat_contacts(
             }
         }
         Err(e) => {
-            eprintln!("Failed to search rooms: {}", e);
-            e.to_string()
+            // If bridge search fails but we have person results, return those
+            if !person_results.is_empty() {
+                let mut response = String::from("Known contacts:\n");
+                for (i, pr) in person_results.iter().enumerate() {
+                    if i > 0 {
+                        response.push('\n');
+                    }
+                    response.push_str(&format!("- {}", pr));
+                }
+                response
+            } else {
+                eprintln!("Failed to search rooms: {}", e);
+                e.to_string()
+            }
         }
     }
 }
@@ -523,76 +583,105 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
         }
     };
 
-    // First, try to find a matching contact profile by nickname
-    let profiles = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default();
-    let matching_profile = profiles.iter().find(|p| {
-        let nickname_lower = p.nickname.to_lowercase();
-        let chat_name_lower = args.chat_name.to_lowercase();
-        nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
-    });
+    // Try ontology Person first for platform/room_id resolution
+    let ont_result: Option<(String, String)> = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.chat_name) {
+        if let Some(platform) = &args.platform {
+            // Platform specified - find matching channel with room_id
+            if let Some(_channel) = person.channels.iter().find(|c| c.platform == *platform && c.room_id.is_some()) {
+                // Person has a channel for this platform with a room_id
+                Some((platform.clone(), args.chat_name.clone()))
+            } else {
+                None
+            }
+        } else {
+            // No platform specified - find any channel with a room_id, prefer most recently created
+            let best_channel = person.channels.iter()
+                .filter(|c| c.room_id.is_some() && ["whatsapp", "telegram", "signal"].contains(&c.platform.as_str()))
+                .max_by_key(|c| c.created_at);
+            if let Some(ch) = best_channel {
+                Some((ch.platform.clone(), args.chat_name.clone()))
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
 
-    // Determine platform and chat_name to use
-    let (platform, chat_name) = if let Some(platform) = &args.platform {
-        // Platform was specified - use existing behavior
-        let chat = matching_profile
-            .and_then(|p| match platform.as_str() {
-                "whatsapp" => p.whatsapp_chat.clone(),
-                "telegram" => p.telegram_chat.clone(),
-                "signal" => p.signal_chat.clone(),
-                _ => None,
-            })
-            .unwrap_or_else(|| args.chat_name.clone());
-        (platform.clone(), chat)
-    } else if let Some(profile) = matching_profile {
-        // No platform specified - find the most recently active platform from profile
-        let mut best_platform: Option<(String, String, i64)> = None; // (platform, chat_name, last_activity)
+    // Determine platform and chat_name - use ontology result if available, else fall back to contact profiles
+    let (platform, chat_name) = if let Some((plat, chat)) = ont_result {
+        (plat, chat)
+    } else {
+        // Fall back to contact profile lookup
+        let profiles = state
+            .user_repository
+            .get_contact_profiles(user_id)
+            .unwrap_or_default();
+        let matching_profile = profiles.iter().find(|p| {
+            let nickname_lower = p.nickname.to_lowercase();
+            let chat_name_lower = args.chat_name.to_lowercase();
+            nickname_lower.contains(&chat_name_lower) || chat_name_lower.contains(&nickname_lower)
+        });
 
-        // Check each linked platform for activity
-        for (plat, chat_opt) in [
-            ("whatsapp", &profile.whatsapp_chat),
-            ("telegram", &profile.telegram_chat),
-            ("signal", &profile.signal_chat),
-        ] {
-            if let Some(chat) = chat_opt {
-                // Check if bridge is connected and get room activity
-                if let Ok(Some(_)) = state.user_repository.get_bridge(user_id, plat) {
-                    if let Ok(client) =
-                        crate::utils::matrix_auth::get_cached_client(user_id, state).await
-                    {
-                        if let Ok(rooms) =
-                            crate::utils::bridge::get_service_rooms(&client, plat).await
+        if let Some(platform) = &args.platform {
+            // Platform was specified - use existing behavior
+            let chat = matching_profile
+                .and_then(|p| match platform.as_str() {
+                    "whatsapp" => p.whatsapp_chat.clone(),
+                    "telegram" => p.telegram_chat.clone(),
+                    "signal" => p.signal_chat.clone(),
+                    _ => None,
+                })
+                .unwrap_or_else(|| args.chat_name.clone());
+            (platform.clone(), chat)
+        } else if let Some(profile) = matching_profile {
+            // No platform specified - find the most recently active platform from profile
+            let mut best_platform: Option<(String, String, i64)> = None; // (platform, chat_name, last_activity)
+
+            // Check each linked platform for activity
+            for (plat, chat_opt) in [
+                ("whatsapp", &profile.whatsapp_chat),
+                ("telegram", &profile.telegram_chat),
+                ("signal", &profile.signal_chat),
+            ] {
+                if let Some(chat) = chat_opt {
+                    // Check if bridge is connected and get room activity
+                    if let Ok(Some(_)) = state.user_repository.get_bridge(user_id, plat) {
+                        if let Ok(client) =
+                            crate::utils::matrix_auth::get_cached_client(user_id, state).await
                         {
-                            // Find the room matching this chat
-                            let chat_lower = chat.to_lowercase();
-                            if let Some(room) = rooms.iter().find(|r| {
-                                let name_lower = r.display_name.to_lowercase();
-                                name_lower.contains(&chat_lower) || chat_lower.contains(&name_lower)
-                            }) {
-                                if best_platform.is_none()
-                                    || room.last_activity > best_platform.as_ref().unwrap().2
-                                {
-                                    best_platform =
-                                        Some((plat.to_string(), chat.clone(), room.last_activity));
+                            if let Ok(rooms) =
+                                crate::utils::bridge::get_service_rooms(&client, plat).await
+                            {
+                                // Find the room matching this chat
+                                let chat_lower = chat.to_lowercase();
+                                if let Some(room) = rooms.iter().find(|r| {
+                                    let name_lower = r.display_name.to_lowercase();
+                                    name_lower.contains(&chat_lower) || chat_lower.contains(&name_lower)
+                                }) {
+                                    if best_platform.is_none()
+                                        || room.last_activity > best_platform.as_ref().unwrap().2
+                                    {
+                                        best_platform =
+                                            Some((plat.to_string(), chat.clone(), room.last_activity));
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        match best_platform {
-            Some((plat, chat, _)) => (plat, chat),
-            None => {
-                return format!("No connected platforms found for '{}'. Make sure they have a linked WhatsApp, Telegram, or Signal chat in their contact profile.", args.chat_name);
+            match best_platform {
+                Some((plat, chat, _)) => (plat, chat),
+                None => {
+                    return format!("No connected platforms found for '{}'. Make sure they have a linked WhatsApp, Telegram, or Signal chat in their contact profile.", args.chat_name);
+                }
             }
+        } else {
+            // No platform and no matching profile - we need a platform
+            return format!("Please specify a platform (whatsapp, telegram, or signal) for '{}', or create a contact profile for them.", args.chat_name);
         }
-    } else {
-        // No platform and no matching profile - we need a platform
-        return format!("Please specify a platform (whatsapp, telegram, or signal) for '{}', or create a contact profile for them.", args.chat_name);
     };
 
     match crate::utils::bridge::fetch_bridge_room_messages(

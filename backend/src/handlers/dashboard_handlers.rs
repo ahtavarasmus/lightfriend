@@ -395,7 +395,7 @@ fn find_items_beyond(
 }
 
 fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedContact> {
-    state
+    let mut contacts: Vec<WatchedContact> = state
         .user_repository
         .get_contact_profiles(user_id)
         .unwrap_or_default()
@@ -405,7 +405,28 @@ fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedConta
             nickname: p.nickname,
             notification_mode: p.notification_mode,
         })
-        .collect()
+        .collect();
+
+    // Add Person+Channel data from ontology
+    let persons = state
+        .ontology_repository
+        .get_persons_with_channels(user_id)
+        .unwrap_or_default();
+
+    for person in &persons {
+        let name = person.display_name().to_string();
+        for channel in &person.channels {
+            let mode = person.effective_notification_mode(channel, "digest");
+            if mode != "digest" {
+                contacts.push(WatchedContact {
+                    nickname: format!("{} ({})", name, channel.platform),
+                    notification_mode: mode,
+                });
+            }
+        }
+    }
+
+    contacts
 }
 
 fn find_next_digest_item(

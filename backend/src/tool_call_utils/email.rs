@@ -168,48 +168,61 @@ pub async fn handle_send_email(
         // Already an email address
         args.to.clone()
     } else {
-        // Try to find a matching contact profile
-        let profiles = state
-            .user_repository
-            .get_contact_profiles(user_id)
-            .unwrap_or_default();
-        let matching_profile = profiles.iter().find(|p| {
-            let nickname_lower = p.nickname.to_lowercase();
-            let to_lower = args.to.to_lowercase();
-            nickname_lower.contains(&to_lower) || to_lower.contains(&nickname_lower)
-        });
+        // Try ontology Person email channel first
+        let ont_email = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.to) {
+            person.channels.iter()
+                .find(|c| c.platform == "email")
+                .and_then(|c| c.handle.clone())
+        } else {
+            None
+        };
 
-        if let Some(profile) = matching_profile {
-            if let Some(ref emails) = profile.email_addresses {
-                // Use the first email address from the profile
-                emails
-                    .split(',')
-                    .next()
-                    .map(|e| e.trim().to_string())
-                    .unwrap_or(args.to.clone())
+        if let Some(email_addr) = ont_email {
+            email_addr
+        } else {
+            // Fall back to contact profile lookup
+            let profiles = state
+                .user_repository
+                .get_contact_profiles(user_id)
+                .unwrap_or_default();
+            let matching_profile = profiles.iter().find(|p| {
+                let nickname_lower = p.nickname.to_lowercase();
+                let to_lower = args.to.to_lowercase();
+                nickname_lower.contains(&to_lower) || to_lower.contains(&nickname_lower)
+            });
+
+            if let Some(profile) = matching_profile {
+                if let Some(ref emails) = profile.email_addresses {
+                    // Use the first email address from the profile
+                    emails
+                        .split(',')
+                        .next()
+                        .map(|e| e.trim().to_string())
+                        .unwrap_or(args.to.clone())
+                } else {
+                    return Ok((
+                        axum::http::StatusCode::OK,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        axum::Json(crate::api::twilio_sms::TwilioResponse {
+                            message: format!(
+                                "Contact '{}' doesn't have an email address in their profile.",
+                                args.to
+                            ),
+                            created_item_id: None,
+                        }),
+                    ));
+                }
             } else {
+                // Not a valid email and no matching profile
                 return Ok((
                     axum::http::StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: format!(
-                            "Contact '{}' doesn't have an email address in their profile.",
-                            args.to
-                        ),
+                        message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
                         created_item_id: None,
-                    }),
+                    })
                 ));
             }
-        } else {
-            // Not a valid email and no matching profile
-            return Ok((
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: format!("'{}' is not a valid email address. Please provide an email address or use a contact profile nickname.", args.to),
-                    created_item_id: None,
-                })
-            ));
         }
     };
 
@@ -578,6 +591,15 @@ pub async fn handle_fetch_specific_email(
         }
     };
 
+    // Try ontology Person email channel first
+    let ont_email = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, query) {
+        person.channels.iter()
+            .find(|c| c.platform == "email")
+            .and_then(|c| c.handle.clone())
+    } else {
+        None
+    };
+
     // Check if query matches a contact profile nickname and get their email addresses
     let profiles = ctx.contact_profiles.as_deref().unwrap_or(&[]);
     let matching_profile = profiles.iter().find(|p| {
@@ -586,8 +608,10 @@ pub async fn handle_fetch_specific_email(
         nickname_lower.contains(&query_lower) || query_lower.contains(&nickname_lower)
     });
 
-    // Enhance query with email addresses if we found a matching profile
-    let enhanced_query = if let Some(profile) = matching_profile {
+    // Enhance query with email addresses: ontology takes priority, then contact profile
+    let enhanced_query = if let Some(ref email_addr) = ont_email {
+        format!("{} (email addresses: {})", query, email_addr)
+    } else if let Some(profile) = matching_profile {
         if let Some(ref emails) = profile.email_addresses {
             format!("{} (email addresses: {})", query, emails)
         } else {

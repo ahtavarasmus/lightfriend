@@ -237,6 +237,7 @@ async fn main() {
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -331,6 +332,7 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
         tool_registry: backend::build_tool_registry(),
     });
     // SMS server route - validates signature using user lookup
@@ -1036,6 +1038,30 @@ async fn main() {
         .route(
             "/api/contact-profiles/{id}",
             delete(contact_profile_handlers::delete_contact_profile),
+        )
+        // Person + Channel (ontology) routes
+        .route(
+            "/api/persons",
+            get(contact_profile_handlers::get_persons)
+                .post(contact_profile_handlers::create_person),
+        )
+        .route(
+            "/api/persons/{id}",
+            put(contact_profile_handlers::update_person)
+                .delete(contact_profile_handlers::delete_person),
+        )
+        .route(
+            "/api/persons/{id}/channels",
+            post(contact_profile_handlers::add_person_channel),
+        )
+        .route(
+            "/api/persons/{person_id}/channels/{channel_id}",
+            put(contact_profile_handlers::update_person_channel)
+                .delete(contact_profile_handlers::delete_person_channel),
+        )
+        .route(
+            "/api/persons/merge",
+            post(contact_profile_handlers::merge_persons),
         )
         // Web-based voice call routes (browser to ElevenLabs)
         .route(

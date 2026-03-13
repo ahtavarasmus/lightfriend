@@ -89,6 +89,7 @@ pub mod tools {
 }
 pub mod models {
     pub mod mcp_models;
+    pub mod ontology_models;
     pub mod user_models;
 }
 pub mod repositories {
@@ -106,6 +107,7 @@ pub mod repositories {
     pub mod user_core;
     pub mod user_repository;
     pub mod user_subscriptions;
+    pub mod ontology_repository;
     pub mod webauthn_repository;
 }
 pub mod services {
@@ -140,6 +142,7 @@ pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
+pub use repositories::ontology_repository::OntologyRepository;
 pub use services::twilio_message_service::TwilioMessageService;
 
 // Tesla client trait and pure functions
@@ -208,6 +211,7 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub ontology_repository: Arc<OntologyRepository>,
     pub tool_registry: tools::registry::ToolRegistry,
 }
 

@@ -402,15 +402,24 @@ pub async fn fetch_assistant(
             }
             // Get contact profile nicknames for voice pronunciation
             // This is faster than fetching from Matrix and contains user's important contacts
-            let contact_nicknames: String = state
+            let mut contact_names: Vec<String> = state
                 .user_repository
                 .get_contact_profiles(user.id)
                 .unwrap_or_default()
                 .iter()
                 .map(|p| p.nickname.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
+                .collect();
 
+            // Also include Person names from ontology
+            if let Ok(persons) = state.ontology_repository.get_persons(user.id) {
+                for p in &persons {
+                    if !contact_names.iter().any(|n| n.to_lowercase() == p.name.to_lowercase()) {
+                        contact_names.push(p.name.clone());
+                    }
+                }
+            }
+
+            let contact_nicknames = contact_names.join(", ");
             dynamic_variables.insert("recent_contacts".to_string(), json!(contact_nicknames));
         }
         Ok(None) => {

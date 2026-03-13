@@ -105,6 +105,7 @@ pub struct AgentContext {
     pub user_info: Option<PgUserInfo>,
     pub timezone: Option<TimezoneInfo>,
     pub contact_profiles: Option<Vec<PgContactProfile>>,
+    pub persons: Option<Vec<crate::models::ontology_models::PersonWithChannels>>,
     pub user_given_info: Option<String>,
     pub contacts_prompt_fragment: Option<String>,
 
@@ -257,6 +258,7 @@ impl ContextBuilder {
             user_info,
             timezone,
             contact_profiles,
+            persons,
             user_given_info,
             contacts_prompt_fragment,
         ) = if self.want_user_context {
@@ -272,7 +274,13 @@ impl ContextBuilder {
                 .get_contact_profiles(user_id)
                 .unwrap_or_default();
 
-            let fragment = if profiles.is_empty() {
+            let persons = self
+                .state
+                .ontology_repository
+                .get_persons_with_channels(user_id)
+                .ok();
+
+            let mut fragment = if profiles.is_empty() {
                 String::new()
             } else {
                 let nicknames: Vec<&str> = profiles.iter().map(|p| p.nickname.as_str()).collect();
@@ -282,6 +290,22 @@ impl ContextBuilder {
                     )
             };
 
+            if let Some(ref persons_list) = persons {
+                if !persons_list.is_empty() {
+                    if fragment.is_empty() {
+                        fragment.push_str("\n\nYour contacts:\n");
+                    } else {
+                        fragment.push('\n');
+                    }
+                    for p in persons_list {
+                        let name = p.display_name();
+                        let platforms: Vec<&str> =
+                            p.channels.iter().map(|c| c.platform.as_str()).collect();
+                        fragment.push_str(&format!("- {} ({})\n", name, platforms.join(", ")));
+                    }
+                }
+            }
+
             let given_info = info.info.clone().unwrap_or_default();
 
             (
@@ -289,11 +313,12 @@ impl ContextBuilder {
                 Some(info),
                 Some(tz),
                 Some(profiles),
+                persons,
                 Some(given_info),
                 Some(fragment),
             )
         } else {
-            (None, None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         };
 
         // 4. Tools (opt-in)
@@ -343,6 +368,7 @@ impl ContextBuilder {
             user_info,
             timezone,
             contact_profiles,
+            persons,
             user_given_info,
             contacts_prompt_fragment,
             tools,

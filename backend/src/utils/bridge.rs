@@ -1768,7 +1768,16 @@ pub async fn handle_bridge_message(
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
-    // Load contact profiles for matching
+    // --- Ontology Person + Channel lookup (takes priority over contact_profiles) ---
+    let matching_person = state
+        .ontology_repository
+        .find_person_by_room_id(user_id, &current_room_id)
+        .unwrap_or_else(|e| {
+            tracing::warn!("Ontology lookup failed for room {}: {}", current_room_id, e);
+            None
+        });
+
+    // Load contact profiles for matching (legacy fallback)
     let contact_profiles = state
         .user_repository
         .get_contact_profiles(user_id)
@@ -1851,6 +1860,46 @@ pub async fn handle_bridge_message(
             name_match
         });
 
+    // Auto-create Person+Channel for recognized phone contacts not yet in ontology
+    if matching_person.is_none() && matching_profile.is_none() {
+        if let Some(true) = is_phone_contact_from_room_name(room_name.as_str()) {
+            let platform = service.clone();
+            match state.ontology_repository.upsert_person(
+                user_id,
+                &chat_name,
+                &platform,
+                None,
+                Some(&current_room_id),
+            ) {
+                Ok(person) => {
+                    tracing::info!(
+                        "Auto-created ontology Person '{}' (id={}) with {} channel for room {}",
+                        chat_name,
+                        person.id,
+                        platform,
+                        current_room_id
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to auto-create ontology Person for '{}': {}",
+                        chat_name,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    // Get user settings for default notification mode (needed for both group and notification routing)
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
+            return;
+        }
+    };
+
     // Check if this is a group room (more than 3 members)
     let members = match room.members(RoomMemberships::JOIN).await {
         Ok(m) => m,
@@ -1864,19 +1913,32 @@ pub async fn handle_bridge_message(
 
     // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
-        // Check platform-specific exception mode first, then fall back to profile mode
-        let effective_mode = matching_profile
-            .and_then(|p| {
-                let profile_id = p.id;
-                state
-                    .user_repository
-                    .get_profile_exception_for_platform(profile_id, &service)
-                    .ok()
-                    .flatten()
-                    .map(|exc| exc.notification_mode)
-                    .or_else(|| Some(p.notification_mode.clone()))
-            })
-            .unwrap_or_default();
+        // Check ontology Person+Channel first, then fall back to contact_profile
+        let effective_mode = if let Some(ref person_with_channels) = matching_person {
+            if let Some(channel) = person_with_channels.channels.iter().find(|c| c.room_id.as_deref() == Some(current_room_id.as_str())) {
+                let user_default_mode = user_settings
+                    .phone_contact_notification_mode
+                    .as_deref()
+                    .unwrap_or("critical");
+                person_with_channels.effective_notification_mode(channel, user_default_mode)
+            } else {
+                String::new()
+            }
+        } else {
+            // Fall back to contact_profile
+            matching_profile
+                .and_then(|p| {
+                    let profile_id = p.id;
+                    state
+                        .user_repository
+                        .get_profile_exception_for_platform(profile_id, &service)
+                        .ok()
+                        .flatten()
+                        .map(|exc| exc.notification_mode)
+                        .or_else(|| Some(p.notification_mode.clone()))
+                })
+                .unwrap_or_default()
+        };
         let is_priority_group = effective_mode == "all";
 
         if !is_priority_group {
@@ -2028,89 +2090,111 @@ pub async fn handle_bridge_message(
 
     let service_cap = capitalize(&service);
 
-    // Get user settings for default notification mode
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get user settings: {}", e);
-            return;
-        }
-    };
-
     // Extract contact notes before the match consumes matching_profile
     let contact_notes = matching_profile.as_ref().and_then(|p| p.notes.clone());
 
-    // Determine notification mode and type based on contact profile or default
-    // Check for platform-specific exceptions if a profile matches
-    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) =
-        match matching_profile {
-            Some(profile) => {
-                let profile_id = profile.id;
-                // Check for platform-specific exception
-                let exception = state
-                    .user_repository
-                    .get_profile_exception_for_platform(profile_id, &service)
-                    .ok()
-                    .flatten();
-
-                match exception {
-                    Some(exc) => {
-                        tracing::info!(
-                            "Using {} exception for profile '{}': mode={}, type={}",
-                            service,
-                            profile.nickname,
-                            exc.notification_mode,
-                            exc.notification_type
-                        );
-                        (
-                            exc.notification_mode.clone(),
-                            exc.notification_type.clone(),
-                            exc.notify_on_call != 0,
-                            Some(profile.nickname.clone()),
-                        )
-                    }
-                    None => (
-                        profile.notification_mode.clone(),
-                        profile.notification_type.clone(),
-                        profile.notify_on_call != 0,
-                        Some(profile.nickname.clone()),
-                    ),
-                }
-            }
-            None => {
-                let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
-                // is_phone_contact:
-                //   Some(true)  = phone contact (WA/Signal, has FullName) -> Tier 2
-                //   Some(false) = not phone contact (WA~/Signal~) -> Tier 3
-                //   None        = Telegram or unknown -> default to Tier 2
-
-                if is_phone_contact.unwrap_or(true) {
-                    // Tier 2: Phone contact (or Telegram where we can't distinguish)
-                    let mode = user_settings
+    // Determine notification mode and type.
+    // Priority: ontology Person+Channel -> contact_profile -> user defaults
+    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) = {
+        // Try ontology Person+Channel first
+        let ontology_settings = matching_person.as_ref().and_then(|pwc| {
+            pwc.channels
+                .iter()
+                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
+                .map(|channel| {
+                    let user_default_mode = user_settings
                         .phone_contact_notification_mode
-                        .clone()
-                        .unwrap_or_else(|| "critical".to_string());
-                    let ntype = user_settings
+                        .as_deref()
+                        .unwrap_or("critical");
+                    let user_default_type = user_settings
                         .phone_contact_notification_type
-                        .clone()
-                        .unwrap_or_else(|| "sms".to_string());
-                    let notify = user_settings.phone_contact_notify_on_call != 0;
-                    (mode, ntype, notify, None)
-                } else {
-                    // Tier 3: Unknown person (not in phone contacts)
-                    let mode = user_settings
-                        .default_notification_mode
-                        .clone()
-                        .unwrap_or_else(|| "critical".to_string());
-                    let ntype = user_settings
-                        .default_notification_type
-                        .clone()
-                        .unwrap_or_else(|| "sms".to_string());
-                    let notify = user_settings.default_notify_on_call != 0;
-                    (mode, ntype, notify, None)
+                        .as_deref()
+                        .unwrap_or("sms");
+                    let user_default_on_call = user_settings.phone_contact_notify_on_call != 0;
+
+                    let mode = pwc.effective_notification_mode(channel, user_default_mode);
+                    let ntype = pwc.effective_notification_type(channel, user_default_type);
+                    let on_call = pwc.effective_notify_on_call(channel, user_default_on_call);
+                    let nickname = Some(pwc.display_name().to_string());
+
+                    tracing::info!(
+                        "Using ontology Person '{}' settings: mode={}, type={}, on_call={}",
+                        pwc.display_name(),
+                        mode,
+                        ntype,
+                        on_call
+                    );
+
+                    (mode, ntype, on_call, nickname)
+                })
+        });
+
+        if let Some(settings) = ontology_settings {
+            settings
+        } else {
+            // Fall back to contact_profile or user defaults
+            match matching_profile {
+                Some(profile) => {
+                    let profile_id = profile.id;
+                    let exception = state
+                        .user_repository
+                        .get_profile_exception_for_platform(profile_id, &service)
+                        .ok()
+                        .flatten();
+
+                    match exception {
+                        Some(exc) => {
+                            tracing::info!(
+                                "Using {} exception for profile '{}': mode={}, type={}",
+                                service,
+                                profile.nickname,
+                                exc.notification_mode,
+                                exc.notification_type
+                            );
+                            (
+                                exc.notification_mode.clone(),
+                                exc.notification_type.clone(),
+                                exc.notify_on_call != 0,
+                                Some(profile.nickname.clone()),
+                            )
+                        }
+                        None => (
+                            profile.notification_mode.clone(),
+                            profile.notification_type.clone(),
+                            profile.notify_on_call != 0,
+                            Some(profile.nickname.clone()),
+                        ),
+                    }
+                }
+                None => {
+                    let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
+                    if is_phone_contact.unwrap_or(true) {
+                        let mode = user_settings
+                            .phone_contact_notification_mode
+                            .clone()
+                            .unwrap_or_else(|| "critical".to_string());
+                        let ntype = user_settings
+                            .phone_contact_notification_type
+                            .clone()
+                            .unwrap_or_else(|| "sms".to_string());
+                        let notify = user_settings.phone_contact_notify_on_call != 0;
+                        (mode, ntype, notify, None)
+                    } else {
+                        let mode = user_settings
+                            .default_notification_mode
+                            .clone()
+                            .unwrap_or_else(|| "critical".to_string());
+                        let ntype = user_settings
+                            .default_notification_type
+                            .clone()
+                            .unwrap_or_else(|| "sms".to_string());
+                        let notify = user_settings.default_notify_on_call != 0;
+                        (mode, ntype, notify, None)
+                    }
                 }
             }
-        };
+        }
+    };
 
     tracing::debug!("notification_mode: {}", notification_mode);
     tracing::debug!("notification_type: {}", notification_type_str);

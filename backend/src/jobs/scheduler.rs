@@ -651,6 +651,53 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             });
                                             continue;
                                         }
+                                        // Check ontology Person email channels with "all" notification mode
+                                        if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id) {
+                                            let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
+                                            let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
+                                            let mut person_matched = false;
+                                            for pwc in &persons {
+                                                for channel in &pwc.channels {
+                                                    if channel.platform == "email" && pwc.effective_notification_mode(channel, "default") == "all" {
+                                                        if let Some(ref handle) = channel.handle {
+                                                            let handle_lower = handle.to_lowercase();
+                                                            if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower) {
+                                                                tracing::info!("Fast check: Ontology Person email channel matched for user {}", user.id);
+                                                                let suffix = match pwc.effective_notification_type(channel, "sms").as_str() {
+                                                                    "call" => "_call",
+                                                                    _ => "_sms",
+                                                                };
+                                                                let notification_type = format!("email_priority{}", suffix);
+                                                                let message = format!(
+                                                                    "Email from: {}\nSubject: {}\nContent: {}",
+                                                                    email.from.as_deref().unwrap_or("Unknown"),
+                                                                    email.subject.as_deref().unwrap_or("No subject"),
+                                                                    email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
+                                                                );
+                                                                let first_message = format!("Hello, you have a critical email from {} with subject: {}",
+                                                                    email.from.as_deref().unwrap_or("Unknown"),
+                                                                    email.subject.as_deref().unwrap_or("No subject")
+                                                                );
+                                                                let state_clone = state.clone();
+                                                                tokio::spawn(async move {
+                                                                    crate::proactive::utils::send_notification(
+                                                                        &state_clone,
+                                                                        user.id,
+                                                                        &message,
+                                                                        notification_type,
+                                                                        Some(first_message),
+                                                                    ).await;
+                                                                });
+                                                                person_matched = true;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if person_matched { break; }
+                                            }
+                                            if person_matched { continue; }
+                                        }
                                         // Format email content for checking
                                         let email_content = format!(
                                             "Platform: email\nFrom: {}\nChat: inbox\nSubject: {}\nContent: {}",

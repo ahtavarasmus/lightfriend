@@ -50,7 +50,8 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
              contact_profile_exceptions, bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
-             user_secrets, user_info, processed_emails CASCADE",
+             user_secrets, user_info, processed_emails, \
+             ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
         )
         .execute(&mut conn);
     }
@@ -95,6 +96,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository =
+        Arc::new(crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()));
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -139,6 +142,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
         tool_registry: crate::build_tool_registry(),
     })
 }

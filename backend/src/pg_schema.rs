@@ -375,6 +375,60 @@ diesel::table! {
     }
 }
 
+// Ontology v1: Person + Channel tables
+
+diesel::table! {
+    ont_persons (id) {
+        id -> Int4,
+        user_id -> Int4,
+        name -> Text,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_person_edits (id) {
+        id -> Int4,
+        user_id -> Int4,
+        person_id -> Int4,
+        property_name -> Text,
+        value -> Text,
+        edited_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_channels (id) {
+        id -> Int4,
+        user_id -> Int4,
+        person_id -> Int4,
+        platform -> Text,
+        handle -> Nullable<Text>,
+        room_id -> Nullable<Text>,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Int4,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_changelog (id) {
+        id -> Int8,
+        user_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Int4,
+        change_type -> Text,
+        changed_fields -> Nullable<Text>,
+        source -> Text,
+        created_at -> Int4,
+    }
+}
+
+diesel::joinable!(ont_person_edits -> ont_persons (person_id));
+diesel::joinable!(ont_channels -> ont_persons (person_id));
+
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 
@@ -406,4 +460,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     disabled_alert_types,
     site_metrics,
     waitlist,
+    ont_persons,
+    ont_person_edits,
+    ont_channels,
+    ont_changelog,
 );
