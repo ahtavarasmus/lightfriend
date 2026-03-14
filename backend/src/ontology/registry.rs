@@ -54,7 +54,7 @@ static PERSON_PROPS: &[PropertyDef] = &[
 
 static PERSON_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Person",
-    description: "Query persons in your contacts. Returns person details with their channels.",
+    description: "Query people in your contacts. Returns person details with their channels.",
     properties: PERSON_PROPS,
     linkable_to: &["Item", "Channel"],
 };

@@ -36,7 +36,7 @@ fn query_person(
 
     if name_filter.is_none() && query_filter.is_none() {
         return Err(
-            "Please specify a 'name' or 'query' parameter to search for persons.".to_string(),
+            "Please specify a 'name' or 'query' parameter to search for people.".to_string(),
         );
     }
 
@@ -45,7 +45,7 @@ fn query_person(
             state
                 .ontology_repository
                 .get_persons_with_channels(user_id)
-                .map_err(|e| format!("Failed to query persons: {}", e))?
+                .map_err(|e| format!("Failed to query people: {}", e))?
         } else {
             match state
                 .ontology_repository
@@ -60,7 +60,7 @@ fn query_person(
         state
             .ontology_repository
             .search_persons(user_id, q)
-            .map_err(|e| format!("Failed to search persons: {}", e))?
+            .map_err(|e| format!("Failed to search people: {}", e))?
     } else {
         vec![]
     };
@@ -80,7 +80,7 @@ fn query_person(
     };
 
     if persons.is_empty() {
-        return Ok("No persons found matching your query.".to_string());
+        return Ok("No people found matching your query.".to_string());
     }
 
     let want_items = linked.contains(&"Item".to_string());
