@@ -7,12 +7,12 @@ pub mod handlers {
     pub mod auth_middleware;
     pub mod billing_handlers;
     pub mod bridge_auth_common;
-    pub mod person_handlers;
     pub mod dashboard_handlers;
     pub mod filter_handlers;
     pub mod imap_auth;
     pub mod imap_handlers;
     pub mod mcp_handlers;
+    pub mod person_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
 
@@ -78,6 +78,7 @@ pub mod tools {
     pub mod email;
     pub mod items;
     pub mod messaging;
+    pub mod ontology;
     pub mod quiet_mode;
     pub mod registry;
     pub mod respond;
@@ -99,6 +100,7 @@ pub mod repositories {
     pub mod metrics_repository;
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
+    pub mod ontology_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod totp_repository;
@@ -107,7 +109,6 @@ pub mod repositories {
     pub mod user_core;
     pub mod user_repository;
     pub mod user_subscriptions;
-    pub mod ontology_repository;
     pub mod webauthn_repository;
 }
 pub mod services {
@@ -122,6 +123,9 @@ pub mod pg_models;
 pub mod pg_schema;
 pub mod jobs {
     pub mod scheduler;
+}
+pub mod ontology {
+    pub mod registry;
 }
 pub mod ai_config;
 pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
@@ -138,11 +142,11 @@ pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::item_repository::ItemRepository;
 pub use repositories::metrics_repository::MetricsRepository;
+pub use repositories::ontology_repository::OntologyRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
-pub use repositories::ontology_repository::OntologyRepository;
 pub use services::twilio_message_service::TwilioMessageService;
 
 // Tesla client trait and pure functions
@@ -212,6 +216,7 @@ pub struct AppState {
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub ontology_repository: Arc<OntologyRepository>,
+    pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
 }
 

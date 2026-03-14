@@ -395,6 +395,22 @@ diesel::table! {
     }
 }
 
+// Ontology v2: Links between entities
+
+diesel::table! {
+    ont_links (id) {
+        id -> Int4,
+        user_id -> Int4,
+        source_type -> Text,
+        source_id -> Int4,
+        target_type -> Text,
+        target_id -> Int4,
+        link_type -> Text,
+        metadata -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -431,4 +447,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_person_edits,
     ont_channels,
     ont_changelog,
+    ont_links,
 );

@@ -1,4 +1,4 @@
-use crate::pg_schema::{ont_changelog, ont_channels, ont_person_edits, ont_persons};
+use crate::pg_schema::{ont_changelog, ont_channels, ont_links, ont_person_edits, ont_persons};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +105,36 @@ pub struct NewOntChangelog {
     pub change_type: String,
     pub changed_fields: Option<String>,
     pub source: String,
+    pub created_at: i32,
+}
+
+// -- ont_links --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = ont_links)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OntLink {
+    pub id: i32,
+    pub user_id: i32,
+    pub source_type: String,
+    pub source_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub link_type: String,
+    pub metadata: Option<String>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = ont_links)]
+pub struct NewOntLink {
+    pub user_id: i32,
+    pub source_type: String,
+    pub source_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub link_type: String,
+    pub metadata: Option<String>,
     pub created_at: i32,
 }
 

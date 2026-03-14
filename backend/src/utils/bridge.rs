@@ -1831,7 +1831,11 @@ pub async fn handle_bridge_message(
     // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
         let effective_mode = if let Some(ref person_with_channels) = matching_person {
-            if let Some(channel) = person_with_channels.channels.iter().find(|c| c.room_id.as_deref() == Some(current_room_id.as_str())) {
+            if let Some(channel) = person_with_channels
+                .channels
+                .iter()
+                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
+            {
                 let user_default_mode = user_settings
                     .phone_contact_notification_mode
                     .as_deref()
@@ -2000,7 +2004,8 @@ pub async fn handle_bridge_message(
 
     // Extract contact notes from ontology Person edits
     let contact_notes = matching_person.as_ref().and_then(|p| {
-        p.edits.iter()
+        p.edits
+            .iter()
             .find(|e| e.property_name == "notes")
             .map(|e| e.value.clone())
     });

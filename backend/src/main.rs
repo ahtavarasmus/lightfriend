@@ -24,8 +24,8 @@ use backend::{
     TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
-    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, person_handlers,
-    dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
+    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, dashboard_handlers,
+    filter_handlers, imap_auth, imap_handlers, person_handlers, profile_handlers,
     self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
     telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
     youtube_auth,
@@ -333,6 +333,7 @@ async fn main() {
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
         ontology_repository,
+        ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
     });
     // SMS server route - validates signature using user lookup
@@ -1013,13 +1014,11 @@ async fn main() {
         // Person + Channel (ontology) routes
         .route(
             "/api/persons",
-            get(person_handlers::get_persons)
-                .post(person_handlers::create_person),
+            get(person_handlers::get_persons).post(person_handlers::create_person),
         )
         .route(
             "/api/persons/{id}",
-            put(person_handlers::update_person)
-                .delete(person_handlers::delete_person),
+            put(person_handlers::update_person).delete(person_handlers::delete_person),
         )
         .route(
             "/api/persons/{id}/channels",
@@ -1030,10 +1029,7 @@ async fn main() {
             put(person_handlers::update_person_channel)
                 .delete(person_handlers::delete_person_channel),
         )
-        .route(
-            "/api/persons/merge",
-            post(person_handlers::merge_persons),
-        )
+        .route("/api/persons/merge", post(person_handlers::merge_persons))
         .route(
             "/api/persons/search/{service}",
             get(person_handlers::search_chats),

@@ -2,10 +2,10 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 
 use crate::models::ontology_models::{
-    NewOntChangelog, NewOntChannel, NewOntPerson, NewOntPersonEdit, OntChannel, OntPerson,
-    OntPersonEdit, PersonWithChannels,
+    NewOntChangelog, NewOntChannel, NewOntLink, NewOntPerson, NewOntPersonEdit, OntChannel,
+    OntLink, OntPerson, OntPersonEdit, PersonWithChannels,
 };
-use crate::pg_schema::{ont_changelog, ont_channels, ont_person_edits, ont_persons};
+use crate::pg_schema::{ont_changelog, ont_channels, ont_links, ont_person_edits, ont_persons};
 use crate::PgDbPool;
 
 pub struct OntologyRepository {
@@ -747,5 +747,190 @@ impl OntologyRepository {
         .execute(&mut conn)?;
 
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Links CRUD
+    // -----------------------------------------------------------------------
+
+    /// Create a link between two entities. Uses ON CONFLICT to avoid duplicates.
+    pub fn create_link(
+        &self,
+        user_id: i32,
+        source_type: &str,
+        source_id: i32,
+        target_type: &str,
+        target_id: i32,
+        link_type: &str,
+        metadata: Option<&str>,
+    ) -> Result<OntLink, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let now = Self::now();
+
+        let new_link = NewOntLink {
+            user_id,
+            source_type: source_type.to_string(),
+            source_id,
+            target_type: target_type.to_string(),
+            target_id,
+            link_type: link_type.to_string(),
+            metadata: metadata.map(|m| m.to_string()),
+            created_at: now,
+        };
+
+        let link: OntLink = diesel::insert_into(ont_links::table)
+            .values(&new_link)
+            .on_conflict_do_nothing()
+            .get_result(&mut conn)?;
+
+        Self::log_change(
+            &mut conn,
+            user_id,
+            "link",
+            link.id,
+            "created",
+            Some(format!(
+                "{{\"source\":\"{}/{}\",\"target\":\"{}/{}\",\"type\":\"{}\"}}",
+                source_type, source_id, target_type, target_id, link_type
+            )),
+            "pipeline",
+        );
+
+        Ok(link)
+    }
+
+    /// Delete a link by ID.
+    pub fn delete_link(&self, user_id: i32, link_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(
+            ont_links::table
+                .filter(ont_links::id.eq(link_id))
+                .filter(ont_links::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    /// Get all links for an entity (both as source and target).
+    pub fn get_links_for_entity(
+        &self,
+        user_id: i32,
+        entity_type: &str,
+        entity_id: i32,
+    ) -> Result<Vec<OntLink>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let as_source: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::source_type.eq(entity_type))
+            .filter(ont_links::source_id.eq(entity_id))
+            .load(&mut conn)?;
+
+        let as_target: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::target_type.eq(entity_type))
+            .filter(ont_links::target_id.eq(entity_id))
+            .load(&mut conn)?;
+
+        let mut all = as_source;
+        all.extend(as_target);
+        Ok(all)
+    }
+
+    /// Get items linked to a person (via ont_links).
+    pub fn get_linked_items_for_person(
+        &self,
+        user_id: i32,
+        person_id: i32,
+    ) -> Result<Vec<(OntLink, crate::pg_models::PgItem)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Links where person is source, item is target
+        let as_source: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::source_type.eq("Person"))
+            .filter(ont_links::source_id.eq(person_id))
+            .filter(ont_links::target_type.eq("Item"))
+            .load(&mut conn)?;
+
+        // Links where item is source, person is target
+        let as_target: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::target_type.eq("Person"))
+            .filter(ont_links::target_id.eq(person_id))
+            .filter(ont_links::source_type.eq("Item"))
+            .load(&mut conn)?;
+
+        let mut results = Vec::new();
+        use crate::pg_schema::items;
+
+        for link in as_source {
+            if let Ok(item) = items::table
+                .filter(items::id.eq(link.target_id))
+                .first::<crate::pg_models::PgItem>(&mut conn)
+            {
+                results.push((link, item));
+            }
+        }
+
+        for link in as_target {
+            if let Ok(item) = items::table
+                .filter(items::id.eq(link.source_id))
+                .first::<crate::pg_models::PgItem>(&mut conn)
+            {
+                results.push((link, item));
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Get persons linked to an item (via ont_links).
+    pub fn get_linked_persons_for_item(
+        &self,
+        user_id: i32,
+        item_id: i32,
+    ) -> Result<Vec<(OntLink, OntPerson)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Links where item is source, person is target
+        let as_source: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::source_type.eq("Item"))
+            .filter(ont_links::source_id.eq(item_id))
+            .filter(ont_links::target_type.eq("Person"))
+            .load(&mut conn)?;
+
+        // Links where person is source, item is target
+        let as_target: Vec<OntLink> = ont_links::table
+            .filter(ont_links::user_id.eq(user_id))
+            .filter(ont_links::target_type.eq("Item"))
+            .filter(ont_links::target_id.eq(item_id))
+            .filter(ont_links::source_type.eq("Person"))
+            .load(&mut conn)?;
+
+        let mut results = Vec::new();
+
+        for link in as_source {
+            if let Ok(person) = ont_persons::table
+                .filter(ont_persons::id.eq(link.target_id))
+                .first::<OntPerson>(&mut conn)
+            {
+                results.push((link, person));
+            }
+        }
+
+        for link in as_target {
+            if let Ok(person) = ont_persons::table
+                .filter(ont_persons::id.eq(link.source_id))
+                .first::<OntPerson>(&mut conn)
+            {
+                results.push((link, person));
+            }
+        }
+
+        Ok(results)
     }
 }

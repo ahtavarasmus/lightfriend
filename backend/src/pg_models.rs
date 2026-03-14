@@ -4,11 +4,10 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    admin_alerts, bridge_disconnection_events, bridges, country_availability,
-    disabled_alert_types, imap_connection, items, mcp_servers, message_history,
-    message_status_log, processed_emails, refund_info, site_metrics, tesla, totp_backup_codes,
-    totp_secrets, usage_logs, user_info, user_secrets, waitlist, webauthn_challenges,
-    webauthn_credentials, youtube,
+    admin_alerts, bridge_disconnection_events, bridges, country_availability, disabled_alert_types,
+    imap_connection, items, mcp_servers, message_history, message_status_log, processed_emails,
+    refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets, usage_logs, user_info,
+    user_secrets, waitlist, webauthn_challenges, webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};

@@ -278,7 +278,23 @@ impl ContextBuilder {
                         let name = p.display_name();
                         let platforms: Vec<&str> =
                             p.channels.iter().map(|c| c.platform.as_str()).collect();
-                        f.push_str(&format!("- {} ({})\n", name, platforms.join(", ")));
+                        let item_count = self
+                            .state
+                            .ontology_repository
+                            .get_linked_items_for_person(user_id, p.person.id)
+                            .map(|items| items.len())
+                            .unwrap_or(0);
+                        if item_count > 0 {
+                            f.push_str(&format!(
+                                "- {} ({}) [{} item{}]\n",
+                                name,
+                                platforms.join(", "),
+                                item_count,
+                                if item_count == 1 { "" } else { "s" }
+                            ));
+                        } else {
+                            f.push_str(&format!("- {} ({})\n", name, platforms.join(", ")));
+                        }
                     }
                     f
                 } else {

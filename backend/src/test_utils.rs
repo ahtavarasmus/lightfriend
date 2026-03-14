@@ -42,6 +42,7 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         let _ = conn.run_pending_migrations(PG_MIGRATIONS);
         // Truncate all PG tables so each test starts clean
         use diesel::RunQueryDsl;
+        // Core tables - always exist
         let _ = diesel::sql_query(
             "TRUNCATE users, user_settings, refund_info, \
              country_availability, message_status_log, admin_alerts, \
@@ -50,8 +51,12 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
              bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
-             user_secrets, user_info, processed_emails, \
-             ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
+             user_secrets, user_info, processed_emails CASCADE",
+        )
+        .execute(&mut conn);
+        // Ontology tables - may not exist yet in all test environments
+        let _ = diesel::sql_query(
+            "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
         )
         .execute(&mut conn);
     }
@@ -96,8 +101,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
-    let ontology_repository =
-        Arc::new(crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(
+        crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -143,6 +149,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
         ontology_repository,
+        ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),
     })
 }

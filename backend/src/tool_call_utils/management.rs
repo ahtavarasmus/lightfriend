@@ -353,6 +353,9 @@ pub async fn handle_create_item(
             .unwrap_or_default()
     };
 
+    // Auto-link item to persons mentioned in sender or description
+    auto_link_item_to_persons(state, user_id, item_id, &args);
+
     let confirmation = match args.item_type.as_str() {
         "tracking" => format!("Tracking: {} (expires {})", args.description, time_label),
         "recurring" => {
@@ -502,4 +505,63 @@ pub async fn handle_create_item_with_retry(
 fn parse_datetime_to_timestamp(time_str: &str, tz: &Tz) -> Result<i32, Box<dyn Error>> {
     let utc_dt = crate::tool_call_utils::utils::parse_user_datetime_to_utc(time_str, tz)?;
     Ok(utc_dt.timestamp() as i32)
+}
+
+/// Try to auto-link a newly created item to persons.
+/// Matches the sender field and person names found in the description.
+fn auto_link_item_to_persons(
+    state: &Arc<AppState>,
+    user_id: i32,
+    item_id: i32,
+    args: &CreateItemArgs,
+) {
+    let persons = match state.ontology_repository.get_persons(user_id) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    if persons.is_empty() {
+        return;
+    }
+
+    let desc_lower = args.description.to_lowercase();
+    let mut linked_person_ids = std::collections::HashSet::new();
+
+    // Match sender field to a person name
+    if let Some(ref sender) = args.sender {
+        if sender != "any" && sender != "none" {
+            let sender_lower = sender.to_lowercase();
+            for person in &persons {
+                if person.name.to_lowercase() == sender_lower {
+                    linked_person_ids.insert(person.id);
+                }
+            }
+        }
+    }
+
+    // Match person names in the description
+    for person in &persons {
+        if desc_lower.contains(&person.name.to_lowercase()) {
+            linked_person_ids.insert(person.id);
+        }
+    }
+
+    // Create links
+    for person_id in linked_person_ids {
+        let link_type = if args.sender.is_some() {
+            "assigned_to"
+        } else {
+            "mentioned_in"
+        };
+        if let Err(e) = state.ontology_repository.create_link(
+            user_id, "Item", item_id, "Person", person_id, link_type, None,
+        ) {
+            tracing::debug!(
+                "Auto-link item {} to person {} skipped: {}",
+                item_id,
+                person_id,
+                e
+            );
+        }
+    }
 }

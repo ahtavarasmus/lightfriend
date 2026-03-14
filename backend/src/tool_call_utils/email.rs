@@ -169,8 +169,13 @@ pub async fn handle_send_email(
         args.to.clone()
     } else {
         // Try ontology Person email channel
-        if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.to) {
-            if let Some(email_addr) = person.channels.iter()
+        if let Ok(Some(person)) = state
+            .ontology_repository
+            .find_person_by_name(user_id, &args.to)
+        {
+            if let Some(email_addr) = person
+                .channels
+                .iter()
                 .find(|c| c.platform == "email")
                 .and_then(|c| c.handle.clone())
             {
@@ -180,10 +185,7 @@ pub async fn handle_send_email(
                     axum::http::StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: format!(
-                            "Contact '{}' doesn't have an email address.",
-                            args.to
-                        ),
+                        message: format!("Contact '{}' doesn't have an email address.", args.to),
                         created_item_id: None,
                     }),
                 ));
@@ -567,8 +569,13 @@ pub async fn handle_fetch_specific_email(
     };
 
     // Try ontology Person email channel to enhance query with email address
-    let enhanced_query = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, query) {
-        if let Some(email_addr) = person.channels.iter()
+    let enhanced_query = if let Ok(Some(person)) = state
+        .ontology_repository
+        .find_person_by_name(user_id, query)
+    {
+        if let Some(email_addr) = person
+            .channels
+            .iter()
             .find(|c| c.platform == "email")
             .and_then(|c| c.handle.clone())
         {

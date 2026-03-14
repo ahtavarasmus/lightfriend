@@ -255,8 +255,15 @@ pub async fn handle_send_chat_message(
     };
 
     // Try ontology Person for room_id lookup
-    let best_match = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.chat_name) {
-        if let Some(channel) = person.channels.iter().find(|c| c.platform == args.platform && c.room_id.is_some()) {
+    let best_match = if let Ok(Some(person)) = state
+        .ontology_repository
+        .find_person_by_name(user_id, &args.chat_name)
+    {
+        if let Some(channel) = person
+            .channels
+            .iter()
+            .find(|c| c.platform == args.platform && c.room_id.is_some())
+        {
             let rid = channel.room_id.as_ref().unwrap();
             rooms.iter().find(|r| r.room_id == *rid).cloned()
         } else {
@@ -410,23 +417,38 @@ pub async fn handle_search_chat_contacts(
 
     // Search ontology Persons
     let mut person_results = Vec::new();
-    if let Ok(persons) = state.ontology_repository.search_persons(user_id, &args.search_term) {
+    if let Ok(persons) = state
+        .ontology_repository
+        .search_persons(user_id, &args.search_term)
+    {
         for p in persons {
-            let platforms: Vec<&str> = p.channels.iter()
+            let platforms: Vec<&str> = p
+                .channels
+                .iter()
                 .filter(|c| c.platform == args.platform)
                 .map(|c| c.platform.as_str())
                 .collect();
             if !platforms.is_empty() {
-                person_results.push(format!("{} (platforms: {})",
+                person_results.push(format!(
+                    "{} (platforms: {})",
                     p.display_name(),
-                    p.channels.iter().map(|c| c.platform.as_str()).collect::<Vec<_>>().join(", ")
+                    p.channels
+                        .iter()
+                        .map(|c| c.platform.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
         }
     }
 
-    match crate::utils::bridge::search_bridge_rooms(&args.platform, state, user_id, &args.search_term)
-        .await
+    match crate::utils::bridge::search_bridge_rooms(
+        &args.platform,
+        state,
+        user_id,
+        &args.search_term,
+    )
+    .await
     {
         Ok(rooms) => {
             if rooms.is_empty() && person_results.is_empty() {
@@ -523,14 +545,22 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
     };
 
     // Determine platform and chat_name using ontology Person lookup
-    let (platform, chat_name) = if let Ok(Some(person)) = state.ontology_repository.find_person_by_name(user_id, &args.chat_name) {
+    let (platform, chat_name) = if let Ok(Some(person)) = state
+        .ontology_repository
+        .find_person_by_name(user_id, &args.chat_name)
+    {
         if let Some(platform) = &args.platform {
             // Platform specified - use it directly
             (platform.clone(), args.chat_name.clone())
         } else {
             // No platform specified - find any channel with a room_id, prefer most recently created
-            let best_channel = person.channels.iter()
-                .filter(|c| c.room_id.is_some() && ["whatsapp", "telegram", "signal"].contains(&c.platform.as_str()))
+            let best_channel = person
+                .channels
+                .iter()
+                .filter(|c| {
+                    c.room_id.is_some()
+                        && ["whatsapp", "telegram", "signal"].contains(&c.platform.as_str())
+                })
                 .max_by_key(|c| c.created_at);
             if let Some(ch) = best_channel {
                 (ch.platform.clone(), args.chat_name.clone())
@@ -546,7 +576,10 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
         (platform.clone(), args.chat_name.clone())
     } else {
         // No Person and no platform - we need a platform
-        return format!("Please specify a platform (whatsapp, telegram, or signal) for '{}'.", args.chat_name);
+        return format!(
+            "Please specify a platform (whatsapp, telegram, or signal) for '{}'.",
+            args.chat_name
+        );
     };
 
     match crate::utils::bridge::fetch_bridge_room_messages(
