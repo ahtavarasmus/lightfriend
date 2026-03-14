@@ -1,197 +1,60 @@
-# Lightfriend Docker Commands
+# Lightfriend
 
 # Default recipe (show available commands)
 default:
     @just --list
 
-# Build all Docker images (multi-platform: amd64 + arm64)
+# ── Docker (enclave) ────────────────────────────────────────────────────
+
+# Build enclave image for current platform (for local testing)
+build-local:
+    cd enclave && docker compose build
+
+# Build enclave image for production (linux/amd64)
 build:
-    @echo "Building for multiple platforms (amd64 + arm64)..."
-    @echo "This enables cross-compatibility but takes longer."
-    cd docker && docker buildx build \
-        --platform linux/amd64,linux/arm64 \
+    cd enclave && docker buildx build \
+        --platform linux/amd64 \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
-        -t lightfriend-core:latest \
-        -f core/Dockerfile \
+        -t lightfriend-enclave:latest \
+        -f Dockerfile \
         --load \
-        .. || echo "Note: --load doesn't support multi-platform. Use 'just build-push' to push to registry."
-    cd docker && docker compose build --no-cache postgres synapse mautrix-whatsapp mautrix-signal mautrix-messenger mautrix-instagram signald
-
-# Build for current platform only (faster, single architecture)
-build-native:
-    @echo "Building for current platform only (faster)..."
-    cd docker && docker compose build
-
-# Build and push multi-platform images to registry
-build-push REGISTRY="docker.io/yourusername":
-    @echo "Building and pushing multi-platform images to {{REGISTRY}}..."
-    cd docker && docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        --build-arg BUILDKIT_INLINE_CACHE=1 \
-        -t {{REGISTRY}}/lightfriend-core:latest \
-        -f core/Dockerfile \
-        --push \
         ..
 
-# Push locally-built core image to Docker Hub (requires docker login first)
-# Usage: just push-dockerhub yourusername
-# Prerequisites:
-#   1. Run 'docker login' first
-#   2. Build image with 'just build-native' or 'just build'
-push-dockerhub REGISTRY:
-    @echo "Tagging image for Docker Hub..."
-    docker tag lightfriend-core:latest {{REGISTRY}}/lightfriend-core:latest
-    @echo "Pushing to {{REGISTRY}}/lightfriend-core:latest..."
-    docker push {{REGISTRY}}/lightfriend-core:latest
-    @echo "✓ Successfully pushed to Docker Hub!"
-
-# Build only the core image (current platform)
-build-core:
-    cd docker && docker compose build core
-
-# Build core for multiple platforms
-build-core-multi:
-    @echo "Building core for multiple platforms..."
-    cd docker && docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        -t lightfriend-core:latest \
-        -f core/Dockerfile \
-        --load \
-        .. || echo "Note: Use 'just build-core-push' to push multi-platform image."
-
-# Fast build (uses release-fast profile with fewer optimizations)
-build-fast:
-    @echo "Building with faster compile settings (less optimized binary)..."
-    cd docker && CARGO_PROFILE=release-fast docker compose build core
-
-# Start all services (generates configs first)
+# Start enclave (pulls latest image if available)
 up:
-    @just setup-configs
-    cd docker && docker compose up -d
-    @echo "Services starting..."
-    @echo "Frontend: http://localhost:8080"
-    @echo "Backend API: http://localhost:3000"
-    @echo "Synapse: http://localhost:8008"
+    cd enclave && docker compose pull --ignore-pull-failures && docker compose up -d
 
-# Start services with logs
-up-logs:
-    cd docker && docker compose up
+# Pull latest enclave image from registry
+pull:
+    cd enclave && docker compose pull
 
-# Stop all services
+# Stop enclave
 down:
-    cd docker && docker compose down
+    cd enclave && docker compose down
 
-# Stop and remove all volumes (WARNING: deletes all data)
-down-volumes:
-    cd docker && docker compose down -v
-
-# Restart all services
-restart:
-    cd docker && docker compose restart
-
-# Restart only core service
-restart-core:
-    cd docker && docker compose restart core
-
-# View logs for all services
+# View enclave logs
 logs:
-    cd docker && docker compose logs -f
+    cd enclave && docker compose logs -f
 
-# View logs for core service only
-logs-core:
-    cd docker && docker compose logs -f core
+# Full encrypted export of all data stores from running enclave
+export:
+    docker exec lightfriend-enclave /app/export.sh
+    @ls -lh enclave/seed/lightfriend-full-backup-*.tar.gz.enc 2>/dev/null | tail -1
 
-# View logs for synapse
-logs-synapse:
-    cd docker && docker compose logs -f synapse
+# Import: place backup in seed/ and start new enclave
+import BACKUP:
+    cp {{BACKUP}} enclave/seed/
+    just up
+    @echo "Waiting for restore and verification..."
+    @echo "Check logs: just logs"
+    @echo "Check verify result: just verify"
+    @echo "Only shut down old enclave AFTER verification passes."
 
-# View logs for a specific bridge (usage: just logs-bridge whatsapp)
-logs-bridge bridge:
-    cd docker && docker compose logs -f mautrix-{{bridge}}
+# Run post-restore verification (or check last result)
+verify:
+    docker exec lightfriend-enclave /app/verify.sh
 
-# Check status of all services
-status:
-    cd docker && docker compose ps
-
-# Generate new secrets for .env file
-# NOTE: Bridge tokens are now auto-generated by setup-configs.sh
-generate-secrets:
-    @echo "# Core secrets"
-    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
-    @echo "JWT_REFRESH_KEY=$(openssl rand -base64 32)"
-    @echo "ENCRYPTION_KEY=$(openssl rand -base64 32)"
-    @echo ""
-    @echo "# Matrix & Database"
-    @echo "MATRIX_HOMESERVER_SHARED_SECRET=$(openssl rand -hex 32)"
-    @echo "SYNAPSE_DB_PASSWORD=$(openssl rand -base64 32)"
-    @echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)"
-    @echo ""
-    @echo "# Bridge configuration"
-    @echo "DOUBLE_PUPPET_SECRET=$(openssl rand -base64 32)"
-
-# Ensure .env file exists (creates from .env.example with generated secrets if missing)
-ensure-env:
-    #!/usr/bin/env bash
-    if [ ! -f .env ]; then
-        echo "No .env file found. Creating from .env.example with generated secrets..."
-        if [ ! -f .env.example ]; then
-            echo "ERROR: .env.example not found!"
-            exit 1
-        fi
-        cp .env.example .env
-        # Generate and append secrets
-        sed -i "s|^JWT_SECRET_KEY=.*|JWT_SECRET_KEY=$(openssl rand -base64 32)|" .env
-        sed -i "s|^JWT_REFRESH_KEY=.*|JWT_REFRESH_KEY=$(openssl rand -base64 32)|" .env
-        sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -base64 32)|" .env
-        sed -i "s|^MATRIX_HOMESERVER_SHARED_SECRET=.*|MATRIX_HOMESERVER_SHARED_SECRET=$(openssl rand -hex 32)|" .env
-        sed -i "s|^SYNAPSE_DB_PASSWORD=.*|SYNAPSE_DB_PASSWORD=$(openssl rand -base64 16)|" .env
-        sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -base64 16)|" .env
-        sed -i "s|^DOUBLE_PUPPET_SECRET=.*|DOUBLE_PUPPET_SECRET=$(openssl rand -base64 32)|" .env
-        echo "✓ Created .env with generated secrets"
-        echo "  You can edit .env to add optional API keys (Twilio, Stripe, etc.)"
-    else
-        echo "✓ .env file exists"
-    fi
-
-# Generate config files from templates using .env variables
-setup-configs: ensure-env
-    @echo "Generating configuration files from .env..."
-    cd docker && ./setup-configs.sh
-
-# Enter core container shell
-shell-core:
-    cd docker && docker compose exec core /bin/bash
-
-# Enter synapse container shell
-shell-synapse:
-    cd docker && docker compose exec synapse /bin/bash
-
-# Enter postgres container shell
-shell-postgres:
-    cd docker && docker compose exec postgres psql -U postgres
-
-# Run database migrations in core
-migrate:
-    cd docker && docker compose exec core diesel migration run
-
-# Create a new Synapse admin user
-create-admin user password:
-    cd docker && docker compose exec synapse register_new_matrix_user \
-        -c /config/homeserver.yaml \
-        -u {{user}} \
-        -p {{password}} \
-        --admin
-
-# Clean up Docker resources (images, containers, networks)
-clean:
-    docker system prune -f
-
-# Full rebuild (stop, clean, rebuild, start)
-rebuild: down clean build up
-
-# Show Docker disk usage
-disk-usage:
-    docker system df
+# ── Development ─────────────────────────────────────────────────────────
 
 # Development: Run backend locally (not in Docker)
 dev-backend:
@@ -205,6 +68,6 @@ dev-frontend:
 test-backend:
     cd backend && cargo test
 
-# Development: Run tests for frontend  
+# Development: Run tests for frontend
 test-frontend:
     cd frontend && cargo test
