@@ -1827,7 +1827,9 @@ pub async fn web_chat_stream(
             }
         };
 
-        if user.sub_tier.is_none() {
+        let is_dev = std::env::var("ENVIRONMENT").as_deref() == Ok("development");
+
+        if !is_dev && user.sub_tier.is_none() {
             yield Ok(axum::response::sse::Event::default().data(
                 serde_json::json!({"step": "error", "message": "Please subscribe to use the web chat feature"}).to_string(),
             ));
@@ -1841,7 +1843,7 @@ pub async fn web_chat_stream(
             (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
         };
 
-        let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+        let has_credits = is_dev || user.credits_left >= credits_left_cost || user.credits >= credits_cost;
         if !has_credits {
             yield Ok(axum::response::sse::Event::default().data(
                 serde_json::json!({"step": "error", "message": "Insufficient credits. Please add more credits to continue."}).to_string(),
@@ -1850,7 +1852,9 @@ pub async fn web_chat_stream(
         }
 
         // Deduct credits
-        let charged_amount = if user.credits_left >= credits_left_cost {
+        let charged_amount = if is_dev {
+            0.0
+        } else if user.credits_left >= credits_left_cost {
             let new_credits_left = user.credits_left - credits_left_cost;
             if let Err(e) = state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left) {
                 yield Ok(axum::response::sse::Event::default().data(

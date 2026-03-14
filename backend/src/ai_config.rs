@@ -35,12 +35,24 @@ impl AiConfig {
     }
 
     pub fn from_env() -> Self {
-        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY").ok();
+        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let tinfoil_api_key = std::env::var("TINFOIL_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
 
-        let tinfoil_api_key =
-            Some(std::env::var("TINFOIL_API_KEY").expect("TINFOIL_API_KEY required"));
+        let is_dev = std::env::var("ENVIRONMENT").as_deref() == Ok("development");
 
-        tracing::info!("AI config initialized: Tinfoil (primary)");
+        if !is_dev && tinfoil_api_key.is_none() {
+            panic!("TINFOIL_API_KEY required in non-development environment");
+        }
+
+        if tinfoil_api_key.is_some() {
+            tracing::info!("AI config initialized: Tinfoil (primary)");
+        } else {
+            tracing::info!("AI config initialized: OpenRouter (development fallback)");
+        }
 
         Self {
             openrouter_api_key,
@@ -48,10 +60,13 @@ impl AiConfig {
         }
     }
 
-    /// Always returns Tinfoil. The preference parameter is accepted for
-    /// backward compatibility but ignored.
+    /// Returns Tinfoil if available, otherwise OpenRouter (for development).
     pub fn provider_for_user_with_preference(&self, _preference: Option<&str>) -> AiProvider {
-        AiProvider::Tinfoil
+        if self.tinfoil_api_key.is_some() {
+            AiProvider::Tinfoil
+        } else {
+            AiProvider::OpenRouter
+        }
     }
 
     /// Get the endpoint URL for a provider

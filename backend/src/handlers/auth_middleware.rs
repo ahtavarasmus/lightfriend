@@ -135,36 +135,48 @@ pub async fn require_admin(
     Ok(next.run(request).await)
 }
 
-pub async fn require_auth(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
-    // Extract token from cookies
-    let cookie_header = request
-        .headers()
+/// Extract token from cookies (access_token) or Authorization: Bearer header.
+fn extract_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, AuthError> {
+    // Try cookies first
+    if let Some(cookie_header) = headers
         .get(axum::http::header::COOKIE)
-        .and_then(|header| header.to_str().ok());
-
-    let token = if let Some(cookies) = cookie_header {
-        // Parse cookies to find access_token
-        cookies
+        .and_then(|h| h.to_str().ok())
+    {
+        if let Some(token) = cookie_header
             .split(';')
             .map(|s| s.trim())
             .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
+                let parts: Vec<&str> = cookie.splitn(2, '=').collect();
+                if parts.len() == 2 && parts[0] == "access_token" {
+                    Some(parts[1])
                 } else {
                     None
                 }
             })
-            .ok_or(AuthError {
-                status: StatusCode::UNAUTHORIZED,
-                message: "No authorization token provided".to_string(),
-            })?
-    } else {
-        return Err(AuthError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "No authorization token provided".to_string(),
-        });
-    };
+        {
+            return Ok(token);
+        }
+    }
+
+    // Fall back to Authorization: Bearer header
+    if let Some(auth_header) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+    {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            return Ok(token);
+        }
+    }
+
+    Err(AuthError {
+        status: StatusCode::UNAUTHORIZED,
+        message: "No authorization token provided".to_string(),
+    })
+}
+
+pub async fn require_auth(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
+    // Extract token from cookies or Authorization header
+    let token = extract_token_from_headers(request.headers())?;
 
     // Validate the token
     decode::<Claims>(
@@ -207,42 +219,8 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Extract the token from cookies
-        // Note: header names are case-insensitive in HTTP
-        let cookie_header = parts
-            .headers
-            .get(axum::http::header::COOKIE)
-            .and_then(|header| header.to_str().ok())
-            .ok_or_else(|| {
-                tracing::debug!("No cookie header found");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
-
-        tracing::debug!("Cookie header: {}", cookie_header);
-
-        // Parse cookies to find access_token
-        let token = cookie_header
-            .split(';')
-            .map(|s| s.trim())
-            .find_map(|cookie| {
-                let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
-                if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
-                    Some(cookie_parts[1])
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                tracing::debug!("No access_token found in cookies");
-                AuthError {
-                    status: StatusCode::UNAUTHORIZED,
-                    message: "No authorization token provided".to_string(),
-                }
-            })?;
+        // Extract token from cookies or Authorization header
+        let token = extract_token_from_headers(&parts.headers)?;
 
         // Decode the token
         let claims = decode::<Claims>(
