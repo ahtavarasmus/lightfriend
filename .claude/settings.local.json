@@ -194,7 +194,24 @@
       "Bash(/Users/ahtavarasmus/Developer/sites/lightfriend/docker/tuwunel/tuwunel.toml:*)",
       "Bash(bash:*)",
       "Bash(git:*)",
-      "Bash(chmod +x:*)"
+      "Bash(chmod +x:*)",
+      "Bash(brew tap getsentry/xcodebuildmcp 2>&1 && brew install xcodebuildmcp 2>&1)",
+      "Bash(tail:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(gh pr:*)",
+      "Bash(xcrun simctl:*)",
+      "WebSearch",
+      "Bash(open:*)",
+      "Bash(brew install:*)",
+      "Bash(brew:*)",
+      "Bash(PQ_LIB_DIR=/opt/homebrew/opt/libpq/lib cargo run:*)",
+      "Bash(openssl rand:*)",
+      "Bash(/opt/homebrew/opt/postgresql@17/bin/createdb lightfriend_dev:*)",
+      "Bash(tr:*)",
+      "Bash(xcrun xctrace:*)",
+      "Bash(echo === $db ===:*)",
+      "WebFetch(domain:cdn.discordapp.com)",
+      "Bash(source .env:*)"
     ],
     "deny": [
       "Read(.env)",
@@ -237,6 +254,10 @@
       "Bash(rm*)"
     ]
   },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "XcodeBuildMCP"
+  ],
   "hooks": {
     "PreToolUse": [
       {

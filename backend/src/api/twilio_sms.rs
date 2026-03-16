@@ -907,7 +907,12 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
     }
 
     // Tools and model from context builder
-    let tools = ctx.tools.unwrap_or_default();
+    // Skip tools for providers with strict rate limits (e.g. Groq free tier)
+    let tools = if state.ai_config.endpoint(ctx.provider).contains("groq") {
+        vec![]
+    } else {
+        ctx.tools.unwrap_or_default()
+    };
     let model = ctx.model.clone();
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
@@ -955,12 +960,15 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         let mut attempt_result = None;
 
         for attempt in 1..=MAX_RETRIES {
-            let request = chat_completion::ChatCompletionRequest::new(
+            let mut request = chat_completion::ChatCompletionRequest::new(
                 model.clone(),
                 completion_messages.clone(),
-            )
-            .tools(tools.clone())
-            .tool_choice(chat_completion::ToolChoiceType::Required);
+            );
+            if !tools.is_empty() {
+                request = request
+                    .tools(tools.clone())
+                    .tool_choice(chat_completion::ToolChoiceType::Required);
+            }
 
             match state
                 .ai_config

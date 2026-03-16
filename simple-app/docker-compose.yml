@@ -1,0 +1,77 @@
+# Lightfriend Simple App
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lightfriend-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lightfriend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  tuwunel:
+    image: jevolk/tuwunel:latest
+    container_name: lightfriend-tuwunel
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
+    volumes:
+      - tuwunel_data:/var/lib/tuwunel
+      - ./tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+    networks:
+      - lightfriend
+    restart: unless-stopped
+
+  core:
+    image: lightfriend-core:latest
+    container_name: lightfriend-core
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: /app/data/database.db
+      PG_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+      MATRIX_HOMESERVER: http://tuwunel:8008
+      MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
+      MATRIX_HOMESERVER_SHARED_SECRET: b325625b6f2c02b73238990d26caf9b39c471828e3a0d09a02a1fee8f7f64112
+      FRONTEND_URL: "http://localhost:8080"
+      PORT: 3000
+      ENVIRONMENT: development
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: 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
+    volumes:
+      - core_data:/app/data
+      - core_uploads:/app/uploads
+      - core_matrix_store:/app/matrix_store
+    ports:
+      - "3000:3000"
+    networks:
+      - lightfriend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tuwunel:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  lightfriend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  tuwunel_data:
+  core_data:
+  core_uploads:
+  core_matrix_store:

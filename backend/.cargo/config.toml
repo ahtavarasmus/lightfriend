@@ -5,6 +5,7 @@
 
 [build]
 # Use all available CPU cores for parallel compilation (default behavior)
+rustflags = ["-L", "/opt/homebrew/opt/libpq/lib"]
 
 [profile.release]
 # Optimize for speed while keeping reasonable build times
