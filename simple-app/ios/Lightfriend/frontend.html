@@ -115,6 +115,60 @@
         .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(26,26,46,0.3); border-top-color: #1a1a2e; border-radius: 50%; animation: spin 0.5s linear infinite; margin-right: 0.4rem; vertical-align: middle; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ===== SPLASH SCREEN ===== */
+        .splash-overlay {
+            position: fixed;
+            inset: 0;
+            background: #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+        .splash-overlay.hiding {
+            opacity: 0;
+            transform: scale(1.05);
+            pointer-events: none;
+        }
+        .splash-logo {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, #7EB2FF 50%, #ba93ff 100%);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: splashGradient 2s ease infinite, splashFadeIn 0.8s ease-out;
+            letter-spacing: -0.02em;
+        }
+        .splash-glow {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(126,178,255,0.15) 0%, transparent 70%);
+            position: absolute;
+            animation: splashPulse 2s ease-in-out infinite;
+        }
+        .splash-tagline {
+            margin-top: 0.8rem;
+            color: rgba(255,255,255,0.3);
+            font-size: 0.85rem;
+            animation: splashFadeIn 1s ease-out 0.4s both;
+        }
+        @keyframes splashGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        @keyframes splashFadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes splashPulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.3); opacity: 0.8; }
+        }
+
         /* ===== ANIMATIONS ===== */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(12px); }
@@ -441,8 +495,8 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 0.6rem;
-            padding: 2rem 1rem;
+            gap: 0.5rem;
+            padding: 1.5rem 1rem;
             text-align: center;
         }
         .suggestion-cards-title {
@@ -451,40 +505,117 @@
             background: linear-gradient(45deg, #fff, #7EB2FF);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+        .suggestion-cards-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.45rem;
+            width: 100%;
+            max-width: 340px;
         }
         .suggestion-card {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.5rem;
             width: 100%;
-            max-width: 320px;
-            padding: 0.8rem 1rem;
+            padding: 0.55rem 0.7rem;
             background: rgba(255,255,255,0.04);
             border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 14px;
+            border-radius: 12px;
             cursor: pointer;
             transition: background 0.2s, border-color 0.2s, transform 0.15s;
             text-align: left;
             color: #fff;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: 0.75rem;
+            line-height: 1.3;
         }
         .suggestion-card:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.15); }
         .suggestion-card:active { transform: scale(0.98); }
         .suggestion-card .sc-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1rem;
+            font-size: 0.8rem;
             flex-shrink: 0;
         }
         .suggestion-card .sc-icon.blue { background: rgba(126,178,255,0.15); color: #7EB2FF; }
         .suggestion-card .sc-icon.orange { background: rgba(255,167,38,0.15); color: #ffa726; }
         .suggestion-card .sc-icon.green { background: rgba(105,240,174,0.15); color: #69f0ae; }
+        .suggestion-card .sc-icon.purple { background: rgba(186,147,255,0.15); color: #ba93ff; }
+        .suggestion-card .sc-icon.red { background: rgba(255,107,107,0.15); color: #ff6b6b; }
+        .suggestion-card .sc-icon.cyan { background: rgba(100,210,255,0.15); color: #64d2ff; }
+
+        /* Welcome text */
+        .welcome-text {
+            max-width: 300px;
+            margin-bottom: 0.5rem;
+            color: rgba(255,255,255,0.45);
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        /* Quick reply buttons */
+        .quick-reply-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.4rem;
+            max-width: 85%;
+        }
+        .quick-reply-btn {
+            padding: 0.35rem 0.75rem;
+            background: rgba(126,178,255,0.08);
+            border: 1px solid rgba(126,178,255,0.2);
+            border-radius: 16px;
+            color: #7EB2FF;
+            font-size: 0.75rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, transform 0.15s;
+        }
+        .quick-reply-btn:hover { background: rgba(126,178,255,0.15); border-color: rgba(126,178,255,0.35); }
+        .quick-reply-btn:active { transform: scale(0.96); }
+
+        /* Contact @mention dropdown */
+        .contact-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 1rem;
+            right: 1rem;
+            max-height: 180px;
+            overflow-y: auto;
+            background: rgba(30,30,30,0.97);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            margin-bottom: 0.4rem;
+            display: none;
+            z-index: 20;
+        }
+        .contact-dropdown.visible { display: block; }
+        .contact-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem 0.8rem;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-size: 0.85rem;
+            color: #fff;
+        }
+        .contact-dropdown-item:hover { background: rgba(126,178,255,0.1); }
+        .contact-dropdown-item i {
+            color: rgba(126,178,255,0.5);
+            font-size: 0.9rem;
+            width: 1.2rem;
+            text-align: center;
+        }
 
         /* @Mention shortcut buttons */
         .mention-shortcuts {
@@ -510,6 +641,31 @@
         }
         .mention-pill:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
         .mention-pill i { font-size: 0.8rem; }
+
+        /* Smart suggest bar (keyword-based) */
+        .smart-suggest-bar {
+            display: none;
+            gap: 0.4rem;
+            padding: 0.4rem 1rem;
+            flex-wrap: wrap;
+        }
+        .smart-suggest-bar.visible { display: flex; }
+        .smart-suggest-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.3rem 0.7rem;
+            background: rgba(126,178,255,0.08);
+            border: 1px solid rgba(126,178,255,0.18);
+            border-radius: 16px;
+            color: #7EB2FF;
+            font-size: 0.75rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, transform 0.15s;
+            animation: fadeInUp 0.2s ease-out;
+        }
+        .smart-suggest-btn:hover { background: rgba(126,178,255,0.15); border-color: rgba(126,178,255,0.3); }
+        .smart-suggest-btn:active { transform: scale(0.96); }
 
         /* Media results panel */
         .media-panel {
@@ -1047,6 +1203,13 @@
 </head>
 <body>
 
+<!-- ===== SPLASH SCREEN ===== -->
+<div class="splash-overlay" id="splash">
+    <div class="splash-glow"></div>
+    <div class="splash-logo">lightfriend</div>
+    <div class="splash-tagline">Your AI assistant</div>
+</div>
+
 <!-- ===== TOAST CONTAINER ===== -->
 <div class="toast-container" id="toast-container"></div>
 
@@ -1128,26 +1291,20 @@
         <div id="panel-chat" class="tab-panel active">
             <div class="chat-messages" id="chat-messages">
                 <div class="suggestion-cards" id="chat-empty">
-                    <div class="suggestion-cards-title">lightfriend</div>
-                    <button class="suggestion-card" onclick="prefillChat('Get a summary of my messages')">
-                        <span class="sc-icon blue"><i class="fa-solid fa-newspaper"></i></span>
-                        <span>Get a summary of my messages</span>
-                    </button>
-                    <button class="suggestion-card" onclick="prefillChat('Watch for delivery updates')">
-                        <span class="sc-icon orange"><i class="fa-solid fa-box"></i></span>
-                        <span>Watch for delivery updates</span>
-                    </button>
-                    <button class="suggestion-card" onclick="prefillChat('Remind me to ')">
-                        <span class="sc-icon green"><i class="fa-solid fa-bell"></i></span>
-                        <span>Remind me to...</span>
-                    </button>
+                    <div class="suggestion-cards-title">Tervetuloa</div>
+                    <div class="welcome-text" id="welcome-text">
+                        Voit kysyä mitä vain — säätä, uutisia, muistutuksia tai vaikka YouTube-videoita. Kokeile jotain näistä:
+                    </div>
+                    <div class="suggestion-cards-grid" id="suggestion-grid"></div>
                 </div>
             </div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChat()">
                 <i class="fa-solid fa-chevron-down"></i>
             </button>
             <div class="mention-shortcuts" id="mention-shortcuts"></div>
-            <div class="chat-input-area">
+            <div class="smart-suggest-bar" id="smart-suggest-bar"></div>
+            <div class="chat-input-area" style="position:relative">
+                <div class="contact-dropdown" id="contact-dropdown"></div>
                 <textarea id="chat-input" placeholder="Message..." rows="1"></textarea>
                 <button class="chat-send" id="chat-send-btn" onclick="sendChat()"><i class="fa-solid fa-arrow-up"></i></button>
             </div>
@@ -1372,6 +1529,7 @@ function showApp() {
     loadQuietMode();
     checkCallCredits();
     loadMentionShortcuts();
+    loadContacts();
 }
 
 // ===== TABS =====
@@ -1521,7 +1679,92 @@ function logout(skipDialog) {
     showScreen('login');
 }
 
-// ===== CHAT TEXTAREA AUTO-RESIZE =====
+// ===== SMART SUGGESTIONS (keyword-based) =====
+const KEYWORD_SUGGESTIONS = [
+    { keywords: ['palaveri', 'kokous', 'tapaaminen'], suggestions: ['Muistuta palaverista', 'Aseta kalenterimerkintä'] },
+    { keywords: ['muistut', 'muista'], suggestions: ['Muistuta huomenna', 'Muistuta tunnin päästä'] },
+    { keywords: ['sää', 'ilma'], suggestions: ['Tämän päivän sää', 'Huomisen sää'] },
+    { keywords: ['video', 'youtube'], suggestions: ['Etsi YouTube-video', 'Suosittele videoita'] },
+    { keywords: ['viesti', 'lähetä'], suggestions: ['Lähetä viesti', 'Yhteenveto viesteistä'] },
+    { keywords: ['uutis', 'news'], suggestions: ['Yhteenveto uutisista', 'Tuoreimmat uutiset'] },
+    { keywords: ['herätys', 'herää'], suggestions: ['Aseta herätys huomiselle'] },
+    { keywords: ['elokuv', 'leffa'], suggestions: ['Suosittele elokuvia'] },
+];
+
+function matchKeywordSuggestions(text) {
+    const lower = text.toLowerCase();
+    const matched = [];
+    for (const entry of KEYWORD_SUGGESTIONS) {
+        for (const kw of entry.keywords) {
+            if (lower.includes(kw)) {
+                for (const s of entry.suggestions) {
+                    if (!matched.includes(s)) matched.push(s);
+                }
+                break;
+            }
+        }
+    }
+    return matched;
+}
+
+function showSmartSuggestions(suggestions) {
+    const bar = document.getElementById('smart-suggest-bar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    for (const text of suggestions) {
+        const btn = document.createElement('button');
+        btn.className = 'smart-suggest-btn';
+        btn.textContent = text;
+        btn.onclick = function() {
+            const input = document.getElementById('chat-input');
+            input.value = text;
+            hideSmartSuggestions();
+            sendChat();
+        };
+        bar.appendChild(btn);
+    }
+    bar.classList.add('visible');
+}
+
+function hideSmartSuggestions() {
+    const bar = document.getElementById('smart-suggest-bar');
+    if (bar) {
+        bar.classList.remove('visible');
+        bar.innerHTML = '';
+    }
+}
+
+// ===== MESSAGE HISTORY TRACKING =====
+function trackMessage(text) {
+    try {
+        let history = JSON.parse(localStorage.getItem('lf_msg_history') || '[]');
+        const lower = text.toLowerCase().trim();
+        const existing = history.find(h => h.text.toLowerCase().trim() === lower);
+        if (existing) {
+            existing.count++;
+            existing.last = Date.now();
+        } else {
+            history.push({ text: text.trim(), count: 1, last: Date.now() });
+        }
+        history.sort((a, b) => b.last - a.last);
+        if (history.length > 50) history = history.slice(0, 50);
+        localStorage.setItem('lf_msg_history', JSON.stringify(history));
+    } catch {}
+}
+
+function getFrequentMessages(limit) {
+    limit = limit || 4;
+    try {
+        const history = JSON.parse(localStorage.getItem('lf_msg_history') || '[]');
+        return history
+            .filter(h => h.count >= 2)
+            .sort((a, b) => b.count - a.count)
+            .slice(0, limit)
+            .map(h => h.text);
+    } catch { return []; }
+}
+
+// ===== CHAT TEXTAREA AUTO-RESIZE + @MENTION =====
 (function setupChatInput() {
     document.addEventListener('DOMContentLoaded', () => {
         const ta = document.getElementById('chat-input');
@@ -1530,14 +1773,59 @@ function logout(skipDialog) {
         ta.addEventListener('input', () => {
             ta.style.height = 'auto';
             ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+
+            // Check for @mention
+            const val = ta.value;
+            const cursorPos = ta.selectionStart;
+            const textBeforeCursor = val.substring(0, cursorPos);
+            const lastAt = textBeforeCursor.lastIndexOf('@');
+            if (lastAt >= 0 && contactProfiles.length > 0) {
+                const query = textBeforeCursor.substring(lastAt + 1);
+                // Only show if @ is at start or after a space, and no space in query
+                const charBefore = lastAt > 0 ? textBeforeCursor[lastAt - 1] : ' ';
+                if ((charBefore === ' ' || charBefore === '\n' || lastAt === 0) && !query.includes(' ')) {
+                    showContactDropdown(query);
+                } else {
+                    hideContactDropdown();
+                }
+            } else {
+                hideContactDropdown();
+            }
+
+            // Check for keyword suggestions
+            const inputVal = ta.value.trim();
+            if (inputVal.length >= 2) {
+                const kwSuggestions = matchKeywordSuggestions(inputVal);
+                if (kwSuggestions.length > 0) {
+                    showSmartSuggestions(kwSuggestions);
+                } else {
+                    hideSmartSuggestions();
+                }
+            } else {
+                hideSmartSuggestions();
+            }
         });
 
         ta.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
+                hideContactDropdown();
                 sendChat();
             }
+            if (e.key === 'Escape') {
+                hideContactDropdown();
+            }
         });
+
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.contact-dropdown') && e.target !== ta) {
+                hideContactDropdown();
+            }
+        });
+
+        // Render time-based suggestions
+        renderSuggestions();
     });
 })();
 
@@ -1570,12 +1858,17 @@ async function sendChat() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
+    trackMessage(text);
+    hideSmartSuggestions();
     const sendBtn = document.getElementById('chat-send-btn');
     sendBtn.disabled = true;
 
-    // Remove empty state
+    // Remove empty state (suggestions + welcome)
     const empty = document.getElementById('chat-empty');
     if (empty) empty.remove();
+
+    // Remove old quick replies
+    removeAllQuickReplies();
 
     addChatMsg(text, 'user');
     input.value = '';
@@ -1617,14 +1910,63 @@ async function sendChat() {
                 logout(true);
                 throw new Error('Session expired');
             }
-            // Retry with new token - recursive call
+            // Retry with new token
             typingEl.remove();
             wrapper.remove();
             sendBtn.disabled = false;
             chatAbort = null;
-            // Re-add user message text to input and resend
-            input.value = text;
-            sendChat();
+            // Resend without re-adding user message (already shown)
+            const retryUrl = API + '/api/chat/web-stream?message=' + encodeURIComponent(text);
+            const retryHeaders = {};
+            if (token) retryHeaders['Authorization'] = 'Bearer ' + token;
+            const retryRes = await fetch(retryUrl, { headers: retryHeaders });
+            if (!retryRes.ok) throw new Error('Retry failed');
+            // Re-create assistant wrapper for the retry
+            const rWrapper = document.createElement('div');
+            rWrapper.className = 'chat-msg-wrapper assistant';
+            const rMsgEl = document.createElement('div');
+            rMsgEl.className = 'chat-msg assistant';
+            const rThinkEl = document.createElement('div');
+            rThinkEl.className = 'thinking';
+            rThinkEl.textContent = 'Thinking...';
+            rMsgEl.appendChild(rThinkEl);
+            rWrapper.appendChild(rMsgEl);
+            document.getElementById('chat-messages').appendChild(rWrapper);
+            // Process the retry response stream same as normal
+            const rReader = retryRes.body.getReader();
+            const rDecoder = new TextDecoder();
+            let rBuffer = '';
+            let rFinalMessage = '';
+            while (true) {
+                const { done, value } = await rReader.read();
+                if (done) break;
+                rBuffer += rDecoder.decode(value, { stream: true });
+                const lines = rBuffer.split('\n');
+                rBuffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data:')) continue;
+                    try {
+                        const d = JSON.parse(line.slice(5).trim());
+                        if (d.step === 'done') {
+                            rFinalMessage = d.message || '';
+                        } else if (d.step === 'thinking' || d.step === 'tool_call' || d.step === 'retry') {
+                            rThinkEl.textContent = d.message || 'Thinking...';
+                        }
+                    } catch(e) {}
+                }
+            }
+            rThinkEl.remove();
+            if (rFinalMessage) {
+                rMsgEl.innerHTML = '<div class="md-content">' + renderMarkdown(rFinalMessage) + '</div>';
+            } else {
+                rMsgEl.textContent = 'No response received.';
+            }
+            const rTs = document.createElement('div');
+            rTs.className = 'chat-timestamp';
+            rTs.textContent = getTimestamp();
+            rWrapper.appendChild(rTs);
+            scrollChat();
+            sendBtn.disabled = false;
             return;
         }
 
@@ -1709,6 +2051,9 @@ async function sendChat() {
             creditsEl.textContent = creditsCharged + ' credit' + (creditsCharged === 1 ? '' : 's') + ' used';
             wrapper.appendChild(creditsEl);
         }
+
+        // Add quick reply buttons
+        addQuickReplies(wrapper, mediaData);
     } catch (err) {
         // Clean up
         const typing = msgEl.querySelector('.typing-indicator');
@@ -1761,13 +2106,186 @@ function scrollChat() {
     if (scrollBtn) scrollBtn.classList.remove('visible');
 }
 
-// ===== SUGGESTION CARDS =====
+// ===== SUGGESTION CARDS (time-based) =====
+function getSuggestions() {
+    const hour = new Date().getHours();
+    let timeBased;
+    if (hour >= 6 && hour < 12) {
+        // Aamu
+        timeBased = [
+            { text: 'Mitä viestejä tuli yöllä?', icon: 'fa-envelope-open-text', color: 'blue' },
+            { text: 'Mikä sää on tänään?', icon: 'fa-cloud-sun', color: 'cyan' },
+            { text: 'Muistuta minua...', icon: 'fa-bell', color: 'green', append: 'Muistuta minua ' },
+            { text: 'Yhteenveto uutisista', icon: 'fa-newspaper', color: 'orange' },
+        ];
+    } else if (hour >= 12 && hour < 17) {
+        // Päivä
+        timeBased = [
+            { text: 'Etsi YouTube-video', icon: 'fa-play', color: 'red' },
+            { text: 'Lähetä viesti', icon: 'fa-paper-plane', color: 'blue', append: 'Lähetä viesti ' },
+            { text: 'Mikä on uutisissa?', icon: 'fa-newspaper', color: 'orange' },
+            { text: 'Aseta muistutus', icon: 'fa-bell', color: 'green', append: 'Muistuta minua ' },
+        ];
+    } else if (hour >= 17 && hour < 23) {
+        // Ilta
+        timeBased = [
+            { text: 'Yhteenveto päivästä', icon: 'fa-list-check', color: 'blue' },
+            { text: 'Aseta herätys huomiselle', icon: 'fa-alarm-clock', color: 'orange', append: 'Herätä minut huomenna klo ' },
+            { text: 'Suosittele elokuvia', icon: 'fa-film', color: 'purple' },
+            { text: 'Etsi YouTube-video', icon: 'fa-play', color: 'red' },
+        ];
+    } else {
+        // Yö
+        timeBased = [
+            { text: 'Muistuta aamulla...', icon: 'fa-sun', color: 'orange', append: 'Muistuta aamulla ' },
+            { text: 'Huomisen sää?', icon: 'fa-cloud-sun', color: 'cyan' },
+            { text: 'Yhteenveto viesteistä', icon: 'fa-envelope-open-text', color: 'blue' },
+            { text: 'Aseta herätys', icon: 'fa-bell', color: 'green', append: 'Herätä minut klo ' },
+        ];
+    }
+
+    // Mix in user's frequent messages (replace last slots)
+    const frequent = getFrequentMessages(2);
+    if (frequent.length > 0) {
+        const result = timeBased.slice(0, 4 - frequent.length);
+        for (const msg of frequent) {
+            result.push({ text: msg, icon: 'fa-star', color: 'purple' });
+        }
+        return result;
+    }
+    return timeBased;
+}
+
+function renderSuggestions() {
+    const grid = document.getElementById('suggestion-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    const suggestions = getSuggestions();
+    for (const s of suggestions) {
+        const btn = document.createElement('button');
+        btn.className = 'suggestion-card';
+        btn.innerHTML = '<span class="sc-icon ' + s.color + '"><i class="fa-solid ' + s.icon + '"></i></span><span>' + escapeHtml(s.text) + '</span>';
+        btn.onclick = function() {
+            if (s.append) {
+                prefillChat(s.append);
+            } else {
+                sendSuggestion(s.text);
+            }
+        };
+        grid.appendChild(btn);
+    }
+}
+
 function prefillChat(text) {
     const input = document.getElementById('chat-input');
     input.value = text;
     input.focus();
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+}
+
+function sendSuggestion(text) {
+    const input = document.getElementById('chat-input');
+    input.value = text;
+    sendChat();
+}
+
+// ===== QUICK REPLIES =====
+function addQuickReplies(wrapperEl, mediaData) {
+    const container = document.createElement('div');
+    container.className = 'quick-reply-container';
+
+    const replies = [
+        'Kerro lisää',
+        'Aseta muistutus',
+    ];
+
+    // Context-based button
+    if (mediaData && mediaData.length > 0) {
+        replies.push('Lisää videoita');
+    }
+
+    // Add user's frequent messages as quick replies
+    const frequentReplies = getFrequentMessages(2);
+    for (const msg of frequentReplies) {
+        if (!replies.includes(msg) && replies.length < 5) {
+            replies.push(msg);
+        }
+    }
+
+    for (const text of replies) {
+        const btn = document.createElement('button');
+        btn.className = 'quick-reply-btn';
+        btn.textContent = text;
+        btn.onclick = function() {
+            const input = document.getElementById('chat-input');
+            input.value = text;
+            sendChat();
+        };
+        container.appendChild(btn);
+    }
+    wrapperEl.appendChild(container);
+}
+
+function removeAllQuickReplies() {
+    document.querySelectorAll('.quick-reply-container').forEach(el => el.remove());
+}
+
+// ===== CONTACT @MENTION =====
+let contactProfiles = [];
+
+async function loadContacts() {
+    try {
+        const res = await api('/api/contact-profiles');
+        if (res.ok) {
+            const data = await res.json();
+            contactProfiles = data || [];
+        }
+    } catch {}
+}
+
+function showContactDropdown(query) {
+    const dropdown = document.getElementById('contact-dropdown');
+    if (!dropdown) return;
+
+    const q = query.toLowerCase();
+    const matches = contactProfiles.filter(c =>
+        (c.nickname || '').toLowerCase().startsWith(q)
+    ).slice(0, 6);
+
+    if (matches.length === 0) {
+        dropdown.classList.remove('visible');
+        return;
+    }
+
+    dropdown.innerHTML = '';
+    for (const contact of matches) {
+        const item = document.createElement('div');
+        item.className = 'contact-dropdown-item';
+        item.innerHTML = '<i class="fa-solid fa-user"></i><span>' + escapeHtml(contact.nickname) + '</span>';
+        item.onclick = function() {
+            insertContactMention(contact.nickname);
+            dropdown.classList.remove('visible');
+        };
+        dropdown.appendChild(item);
+    }
+    dropdown.classList.add('visible');
+}
+
+function hideContactDropdown() {
+    const dropdown = document.getElementById('contact-dropdown');
+    if (dropdown) dropdown.classList.remove('visible');
+}
+
+function insertContactMention(nickname) {
+    const input = document.getElementById('chat-input');
+    const val = input.value;
+    // Find the last @ and replace from there
+    const lastAt = val.lastIndexOf('@');
+    if (lastAt >= 0) {
+        input.value = val.substring(0, lastAt) + '@' + nickname + ' ';
+    }
+    input.focus();
 }
 
 // ===== @MENTION SHORTCUTS =====
@@ -2120,10 +2638,25 @@ async function toggleQuietMode() {
 }
 
 // ===== INIT =====
+function dismissSplash() {
+    const splash = document.getElementById('splash');
+    if (!splash) return;
+    splash.classList.add('hiding');
+    setTimeout(() => splash.remove(), 600);
+}
+
 if (token) {
-    showApp();
+    // Logged in: show splash briefly, then app
+    setTimeout(() => {
+        showApp();
+        dismissSplash();
+    }, 1800);
 } else {
-    showScreen('login');
+    // Not logged in: show splash, then login
+    setTimeout(() => {
+        showScreen('login');
+        dismissSplash();
+    }, 1800);
 }
 </script>
 
