@@ -100,16 +100,35 @@ On push to master:
 
 ### Enclave Networking
 
-- **Inbound**: Cloudflare tunnel running inside the enclave for webhook endpoints (Twilio, Stripe, ElevenLabs)
-- **Outbound**: vsock proxies route TCP through the host to the internet
-- **DNS**: Forwarded to Cloudflare DoH (1.1.1.1)
-- **KMS**: Derive server connects to Marlin's root server at `image-v4.kms.box:1100`
+The enclave has no direct network access. All traffic flows through VSOCK channels to the host:
+
+```
+Inbound:  Internet -> Cloudflare -> tunnel -> cloudflared (inside enclave) -> localhost:3000
+Outbound: app -> HTTP_PROXY:3128 -> socat/VSOCK:3:8001 -> host socat -> tinyproxy -> Internet
+Env vars: entrypoint.sh -> VSOCK:3:9000 -> host config server -> .env
+Backup out: export.sh -> VSOCK:3:9001 -> host backup receiver -> S3
+Backup in:  entrypoint.sh -> VSOCK:3:9002 -> host seed server -> /data/seed/
+```
+
+#### VSOCK Port Map
+
+| Port | Direction | Purpose |
+|------|-----------|---------|
+| 8001 | Enclave -> Host | HTTP proxy (outbound internet via tinyproxy) |
+| 9000 | Enclave <- Host | Environment variable injection (.env) |
+| 9001 | Enclave -> Host | Encrypted backup transfer out |
+| 9002 | Enclave <- Host | Encrypted backup transfer in (for restore) |
+
+- **Inbound**: cloudflared runs inside the enclave, connects to Cloudflare's edge via the outbound proxy. Cloudflare tunnels support multiple connectors - both old and new enclaves connect simultaneously during updates.
+- **Outbound**: HTTP/HTTPS traffic goes through socat VSOCK bridge to tinyproxy on the host.
+- **KMS**: Derive server connects to Marlin's root server at `image-v4.kms.box:1100` (Phase 2 - not yet implemented)
 
 ### State Persistence
 
-- Encrypted with AES-256-GCM using the KMS-derived key
-- Stored on S3 (or parent instance EBS)
-- Encrypted blobs contain: PostgreSQL data directory, Tuwunel RocksDB directory, bridge state
+- Encrypted with AES-256-CBC (Phase 1, env-based key) / AES-256-GCM (Phase 2, KMS-derived key)
+- Backup transfer: enclave -> VSOCK:9001 -> host -> S3
+- Restore transfer: S3 -> host -> VSOCK:9002 -> enclave
+- Encrypted blobs contain: PostgreSQL dumps, Tuwunel RocksDB, bridge state, matrix store, uploads, core data
 
 ## Trust Chain
 
@@ -145,30 +164,31 @@ What users can independently verify:
 - Threshold Network (TACo) is available for root seed decryption
 - GitHub Actions environment is not compromised (Microsoft-hosted runners)
 
-## Update Flow (Blue-Green Deployment)
+## Update Flow
 
-1. Push code to master
-2. GitHub Actions builds enclave image, publishes image ID
-3. GitHub Actions submits `proposeImage` to Arbitrum
-4. Wait 24 hours (old enclave runs normally during this period - zero downtime)
-5. Call `activateImage()`
-6. **Pre-flight checks** (old enclave still running):
-   - Verify new image ID is activated on contract
-   - Verify Marlin KMS root server is reachable
-   - Verify S3 bucket is accessible
-   - If ANY check fails -> ABORT, old enclave keeps running
-7. Old enclave: encrypt state -> push to S3 -> verify upload checksum
-8. Launch new EC2 instance with new enclave image
-9. New enclave: derive same key from Marlin KMS -> pull from S3 -> decrypt state -> start up
-10. Health check new enclave
-11. Switch Cloudflare tunnel to new enclave
-12. Verify new enclave serves requests
-13. Terminate old EC2 instance
-14. Optionally revoke old image ID
+### Phase 1 (Current - env-based key)
 
-**Never stop old enclave until new one is confirmed working.** If new enclave fails at any step, old enclave is unaffected. Old image stays approved on contract, so a fresh old-image instance can always recover from S3.
+1. SSM to old host: trigger `export.sh` in enclave (runs via supervisorctl exec or VSOCK)
+2. Backup appears on host via VSOCK:9001, upload to S3 via `upload-backup.sh`
+3. Create new EC2 with `terraform apply` (or AWS CLI)
+4. SSM to new host: create `/opt/lightfriend/.env`, download backup from S3 via `download-backup.sh`
+5. Launch enclave: `/opt/lightfriend/launch-enclave.sh`
+6. Enclave fetches env via VSOCK:9000, backup via VSOCK:9002, restores, starts services
+7. `verify.sh` runs automatically, produces `/data/seed/verify-result.json`
+8. Both old and new enclaves serve traffic via Cloudflare tunnel (multiple connectors)
+9. Verify new enclave is healthy
+10. Terminate old EC2
 
-For critical security fixes, the 24h delay is unavoidable - this is the cost of trustlessness.
+**Never stop old enclave until new one is confirmed working.**
+
+### Phase 2 (Future - Marlin KMS)
+
+Same flow plus:
+- Wait 24h for image approval timelock on Arbitrum
+- New enclave derives key from Marlin KMS instead of env var
+- Pre-flight checks verify KMS reachability and contract approval
+
+For critical security fixes with KMS, the 24h delay is unavoidable - this is the cost of trustlessness.
 
 ## Open Questions
 

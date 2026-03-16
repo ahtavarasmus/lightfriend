@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tower_sessions::{MemoryStore, SessionManagerLayer};
@@ -59,7 +59,6 @@ pub fn validate_env() {
             "STRIPE_PUBLISHABLE_KEY",
             "STRIPE_WEBHOOK_SECRET",
             "STRIPE_CREDITS_PRODUCT_ID",
-            "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
             // SMS/Voice (Twilio)
             "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN",
@@ -69,14 +68,12 @@ pub fn validate_env() {
             "FIN_PHONE",
             "USA_PHONE",
             "AUS_PHONE",
-            // Music recognition (Shazam)
-            "SHAZAM_PHONE_NUMBER",
-            "SHAZAM_API_KEY",
+            "GB_PHONE",
+            "NL_PHONE",
+            "CAN_PHONE",
             // Production server config
             "SERVER_URL",
             "ASSISTANT_ID",
-            // External integrations
-            "COMPOSIO_API_KEY",
         ];
 
         for var in production_vars.iter() {
@@ -87,7 +84,6 @@ pub fn validate_env() {
 
     // Note: The following are truly optional even in production:
     // - PERPLEXITY_API_KEY, OPENROUTER_API_KEY (AI features gracefully degrade)
-    // - SENTRY_DSN (error tracking, optional)
     // - Bridge bot IDs (may have defaults)
 }
 
@@ -1089,15 +1085,18 @@ async fn main() {
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
-        // Serve static files (robots.txt, sitemap.xml) at the root
+        .fallback_service(
+            ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
+        )
         .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .layer(
-            CorsLayer::new()
+        .layer({
+            let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+            let cors = CorsLayer::new()
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
@@ -1106,12 +1105,6 @@ async fn main() {
                     axum::http::Method::PATCH,
                     axum::http::Method::PUT,
                 ])
-                .allow_origin(AllowOrigin::exact(
-                    std::env::var("FRONTEND_URL")
-                        .unwrap_or_else(|_| "http://localhost:8080".to_string())
-                        .parse()
-                        .expect("Invalid FRONTEND_URL"),
-                )) // Restrict in production
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,
@@ -1121,9 +1114,18 @@ async fn main() {
                 .expose_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::CONTENT_LENGTH,
-                ])
-                .allow_credentials(true),
-        )
+                ]);
+            if frontend_url.is_empty() {
+                // Same-origin mode: permissive CORS (no credentials needed)
+                cors.allow_origin(AllowOrigin::any())
+            } else {
+                // Cross-origin mode (local dev): exact origin with credentials
+                cors.allow_origin(AllowOrigin::exact(
+                    frontend_url.parse().expect("Invalid FRONTEND_URL"),
+                ))
+                .allow_credentials(true)
+            }
+        })
         // Security headers to prevent clickjacking, XSS, and other attacks
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,

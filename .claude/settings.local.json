@@ -1,20 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(**/*.rs)",
-      "Read(**/*.toml)",
-      "Read(**/*.yaml)",
-      "Read(**/*.yml)",
-      "Read(**/*.json)",
-      "Read(**/*.md)",
-      "Read(**/*.sql)",
-      "Read(**/*.html)",
-      "Read(**/*.css)",
-      "Read(**/*.js)",
-      "Read(**/*.ts)",
-      "Read(**/Dockerfile)",
-      "Read(**/justfile)",
-      "Read(**/Cargo.lock)",
+      "Read",
       "Edit(**/*.rs)",
       "Edit(**/*.toml)",
       "Edit(**/*.yaml)",
@@ -201,10 +188,9 @@
       "Bash(psql postgres:*)",
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib\" TEST_PG_DATABASE_URL=\"postgres://lightfriend:test@localhost:5432/lightfriend_test\" cargo test:*)",
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/libpq/lib:/opt/homebrew/opt/openssl@3/lib\" cargo run:*)",
-      "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib:$DYLD_LIBRARY_PATH\" cargo run:*)",
-      "Bash(unzip:*)",
-      "Bash(lsof:*)",
-      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo run:*)"
+      "Bash(cd /Users/ahtavarasmus/Developer/sites/lightfriend-worktrees/ontology-v1 && mv backend/src/handlers/contact_profile_handlers.rs backend/src/handlers/person_handlers.rs)",
+      "Bash(brew list:*)",
+      "Bash(just:*)"
     ],
     "deny": [
       "Read(.env)",

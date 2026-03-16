@@ -35,9 +35,9 @@ extract_yaml_value() {
 
 # Bridge bot configs: registration_file bot_username
 bridges=(
-    "bridges/whatsapp/whatsapp-registration.yaml whatsappbot"
-    "bridges/signal/signal-registration.yaml signalbot"
-    "bridges/telegram/telegram-registration.yaml telegrambot"
+    "/data/bridges/whatsapp/whatsapp-registration.yaml whatsappbot"
+    "/data/bridges/signal/signal-registration.yaml signalbot"
+    "/data/bridges/telegram/telegram-registration.yaml telegrambot"
 )
 
 for entry in "${bridges[@]}"; do

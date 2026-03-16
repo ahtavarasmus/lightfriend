@@ -9,7 +9,6 @@
 FROM rust:1.88-bookworm AS backend-builder
 
 RUN cargo install cargo-chef sccache --locked
-RUN cargo install diesel_cli --no-default-features --features postgres --locked
 
 ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache
 ENV SCCACHE_DIR=/sccache
@@ -70,14 +69,31 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/backend /backend && \
     strip /backend
 
-# ── Stage 2: Collect bridge binaries from official images ───────────────────
+# ── Stage 2: Build Frontend (Yew/WASM) ──────────────────────────────────────
+
+FROM rust:1.88-bookworm AS frontend-builder
+
+RUN rustup target add wasm32-unknown-unknown
+RUN cargo install trunk --locked
+
+WORKDIR /app
+COPY frontend/Cargo.toml frontend/Cargo.lock ./
+COPY frontend/src ./src
+COPY frontend/index.html ./
+COPY frontend/assets ./assets
+COPY frontend/Trunk.toml ./
+COPY frontend/robots.txt ./
+
+RUN trunk build --release
+
+# ── Stage 3: Collect bridge binaries from official images ───────────────────
 
 FROM jevolk/tuwunel:latest AS tuwunel-src
 FROM dock.mau.dev/mautrix/whatsapp:latest AS whatsapp-src
 FROM dock.mau.dev/mautrix/signal:latest AS signal-src
 FROM dock.mau.dev/mautrix/telegram:latest AS telegram-src
 
-# ── Stage 3: Runtime - single container with all services ───────────────────
+# ── Stage 4: Runtime - single container with all services ───────────────────
 
 FROM debian:bookworm-slim
 
@@ -87,13 +103,19 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     libssl3 \
     curl \
-    postgresql-16 \
+    socat \
+    postgresql-15 \
+    openssl \
     supervisor \
     python3 \
     python3-pip \
     python3-venv \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Install cloudflared for Cloudflare tunnel inside enclave ─────────────────
+RUN curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+    -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 
 # ── Copy Tuwunel binary ────────────────────────────────────────────────────
 COPY --from=tuwunel-src /usr/local/bin/tuwunel /usr/local/bin/tuwunel
@@ -111,11 +133,7 @@ COPY --from=telegram-src /opt/mautrix-telegram /opt/mautrix-telegram
 # ── Copy Lightfriend backend ──────────────────────────────────────────────
 WORKDIR /app
 COPY --from=builder /backend ./backend
-COPY --from=builder /usr/local/cargo/bin/diesel ./diesel
-
-# Copy migrations
-COPY backend/migrations ./migrations
-COPY backend/diesel.toml ./
+COPY --from=frontend-builder /app/dist ./public/
 
 # Create runtime directories
 RUN mkdir -p \
