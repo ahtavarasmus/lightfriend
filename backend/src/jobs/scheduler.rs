@@ -1169,6 +1169,30 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add metrics update job to scheduler");
 
+    // Daily at 3 AM: purge ont_messages older than 14 days
+    let state_clone = Arc::clone(&state);
+    let message_purge_job = Job::new_async("0 0 3 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let max_age_secs = 14 * 24 * 3600; // 14 days
+            match state.ontology_repository.purge_old_messages(max_age_secs) {
+                Ok(count) if count > 0 => {
+                    tracing::info!("Purged {} old ont_messages (>14 days)", count);
+                }
+                Err(e) => {
+                    error!("Failed to purge old ont_messages: {}", e);
+                }
+                _ => {}
+            }
+        })
+    })
+    .expect("Failed to create message purge job");
+
+    sched
+        .add(message_purge_job)
+        .await
+        .expect("Failed to add message purge job to scheduler");
+
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 

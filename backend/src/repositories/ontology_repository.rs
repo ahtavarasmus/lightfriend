@@ -2,11 +2,25 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 
 use crate::models::ontology_models::{
-    NewOntChangelog, NewOntChannel, NewOntLink, NewOntPerson, NewOntPersonEdit, OntChannel,
-    OntLink, OntPerson, OntPersonEdit, PersonWithChannels,
+    NewOntChangelog, NewOntChannel, NewOntLink, NewOntMessage, NewOntPerson, NewOntPersonEdit,
+    OntChannel, OntLink, OntMessage, OntPerson, OntPersonEdit, PersonWithChannels,
 };
-use crate::pg_schema::{ont_changelog, ont_channels, ont_links, ont_person_edits, ont_persons};
+use crate::pg_schema::{
+    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons,
+};
 use crate::PgDbPool;
+
+#[derive(diesel::QueryableByName, Debug)]
+struct SuggestionCandidate {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    sender_name: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    room_id: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    platform: String,
+    #[diesel(sql_type = diesel::sql_types::Int8)]
+    msg_count: i64,
+}
 
 pub struct OntologyRepository {
     pub pool: PgDbPool,
@@ -885,6 +899,99 @@ impl OntologyRepository {
         }
 
         Ok(results)
+    }
+
+    // -----------------------------------------------------------------------
+    // Messages
+    // -----------------------------------------------------------------------
+
+    /// Insert a bridge message into ont_messages.
+    pub fn insert_message(&self, msg: &NewOntMessage) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(ont_messages::table)
+            .values(msg)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get messages for a specific room, ordered by created_at DESC.
+    pub fn get_messages_for_room(
+        &self,
+        user_id: i32,
+        room_id: &str,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::room_id.eq(room_id))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get recent messages for a platform since a timestamp.
+    pub fn get_recent_messages(
+        &self,
+        user_id: i32,
+        platform: &str,
+        since_ts: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::platform.eq(platform))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get recent messages across all platforms since a timestamp.
+    pub fn get_recent_messages_all_platforms(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get suggestion candidates: senders with no person_id, grouped by name+room+platform.
+    /// Returns (sender_name, room_id, platform, count) where count >= threshold.
+    pub fn get_suggestion_candidates(
+        &self,
+        user_id: i32,
+        threshold: i64,
+    ) -> Result<Vec<(String, String, String, i64)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::sql_query(
+            "SELECT sender_name, room_id, platform, COUNT(*) as msg_count \
+             FROM ont_messages \
+             WHERE user_id = $1 AND person_id IS NULL \
+             GROUP BY sender_name, room_id, platform \
+             HAVING COUNT(*) >= $2 \
+             ORDER BY msg_count DESC",
+        )
+        .bind::<diesel::sql_types::Int4, _>(user_id)
+        .bind::<diesel::sql_types::Int8, _>(threshold)
+        .load::<SuggestionCandidate>(&mut conn)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| (r.sender_name, r.room_id, r.platform, r.msg_count))
+                .collect()
+        })
+    }
+
+    /// Purge messages older than max_age_secs.
+    pub fn purge_old_messages(&self, max_age_secs: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let cutoff = Self::now() - max_age_secs;
+        diesel::delete(ont_messages::table.filter(ont_messages::created_at.lt(cutoff)))
+            .execute(&mut conn)
     }
 
     /// Get persons linked to an item (via ont_links).

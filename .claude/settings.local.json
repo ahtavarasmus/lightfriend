@@ -204,7 +204,9 @@
       "Bash(DYLD_LIBRARY_PATH=\"/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib:$DYLD_LIBRARY_PATH\" cargo run:*)",
       "Bash(unzip:*)",
       "Bash(lsof:*)",
-      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo run:*)"
+      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo run:*)",
+      "Bash(open -a \"Google Chrome\" http://localhost:8080)",
+      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo build)"
     ],
     "deny": [
       "Read(.env)",

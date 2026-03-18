@@ -411,6 +411,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    ont_messages (id) {
+        id -> Int8,
+        user_id -> Int4,
+        room_id -> Text,
+        platform -> Text,
+        sender_name -> Text,
+        content -> Text,
+        person_id -> Nullable<Int4>,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -448,4 +461,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_channels,
     ont_changelog,
     ont_links,
+    ont_messages,
 );

@@ -1572,8 +1572,9 @@ struct MessageTrackableResponse {
     due_at: String,
 }
 
-/// Checks whether a bridge message contains a trackable item and silently
-/// creates a tracking item if detected. Always priority 0 (silent).
+/// Checks whether a bridge message from a known Person contains a trackable
+/// item and silently creates a tracking item if detected. Always priority 0
+/// (silent). Only evaluates messages from known, non-muted Persons.
 /// LLM decides due_at (expiration deadline) based on message urgency.
 /// Uses source_id = "msg_{service}_{room_id}_{topic}" for dedup.
 pub async fn check_message_trackable_items(
@@ -1583,11 +1584,52 @@ pub async fn check_message_trackable_items(
     room_id: &str,
     sender: &str,
     message_content: &str,
+    person: &crate::models::ontology_models::PersonWithChannels,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Skip very short messages - no point evaluating "ok" or "hi"
     if message_content.len() < 10 {
         return Ok(());
     }
+
+    // Gate: skip muted Persons
+    let channel = person
+        .channels
+        .iter()
+        .find(|c| c.room_id.as_deref() == Some(room_id));
+    let user_settings = state.user_core.get_user_settings(user_id)?;
+    let default_mode = user_settings
+        .default_notification_mode
+        .as_deref()
+        .unwrap_or("all");
+    if let Some(ch) = channel {
+        if person.effective_notification_mode(ch, default_mode) == "mute" {
+            return Ok(());
+        }
+    }
+
+    // Fetch existing items linked to this Person for context/dedup
+    let existing_items = state
+        .ontology_repository
+        .get_linked_items_for_person(user_id, person.person.id)
+        .unwrap_or_default();
+    let items_context = if existing_items.is_empty() {
+        String::new()
+    } else {
+        let items_list: Vec<String> = existing_items
+            .iter()
+            .take(10)
+            .map(|(_, item)| {
+                // Extract the human-readable part after the tags
+                let summary = item.summary.split('\n').last().unwrap_or(&item.summary);
+                format!("- {}", summary.trim())
+            })
+            .collect();
+        format!(
+            "\nCurrently tracking for {}: \n{}",
+            person.display_name(),
+            items_list.join("\n")
+        )
+    };
 
     let ctx = ContextBuilder::for_user(state, user_id).build().await?;
 
@@ -1602,10 +1644,11 @@ pub async fn check_message_trackable_items(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Current date: {}\nPlatform: {}\nFrom: {}\nMessage: {}",
+                "Current date: {}\nPlatform: {}\nContact: {} (tracked){}\nMessage: {}",
                 chrono::Utc::now().format("%Y-%m-%d"),
                 service,
-                sender,
+                person.display_name(),
+                items_context,
                 message_content
             )),
             name: None,
@@ -1731,11 +1774,23 @@ pub async fn check_message_trackable_items(
             };
 
             match state.item_repository.create_item_if_not_exists(&new_item) {
-                Ok(Some(_id)) => {
-                    tracing::debug!(
-                        "Created message tracking item for user {} source_id={}",
+                Ok(Some(item_id)) => {
+                    // Link item to the Person deterministically
+                    let _ = state.ontology_repository.create_link(
                         user_id,
-                        source_id
+                        "Item",
+                        item_id,
+                        "Person",
+                        person.person.id,
+                        "tracked_from",
+                        None,
+                    );
+                    tracing::debug!(
+                        "Created message tracking item (id={}) for user {} source_id={}, linked to person {}",
+                        item_id,
+                        user_id,
+                        source_id,
+                        person.person.id
                     );
                 }
                 Ok(None) => {
