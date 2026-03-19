@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
+    Json,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -126,8 +126,9 @@ pub struct MergePersonsRequest {
 
 pub async fn get_persons(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
 ) -> Result<Json<Vec<PersonWithChannels>>, StatusCode> {
+    let user_id = auth_user.user_id;
     state
         .ontology_repository
         .get_persons_with_channels(user_id)
@@ -140,9 +141,10 @@ pub async fn get_persons(
 
 pub async fn create_person(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Json(req): Json<CreatePersonRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = auth_user.user_id;
     let person = state
         .ontology_repository
         .create_person(user_id, &req.name)
@@ -178,10 +180,11 @@ pub async fn create_person(
 
 pub async fn update_person(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Path(person_id): Path<i32>,
     Json(req): Json<UpdatePersonRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = auth_user.user_id;
     // Update base name if provided
     if let Some(ref name) = req.name {
         state
@@ -241,9 +244,10 @@ pub async fn update_person(
 
 pub async fn delete_person(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Path(person_id): Path<i32>,
 ) -> Result<StatusCode, StatusCode> {
+    let user_id = auth_user.user_id;
     state
         .ontology_repository
         .delete_person(user_id, person_id)
@@ -256,10 +260,11 @@ pub async fn delete_person(
 
 pub async fn add_person_channel(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Path(person_id): Path<i32>,
     Json(req): Json<CreateChannelRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = auth_user.user_id;
     let channel = state
         .ontology_repository
         .add_channel(
@@ -279,10 +284,11 @@ pub async fn add_person_channel(
 
 pub async fn update_person_channel(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Path((person_id, channel_id)): Path<(i32, i32)>,
     Json(req): Json<UpdateChannelRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = auth_user.user_id;
     let _ = person_id; // Validated by ownership check below
     let mode = req.notification_mode.as_deref().unwrap_or("default");
     let ntype = req.notification_type.as_deref().unwrap_or("sms");
@@ -307,9 +313,10 @@ pub async fn update_person_channel(
 
 pub async fn delete_person_channel(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Path((_person_id, channel_id)): Path<(i32, i32)>,
 ) -> Result<StatusCode, StatusCode> {
+    let user_id = auth_user.user_id;
     state
         .ontology_repository
         .delete_channel(user_id, channel_id)
@@ -322,9 +329,10 @@ pub async fn delete_person_channel(
 
 pub async fn merge_persons(
     State(state): State<Arc<AppState>>,
-    Extension(user_id): Extension<i32>,
+    auth_user: AuthUser,
     Json(req): Json<MergePersonsRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = auth_user.user_id;
     state
         .ontology_repository
         .merge_persons(user_id, req.keep_id, req.merge_id)

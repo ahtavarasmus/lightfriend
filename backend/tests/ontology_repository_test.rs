@@ -3,9 +3,7 @@
 //! DB tests with #[serial]. Tests CRUD, case-insensitive matching, upsert dedup,
 //! nickname lookup, partial search, links, user isolation, and cascading deletes.
 
-use backend::test_utils::{
-    create_test_item, create_test_state, create_test_user, TestItemParams, TestUserParams,
-};
+use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
 use serial_test::serial;
 
 // =============================================================================
@@ -190,23 +188,26 @@ fn test_link_idempotent() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
-    let person = state
+    let person1 = state
         .ontology_repository
         .create_person(user.id, "Alice")
         .unwrap();
-    let item = create_test_item(&state, &TestItemParams::reminder(user.id, "Call Alice"));
+    let person2 = state
+        .ontology_repository
+        .create_person(user.id, "Bob")
+        .unwrap();
 
     // First create_link succeeds
     state
         .ontology_repository
         .create_link(
-            user.id, "Person", person.id, "Item", item.id, "related", None,
+            user.id, "Person", person1.id, "Person", person2.id, "related", None,
         )
         .unwrap();
 
     // Second create_link with same params - ON CONFLICT DO NOTHING means get_result returns error
     let second = state.ontology_repository.create_link(
-        user.id, "Person", person.id, "Item", item.id, "related", None,
+        user.id, "Person", person1.id, "Person", person2.id, "related", None,
     );
     // It's ok if second errors (NotFound from get_result with no insert)
     let _ = second;
@@ -214,59 +215,9 @@ fn test_link_idempotent() {
     // Should have exactly 1 link
     let links = state
         .ontology_repository
-        .get_links_for_entity(user.id, "Person", person.id)
+        .get_links_for_entity(user.id, "Person", person1.id)
         .unwrap();
     assert_eq!(links.len(), 1);
-}
-
-#[test]
-#[serial]
-fn test_linked_items_both_directions() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-
-    let person = state
-        .ontology_repository
-        .create_person(user.id, "Alice")
-        .unwrap();
-    let item1 = create_test_item(&state, &TestItemParams::reminder(user.id, "Task A"));
-    let item2 = create_test_item(&state, &TestItemParams::reminder(user.id, "Task B"));
-
-    // Link Item->Person (item1 as source)
-    state
-        .ontology_repository
-        .create_link(
-            user.id,
-            "Item",
-            item1.id,
-            "Person",
-            person.id,
-            "assigned_to",
-            None,
-        )
-        .unwrap();
-
-    // Link Person->Item (person as source)
-    state
-        .ontology_repository
-        .create_link(
-            user.id, "Person", person.id, "Item", item2.id, "related", None,
-        )
-        .unwrap();
-
-    // get_linked_items_for_person should return both
-    let linked = state
-        .ontology_repository
-        .get_linked_items_for_person(user.id, person.id)
-        .unwrap();
-    assert_eq!(linked.len(), 2);
-
-    let summaries: Vec<&str> = linked
-        .iter()
-        .map(|(_, item)| item.summary.as_str())
-        .collect();
-    assert!(summaries.contains(&"Task A"));
-    assert!(summaries.contains(&"Task B"));
 }
 
 // =============================================================================
@@ -333,15 +284,6 @@ fn test_delete_person_cascades() {
         .set_person_edit(user.id, person.id, "nickname", "Ali")
         .unwrap();
 
-    // Create item and link
-    let item = create_test_item(&state, &TestItemParams::reminder(user.id, "Task"));
-    state
-        .ontology_repository
-        .create_link(
-            user.id, "Person", person.id, "Item", item.id, "related", None,
-        )
-        .unwrap();
-
     // Delete person
     state
         .ontology_repository
@@ -359,7 +301,5 @@ fn test_delete_person_cascades() {
         .unwrap();
     assert!(pwc.is_empty());
 
-    // Links referencing deleted person should still exist in ont_links (no FK cascade)
-    // but get_linked_items_for_person would fail since person is gone.
     // The important thing is the person, channels, and edits are gone.
 }

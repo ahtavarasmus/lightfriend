@@ -301,6 +301,44 @@ impl UserRepository {
     // TODO(pg-migration): is_credits_under_threshold moved to UserCore - it queries
     // the users table which remains in SQLite. Callers should use UserCore instead.
 
+    /// Count successful notification-related usage logs since a timestamp.
+    pub fn count_notifications_since(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .filter(usage_logs::success.eq(true))
+            .filter(
+                usage_logs::activity_type
+                    .like("%_sms")
+                    .or(usage_logs::activity_type.like("%_call"))
+                    .or(usage_logs::activity_type.eq("noti_msg"))
+                    .or(usage_logs::activity_type.eq("noti_call")),
+            )
+            .count()
+            .get_result(&mut conn)
+    }
+
+    /// Get recent usage logs for a user (for activity feed).
+    pub fn get_recent_usage_logs(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<crate::pg_models::PgUsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .order(usage_logs::created_at.desc())
+            .limit(limit)
+            .load(&mut conn)
+    }
+
     pub fn get_usage_data(
         &self,
         _user_id: i32,

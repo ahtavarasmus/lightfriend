@@ -8,13 +8,13 @@ pub mod handlers {
     pub mod billing_handlers;
     pub mod bridge_auth_common;
     pub mod dashboard_handlers;
-    pub mod filter_handlers;
     pub mod imap_auth;
     pub mod imap_handlers;
     pub mod mcp_handlers;
     pub mod person_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
+    pub mod rule_handlers;
 
     pub mod self_host_handlers;
     pub mod signal_auth;
@@ -47,6 +47,7 @@ pub mod utils {
     pub mod webauthn_config;
 }
 pub mod proactive {
+    pub mod rules;
     pub mod utils;
 }
 pub mod tool_call_utils {
@@ -76,13 +77,12 @@ pub mod context;
 pub mod error;
 pub mod tools {
     pub mod email;
-    pub mod items;
     pub mod messaging;
     pub mod ontology;
     pub mod quiet_mode;
     pub mod registry;
     pub mod respond;
-    pub mod schedule;
+    pub mod rules;
     pub mod search;
     pub mod tesla;
     pub mod weather;
@@ -95,7 +95,6 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
-    pub mod item_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
@@ -140,7 +139,6 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
-pub use repositories::item_repository::ItemRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
 pub use repositories::totp_repository::TotpRepository;
@@ -177,7 +175,6 @@ pub struct AppState {
     pub pg_pool: PgDbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
-    pub item_repository: Arc<ItemRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
@@ -246,18 +243,17 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
 
-    // Schedule/management tools
-    registry.register(Arc::new(tools::schedule::CreateItemHandler));
+    // Rules (Automation -> Logic -> Action)
+    registry.register(Arc::new(tools::rules::SetReminderHandler));
+    registry.register(Arc::new(tools::rules::CreateRuleHandler));
+    registry.register(Arc::new(tools::rules::PinMessageHandler));
+    registry.register(Arc::new(tools::rules::UpdateTrackedItemHandler));
 
     // Tesla tools
     registry.register(Arc::new(tools::tesla::TeslaControlHandler));
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
-
-    // Item tracking tools
-    registry.register(Arc::new(tools::items::ListTrackedItemsHandler));
-    registry.register(Arc::new(tools::items::UpdateTrackedItemHandler));
 
     // Direct response
     registry.register(Arc::new(tools::respond::DirectResponseHandler));

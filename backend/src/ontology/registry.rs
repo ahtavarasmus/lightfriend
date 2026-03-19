@@ -56,7 +56,7 @@ static PERSON_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Person",
     description: "Query people in your contacts. Returns person details with their channels.",
     properties: PERSON_PROPS,
-    linkable_to: &["Item", "Channel"],
+    linkable_to: &["Channel"],
 };
 
 static CHANNEL_PROPS: &[PropertyDef] = &[
@@ -101,46 +101,6 @@ static CHANNEL_DEF: ObjectTypeDef = ObjectTypeDef {
     linkable_to: &["Person"],
 };
 
-static ITEM_PROPS: &[PropertyDef] = &[
-    PropertyDef {
-        name: "summary",
-        description: "The item's description text.",
-        prop_type: "String",
-        filter: None,
-    },
-    PropertyDef {
-        name: "due_at",
-        description: "When the item is due (unix timestamp).",
-        prop_type: "Optional<Integer>",
-        filter: None,
-    },
-    PropertyDef {
-        name: "priority",
-        description: "Filter by priority level (1=highest), or 'all'.",
-        prop_type: "Integer",
-        filter: Some(FilterSource::Static(&["1", "2", "3"])),
-    },
-    PropertyDef {
-        name: "source_id",
-        description: "Source identifier (email message ID, etc.).",
-        prop_type: "Optional<String>",
-        filter: None,
-    },
-    PropertyDef {
-        name: "created_at",
-        description: "When the item was created (unix timestamp).",
-        prop_type: "Integer",
-        filter: None,
-    },
-];
-
-static ITEM_DEF: ObjectTypeDef = ObjectTypeDef {
-    name: "Item",
-    description: "Query tracked items (tasks, reminders, tracked shipments).",
-    properties: ITEM_PROPS,
-    linkable_to: &["Person"],
-};
-
 // ---------------------------------------------------------------------------
 // Registry implementation
 // ---------------------------------------------------------------------------
@@ -148,7 +108,7 @@ static ITEM_DEF: ObjectTypeDef = ObjectTypeDef {
 impl OntologyRegistry {
     pub fn build() -> Self {
         Self {
-            object_types: vec![&PERSON_DEF, &CHANNEL_DEF, &ITEM_DEF],
+            object_types: vec![&PERSON_DEF, &CHANNEL_DEF],
         }
     }
 

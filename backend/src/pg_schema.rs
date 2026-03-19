@@ -421,6 +421,30 @@ diesel::table! {
         content -> Text,
         person_id -> Nullable<Int4>,
         created_at -> Int4,
+        pinned -> Bool,
+        status -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    ont_rules (id) {
+        id -> Int4,
+        user_id -> Int4,
+        name -> Text,
+        trigger_type -> Text,
+        trigger_config -> Text,
+        logic_type -> Text,
+        logic_prompt -> Nullable<Text>,
+        logic_fetch -> Nullable<Text>,
+        action_type -> Text,
+        action_config -> Text,
+        status -> Text,
+        next_fire_at -> Nullable<Int4>,
+        expires_at -> Nullable<Int4>,
+        last_triggered_at -> Nullable<Int4>,
+        created_at -> Int4,
+        updated_at -> Int4,
+        flow_config -> Nullable<Text>,
     }
 }
 
@@ -462,4 +486,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_changelog,
     ont_links,
     ont_messages,
+    ont_rules,
 );

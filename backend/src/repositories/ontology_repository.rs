@@ -3,10 +3,11 @@ use diesel::result::Error as DieselError;
 
 use crate::models::ontology_models::{
     NewOntChangelog, NewOntChannel, NewOntLink, NewOntMessage, NewOntPerson, NewOntPersonEdit,
-    OntChannel, OntLink, OntMessage, OntPerson, OntPersonEdit, PersonWithChannels,
+    NewOntRule, OntChangelog, OntChannel, OntLink, OntMessage, OntPerson, OntPersonEdit, OntRule,
+    PersonWithChannels,
 };
 use crate::pg_schema::{
-    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons,
+    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons, ont_rules,
 };
 use crate::PgDbPool;
 
@@ -853,65 +854,16 @@ impl OntologyRepository {
         Ok(all)
     }
 
-    /// Get items linked to a person (via ont_links).
-    pub fn get_linked_items_for_person(
-        &self,
-        user_id: i32,
-        person_id: i32,
-    ) -> Result<Vec<(OntLink, crate::pg_models::PgItem)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Links where person is source, item is target
-        let as_source: Vec<OntLink> = ont_links::table
-            .filter(ont_links::user_id.eq(user_id))
-            .filter(ont_links::source_type.eq("Person"))
-            .filter(ont_links::source_id.eq(person_id))
-            .filter(ont_links::target_type.eq("Item"))
-            .load(&mut conn)?;
-
-        // Links where item is source, person is target
-        let as_target: Vec<OntLink> = ont_links::table
-            .filter(ont_links::user_id.eq(user_id))
-            .filter(ont_links::target_type.eq("Person"))
-            .filter(ont_links::target_id.eq(person_id))
-            .filter(ont_links::source_type.eq("Item"))
-            .load(&mut conn)?;
-
-        let mut results = Vec::new();
-        use crate::pg_schema::items;
-
-        for link in as_source {
-            if let Ok(item) = items::table
-                .filter(items::id.eq(link.target_id))
-                .first::<crate::pg_models::PgItem>(&mut conn)
-            {
-                results.push((link, item));
-            }
-        }
-
-        for link in as_target {
-            if let Ok(item) = items::table
-                .filter(items::id.eq(link.source_id))
-                .first::<crate::pg_models::PgItem>(&mut conn)
-            {
-                results.push((link, item));
-            }
-        }
-
-        Ok(results)
-    }
-
     // -----------------------------------------------------------------------
     // Messages
     // -----------------------------------------------------------------------
 
-    /// Insert a bridge message into ont_messages.
-    pub fn insert_message(&self, msg: &NewOntMessage) -> Result<(), DieselError> {
+    /// Insert a message into ont_messages, returning the created row.
+    pub fn insert_message(&self, msg: &NewOntMessage) -> Result<OntMessage, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::insert_into(ont_messages::table)
             .values(msg)
-            .execute(&mut conn)?;
-        Ok(())
+            .get_result(&mut conn)
     }
 
     /// Get messages for a specific room, ordered by created_at DESC.
@@ -944,6 +896,29 @@ impl OntologyRepository {
             .filter(ont_messages::created_at.gt(since_ts))
             .order(ont_messages::created_at.desc())
             .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get recent messages with optional platform filter and limit.
+    pub fn get_recent_messages_filtered(
+        &self,
+        user_id: i32,
+        platform: Option<&str>,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let mut query = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .into_boxed();
+
+        if let Some(plat) = platform {
+            query = query.filter(ont_messages::platform.eq(plat));
+        }
+
+        query.load::<OntMessage>(&mut conn)
     }
 
     /// Get recent messages across all platforms since a timestamp.
@@ -986,58 +961,343 @@ impl OntologyRepository {
         })
     }
 
-    /// Purge messages older than max_age_secs.
+    /// Delete completed/expired rules older than max_age_secs.
+    pub fn purge_old_rules(&self, max_age_secs: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let cutoff = Self::now() - max_age_secs;
+        diesel::delete(
+            ont_rules::table
+                .filter(ont_rules::status.eq_any(&["completed", "expired"]))
+                .filter(ont_rules::updated_at.lt(cutoff)),
+        )
+        .execute(&mut conn)
+    }
+
+    /// Purge messages older than max_age_secs (but never purge pinned messages).
     pub fn purge_old_messages(&self, max_age_secs: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let cutoff = Self::now() - max_age_secs;
-        diesel::delete(ont_messages::table.filter(ont_messages::created_at.lt(cutoff)))
-            .execute(&mut conn)
+        diesel::delete(
+            ont_messages::table
+                .filter(ont_messages::created_at.lt(cutoff))
+                .filter(ont_messages::pinned.eq(false)),
+        )
+        .execute(&mut conn)
     }
 
-    /// Get persons linked to an item (via ont_links).
-    pub fn get_linked_persons_for_item(
+    /// Pin a message (set pinned=true).
+    pub fn pin_message(&self, user_id: i32, message_id: i64) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::id.eq(message_id))
+                .filter(ont_messages::user_id.eq(user_id)),
+        )
+        .set(ont_messages::pinned.eq(true))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Unpin a message (set pinned=false).
+    pub fn unpin_message(&self, user_id: i32, message_id: i64) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::id.eq(message_id))
+                .filter(ont_messages::user_id.eq(user_id)),
+        )
+        .set(ont_messages::pinned.eq(false))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Update a pinned message's status. If status == "completed", also unpin.
+    pub fn update_message_status(
         &self,
         user_id: i32,
-        item_id: i32,
-    ) -> Result<Vec<(OntLink, OntPerson)>, DieselError> {
+        message_id: i64,
+        status: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Links where item is source, person is target
-        let as_source: Vec<OntLink> = ont_links::table
-            .filter(ont_links::user_id.eq(user_id))
-            .filter(ont_links::source_type.eq("Item"))
-            .filter(ont_links::source_id.eq(item_id))
-            .filter(ont_links::target_type.eq("Person"))
-            .load(&mut conn)?;
-
-        // Links where person is source, item is target
-        let as_target: Vec<OntLink> = ont_links::table
-            .filter(ont_links::user_id.eq(user_id))
-            .filter(ont_links::target_type.eq("Item"))
-            .filter(ont_links::target_id.eq(item_id))
-            .filter(ont_links::source_type.eq("Person"))
-            .load(&mut conn)?;
-
-        let mut results = Vec::new();
-
-        for link in as_source {
-            if let Ok(person) = ont_persons::table
-                .filter(ont_persons::id.eq(link.target_id))
-                .first::<OntPerson>(&mut conn)
-            {
-                results.push((link, person));
-            }
+        if status == "completed" {
+            diesel::update(
+                ont_messages::table
+                    .filter(ont_messages::id.eq(message_id))
+                    .filter(ont_messages::user_id.eq(user_id)),
+            )
+            .set((
+                ont_messages::status.eq(Some(status)),
+                ont_messages::pinned.eq(false),
+            ))
+            .execute(&mut conn)?;
+        } else {
+            diesel::update(
+                ont_messages::table
+                    .filter(ont_messages::id.eq(message_id))
+                    .filter(ont_messages::user_id.eq(user_id)),
+            )
+            .set(ont_messages::status.eq(Some(status)))
+            .execute(&mut conn)?;
         }
+        Ok(())
+    }
 
-        for link in as_target {
-            if let Ok(person) = ont_persons::table
-                .filter(ont_persons::id.eq(link.source_id))
-                .first::<OntPerson>(&mut conn)
-            {
-                results.push((link, person));
-            }
-        }
+    /// Get all pinned messages for a user.
+    pub fn get_pinned_messages(&self, user_id: i32) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::pinned.eq(true))
+            .order(ont_messages::created_at.desc())
+            .load(&mut conn)
+    }
 
-        Ok(results)
+    // -----------------------------------------------------------------------
+    // Rules (Automation -> Logic -> Action)
+    // -----------------------------------------------------------------------
+
+    pub fn create_rule(&self, rule: &NewOntRule) -> Result<OntRule, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let created: OntRule = diesel::insert_into(ont_rules::table)
+            .values(rule)
+            .get_result(&mut conn)?;
+        Self::log_change(
+            &mut conn,
+            rule.user_id,
+            "Rule",
+            created.id,
+            "created",
+            Some(format!("name={}", rule.name)),
+            "user_action",
+        );
+        Ok(created)
+    }
+
+    pub fn get_rules(&self, user_id: i32) -> Result<Vec<OntRule>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_rules::table
+            .filter(ont_rules::user_id.eq(user_id))
+            .order(ont_rules::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_active_rules(&self, user_id: i32) -> Result<Vec<OntRule>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_rules::table
+            .filter(ont_rules::user_id.eq(user_id))
+            .filter(ont_rules::status.eq("active"))
+            .load(&mut conn)
+    }
+
+    pub fn get_rule(&self, user_id: i32, rule_id: i32) -> Result<OntRule, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_rules::table
+            .filter(ont_rules::id.eq(rule_id))
+            .filter(ont_rules::user_id.eq(user_id))
+            .first(&mut conn)
+    }
+
+    pub fn delete_rule(&self, user_id: i32, rule_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(
+            ont_rules::table
+                .filter(ont_rules::id.eq(rule_id))
+                .filter(ont_rules::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+        Self::log_change(
+            &mut conn,
+            user_id,
+            "Rule",
+            rule_id,
+            "deleted",
+            None,
+            "user_action",
+        );
+        Ok(())
+    }
+
+    pub fn update_rule(
+        &self,
+        user_id: i32,
+        rule_id: i32,
+        name: &str,
+        trigger_type: &str,
+        trigger_config: &str,
+        logic_type: &str,
+        logic_prompt: Option<&str>,
+        logic_fetch: Option<&str>,
+        action_type: &str,
+        action_config: &str,
+        next_fire_at: Option<i32>,
+        flow_config: Option<&str>,
+    ) -> Result<OntRule, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let now = Self::now();
+
+        diesel::update(
+            ont_rules::table
+                .filter(ont_rules::id.eq(rule_id))
+                .filter(ont_rules::user_id.eq(user_id)),
+        )
+        .set((
+            ont_rules::name.eq(name),
+            ont_rules::trigger_type.eq(trigger_type),
+            ont_rules::trigger_config.eq(trigger_config),
+            ont_rules::logic_type.eq(logic_type),
+            ont_rules::logic_prompt.eq(logic_prompt),
+            ont_rules::logic_fetch.eq(logic_fetch),
+            ont_rules::action_type.eq(action_type),
+            ont_rules::action_config.eq(action_config),
+            ont_rules::next_fire_at.eq(next_fire_at),
+            ont_rules::flow_config.eq(flow_config),
+            ont_rules::updated_at.eq(now),
+        ))
+        .get_result(&mut conn)
+    }
+
+    pub fn update_rule_status(&self, rule_id: i32, status: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_rules::table.filter(ont_rules::id.eq(rule_id)))
+            .set((
+                ont_rules::status.eq(status),
+                ont_rules::updated_at.eq(Self::now()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_rule_last_triggered(&self, rule_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_rules::table.filter(ont_rules::id.eq(rule_id)))
+            .set((
+                ont_rules::last_triggered_at.eq(Self::now()),
+                ont_rules::updated_at.eq(Self::now()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_rule_next_fire_at(
+        &self,
+        rule_id: i32,
+        next_fire_at: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_rules::table.filter(ont_rules::id.eq(rule_id)))
+            .set((
+                ont_rules::next_fire_at.eq(next_fire_at),
+                ont_rules::updated_at.eq(Self::now()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get all schedule-based rules that are due to fire.
+    pub fn get_due_schedule_rules(&self, now: i32) -> Result<Vec<OntRule>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_rules::table
+            .filter(ont_rules::trigger_type.eq("schedule"))
+            .filter(ont_rules::status.eq("active"))
+            .filter(ont_rules::next_fire_at.le(now))
+            .load(&mut conn)
+    }
+
+    /// Get all active ontology_change rules for a given user.
+    /// Caller is responsible for matching trigger_config filters against the entity data.
+    pub fn get_ontology_change_rules(&self, user_id: i32) -> Result<Vec<OntRule>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_rules::table
+            .filter(ont_rules::user_id.eq(user_id))
+            .filter(ont_rules::trigger_type.eq("ontology_change"))
+            .filter(ont_rules::status.eq("active"))
+            .load(&mut conn)
+    }
+
+    /// Count messages since a timestamp for a user.
+    pub fn count_messages_since(&self, user_id: i32, since_ts: i32) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .count()
+            .get_result(&mut conn)
+    }
+
+    /// Get recent messages from known persons (person_id IS NOT NULL) since a timestamp.
+    pub fn get_notifiable_messages(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::person_id.is_not_null())
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get distinct senders from ont_messages (for rule builder autocomplete).
+    pub fn get_distinct_senders(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<(String, String, i64)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Reuse SuggestionCandidate shape (room_id will be empty placeholder)
+        diesel::sql_query(
+            "SELECT sender_name, platform, '' as room_id, COUNT(*) as msg_count \
+             FROM ont_messages \
+             WHERE user_id = $1 \
+             GROUP BY sender_name, platform \
+             ORDER BY msg_count DESC \
+             LIMIT 200",
+        )
+        .bind::<diesel::sql_types::Int4, _>(user_id)
+        .load::<SuggestionCandidate>(&mut conn)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| (r.sender_name, r.platform, r.msg_count))
+                .collect()
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Changelog (for activity feed)
+    // -----------------------------------------------------------------------
+
+    /// Get recent changelog entries for a user.
+    pub fn get_recent_changelog(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<OntChangelog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_changelog::table
+            .filter(ont_changelog::user_id.eq(user_id))
+            .filter(ont_changelog::created_at.gt(since_ts))
+            .order(ont_changelog::created_at.desc())
+            .limit(limit)
+            .load::<OntChangelog>(&mut conn)
+    }
+
+    /// Expire rules past their expires_at timestamp.
+    pub fn expire_old_rules(&self, now: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_rules::table
+                .filter(ont_rules::status.eq("active"))
+                .filter(ont_rules::expires_at.is_not_null())
+                .filter(ont_rules::expires_at.le(now)),
+        )
+        .set((
+            ont_rules::status.eq("expired"),
+            ont_rules::updated_at.eq(now),
+        ))
+        .execute(&mut conn)
     }
 }

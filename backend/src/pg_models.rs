@@ -5,12 +5,12 @@
 
 use crate::pg_schema::{
     admin_alerts, bridge_disconnection_events, bridges, country_availability, disabled_alert_types,
-    imap_connection, items, mcp_servers, message_history, message_status_log, processed_emails,
+    imap_connection, mcp_servers, message_history, message_status_log, processed_emails,
     refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets, usage_logs, user_info,
     user_secrets, waitlist, webauthn_challenges, webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 // -- user_secrets (NEW table, consolidates matrix/twilio secrets) --
 
@@ -304,32 +304,6 @@ pub struct NewPgWebauthnChallenge {
     pub context: Option<String>,
     pub created_at: i32,
     pub expires_at: i32,
-}
-
-// -- items --
-
-#[derive(Queryable, Selectable, Insertable, Debug, Clone, Serialize, Deserialize)]
-#[diesel(table_name = items)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct PgItem {
-    pub id: i32,
-    pub user_id: i32,
-    pub summary: String,
-    pub due_at: Option<i32>,
-    pub priority: i32,
-    pub source_id: Option<String>,
-    pub created_at: i32,
-}
-
-#[derive(Insertable, Debug)]
-#[diesel(table_name = items)]
-pub struct NewPgItem {
-    pub user_id: i32,
-    pub summary: String,
-    pub due_at: Option<i32>,
-    pub priority: i32,
-    pub source_id: Option<String>,
-    pub created_at: i32,
 }
 
 // -- bridges --

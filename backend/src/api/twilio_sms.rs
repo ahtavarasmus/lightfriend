@@ -800,9 +800,11 @@ pub async fn process_sms(
 - State only what tool results returned. Note any gaps in data coverage.
 
 ### Behavior:
-- Recurring patterns (daily, every, weekly) mean the user wants an automated schedule - create a recurring item immediately, don't do the task manually this one time.
-- Time-specific requests (at Xpm, remind me, notify me when) are scheduling requests - create items.
-- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify an exact time, pick a reasonable default (e.g. 'morning' = 8:00, 'afternoon' = 14:00, 'evening' = 18:00, 'tonight' = 20:00). Never ask the user to clarify the time - just pick the most sensible time and go.
+- 'remind me', 'notify me at X', 'wake me at Y' -> use set_reminder immediately. Never answer these directly.
+- Recurring reminders ('daily at 9am remind me to X', 'every weekday at 8am') -> use set_reminder with a recurring pattern.
+- Complex recurring schedules with AI logic or tool actions (daily email briefings, check conditions) -> use create_rule with recurring schedule + llm logic.
+- Tracking conditions (notify me when X emails me, alert me if Y happens) -> use create_rule with ontology_change trigger.
+- When in doubt between set_reminder and create_rule: if it's just a notification with a message, use set_reminder. If it needs LLM evaluation, data fetching, or tool execution, use create_rule.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
@@ -989,7 +991,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         };
 
     // Terminal tools: produce final response, break the loop without going back to LLM
-    let terminal_tools = ["direct_response", "create_item"];
+    let terminal_tools = ["direct_response", "create_rule", "set_reminder"];
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new();

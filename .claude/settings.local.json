@@ -206,7 +206,18 @@
       "Bash(lsof:*)",
       "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo run:*)",
       "Bash(open -a \"Google Chrome\" http://localhost:8080)",
-      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo build)"
+      "Bash(DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib:/opt/homebrew/opt/libpq/lib cargo build)",
+      "Bash(1)",
+      "Bash(brew --prefix openssl@3)",
+      "Bash(brew --prefix sqlite3)",
+      "Bash(brew --prefix libpq)",
+      "Read(//opt/homebrew/Cellar/openssl@3/3.6.1/lib/**)",
+      "Read(//opt/homebrew/Cellar/sqlite/3.51.2_1/lib/**)",
+      "Read(//opt/homebrew/Cellar/libpq/18.1/lib/**)",
+      "Bash(env)",
+      "Bash(brew --prefix openssl)",
+      "Bash(openssl version:*)",
+      "Bash(psql:*)"
     ],
     "deny": [
       "Read(.env)",

@@ -20,7 +20,6 @@ pub async fn handle_query(
     match entity_type {
         "person" => query_person(&params, state, user_id),
         "channel" => query_channel(&params, state, user_id),
-        "item" => query_item(&params, state, user_id),
         _ => Err(format!("Unknown ontology entity type: {}", entity_type)),
     }
 }
@@ -83,7 +82,6 @@ fn query_person(
         return Ok("No people found matching your query.".to_string());
     }
 
-    let want_items = linked.contains(&"Item".to_string());
     let want_channels = linked.contains(&"Channel".to_string());
 
     let mut output = String::new();
@@ -103,32 +101,6 @@ fn query_person(
                     "  - {}{} (notification: {})\n",
                     ch.platform, handle_str, ch.notification_mode
                 ));
-            }
-        }
-
-        // Linked items (only if explicitly requested)
-        if want_items {
-            match state
-                .ontology_repository
-                .get_linked_items_for_person(user_id, p.person.id)
-            {
-                Ok(linked_items) if !linked_items.is_empty() => {
-                    output.push_str("Linked Items:\n");
-                    for (link, item) in &linked_items {
-                        let due = item
-                            .due_at
-                            .map(|d| format!(", due: {}", format_timestamp(d)))
-                            .unwrap_or_default();
-                        output.push_str(&format!(
-                            "  - \"{}\" (priority: {}{}) [{}]\n",
-                            item.summary, item.priority, due, link.link_type
-                        ));
-                    }
-                }
-                Ok(_) => {
-                    output.push_str("Linked Items: none\n");
-                }
-                Err(_) => {}
             }
         }
 
@@ -245,89 +217,6 @@ fn query_channel(
     Ok(output.trim().to_string())
 }
 
-fn query_item(
-    params: &serde_json::Value,
-    state: &Arc<AppState>,
-    user_id: i32,
-) -> Result<String, String> {
-    let priority_filter = param_str(params, "priority");
-    let query_filter = param_str(params, "query");
-    let linked = param_str_array(params, "linked_entities");
-
-    if priority_filter.is_none() && query_filter.is_none() {
-        return Err(
-            "Please specify a 'priority' or 'query' parameter to search for items.".to_string(),
-        );
-    }
-
-    let all_items = state
-        .item_repository
-        .get_items(user_id)
-        .map_err(|e| format!("Failed to query items: {}", e))?;
-
-    let mut items: Vec<&crate::pg_models::PgItem> = Vec::new();
-
-    for item in &all_items {
-        // Filter by priority
-        if let Some(ref prio) = priority_filter {
-            if prio != "all" {
-                if let Ok(p) = prio.parse::<i32>() {
-                    if item.priority != p {
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // Filter by query
-        if let Some(ref q) = query_filter {
-            if !item.summary.to_lowercase().contains(&q.to_lowercase()) {
-                continue;
-            }
-        }
-
-        items.push(item);
-    }
-
-    if items.is_empty() {
-        return Ok("No items found matching your query.".to_string());
-    }
-
-    let want_person = linked.contains(&"Person".to_string());
-
-    let mut output = String::new();
-    for item in &items {
-        let due = item
-            .due_at
-            .map(|d| format!(", due: {}", format_timestamp(d)))
-            .unwrap_or_default();
-        output.push_str(&format!(
-            "Item: \"{}\" (priority: {}{})\n",
-            item.summary, item.priority, due
-        ));
-
-        if want_person {
-            match state
-                .ontology_repository
-                .get_linked_persons_for_item(user_id, item.id)
-            {
-                Ok(linked_persons) if !linked_persons.is_empty() => {
-                    output.push_str("Linked Persons:\n");
-                    for (link, person) in &linked_persons {
-                        output.push_str(&format!("  - {} [{}]\n", person.name, link.link_type));
-                    }
-                }
-                Ok(_) => {
-                    output.push_str("Linked Persons: none\n");
-                }
-                Err(_) => {}
-            }
-        }
-    }
-
-    Ok(output.trim().to_string())
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -349,11 +238,4 @@ fn param_str_array(params: &serde_json::Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn format_timestamp(ts: i32) -> String {
-    use chrono::{DateTime, Utc};
-    DateTime::<Utc>::from_timestamp(ts as i64, 0)
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| ts.to_string())
 }
