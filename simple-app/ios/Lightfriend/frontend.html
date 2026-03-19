@@ -566,6 +566,70 @@
         .marked-section.visible {
             display: block;
         }
+        .chat-overview {
+            width: 100%;
+            max-width: 340px;
+            display: none;
+            flex-direction: column;
+            gap: 0.7rem;
+            margin-top: 0.95rem;
+            text-align: left;
+        }
+        .chat-overview.visible {
+            display: flex;
+        }
+        .overview-status {
+            display: none;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.8rem 0.9rem;
+            background: rgba(255, 184, 77, 0.08);
+            border: 1px solid rgba(255, 184, 77, 0.14);
+            border-radius: 14px;
+        }
+        .overview-status.visible {
+            display: flex;
+        }
+        .overview-status-icon {
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 184, 77, 0.14);
+            color: #ffb84d;
+            font-size: 0.9rem;
+        }
+        .overview-status-text {
+            font-size: 0.82rem;
+            line-height: 1.4;
+            color: rgba(255,255,255,0.86);
+        }
+        .overview-trust {
+            display: none;
+            flex-wrap: wrap;
+            gap: 0.4rem 0.55rem;
+        }
+        .overview-trust.visible {
+            display: flex;
+        }
+        .overview-stat {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.38rem 0.62rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: rgba(255,255,255,0.6);
+            font-size: 0.72rem;
+            letter-spacing: 0.01em;
+        }
+        .overview-stat i {
+            color: #7EB2FF;
+        }
         .marked-section-header {
             display: flex;
             align-items: center;
@@ -1537,12 +1601,21 @@
                         Voit kysyä mitä vain — säätä, uutisia, muistutuksia tai vaikka YouTube-videoita. Kokeile jotain näistä:
                     </div>
                     <div class="suggestion-cards-grid" id="suggestion-grid"></div>
-                    <div class="marked-section" id="marked-section">
-                        <div class="marked-section-header">
-                            <div class="marked-section-title">Merkatut viestit</div>
-                            <div class="marked-section-count" id="marked-count"></div>
+                    <div class="chat-overview" id="chat-overview">
+                        <div class="overview-status" id="overview-status">
+                            <div class="overview-status-icon">
+                                <i class="fa-solid fa-bell"></i>
+                            </div>
+                            <div class="overview-status-text" id="overview-status-text"></div>
                         </div>
-                        <div class="marked-list" id="marked-list"></div>
+                        <div class="overview-trust" id="overview-trust"></div>
+                        <div class="marked-section" id="marked-section">
+                            <div class="marked-section-header">
+                                <div class="marked-section-title">Merkatut viestit</div>
+                                <div class="marked-section-count" id="marked-count"></div>
+                            </div>
+                            <div class="marked-list" id="marked-list"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2602,44 +2675,80 @@ function pinnedPlatformLabel(platform) {
 }
 
 async function loadPinnedMessages() {
+    const overview = document.getElementById('chat-overview');
+    const status = document.getElementById('overview-status');
+    const statusText = document.getElementById('overview-status-text');
+    const trust = document.getElementById('overview-trust');
     const section = document.getElementById('marked-section');
     const list = document.getElementById('marked-list');
     const count = document.getElementById('marked-count');
-    if (!section || !list || !count || !token) return;
+    if (!overview || !status || !statusText || !trust || !section || !list || !count || !token) return;
 
     try {
         const res = await api('/api/dashboard/summary');
         if (!res.ok) throw new Error('Failed to load summary');
         const data = await res.json();
+        const actionItems = Array.isArray(data.action_items) ? data.action_items : [];
         const pinned = Array.isArray(data.pinned_messages) ? data.pinned_messages.slice(0, 4) : [];
+        const stats = [
+            data.messages_handled_today > 0 ? { icon: 'fa-solid fa-envelope-open-text', label: data.messages_handled_today + ' messages handled' } : null,
+            data.notifications_sent_today > 0 ? { icon: 'fa-solid fa-bell', label: data.notifications_sent_today + ' notifications sent' } : null,
+            data.rules_active > 0 ? { icon: 'fa-solid fa-wand-magic-sparkles', label: data.rules_active + (data.rules_active === 1 ? ' rule active' : ' rules active') } : null,
+        ].filter(Boolean);
 
         list.innerHTML = '';
+        trust.innerHTML = '';
+
+        if (actionItems.length) {
+            statusText.textContent = actionItems.length === 1
+                ? '1 message needs your attention'
+                : actionItems.length + ' messages need your attention';
+            status.classList.add('visible');
+        } else {
+            status.classList.remove('visible');
+        }
+
+        if (stats.length) {
+            for (const stat of stats) {
+                const pill = document.createElement('div');
+                pill.className = 'overview-stat';
+                pill.innerHTML = '<i class="' + stat.icon + '"></i><span>' + escapeHtml(stat.label) + '</span>';
+                trust.appendChild(pill);
+            }
+            trust.classList.add('visible');
+        } else {
+            trust.classList.remove('visible');
+        }
 
         if (!pinned.length) {
             section.classList.remove('visible');
             count.textContent = '';
-            return;
+        } else {
+            count.textContent = pinned.length === 1 ? '1 viesti' : pinned.length + ' viestiä';
+
+            for (const msg of pinned) {
+                const card = document.createElement('div');
+                card.className = 'marked-card';
+                card.innerHTML =
+                    '<div class="marked-card-icon"><i class="' + pinnedPlatformIcon(msg.platform) + '"></i></div>' +
+                    '<div class="marked-card-body">' +
+                        '<div class="marked-card-topline">' +
+                            '<div class="marked-card-sender">' + escapeHtml(msg.sender_name || 'Unknown') + '</div>' +
+                            '<div class="marked-card-platform">' + escapeHtml(pinnedPlatformLabel(msg.platform)) + '</div>' +
+                        '</div>' +
+                        '<div class="marked-card-preview">' + escapeHtml(msg.content || '') + '</div>' +
+                    '</div>';
+                list.appendChild(card);
+            }
+
+            section.classList.add('visible');
         }
 
-        count.textContent = pinned.length === 1 ? '1 viesti' : pinned.length + ' viestiä';
-
-        for (const msg of pinned) {
-            const card = document.createElement('div');
-            card.className = 'marked-card';
-            card.innerHTML =
-                '<div class="marked-card-icon"><i class="' + pinnedPlatformIcon(msg.platform) + '"></i></div>' +
-                '<div class="marked-card-body">' +
-                    '<div class="marked-card-topline">' +
-                        '<div class="marked-card-sender">' + escapeHtml(msg.sender_name || 'Unknown') + '</div>' +
-                        '<div class="marked-card-platform">' + escapeHtml(pinnedPlatformLabel(msg.platform)) + '</div>' +
-                    '</div>' +
-                    '<div class="marked-card-preview">' + escapeHtml(msg.content || '') + '</div>' +
-                '</div>';
-            list.appendChild(card);
-        }
-
-        section.classList.add('visible');
+        overview.classList.toggle('visible', actionItems.length > 0 || stats.length > 0 || pinned.length > 0);
     } catch {
+        overview.classList.remove('visible');
+        status.classList.remove('visible');
+        trust.classList.remove('visible');
         section.classList.remove('visible');
         count.textContent = '';
     }
