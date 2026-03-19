@@ -558,6 +558,90 @@
             font-size: 0.8rem;
             line-height: 1.5;
         }
+        .marked-section {
+            width: 100%;
+            margin-top: 1rem;
+            display: none;
+        }
+        .marked-section.visible {
+            display: block;
+        }
+        .marked-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.7rem;
+        }
+        .marked-section-title {
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.38);
+        }
+        .marked-section-count {
+            font-size: 0.72rem;
+            color: rgba(126,178,255,0.75);
+        }
+        .marked-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.55rem;
+        }
+        .marked-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.7rem;
+            width: 100%;
+            padding: 0.8rem 0.9rem;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+        }
+        .marked-card-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(126,178,255,0.12);
+            color: #7EB2FF;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+        .marked-card-body {
+            min-width: 0;
+            flex: 1;
+        }
+        .marked-card-topline {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.18rem;
+        }
+        .marked-card-sender {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #f5f8ff;
+        }
+        .marked-card-platform {
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.32);
+            flex-shrink: 0;
+        }
+        .marked-card-preview {
+            font-size: 0.78rem;
+            line-height: 1.45;
+            color: rgba(255,255,255,0.58);
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
 
         /* Quick reply buttons */
         .quick-reply-container {
@@ -962,6 +1046,9 @@
         .conn-icon.telegram { background: rgba(0,136,204,0.15); color: #0088cc; }
         .conn-icon.signal { background: rgba(59,134,247,0.15); color: #3b86f7; }
         .conn-icon.email { background: rgba(234,67,53,0.15); color: #ea4335; }
+        .conn-icon.youtube { background: rgba(255,0,0,0.15); color: #ff3b30; }
+        .conn-icon.tesla { background: rgba(227,25,55,0.15); color: #e31937; }
+        .conn-icon.mcp { background: rgba(126,178,255,0.15); color: #7eb2ff; }
         .conn-info { flex: 1; }
         .conn-info h3 { font-size: 0.95rem; font-weight: 500; }
         .conn-info p { font-size: 0.8rem; color: rgba(255,255,255,0.4); }
@@ -1015,7 +1102,7 @@
             padding: 1rem;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 1.1rem;
             overflow-y: auto;
             flex: 1;
         }
@@ -1025,6 +1112,115 @@
             border-radius: 14px;
             overflow: hidden;
         }
+        .wellbeing-hero {
+            position: relative;
+            overflow: hidden;
+            padding: 1.15rem 1.1rem 1.05rem;
+            border-radius: 22px;
+            border: 1px solid rgba(126,178,255,0.18);
+            background:
+                radial-gradient(circle at top right, rgba(126,178,255,0.24), transparent 42%),
+                radial-gradient(circle at bottom left, rgba(105,240,174,0.14), transparent 35%),
+                linear-gradient(145deg, rgba(14,18,28,0.96), rgba(18,24,38,0.92));
+            box-shadow:
+                0 18px 40px rgba(0,0,0,0.28),
+                inset 0 1px 0 rgba(255,255,255,0.06);
+        }
+        .wellbeing-hero::after {
+            content: '';
+            position: absolute;
+            inset: auto -10% -35% auto;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(126,178,255,0.22), rgba(126,178,255,0));
+            pointer-events: none;
+        }
+        .wellbeing-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.38rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(198,220,255,0.9);
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(10px);
+        }
+        .wellbeing-kicker i {
+            color: #8ad4ff;
+            font-size: 0.8rem;
+        }
+        .wellbeing-hero h3 {
+            margin: 0.9rem 0 0.45rem;
+            font-size: 1.4rem;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            color: #f4f8ff;
+        }
+        .wellbeing-hero p {
+            margin: 0;
+            max-width: 280px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: rgba(225,235,255,0.7);
+        }
+        .wellbeing-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.6rem;
+            margin-top: 1rem;
+        }
+        .wellbeing-stat {
+            padding: 0.75rem 0.8rem;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.07);
+            backdrop-filter: blur(10px);
+        }
+        .wellbeing-stat strong {
+            display: block;
+            margin-bottom: 0.18rem;
+            font-size: 0.95rem;
+            color: #f8fbff;
+        }
+        .wellbeing-stat span {
+            font-size: 0.72rem;
+            color: rgba(220,230,245,0.6);
+        }
+        .wellbeing-section {
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+        }
+        .wellbeing-section h3 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1rem 0.45rem;
+            font-size: 0.8rem;
+            letter-spacing: 0.1em;
+            color: rgba(215,228,255,0.55);
+        }
+        .wellbeing-section h3::after {
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            text-transform: none;
+            color: rgba(126,178,255,0.72);
+        }
+        .digest-section {
+            background:
+                linear-gradient(180deg, rgba(18,22,31,0.98), rgba(15,18,25,0.96));
+        }
+        .digest-section h3::after { content: 'Rhythm'; }
+        .quiet-section {
+            background:
+                linear-gradient(180deg, rgba(18,24,30,0.98), rgba(12,18,23,0.96));
+        }
+        .quiet-section h3::after { content: 'Recovery'; }
         .settings-section h3 {
             font-size: 0.75rem;
             text-transform: uppercase;
@@ -1042,9 +1238,48 @@
         }
         .setting-row:first-child { border-top: none; }
         .setting-row:hover { background: rgba(255,255,255,0.02); }
+        .wellbeing-section .setting-row {
+            padding: 0.95rem 1rem;
+            border-top-color: rgba(255,255,255,0.05);
+        }
+        .wellbeing-section .setting-row:hover {
+            background: rgba(255,255,255,0.035);
+        }
+        .setting-row.highlight-row {
+            align-items: flex-end;
+        }
         .setting-label {
             font-size: 0.9rem;
             color: rgba(255,255,255,0.8);
+        }
+        .setting-title {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            font-weight: 600;
+            color: #f5f8ff;
+        }
+        .setting-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(126,178,255,0.12);
+            color: #8ab8ff;
+            border: 1px solid rgba(126,178,255,0.16);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+        }
+        .setting-icon.green {
+            background: rgba(105,240,174,0.12);
+            color: #7cf0bd;
+            border-color: rgba(105,240,174,0.14);
+        }
+        .setting-icon.amber {
+            background: rgba(255,197,84,0.12);
+            color: #ffd676;
+            border-color: rgba(255,197,84,0.15);
         }
         .setting-label small {
             display: block;
@@ -1052,24 +1287,34 @@
             color: rgba(255,255,255,0.35);
             margin-top: 0.1rem;
         }
+        .setting-side-note {
+            font-size: 0.72rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.32);
+        }
 
         /* Time input */
         .time-input {
-            background: rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 0.4rem 0.6rem;
+            background: rgba(6,10,18,0.62);
+            border: 1px solid rgba(126,178,255,0.16);
+            border-radius: 12px;
+            padding: 0.55rem 0.7rem;
             color: #fff;
             font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
             font-family: inherit;
             outline: none;
-            width: 90px;
+            width: 98px;
             text-align: center;
-            transition: border-color 0.3s, box-shadow 0.3s;
+            transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
         .time-input:focus {
-            border-color: rgba(126,178,255,0.4);
-            box-shadow: 0 0 0 3px rgba(126,178,255,0.08);
+            border-color: rgba(126,178,255,0.5);
+            box-shadow: 0 0 0 3px rgba(126,178,255,0.12);
+            transform: translateY(-1px);
         }
 
         /* Toggle switch */
@@ -1105,15 +1350,16 @@
         .btn-sm {
             padding: 0.5rem 1rem;
             font-size: 0.85rem;
-            border-radius: 10px;
-            background: rgba(126,178,255,0.12);
-            color: #7EB2FF;
-            border: 1px solid rgba(126,178,255,0.2);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(126,178,255,0.18), rgba(126,178,255,0.1));
+            color: #c7ddff;
+            border: 1px solid rgba(126,178,255,0.22);
             cursor: pointer;
             font-family: inherit;
             transition: all 0.2s;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
         }
-        .btn-sm:hover { background: rgba(126,178,255,0.2); transform: translateY(-1px); }
+        .btn-sm:hover { background: linear-gradient(180deg, rgba(126,178,255,0.24), rgba(126,178,255,0.14)); transform: translateY(-1px); }
         .btn-sm:active { transform: translateY(0); }
 
         .btn-danger {
@@ -1130,6 +1376,26 @@
             transition: opacity 0.3s;
         }
         .save-indicator.show { opacity: 1; }
+        .wellbeing-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.8rem;
+        }
+        .quiet-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.38rem 0.62rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: rgba(228,236,248,0.72);
+            font-size: 0.74rem;
+        }
+        .quiet-pill i {
+            color: #8ab8ff;
+        }
 
         /* About section */
         .about-info {
@@ -1140,6 +1406,11 @@
         }
         .about-info a { color: rgba(126,178,255,0.6); text-decoration: none; }
         .about-info a:hover { text-decoration: underline; }
+        @media (max-width: 390px) {
+            .wellbeing-stats {
+                grid-template-columns: 1fr;
+            }
+        }
 
         /* ===== LOGOUT DIALOG ===== */
         .dialog-overlay {
@@ -1296,6 +1567,13 @@
                         Voit kysyä mitä vain — säätä, uutisia, muistutuksia tai vaikka YouTube-videoita. Kokeile jotain näistä:
                     </div>
                     <div class="suggestion-cards-grid" id="suggestion-grid"></div>
+                    <div class="marked-section" id="marked-section">
+                        <div class="marked-section-header">
+                            <div class="marked-section-title">Merkatut viestit</div>
+                            <div class="marked-section-count" id="marked-count"></div>
+                        </div>
+                        <div class="marked-list" id="marked-list"></div>
+                    </div>
                 </div>
             </div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChat()">
@@ -1307,24 +1585,6 @@
                 <div class="contact-dropdown" id="contact-dropdown"></div>
                 <textarea id="chat-input" placeholder="Message..." rows="1"></textarea>
                 <button class="chat-send" id="chat-send-btn" onclick="sendChat()"><i class="fa-solid fa-arrow-up"></i></button>
-            </div>
-        </div>
-
-        <!-- CALL -->
-        <div id="panel-call" class="tab-panel">
-            <div class="call-panel">
-                <div class="call-avatar" id="call-avatar">
-                    <i class="fa-solid fa-phone"></i>
-                </div>
-                <div class="call-status">
-                    <h2 id="call-status-text">Voice assistant</h2>
-                    <p id="call-status-sub">Tap to start a call</p>
-                </div>
-                <div class="call-timer" id="call-timer" style="display:none">00:00</div>
-                <button class="call-btn start" id="call-btn" onclick="toggleCall()">
-                    <i class="fa-solid fa-phone"></i>
-                </button>
-                <div class="call-credits" id="call-credits"></div>
             </div>
         </div>
 
@@ -1353,38 +1613,88 @@
                     <div class="conn-info"><h3>Email</h3><p>IMAP</p></div>
                     <span class="conn-status-badge loading"><span class="dot"></span>...</span>
                 </div>
+                <div class="conn-item" data-service="youtube">
+                    <div class="conn-icon youtube"><i class="fa-brands fa-youtube"></i></div>
+                    <div class="conn-info"><h3>YouTube</h3><p>Subscriptions</p></div>
+                    <span class="conn-status-badge loading"><span class="dot"></span>...</span>
+                </div>
+                <div class="conn-item" data-service="tesla">
+                    <div class="conn-icon tesla"><i class="fa-solid fa-car-side"></i></div>
+                    <div class="conn-info"><h3>Tesla</h3><p>Vehicle</p></div>
+                    <span class="conn-status-badge loading"><span class="dot"></span>...</span>
+                </div>
+                <div class="conn-item" data-service="mcp">
+                    <div class="conn-icon mcp"><i class="fa-solid fa-plug-circle-bolt"></i></div>
+                    <div class="conn-info"><h3>MCP</h3><p>Servers</p></div>
+                    <span class="conn-status-badge loading"><span class="dot"></span>...</span>
+                </div>
             </div>
         </div>
 
         <!-- SETTINGS -->
         <div id="panel-settings" class="tab-panel">
             <div class="settings-list">
+                <div class="wellbeing-hero">
+                    <div class="wellbeing-kicker"><i class="fa-solid fa-sparkles"></i>Wellbeing</div>
+                    <h3>Make the app feel calmer and more intentional</h3>
+                    <p>Shape the rhythm of your updates and protect your attention when you want more quiet.</p>
+                    <div class="wellbeing-stats">
+                        <div class="wellbeing-stat">
+                            <strong>3x</strong>
+                            <span>Digest checkpoints</span>
+                        </div>
+                        <div class="wellbeing-stat">
+                            <strong>Focus</strong>
+                            <span>Fewer interruptions</span>
+                        </div>
+                        <div class="wellbeing-stat">
+                            <strong>Quiet</strong>
+                            <span>One-tap reset</span>
+                        </div>
+                    </div>
+                </div>
                 <!-- Digests -->
-                <div class="settings-section">
+                <div class="settings-section wellbeing-section digest-section">
                     <h3>Digests</h3>
                     <div class="setting-row">
-                        <div class="setting-label">Morning<small>Daily morning summary</small></div>
+                        <div class="setting-label">
+                            <div class="setting-title"><span class="setting-icon amber"><i class="fa-solid fa-sun"></i></span>Morning</div>
+                            <small>Daily morning summary</small>
+                        </div>
                         <input type="time" class="time-input" id="digest-morning" onchange="saveDigests()">
                     </div>
                     <div class="setting-row">
-                        <div class="setting-label">Day<small>Midday update</small></div>
+                        <div class="setting-label">
+                            <div class="setting-title"><span class="setting-icon"><i class="fa-solid fa-cloud-sun"></i></span>Day</div>
+                            <small>Midday update</small>
+                        </div>
                         <input type="time" class="time-input" id="digest-day" onchange="saveDigests()">
                     </div>
                     <div class="setting-row">
-                        <div class="setting-label">Evening<small>End of day summary</small></div>
+                        <div class="setting-label">
+                            <div class="setting-title"><span class="setting-icon green"><i class="fa-solid fa-moon-stars"></i></span>Evening</div>
+                            <small>End of day summary</small>
+                        </div>
                         <input type="time" class="time-input" id="digest-evening" onchange="saveDigests()">
                     </div>
-                    <div class="setting-row">
-                        <span class="save-indicator" id="digest-saved">Saved</span>
+                    <div class="setting-row highlight-row">
+                        <div class="wellbeing-footer">
+                            <span class="save-indicator" id="digest-saved">Saved</span>
+                            <span class="setting-side-note">On-demand summary</span>
+                        </div>
                         <button class="btn-sm" onclick="getInstantDigest()">Get digest now</button>
                     </div>
                 </div>
 
                 <!-- Quiet mode -->
-                <div class="settings-section">
+                <div class="settings-section wellbeing-section quiet-section">
                     <h3>Quiet mode</h3>
-                    <div class="setting-row">
-                        <div class="setting-label">Do not disturb<small id="quiet-status-text">Off</small></div>
+                    <div class="setting-row highlight-row">
+                        <div class="setting-label">
+                            <div class="setting-title"><span class="setting-icon"><i class="fa-solid fa-bell-slash"></i></span>Do not disturb</div>
+                            <small id="quiet-status-text">Off</small>
+                        </div>
+                        <div class="quiet-pill"><i class="fa-solid fa-leaf"></i>Calmer delivery</div>
                         <label class="toggle">
                             <input type="checkbox" id="quiet-toggle" onchange="toggleQuietMode()">
                             <span class="toggle-slider"></span>
@@ -1415,10 +1725,6 @@
         <button class="tab-btn active" onclick="switchTab('chat', this)">
             <i class="fa-solid fa-comment"></i>
             <span>Chat</span>
-        </button>
-        <button class="tab-btn" onclick="switchTab('call', this)">
-            <i class="fa-solid fa-phone"></i>
-            <span>Call</span>
         </button>
         <button class="tab-btn" onclick="switchTab('connections', this)">
             <i class="fa-solid fa-plug"></i>
@@ -1525,11 +1831,13 @@ function showApp() {
     document.getElementById('app').classList.add('active');
     document.getElementById('account-email').textContent = userEmail || '';
     loadConnectionStatuses();
+    loadPinnedMessages();
     loadDigestSettings();
     loadQuietMode();
     checkCallCredits();
     loadMentionShortcuts();
     loadContacts();
+    if (window._registerPushToken) window._registerPushToken();
 }
 
 // ===== TABS =====
@@ -1538,6 +1846,7 @@ function switchTab(name, btn) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('panel-' + name).classList.add('active');
     if (btn) btn.classList.add('active');
+    if (name === 'chat') loadPinnedMessages();
     if (name === 'connections') loadConnectionStatuses();
     if (name === 'settings') { loadDigestSettings(); loadQuietMode(); }
     if (name === 'call') checkCallCredits();
@@ -1566,19 +1875,19 @@ async function api(path, opts = {}) {
 }
 
 async function tryRefresh() {
-    if (!refreshToken) return false;
     try {
         const res = await fetch(API + '/api/auth/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken })
+            method: 'POST'
         });
         if (!res.ok) return false;
         const data = await res.json();
-        token = data.access_token;
-        if (data.refresh_token) refreshToken = data.refresh_token;
+        token = data.access_token || data.token || null;
+        if (!token) return false;
+        if (data.refresh_token) {
+            refreshToken = data.refresh_token;
+            localStorage.setItem('lf_refresh', refreshToken);
+        }
         localStorage.setItem('lf_token', token);
-        localStorage.setItem('lf_refresh', refreshToken);
         return true;
     } catch { return false; }
 }
@@ -1613,11 +1922,13 @@ async function handleLogin(e) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.message || 'Login failed');
         if (data.requires_2fa) { showMsg('login-msg', 'error', '2FA not supported in this app yet'); return; }
-        token = data.access_token;
-        refreshToken = data.refresh_token;
+        token = data.access_token || data.token || null;
+        if (!token) throw new Error('Login response missing access token');
+        refreshToken = data.refresh_token || null;
         userEmail = email;
         localStorage.setItem('lf_token', token);
-        localStorage.setItem('lf_refresh', refreshToken);
+        if (refreshToken) localStorage.setItem('lf_refresh', refreshToken);
+        else localStorage.removeItem('lf_refresh');
         localStorage.setItem('lf_email', userEmail);
         showApp();
     } catch (err) {
@@ -2379,6 +2690,71 @@ function buildItemPreview(itemId) {
     return preview;
 }
 
+function pinnedPlatformIcon(platform) {
+    switch ((platform || '').toLowerCase()) {
+        case 'whatsapp': return 'fa-brands fa-whatsapp';
+        case 'telegram': return 'fa-brands fa-telegram';
+        case 'signal': return 'fa-solid fa-comment-dots';
+        case 'email': return 'fa-solid fa-envelope';
+        default: return 'fa-solid fa-bookmark';
+    }
+}
+
+function pinnedPlatformLabel(platform) {
+    switch ((platform || '').toLowerCase()) {
+        case 'imap':
+        case 'email': return 'Email';
+        case 'whatsapp': return 'WhatsApp';
+        case 'telegram': return 'Telegram';
+        case 'signal': return 'Signal';
+        default: return platform || 'Message';
+    }
+}
+
+async function loadPinnedMessages() {
+    const section = document.getElementById('marked-section');
+    const list = document.getElementById('marked-list');
+    const count = document.getElementById('marked-count');
+    if (!section || !list || !count || !token) return;
+
+    try {
+        const res = await api('/api/dashboard/summary');
+        if (!res.ok) throw new Error('Failed to load summary');
+        const data = await res.json();
+        const pinned = Array.isArray(data.pinned_messages) ? data.pinned_messages.slice(0, 4) : [];
+
+        list.innerHTML = '';
+
+        if (!pinned.length) {
+            section.classList.remove('visible');
+            count.textContent = '';
+            return;
+        }
+
+        count.textContent = pinned.length === 1 ? '1 viesti' : pinned.length + ' viestiä';
+
+        for (const msg of pinned) {
+            const card = document.createElement('div');
+            card.className = 'marked-card';
+            card.innerHTML =
+                '<div class="marked-card-icon"><i class="' + pinnedPlatformIcon(msg.platform) + '"></i></div>' +
+                '<div class="marked-card-body">' +
+                    '<div class="marked-card-topline">' +
+                        '<div class="marked-card-sender">' + escapeHtml(msg.sender_name || 'Unknown') + '</div>' +
+                        '<div class="marked-card-platform">' + escapeHtml(pinnedPlatformLabel(msg.platform)) + '</div>' +
+                    '</div>' +
+                    '<div class="marked-card-preview">' + escapeHtml(msg.content || '') + '</div>' +
+                '</div>';
+            list.appendChild(card);
+        }
+
+        section.classList.add('visible');
+    } catch {
+        section.classList.remove('visible');
+        count.textContent = '';
+    }
+}
+
 // ===== VOICE CALL (ElevenLabs) =====
 async function checkCallCredits() {
     try {
@@ -2536,6 +2912,9 @@ async function loadConnectionStatuses() {
         { key: 'telegram', path: '/api/auth/telegram/status' },
         { key: 'signal', path: '/api/auth/signal/status' },
         { key: 'imap', path: '/api/auth/imap/status' },
+        { key: 'youtube', path: '/api/auth/youtube/status' },
+        { key: 'tesla', path: '/api/auth/tesla/status', connectedKey: 'has_tesla', connectedLabel: 'Tesla account' },
+        { key: 'mcp', path: '/api/mcp/servers', isList: true, connectedLabel: 'Server configured' },
     ];
 
     for (const svc of services) {
@@ -2545,12 +2924,26 @@ async function loadConnectionStatuses() {
         try {
             const res = await api(svc.path);
             const data = await res.json();
-            if (data.connected) {
+            const connected = svc.isList
+                ? Array.isArray(data) && data.length > 0
+                : Boolean(data[svc.connectedKey || 'connected']);
+
+            if (connected) {
                 statusEl.className = 'conn-status-badge on';
                 statusEl.innerHTML = '<span class="dot"></span>Connected';
                 const info = item.querySelector('.conn-info p');
-                if (data.connected_account) info.textContent = data.connected_account;
-                else if (data.email) info.textContent = data.email;
+                if (svc.key === 'mcp') {
+                    const count = Array.isArray(data) ? data.length : 0;
+                    info.textContent = count === 1 ? '1 server configured' : count + ' servers configured';
+                } else if (data.connected_account) {
+                    info.textContent = data.connected_account;
+                } else if (data.email) {
+                    info.textContent = data.email;
+                } else if (data.scope) {
+                    info.textContent = 'Scope: ' + data.scope;
+                } else if (svc.connectedLabel) {
+                    info.textContent = svc.connectedLabel;
+                }
             } else {
                 statusEl.className = 'conn-status-badge off';
                 statusEl.innerHTML = '<span class="dot"></span>Not connected';
