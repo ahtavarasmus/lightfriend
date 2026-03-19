@@ -43,8 +43,7 @@ services:
       FRONTEND_URL: "http://localhost:8080"
       PORT: 3000
       ENVIRONMENT: development
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OPENROUTER_API_KEY: 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
+      TINFOIL_API_KEY: ${TINFOIL_API_KEY}
     volumes:
       - core_data:/app/data
       - core_uploads:/app/uploads
