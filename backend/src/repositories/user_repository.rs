@@ -11,12 +11,9 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{
-        Bridge, ContactProfile, ContactProfileException, NewBridge, NewContactProfile,
-        NewContactProfileException, NewImapConnection, NewUsageLog, User,
-    },
-    schema::{contact_profile_exceptions, contact_profiles, message_status_log, usage_logs, users},
-    DbPool,
+    pg_models::{NewPgBridge, NewPgImapConnection, NewPgUsageLog, PgBridge},
+    pg_schema::usage_logs,
+    PgDbPool,
 };
 
 /// Type alias for IMAP credentials: (description, password, server, port)
@@ -36,30 +33,12 @@ pub struct LogUsageParams {
     pub zero_credits_timestamp: Option<i32>,
 }
 
-/// Parameters for updating a contact profile
-pub struct UpdateContactProfileParams {
-    pub user_id: i32,
-    pub profile_id: i32,
-    pub nickname: String,
-    pub whatsapp_chat: Option<String>,
-    pub telegram_chat: Option<String>,
-    pub signal_chat: Option<String>,
-    pub email_addresses: Option<String>,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
-    pub whatsapp_room_id: Option<String>,
-    pub telegram_room_id: Option<String>,
-    pub signal_room_id: Option<String>,
-    pub notes: Option<String>,
-}
-
 pub struct UserRepository {
-    pub pool: DbPool,
+    pub pool: PgDbPool,
 }
 
 impl UserRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 
@@ -68,8 +47,8 @@ impl UserRepository {
         user_id: i32,
         limit: i64,
         include_tools: bool,
-    ) -> Result<Vec<crate::models::user_models::MessageHistory>, diesel::result::Error> {
-        use crate::schema::message_history;
+    ) -> Result<Vec<crate::pg_models::PgMessageHistory>, diesel::result::Error> {
+        use crate::pg_schema::message_history;
         use crate::utils::encryption;
         use diesel::prelude::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -81,7 +60,7 @@ impl UserRepository {
                 .filter(message_history::role.eq("user"))
                 .order_by(message_history::created_at.desc())
                 .limit(limit)
-                .load::<crate::models::user_models::MessageHistory>(&mut conn)?
+                .load::<crate::pg_models::PgMessageHistory>(&mut conn)?
         } else {
             message_history::table
                 .filter(message_history::user_id.eq(user_id))
@@ -89,7 +68,7 @@ impl UserRepository {
                 .filter(message_history::role.eq("user"))
                 .order_by(message_history::created_at.desc())
                 .limit(limit)
-                .load::<crate::models::user_models::MessageHistory>(&mut conn)?
+                .load::<crate::pg_models::PgMessageHistory>(&mut conn)?
         };
         if user_messages.is_empty() {
             return Ok(Vec::new());
@@ -101,7 +80,7 @@ impl UserRepository {
             .filter(message_history::user_id.eq(user_id))
             .filter(message_history::created_at.ge(oldest_timestamp))
             .order_by(message_history::created_at.desc())
-            .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
+            .load::<crate::pg_models::PgMessageHistory>(&mut conn)?;
         // Decrypt the content of each message and filter out empty assistant messages
         let mut decrypted_messages = Vec::new();
         for mut msg in encrypted_messages {
@@ -129,9 +108,9 @@ impl UserRepository {
 
     pub fn create_message_history(
         &self,
-        new_message: &crate::models::user_models::NewMessageHistory,
+        new_message: &crate::pg_models::NewPgMessageHistory,
     ) -> Result<(), DieselError> {
-        use crate::schema::message_history;
+        use crate::pg_schema::message_history;
         use crate::utils::encryption;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -142,7 +121,7 @@ impl UserRepository {
                 DieselError::RollbackTransaction
             })?;
 
-        let encrypted_message = crate::models::user_models::NewMessageHistory {
+        let encrypted_message = crate::pg_models::NewPgMessageHistory {
             user_id: new_message.user_id,
             role: new_message.role.clone(),
             encrypted_content,
@@ -165,7 +144,7 @@ impl UserRepository {
         user_id: i32,
         save_context_limit: i64,
     ) -> Result<usize, diesel::result::Error> {
-        use crate::schema::message_history;
+        use crate::pg_schema::message_history;
         use diesel::prelude::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -208,7 +187,7 @@ impl UserRepository {
         imap_server: Option<&str>,
         imap_port: Option<u16>,
     ) -> Result<(), diesel::result::Error> {
-        use crate::schema::imap_connection;
+        use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt password
@@ -226,7 +205,7 @@ impl UserRepository {
             .execute(&mut conn)?;
 
         // Create new connection
-        let new_connection = NewImapConnection {
+        let new_connection = NewPgImapConnection {
             user_id,
             method: imap_server
                 .map(|s| s.to_string())
@@ -252,14 +231,14 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<ImapCredentials>, diesel::result::Error> {
-        use crate::schema::imap_connection;
+        use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Get the active IMAP connection for the user
         let imap_conn = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
             .filter(imap_connection::status.eq("active"))
-            .first::<crate::models::user_models::ImapConnection>(&mut conn)
+            .first::<crate::pg_models::PgImapConnection>(&mut conn)
             .optional()?;
 
         if let Some(conn) = imap_conn {
@@ -279,7 +258,7 @@ impl UserRepository {
     }
 
     pub fn delete_imap_credentials(&self, user_id: i32) -> Result<(), diesel::result::Error> {
-        use crate::schema::imap_connection;
+        use crate::pg_schema::imap_connection;
         let connection = &mut self.pool.get().unwrap();
 
         diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
@@ -289,18 +268,17 @@ impl UserRepository {
     }
 
     // log the usage. activity_type either 'call' or 'sms', or the new 'notification'
+    // NOTE: User existence verification removed - users table is in SQLite, not PG.
+    // Callers should verify user existence via UserCore before calling this.
     pub fn log_usage(&self, params: LogUsageParams) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Verify user exists
-        users::table.find(params.user_id).first::<User>(&mut conn)?;
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i32;
 
-        let new_log = NewUsageLog {
+        let new_log = NewPgUsageLog {
             user_id: params.user_id,
             sid: params.sid,
             activity_type: params.activity_type,
@@ -320,18 +298,45 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
-        let charge_back_threshold = std::env::var("CHARGE_BACK_THRESHOLD")
-            .unwrap_or_else(|_| "2.0".to_string())
-            .parse::<f32>()
-            .unwrap_or(2.00);
+    // TODO(pg-migration): is_credits_under_threshold moved to UserCore - it queries
+    // the users table which remains in SQLite. Callers should use UserCore instead.
 
+    /// Count successful notification-related usage logs since a timestamp.
+    pub fn count_notifications_since(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<i64, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table.find(user_id).first::<User>(&mut conn)?;
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .filter(usage_logs::success.eq(true))
+            .filter(
+                usage_logs::activity_type
+                    .like("%_sms")
+                    .or(usage_logs::activity_type.like("%_call"))
+                    .or(usage_logs::activity_type.eq("noti_msg"))
+                    .or(usage_logs::activity_type.eq("noti_call")),
+            )
+            .count()
+            .get_result(&mut conn)
+    }
 
-        // Only trigger auto-recharge if BOTH credits AND credits_left are low
-        // This prevents unnecessary charges when user still has monthly allowance
-        Ok(user.credits < charge_back_threshold && user.credits_left < charge_back_threshold)
+    /// Get recent usage logs for a user (for activity feed).
+    pub fn get_recent_usage_logs(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<crate::pg_models::PgUsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .order(usage_logs::created_at.desc())
+            .limit(limit)
+            .load(&mut conn)
     }
 
     pub fn get_usage_data(
@@ -379,7 +384,7 @@ impl UserRepository {
             return Ok(example_data);
         }
         println!("getting real usage data");
-        use crate::schema::usage_logs::dsl::*;
+        use crate::pg_schema::usage_logs::dsl::*;
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -406,12 +411,12 @@ impl UserRepository {
     pub fn get_ongoing_usage(
         &self,
         user_id: i32,
-    ) -> Result<Option<crate::models::user_models::UsageLog>, DieselError> {
+    ) -> Result<Option<crate::pg_models::PgUsageLog>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let ongoing_log = usage_logs::table
             .filter(usage_logs::user_id.eq(user_id))
             .filter(usage_logs::status.eq("ongoing"))
-            .first::<crate::models::user_models::UsageLog>(&mut conn)
+            .first::<crate::pg_models::PgUsageLog>(&mut conn)
             .optional()?;
         Ok(ongoing_log)
     }
@@ -457,15 +462,13 @@ impl UserRepository {
         Ok(count)
     }
 
-    pub fn get_all_usage_logs(
-        &self,
-    ) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {
+    pub fn get_all_usage_logs(&self) -> Result<Vec<crate::pg_models::PgUsageLog>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Get all usage logs ordered by creation time (newest first)
         let logs = usage_logs::table
             .order_by(usage_logs::created_at.desc())
-            .load::<crate::models::user_models::UsageLog>(&mut conn)?;
+            .load::<crate::pg_models::PgUsageLog>(&mut conn)?;
 
         Ok(logs)
     }
@@ -496,223 +499,18 @@ impl UserRepository {
         Ok(count > 0)
     }
 
-    /// Delete old message status logs (for database cleanup)
-    /// Keeps logs for diagnostics but removes old entries to prevent bloat
-    pub fn delete_old_message_status_logs(
-        &self,
-        before_timestamp: i32,
-    ) -> Result<usize, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(
-            message_status_log::table.filter(message_status_log::created_at.lt(before_timestamp)),
-        )
-        .execute(&mut conn)
-    }
-
-    // Contact Profiles methods
-    pub fn create_contact_profile(
-        &self,
-        new_profile: &NewContactProfile,
-    ) -> Result<ContactProfile, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::insert_into(contact_profiles::table)
-            .values(new_profile)
-            .execute(&mut conn)?;
-
-        // Return the created profile
-        contact_profiles::table
-            .filter(contact_profiles::user_id.eq(new_profile.user_id))
-            .filter(contact_profiles::nickname.eq(&new_profile.nickname))
-            .order(contact_profiles::id.desc())
-            .first::<ContactProfile>(&mut conn)
-    }
-
-    pub fn get_contact_profiles(&self, user_id: i32) -> Result<Vec<ContactProfile>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profiles::table
-            .filter(contact_profiles::user_id.eq(user_id))
-            .order(contact_profiles::nickname.asc())
-            .load::<ContactProfile>(&mut conn)
-    }
-
-    pub fn update_contact_profile(
-        &self,
-        params: UpdateContactProfileParams,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(contact_profiles::table)
-            .filter(contact_profiles::user_id.eq(params.user_id))
-            .filter(contact_profiles::id.eq(params.profile_id))
-            .set((
-                contact_profiles::nickname.eq(params.nickname),
-                contact_profiles::whatsapp_chat.eq(params.whatsapp_chat),
-                contact_profiles::telegram_chat.eq(params.telegram_chat),
-                contact_profiles::signal_chat.eq(params.signal_chat),
-                contact_profiles::email_addresses.eq(params.email_addresses),
-                contact_profiles::notification_mode.eq(params.notification_mode),
-                contact_profiles::notification_type.eq(params.notification_type),
-                contact_profiles::notify_on_call.eq(params.notify_on_call),
-                contact_profiles::whatsapp_room_id.eq(params.whatsapp_room_id),
-                contact_profiles::telegram_room_id.eq(params.telegram_room_id),
-                contact_profiles::signal_room_id.eq(params.signal_room_id),
-                contact_profiles::notes.eq(params.notes),
-            ))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    /// Update only the room_id for a specific service on a contact profile.
-    /// Used to auto-capture room_id on first name-based match from the bridge.
-    pub fn update_profile_room_id(
-        &self,
-        profile_id: i32,
-        service: &str,
-        room_id: &str,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        match service {
-            "whatsapp" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::whatsapp_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            "telegram" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::telegram_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            "signal" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::signal_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Find contact profiles that use any of the given room IDs.
-    /// Returns a map of room_id -> nickname for rooms that are already assigned.
-    pub fn find_profiles_by_room_ids(
-        &self,
-        user_id: i32,
-        room_ids: &[String],
-        exclude_profile_id: Option<i32>,
-    ) -> Result<std::collections::HashMap<String, String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let mut query = contact_profiles::table
-            .filter(contact_profiles::user_id.eq(user_id))
-            .into_boxed();
-
-        if let Some(excl_id) = exclude_profile_id {
-            query = query.filter(contact_profiles::id.ne(excl_id));
-        }
-
-        let profiles: Vec<ContactProfile> = query.load(&mut conn)?;
-
-        let mut result = std::collections::HashMap::new();
-        for profile in profiles {
-            for rid in room_ids {
-                if profile.whatsapp_room_id.as_deref() == Some(rid.as_str())
-                    || profile.telegram_room_id.as_deref() == Some(rid.as_str())
-                    || profile.signal_room_id.as_deref() == Some(rid.as_str())
-                {
-                    result.insert(rid.clone(), profile.nickname.clone());
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    pub fn delete_contact_profile(&self, user_id: i32, profile_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(contact_profiles::table)
-            .filter(contact_profiles::user_id.eq(user_id))
-            .filter(contact_profiles::id.eq(profile_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // Contact Profile Exception methods
-    pub fn get_profile_exceptions(
-        &self,
-        profile_id: i32,
-    ) -> Result<Vec<ContactProfileException>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profile_exceptions::table
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .select(ContactProfileException::as_select())
-            .load::<ContactProfileException>(&mut conn)
-    }
-
-    pub fn get_profile_exception_for_platform(
-        &self,
-        profile_id: i32,
-        platform: &str,
-    ) -> Result<Option<ContactProfileException>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profile_exceptions::table
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .filter(contact_profile_exceptions::platform.eq(platform))
-            .select(ContactProfileException::as_select())
-            .first::<ContactProfileException>(&mut conn)
-            .optional()
-    }
-
-    pub fn set_profile_exception(
-        &self,
-        profile_id: i32,
-        platform: &str,
-        notification_mode: &str,
-        notification_type: &str,
-        notify_on_call: i32,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Try to update first, if no rows updated, insert
-        let updated = diesel::update(contact_profile_exceptions::table)
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .filter(contact_profile_exceptions::platform.eq(platform))
-            .set((
-                contact_profile_exceptions::notification_mode.eq(notification_mode),
-                contact_profile_exceptions::notification_type.eq(notification_type),
-                contact_profile_exceptions::notify_on_call.eq(notify_on_call),
-            ))
-            .execute(&mut conn)?;
-
-        if updated == 0 {
-            // Insert new exception
-            let new_exception = NewContactProfileException {
-                profile_id,
-                platform: platform.to_string(),
-                notification_mode: notification_mode.to_string(),
-                notification_type: notification_type.to_string(),
-                notify_on_call,
-            };
-            diesel::insert_into(contact_profile_exceptions::table)
-                .values(&new_exception)
-                .execute(&mut conn)?;
-        }
-        Ok(())
-    }
-
-    pub fn delete_all_profile_exceptions(&self, profile_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(contact_profile_exceptions::table)
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
+    // TODO(pg-migration): delete_old_message_status_logs moved to UserCore - it queries
+    // the message_status_log table which remains in SQLite. Callers should use UserCore instead.
 
     // YouTube integration methods
     pub fn has_active_youtube(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = youtube::table
             .filter(youtube::user_id.eq(user_id))
             .filter(youtube::status.eq("active"))
-            .first::<crate::models::user_models::YouTube>(&mut conn)
+            .first::<crate::pg_models::PgYouTube>(&mut conn)
             .optional()?;
 
         Ok(connection.is_some())
@@ -722,13 +520,13 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<(String, String)>, DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = youtube::table
             .filter(youtube::user_id.eq(user_id))
             .filter(youtube::status.eq("active"))
-            .first::<crate::models::user_models::YouTube>(&mut conn)
+            .first::<crate::pg_models::PgYouTube>(&mut conn)
             .optional()?;
 
         if let Some(connection) = connection {
@@ -762,7 +560,7 @@ impl UserRepository {
         expires_in: i32,
         scope: &str,
     ) -> Result<(), DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let encrypted_access_token =
@@ -783,7 +581,7 @@ impl UserRepository {
         // Store scope in description field
         let description = format!("scope:{}", scope);
 
-        let new_youtube = crate::models::user_models::NewYouTube {
+        let new_youtube = crate::pg_models::NewPgYouTube {
             user_id,
             encrypted_access_token,
             encrypted_refresh_token,
@@ -802,7 +600,7 @@ impl UserRepository {
     }
 
     pub fn get_youtube_scope(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let result = youtube::table
@@ -825,7 +623,7 @@ impl UserRepository {
     }
 
     pub fn delete_youtube_connection(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(youtube::table)
@@ -841,7 +639,7 @@ impl UserRepository {
         new_access_token: &str,
         expires_in: i32,
     ) -> Result<(), DieselError> {
-        use crate::schema::youtube;
+        use crate::pg_schema::youtube;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let encrypted_access_token =
@@ -866,7 +664,7 @@ impl UserRepository {
     }
 
     pub fn get_active_imap_connection_users(&self) -> Result<Vec<i32>, DieselError> {
-        use crate::schema::imap_connection;
+        use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let user_ids = imap_connection::table
@@ -879,21 +677,21 @@ impl UserRepository {
 
     // Tesla repository methods
     pub fn has_active_tesla(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let connection = tesla::table
             .filter(tesla::user_id.eq(user_id))
             .filter(tesla::status.eq("active"))
-            .first::<crate::models::user_models::Tesla>(&mut conn)
+            .first::<crate::pg_models::PgTesla>(&mut conn)
             .optional()?;
         Ok(connection.is_some())
     }
 
     pub fn create_tesla_connection(
         &self,
-        new_connection: crate::models::user_models::NewTesla,
+        new_connection: crate::pg_models::NewPgTesla,
     ) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user_id = new_connection.user_id;
 
@@ -911,7 +709,7 @@ impl UserRepository {
     }
 
     pub fn delete_tesla_connection(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::delete(tesla::table)
             .filter(tesla::user_id.eq(user_id))
@@ -923,12 +721,12 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<(String, String, i32, i32), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let connection = tesla::table
             .filter(tesla::user_id.eq(user_id))
             .filter(tesla::status.eq("active"))
-            .first::<crate::models::user_models::Tesla>(&mut conn)?;
+            .first::<crate::pg_models::PgTesla>(&mut conn)?;
 
         // Return encrypted tokens - let the caller decrypt them if needed
         Ok((
@@ -947,7 +745,7 @@ impl UserRepository {
         expires_in: i32,
         last_update: i32,
     ) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::update(tesla::table)
@@ -965,7 +763,7 @@ impl UserRepository {
     }
 
     pub fn get_tesla_region(&self, user_id: i32) -> Result<String, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let connection = tesla::table
@@ -978,7 +776,7 @@ impl UserRepository {
     }
 
     pub fn get_selected_vehicle_vin(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let vehicle_vin = tesla::table
@@ -997,7 +795,7 @@ impl UserRepository {
         name: String,
         vehicle_id: String,
     ) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::update(tesla::table.filter(tesla::user_id.eq(user_id)))
@@ -1015,7 +813,7 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<(String, String, String)>, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let result = tesla::table
@@ -1035,7 +833,7 @@ impl UserRepository {
     }
 
     pub fn mark_tesla_key_paired(&self, user_id: i32, paired: bool) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let paired_value = if paired { 1 } else { 0 };
@@ -1048,7 +846,7 @@ impl UserRepository {
     }
 
     pub fn get_tesla_key_paired_status(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let paired = tesla::table
@@ -1062,7 +860,7 @@ impl UserRepository {
 
     /// Get the granted scopes for a user's Tesla connection
     pub fn get_tesla_granted_scopes(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let scopes = tesla::table
@@ -1080,7 +878,7 @@ impl UserRepository {
         user_id: i32,
         scopes: String,
     ) -> Result<(), DieselError> {
-        use crate::schema::tesla;
+        use crate::pg_schema::tesla;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::update(tesla::table)
@@ -1092,109 +890,13 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn set_matrix_credentials(
-        &self,
-        user_id: i32,
-        username: &str,
-        access_token: &str,
-        device_id: &str,
-        password: &str,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Encrypt the access token before storing
-        let encrypted_token = crate::utils::encryption::encrypt(access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        // Encrypt the password before storing
-        let encrypted_password = crate::utils::encryption::encrypt(password)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::matrix_username.eq(username),
-                users::encrypted_matrix_access_token.eq(encrypted_token),
-                users::matrix_device_id.eq(device_id),
-                users::encrypted_matrix_password.eq(encrypted_password),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-    pub fn set_matrix_device_id_and_access_token(
-        &self,
-        user_id: i32,
-        access_token: &str,
-        device_id: &str,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Encrypt the access token before storing
-        let encrypted_token = crate::utils::encryption::encrypt(access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::encrypted_matrix_access_token.eq(encrypted_token),
-                users::matrix_device_id.eq(device_id),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    /// Clear all Matrix credentials for a user - used when Matrix auth fails and user needs to re-register
-    pub fn clear_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::matrix_username.eq(None::<String>),
-                users::encrypted_matrix_access_token.eq(None::<String>),
-                users::matrix_device_id.eq(None::<String>),
-                users::encrypted_matrix_password.eq(None::<String>),
-                users::encrypted_matrix_secret_storage_recovery_key.eq(None::<String>),
-            ))
-            .execute(&mut conn)?;
-
-        tracing::info!("Cleared Matrix credentials for user {}", user_id);
-        Ok(())
-    }
-
-    /// Enable or disable Matrix E2EE for a user
-    pub fn set_matrix_e2ee_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(users::table.find(user_id))
-            .set(users::matrix_e2ee_enabled.eq(enabled))
-            .execute(&mut conn)?;
-
-        tracing::info!("Set matrix_e2ee_enabled={} for user {}", enabled, user_id);
-        Ok(())
-    }
-
-    /// Stores the encrypted secret storage recovery key for a user
-    pub fn set_matrix_secret_storage_recovery_key(
-        &self,
-        user_id: i32,
-        recovery_key: &str,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_key = encrypt(recovery_key).map_err(|_| {
-            DieselError::SerializationError(Box::new(std::io::Error::other("Encryption failed")))
-        })?;
-
-        diesel::update(users::table.find(user_id))
-            .set(users::encrypted_matrix_secret_storage_recovery_key.eq(Some(encrypted_key)))
-            .execute(&mut conn)?;
-
-        tracing::info!(
-            "Stored Matrix secret storage recovery key for user {}",
-            user_id
-        );
-        Ok(())
-    }
+    // TODO(pg-migration): The following Matrix credential methods were moved to UserCore
+    // because they query the users table which remains in SQLite:
+    // - set_matrix_credentials
+    // - set_matrix_device_id_and_access_token
+    // - clear_matrix_credentials
+    // - set_matrix_e2ee_enabled
+    // - set_matrix_secret_storage_recovery_key
 
     pub fn update_bridge_last_seen_online(
         &self,
@@ -1202,7 +904,7 @@ impl UserRepository {
         service_type: &str,
         last_seen_online: i32,
     ) -> Result<usize, DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let rows = diesel::update(bridges::table)
             .filter(bridges::user_id.eq(user_id))
@@ -1219,7 +921,7 @@ impl UserRepository {
         service_type: &str,
         data: &str,
     ) -> Result<usize, DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let rows = diesel::update(bridges::table)
             .filter(bridges::user_id.eq(user_id))
@@ -1236,7 +938,7 @@ impl UserRepository {
         service_type: &str,
         status: &str,
     ) -> Result<usize, DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let rows = diesel::update(bridges::table)
             .filter(bridges::user_id.eq(user_id))
@@ -1246,25 +948,19 @@ impl UserRepository {
         Ok(rows)
     }
 
-    pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
-        use crate::schema::bridges;
-        use crate::schema::users;
+    pub fn create_bridge(&self, new_bridge: NewPgBridge) -> Result<(), DieselError> {
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::insert_into(bridges::table)
             .values(&new_bridge)
             .execute(&mut conn)?;
 
-        // Mark user as migrated when they connect a bridge
-        diesel::update(users::table.filter(users::id.eq(new_bridge.user_id)))
-            .set(users::migrated_to_new_server.eq(true))
-            .execute(&mut conn)?;
-
         Ok(())
     }
 
     pub fn delete_bridge(&self, user_id: i32, service: &str) -> Result<(), DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(bridges::table)
@@ -1275,35 +971,38 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn get_bridge(&self, user_id: i32, service: &str) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
+    pub fn get_bridge(&self, user_id: i32, service: &str) -> Result<Option<PgBridge>, DieselError> {
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
             .filter(bridges::bridge_type.eq(service))
-            .first::<Bridge>(&mut conn)
+            .first::<PgBridge>(&mut conn)
             .optional()?;
 
         Ok(bridge)
     }
 
-    pub fn get_first_connected_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
+    pub fn get_first_connected_bridge(
+        &self,
+        user_id: i32,
+    ) -> Result<Option<PgBridge>, DieselError> {
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
             .filter(bridges::status.eq("connected"))
             .order(bridges::id.asc())
-            .first::<Bridge>(&mut conn)
+            .first::<PgBridge>(&mut conn)
             .optional()?;
 
         Ok(bridge)
     }
 
     pub fn has_active_bridges(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let count = bridges::table
             .filter(bridges::user_id.eq(user_id))
@@ -1315,15 +1014,15 @@ impl UserRepository {
 
     pub fn get_users_with_active_bridges(
         &self,
-    ) -> Result<std::collections::HashMap<i32, Vec<Bridge>>, DieselError> {
-        use crate::schema::bridges;
+    ) -> Result<std::collections::HashMap<i32, Vec<PgBridge>>, DieselError> {
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let all_bridges: Vec<Bridge> = bridges::table
+        let all_bridges: Vec<PgBridge> = bridges::table
             .filter(bridges::status.eq("connected"))
             .load(&mut conn)?;
 
-        let mut result: std::collections::HashMap<i32, Vec<Bridge>> =
+        let mut result: std::collections::HashMap<i32, Vec<PgBridge>> =
             std::collections::HashMap::new();
         for bridge in all_bridges {
             result.entry(bridge.user_id).or_default().push(bridge);
@@ -1332,7 +1031,7 @@ impl UserRepository {
     }
 
     pub fn get_users_with_matrix_bridge_connections(&self) -> Result<Vec<i32>, DieselError> {
-        use crate::schema::bridges;
+        use crate::pg_schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Get distinct user_ids that have at least one bridge connection
@@ -1344,18 +1043,361 @@ impl UserRepository {
         Ok(user_ids)
     }
 
+    /// Check if user credits are below their auto-charge threshold.
+    /// Returns true when `charge_when_under` is enabled and credits are at or
+    /// below the `charge_back_to` target (meaning the user should be auto-charged).
+    pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::pg_schema::users;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        let (credits, charge_enabled, charge_back_to): (f32, bool, Option<f32>) = users::table
+            .find(user_id)
+            .select((
+                users::credits,
+                users::charge_when_under,
+                users::charge_back_to,
+            ))
+            .first(&mut conn)?;
+        if !charge_enabled {
+            return Ok(false);
+        }
+        let threshold = charge_back_to.unwrap_or(5.0);
+        Ok(credits < threshold)
+    }
+
+    /// Delete old message status logs older than a given timestamp.
+    pub fn delete_old_message_status_logs(
+        &self,
+        before_timestamp: i32,
+    ) -> Result<usize, DieselError> {
+        use crate::pg_schema::message_status_log;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        diesel::delete(
+            message_status_log::table.filter(message_status_log::created_at.lt(before_timestamp)),
+        )
+        .execute(&mut conn)
+    }
+
+    /// Store or update Matrix credentials in PG `user_secrets` table.
+    /// Upserts matrix_username, encrypted_matrix_access_token, matrix_device_id,
+    /// and encrypted_matrix_password.
+    pub fn set_matrix_credentials(
+        &self,
+        user_id: i32,
+        matrix_username: &str,
+        access_token: &str,
+        device_id: &str,
+        password: &str,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let encrypted_access_token =
+            encrypt(access_token).map_err(|_| DieselError::RollbackTransaction)?;
+        let encrypted_password = encrypt(password).map_err(|_| DieselError::RollbackTransaction)?;
+
+        // Try update first
+        let rows = diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::matrix_username.eq(Some(matrix_username)),
+                user_secrets::encrypted_matrix_access_token.eq(Some(&encrypted_access_token)),
+                user_secrets::matrix_device_id.eq(Some(device_id)),
+                user_secrets::encrypted_matrix_password.eq(Some(&encrypted_password)),
+            ))
+            .execute(&mut conn)?;
+
+        if rows == 0 {
+            // Insert new row
+            diesel::insert_into(user_secrets::table)
+                .values(&crate::pg_models::NewUserSecrets {
+                    user_id,
+                    matrix_username: Some(matrix_username.to_string()),
+                    matrix_device_id: Some(device_id.to_string()),
+                    encrypted_matrix_access_token: Some(encrypted_access_token.clone()),
+                    encrypted_matrix_password: Some(encrypted_password.clone()),
+                    encrypted_matrix_secret_storage_recovery_key: None,
+                    encrypted_twilio_account_sid: None,
+                    encrypted_twilio_auth_token: None,
+                })
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    /// Update Matrix device_id and access_token in PG `user_secrets` table.
+    pub fn set_matrix_device_id_and_access_token(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        device_id: &str,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let encrypted_access_token =
+            encrypt(access_token).map_err(|_| DieselError::RollbackTransaction)?;
+
+        let rows = diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::matrix_device_id.eq(Some(device_id)),
+                user_secrets::encrypted_matrix_access_token.eq(Some(&encrypted_access_token)),
+            ))
+            .execute(&mut conn)?;
+
+        if rows == 0 {
+            diesel::insert_into(user_secrets::table)
+                .values(&crate::pg_models::NewUserSecrets {
+                    user_id,
+                    matrix_username: None,
+                    matrix_device_id: Some(device_id.to_string()),
+                    encrypted_matrix_access_token: Some(encrypted_access_token.clone()),
+                    encrypted_matrix_password: None,
+                    encrypted_matrix_secret_storage_recovery_key: None,
+                    encrypted_twilio_account_sid: None,
+                    encrypted_twilio_auth_token: None,
+                })
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    /// Clear all Matrix credentials in PG `user_secrets` table.
+    pub fn clear_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::matrix_username.eq(None::<String>),
+                user_secrets::matrix_device_id.eq(None::<String>),
+                user_secrets::encrypted_matrix_access_token.eq(None::<String>),
+                user_secrets::encrypted_matrix_password.eq(None::<String>),
+                user_secrets::encrypted_matrix_secret_storage_recovery_key.eq(None::<String>),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    /// Set the Matrix secret storage recovery key in PG `user_secrets` table.
+    pub fn set_matrix_secret_storage_recovery_key(
+        &self,
+        user_id: i32,
+        recovery_key: &str,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let encrypted_key = encrypt(recovery_key).map_err(|_| DieselError::RollbackTransaction)?;
+
+        let rows = diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set(
+                user_secrets::encrypted_matrix_secret_storage_recovery_key.eq(Some(&encrypted_key)),
+            )
+            .execute(&mut conn)?;
+
+        if rows == 0 {
+            diesel::insert_into(user_secrets::table)
+                .values(&crate::pg_models::NewUserSecrets {
+                    user_id,
+                    matrix_username: None,
+                    matrix_device_id: None,
+                    encrypted_matrix_access_token: None,
+                    encrypted_matrix_password: None,
+                    encrypted_matrix_secret_storage_recovery_key: Some(encrypted_key.clone()),
+                    encrypted_twilio_account_sid: None,
+                    encrypted_twilio_auth_token: None,
+                })
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    /// Get Matrix credentials from PG `user_secrets` table.
+    /// Returns (username, encrypted_password, device_id, encrypted_access_token, encrypted_recovery_key).
+    #[allow(clippy::type_complexity)]
+    pub fn get_matrix_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<
+        Option<(
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )>,
+        DieselError,
+    > {
+        use crate::pg_schema::user_secrets;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let result = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::matrix_username,
+                user_secrets::encrypted_matrix_password,
+                user_secrets::matrix_device_id,
+                user_secrets::encrypted_matrix_access_token,
+                user_secrets::encrypted_matrix_secret_storage_recovery_key,
+            ))
+            .first::<(
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )>(&mut conn)
+            .optional()?;
+
+        Ok(result)
+    }
+
+    /// Get Twilio credentials from PG `user_secrets` table.
+    pub fn get_twilio_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let settings = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::encrypted_twilio_account_sid,
+                user_secrets::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn)?;
+
+        match settings {
+            (Some(encrypted_account_sid), Some(encrypted_auth_token)) => {
+                let account_sid = decrypt(&encrypted_account_sid)?;
+                let auth_token = decrypt(&encrypted_auth_token)?;
+                Ok((account_sid, auth_token))
+            }
+            _ => Err("Twilio credentials not found".into()),
+        }
+    }
+
+    /// Check if user has their own Twilio credentials stored (BYOT) in PG.
+    pub fn has_twilio_credentials(&self, user_id: i32) -> bool {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let settings = user_secrets::table
+            .filter(user_secrets::user_id.eq(user_id))
+            .select((
+                user_secrets::encrypted_twilio_account_sid,
+                user_secrets::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn);
+
+        matches!(settings, Ok((Some(_), Some(_))))
+    }
+
+    /// Update Twilio credentials in PG `user_secrets` table.
+    pub fn update_twilio_credentials(
+        &self,
+        user_id: i32,
+        account_sid: &str,
+        auth_token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        let encrypted_account_sid = encrypt(account_sid)?;
+        let encrypted_auth_token = encrypt(auth_token)?;
+
+        // Try update first
+        let rows = diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::encrypted_twilio_account_sid.eq(Some(&encrypted_account_sid)),
+                user_secrets::encrypted_twilio_auth_token.eq(Some(&encrypted_auth_token)),
+            ))
+            .execute(&mut conn)?;
+
+        if rows == 0 {
+            // Insert new row
+            diesel::insert_into(user_secrets::table)
+                .values(&crate::pg_models::NewUserSecrets {
+                    user_id,
+                    matrix_username: None,
+                    matrix_device_id: None,
+                    encrypted_matrix_access_token: None,
+                    encrypted_matrix_password: None,
+                    encrypted_matrix_secret_storage_recovery_key: None,
+                    encrypted_twilio_account_sid: Some(encrypted_account_sid),
+                    encrypted_twilio_auth_token: Some(encrypted_auth_token),
+                })
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    /// Clear BYOT Twilio credentials in PG `user_secrets` table.
+    pub fn clear_twilio_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::pg_schema::user_secrets;
+
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+
+        diesel::update(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
+            .set((
+                user_secrets::encrypted_twilio_account_sid.eq(None::<String>),
+                user_secrets::encrypted_twilio_auth_token.eq(None::<String>),
+            ))
+            .execute(&mut conn)?;
+
+        tracing::info!("Cleared BYOT Twilio credentials for user {}", user_id);
+        Ok(())
+    }
+
+    /// Set matrix_e2ee_enabled flag.
+    pub fn set_matrix_e2ee_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+        use crate::pg_schema::users;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::matrix_e2ee_enabled.eq(enabled))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Look up a user by their Matrix username.
+    /// Queries PG `user_secrets` for the user_id, then PG `users` for the full User.
     pub fn get_user_by_matrix_user_id(
         &self,
         matrix_user_id: &str,
-    ) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
+    ) -> Result<Option<crate::models::user_models::User>, DieselError> {
+        use crate::pg_schema::{user_secrets, users};
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
 
-        let user = users::table
-            .filter(users::matrix_username.eq(matrix_user_id))
-            .first::<User>(&mut conn)
+        let maybe_uid: Option<i32> = user_secrets::table
+            .filter(user_secrets::matrix_username.eq(matrix_user_id))
+            .select(user_secrets::user_id)
+            .first(&mut pg_conn)
             .optional()?;
 
-        Ok(user)
+        match maybe_uid {
+            Some(uid) => {
+                let user = users::table
+                    .find(uid)
+                    .first::<crate::models::user_models::User>(&mut pg_conn)
+                    .optional()?;
+                Ok(user)
+            }
+            None => Ok(None),
+        }
     }
 
     // Bridge disconnection event methods
@@ -1365,10 +1407,10 @@ impl UserRepository {
         bridge_type: &str,
         detected_at: i32,
     ) -> Result<(), DieselError> {
-        use crate::schema::bridge_disconnection_events;
+        use crate::pg_schema::bridge_disconnection_events;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let new_event = crate::models::user_models::NewBridgeDisconnectionEvent {
+        let new_event = crate::pg_models::NewPgBridgeDisconnectionEvent {
             user_id,
             bridge_type: bridge_type.to_string(),
             detected_at,
@@ -1387,7 +1429,7 @@ impl UserRepository {
         user_id: i32,
         email_uid: &str,
     ) -> Result<(), DieselError> {
-        use crate::schema::processed_emails;
+        use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // First check if the email is already processed
@@ -1406,7 +1448,7 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
-        let new_processed_email = crate::models::user_models::NewProcessedEmail {
+        let new_processed_email = crate::pg_models::NewPgProcessedEmail {
             user_id,
             email_uid: email_uid.to_string(),
             processed_at: current_time,
@@ -1438,13 +1480,13 @@ impl UserRepository {
 
     // Check if an email is processed
     pub fn is_email_processed(&self, user_id: i32, email_uid: &str) -> Result<bool, DieselError> {
-        use crate::schema::processed_emails;
+        use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let processed = processed_emails::table
             .filter(processed_emails::user_id.eq(user_id))
             .filter(processed_emails::email_uid.eq(email_uid))
-            .first::<crate::models::user_models::ProcessedEmail>(&mut conn)
+            .first::<crate::pg_models::PgProcessedEmail>(&mut conn)
             .optional()?;
 
         Ok(processed.is_some())
@@ -1454,21 +1496,21 @@ impl UserRepository {
     pub fn get_processed_emails(
         &self,
         user_id: i32,
-    ) -> Result<Vec<crate::models::user_models::ProcessedEmail>, DieselError> {
-        use crate::schema::processed_emails;
+    ) -> Result<Vec<crate::pg_models::PgProcessedEmail>, DieselError> {
+        use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let processed = processed_emails::table
             .filter(processed_emails::user_id.eq(user_id))
             .order_by(processed_emails::processed_at.desc())
-            .load::<crate::models::user_models::ProcessedEmail>(&mut conn)?;
+            .load::<crate::pg_models::PgProcessedEmail>(&mut conn)?;
 
         Ok(processed)
     }
 
     // Delete a single processed email record
     pub fn delete_processed_email(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
-        use crate::schema::processed_emails;
+        use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(processed_emails::table)

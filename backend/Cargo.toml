@@ -27,7 +27,7 @@ serde_json = "1.0"
 chrono = "0.4"
 chrono-tz = "0.8"
 jiff = "0.2.5"
-diesel = { version = "2.1.0", features = ["sqlite", "r2d2", "64-column-tables"] }
+diesel = { version = "2.1.0", features = ["sqlite", "postgres", "r2d2", "64-column-tables"] }
 diesel_migrations = "2.1.0"
 dotenvy = "0.15"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "set-header"] }
@@ -63,6 +63,10 @@ async-stream = "0.3"
 resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
+
+[[bin]]
+name = "migrate_to_pg"
+path = "src/bin/migrate_to_pg.rs"
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables

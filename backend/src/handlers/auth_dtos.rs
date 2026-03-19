@@ -1,4 +1,4 @@
-use crate::schema::users;
+use crate::pg_schema::users;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -10,11 +10,9 @@ pub struct NewUser {
     pub password_hash: String,
     pub phone_number: String,
     pub time_to_live: i32,
-    pub verified: bool,
     pub credits: f32,
     pub credits_left: f32,
     pub charge_when_under: bool,
-    pub discount: bool,
     pub sub_tier: Option<String>,
 }
 
@@ -38,13 +36,11 @@ pub struct UserResponse {
     pub phone_number: String,
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
-    pub verified: bool,
     pub credits: f32,
     pub notify: bool,
     pub preferred_number: Option<String>,
     pub sub_tier: Option<String>,
     pub credits_left: f32,
-    pub discount_tier: Option<String>,
     pub plan_type: Option<String>,
     pub has_twilio_credentials: bool,
 }

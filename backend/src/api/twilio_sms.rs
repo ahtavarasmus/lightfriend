@@ -43,6 +43,59 @@ fn log_tool_error(
     );
 }
 
+/// LLM call with retry logic, used by the agentic loop.
+async fn llm_call_with_retry(
+    state: &Arc<AppState>,
+    provider: AiProvider,
+    model: &str,
+    messages: &[chat_completion::ChatCompletionMessage],
+    tools: &[chat_completion::Tool],
+    reasoning_tx: &Option<tokio::sync::mpsc::Sender<String>>,
+    options: &mut ProcessSmsOptions,
+    max_retries: u32,
+) -> Result<chat_completion::ChatCompletionResponse, String> {
+    let mut last_error = String::new();
+
+    for attempt in 1..=max_retries {
+        let request =
+            chat_completion::ChatCompletionRequest::new(model.to_string(), messages.to_vec())
+                .tools(tools.to_vec())
+                .tool_choice(chat_completion::ToolChoiceType::Required);
+
+        match state
+            .ai_config
+            .chat_completion_streaming(provider, &request, reasoning_tx.clone())
+            .await
+        {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                last_error = format!("{:?}", e);
+                tracing::warn!(
+                    "Chat completion attempt {}/{} failed: {:?}",
+                    attempt,
+                    max_retries,
+                    e
+                );
+                if attempt < max_retries {
+                    options.emit_status(ChatStatus::Retrying {
+                        attempt: attempt + 1,
+                        max: max_retries,
+                    });
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
+                        .await;
+                }
+            }
+        }
+    }
+
+    tracing::error!(
+        "Failed to get chat completion after {} attempts: {}",
+        max_retries,
+        last_error
+    );
+    Err(format!("Failed to get chat completion: {}", last_error))
+}
+
 // =============================================================================
 // SmsResult - Standardized SMS processing outcomes
 // =============================================================================
@@ -450,31 +503,7 @@ pub async fn handle_textbee_sms(
         }
     };
 
-    // Step 2: Verify device_id matches user's stored TextBee credentials
-    if let Ok((stored_device_id, _api_key)) = state.user_core.get_textbee_credentials(user.id) {
-        if payload.device_id != stored_device_id {
-            tracing::warn!(
-                "Device ID mismatch for user {}: expected {}, got {}",
-                user.id,
-                stored_device_id,
-                payload.device_id
-            );
-            return SmsResult::UserError {
-                message: "Invalid request source".to_string(),
-                status: StatusCode::FORBIDDEN,
-            }
-            .into_response();
-        }
-    } else {
-        tracing::error!("No TextBee credentials found for user {}", user.id);
-        return SmsResult::UserError {
-            message: "No credentials configured".to_string(),
-            status: StatusCode::FORBIDDEN,
-        }
-        .into_response();
-    }
-
-    // Step 3: Map to Twilio payload format
+    // Step 2: Map to Twilio payload format
     let twilio_payload = TwilioWebhookPayload {
         from: payload.sender.clone(),
         to: payload.recipient,
@@ -713,7 +742,7 @@ pub async fn process_sms(
         .as_secs() as i32;
 
     // Store user's message in history
-    let user_message = crate::models::user_models::NewMessageHistory {
+    let user_message = crate::pg_models::NewPgMessageHistory {
         user_id: user.id,
         role: "user".to_string(),
         encrypted_content: payload.body.clone(),
@@ -771,9 +800,11 @@ pub async fn process_sms(
 - State only what tool results returned. Note any gaps in data coverage.
 
 ### Behavior:
-- Recurring patterns (daily, every, weekly) mean the user wants an automated schedule - create a recurring item immediately, don't do the task manually this one time.
-- Time-specific requests (at Xpm, remind me, notify me when) are scheduling requests - create items.
-- When creating oneshot items, you MUST always include due_at in YYYY-MM-DDTHH:MM format. If the user doesn't specify a time, ask them when.
+- 'remind me', 'notify me at X', 'wake me at Y' -> use set_reminder immediately. Never answer these directly.
+- Recurring reminders ('daily at 9am remind me to X', 'every weekday at 8am') -> use set_reminder with a recurring pattern.
+- Complex recurring schedules with AI logic or tool actions (daily email briefings, check conditions) -> use create_rule with recurring schedule + llm logic.
+- Tracking conditions (notify me when X emails me, alert me if Y happens) -> use create_rule with ontology_change trigger.
+- When in doubt between set_reminder and create_rule: if it's just a notification with a message, use set_reminder. If it needs LLM evaluation, data fetching, or tool execution, use create_rule.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
@@ -907,13 +938,23 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
     }
 
     // Tools and model from context builder
-    // Skip tools for providers with strict rate limits (e.g. Groq free tier)
-    let tools = if state.ai_config.endpoint(ctx.provider).contains("groq") {
-        vec![]
-    } else {
-        ctx.tools.unwrap_or_default()
-    };
+    let mut tools = ctx.tools.unwrap_or_default();
     let model = ctx.model.clone();
+
+    // Inject ontology query tools (dynamically built with user-specific enum values)
+    let ontology_user_data = {
+        let mut dynamic_enums = std::collections::HashMap::new();
+        if let Ok(persons) = state.ontology_repository.get_persons(user.id) {
+            let names: Vec<String> = persons.iter().map(|p| p.name.clone()).collect();
+            dynamic_enums.insert("person_names".to_string(), names);
+        }
+        crate::ontology::registry::OntologyUserData { dynamic_enums }
+    };
+    tools.extend(
+        state
+            .ontology_registry
+            .build_query_tools(&ontology_user_data),
+    );
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
     let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
@@ -949,442 +990,361 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
             None
         };
 
-    // Use mock response if provided (for testing), otherwise call real LLM with retry
-    let result = if let Some(mock_response) = options.mock_llm_response.take() {
-        tracing::debug!("Using mock LLM response for testing");
-        mock_response
-    } else {
-        options.emit_status(ChatStatus::Thinking);
-        const MAX_RETRIES: u32 = 3;
-        let mut last_error = String::new();
-        let mut attempt_result = None;
-
-        for attempt in 1..=MAX_RETRIES {
-            let mut request = chat_completion::ChatCompletionRequest::new(
-                model.clone(),
-                completion_messages.clone(),
-            );
-            if !tools.is_empty() {
-                request = request
-                    .tools(tools.clone())
-                    .tool_choice(chat_completion::ToolChoiceType::Required);
-            }
-
-            match state
-                .ai_config
-                .chat_completion_streaming(ctx.provider, &request, reasoning_tx.clone())
-                .await
-            {
-                Ok(result) => {
-                    attempt_result = Some(result);
-                    break;
-                }
-                Err(e) => {
-                    last_error = format!("{:?}", e);
-                    tracing::warn!(
-                        "Chat completion attempt {}/{} failed: {:?}",
-                        attempt,
-                        MAX_RETRIES,
-                        e
-                    );
-                    if attempt < MAX_RETRIES {
-                        options.emit_status(ChatStatus::Retrying {
-                            attempt: attempt + 1,
-                            max: MAX_RETRIES,
-                        });
-                        // Wait before retry: 500ms, 1000ms
-                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                            500 * attempt as u64,
-                        ))
-                        .await;
-                    }
-                }
-            }
-        }
-
-        match attempt_result {
-            Some(result) => result,
-            None => {
-                tracing::error!(
-                    "Failed to get chat completion after {} attempts: {}",
-                    MAX_RETRIES,
-                    last_error
-                );
-                return SmsResult::SystemError {
-                    log_msg: format!("Failed to get chat completion: {}", last_error),
-                }
-                .into_response();
-            }
-        }
-    };
+    // Terminal tools: produce final response, break the loop without going back to LLM
+    let terminal_tools = ["direct_response", "create_rule", "set_reminder"];
 
     let mut fail = false;
-    let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
-    let mut created_item_id: Option<i32> = None; // Track if an item was created during this conversation
-    let final_response = match result.choices[0].finish_reason {
-        None | Some(chat_completion::FinishReason::stop) => {
-            tracing::debug!("Model provided direct response (no tool calls needed)");
-            // Direct response from the model
+    let mut tool_answers: HashMap<String, String> = HashMap::new();
+    let mut created_item_id: Option<i32> = None;
+    let mut loop_messages = completion_messages.clone();
 
-            result.choices[0]
-                .message
-                .content
-                .clone()
-                .unwrap_or_default()
-        }
-        Some(chat_completion::FinishReason::tool_calls) => {
-            tracing::debug!("Model requested tool calls - beginning tool execution phase");
+    const MAX_ROUNDS: u32 = 5;
+    const MAX_RETRIES: u32 = 3;
 
-            let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
-                Some(calls) => {
-                    tracing::debug!("Found {} tool call(s) in response", calls.len());
-                    calls
-                }
-                None => {
-                    tracing::error!(
-                        "No tool calls found in response despite tool_calls finish reason"
-                    );
-                    return SmsResult::SystemError {
-                        log_msg: "No tool calls found in response despite tool_calls finish reason"
-                            .to_string(),
-                    }
-                    .into_response();
-                }
-            };
+    let mut final_response = String::new();
 
-            for tool_call in tool_calls {
-                let tool_call_id = tool_call.id.clone();
-                tracing::debug!(
-                    "Processing tool call: {:?} with id: {:?}",
-                    tool_call,
-                    tool_call_id
-                );
-                let name = match &tool_call.function.name {
-                    Some(n) => {
-                        tracing::debug!("Tool call function name: {}", n);
-                        options.emit_status(ChatStatus::ToolCall { name: n.clone() });
-                        n
-                    }
-                    None => {
-                        log_tool_error(
-                            user.id,
-                            "unknown",
-                            "llm_malformed",
-                            "missing_function_name",
-                            "Tool call missing function name",
-                        );
-                        return SmsResult::SystemError {
-                            log_msg: "Tool call missing function name".to_string(),
-                        }
-                        .into_response();
-                    }
-                };
+    'agentic: for round in 0..MAX_ROUNDS {
+        tracing::debug!("Agentic loop round {}/{}", round + 1, MAX_ROUNDS);
 
-                // Check if user has access to this tool
-                if crate::tool_call_utils::utils::requires_subscription(
-                    name,
-                    user.sub_tier.clone(),
-                    user.discount,
-                ) {
-                    tracing::info!(
-                        "Attempted to use subscription-only tool {} without proper subscription",
-                        name
-                    );
-                    tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
-                    continue;
-                }
-                let arguments = match &tool_call.function.arguments {
-                    Some(args) => args,
-                    None => {
-                        log_tool_error(
-                            user.id,
-                            name,
-                            "llm_malformed",
-                            "missing_arguments",
-                            "Tool call missing arguments",
-                        );
-                        return SmsResult::SystemError {
-                            log_msg: format!("Tool call {} missing arguments", name),
-                        }
-                        .into_response();
-                    }
-                };
-
-                // Mock tool responses for testing
-                if let Some(ref mock_map) = options.mock_tool_responses {
-                    if let Some(mock_result) = mock_map.get(name) {
-                        tracing::debug!("Using mock response for tool: {}", name);
-                        tool_answers.insert(tool_call_id, mock_result.clone());
-                        continue;
-                    }
-                }
-
-                // Handle MCP tool calls (dynamic, per-user)
-                if crate::tool_call_utils::mcp::is_mcp_tool(name) {
-                    tracing::debug!("Executing MCP tool call: {}", name);
-                    let result = crate::tool_call_utils::mcp::handle_mcp_tool_call(
-                        state, user.id, name, arguments,
-                    )
-                    .await;
-                    tool_answers.insert(tool_call_id, result);
-                    continue;
-                }
-
-                // Registry dispatch for static tools
-                let ctx = crate::tools::registry::ToolContext {
+        // Use mock response if provided (for testing, first round only)
+        let result = if round == 0 {
+            if let Some(mock_response) = options.mock_llm_response.take() {
+                tracing::debug!("Using mock LLM response for testing");
+                mock_response
+            } else {
+                options.emit_status(ChatStatus::Thinking);
+                match llm_call_with_retry(
                     state,
-                    user: &user,
-                    user_id: user.id,
-                    arguments,
-                    image_url: image_url.as_deref(),
-                    tool_call_id: tool_call_id.clone(),
-                    user_given_info,
-                    current_time,
-                    // Fields for create_task retry logic
-                    client: Some(&ctx.client),
-                    model: Some(&model),
-                    tools: Some(&tools),
-                    completion_messages: Some(&completion_messages),
-                    assistant_content: result.choices[0].message.content.as_deref(),
-                    tool_call: Some(tool_call),
-                };
-
-                match state.tool_registry.get(name) {
-                    Some(handler) => match handler.execute(ctx).await {
-                        Ok(crate::tools::registry::ToolResult::Answer(answer)) => {
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Ok(crate::tools::registry::ToolResult::AnswerWithTask {
-                            answer,
-                            task_id,
-                        }) => {
-                            created_item_id = Some(task_id);
-                            tool_answers.insert(tool_call_id, answer);
-                        }
-                        Ok(crate::tools::registry::ToolResult::EarlyReturn {
-                            response,
-                            status,
-                        }) => {
-                            let headers = [(axum::http::header::CONTENT_TYPE, "application/json")];
-                            return (status, headers, Json(response));
-                        }
-                        Err(e) => {
-                            log_tool_error(user.id, name, "execution", "handler_error", &e);
-                            let error_msg = e.to_string();
-                            let user_facing_msg = if error_msg.contains("plan")
-                                || error_msg.contains("feature")
-                                || error_msg.contains("upgrade")
-                                || error_msg.contains("Autopilot")
-                            {
-                                error_msg
-                            } else {
-                                tool_error_messages::INTERNAL_ERROR.to_string()
-                            };
-                            tool_answers.insert(tool_call_id, user_facing_msg);
-                        }
-                    },
-                    None => {
-                        tracing::error!("Unknown tool called: {}", name);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            Json(TwilioResponse {
-                                message: format!("Unknown tool: {}", name),
-                                created_item_id: None,
-                            }),
-                        );
+                    ctx.provider,
+                    &model,
+                    &loop_messages,
+                    &tools,
+                    &reasoning_tx,
+                    &mut options,
+                    MAX_RETRIES,
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(log_msg) => {
+                        return SmsResult::SystemError { log_msg }.into_response();
                     }
                 }
             }
+        } else {
+            options.emit_status(ChatStatus::Thinking);
+            match llm_call_with_retry(
+                state,
+                ctx.provider,
+                &model,
+                &loop_messages,
+                &tools,
+                &reasoning_tx,
+                &mut options,
+                MAX_RETRIES,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(log_msg) => {
+                    return SmsResult::SystemError { log_msg }.into_response();
+                }
+            }
+        };
 
-            let mut follow_up_messages = completion_messages.clone();
-            // Add the assistant's message with tool calls
-            follow_up_messages.push(chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::assistant,
-                content: chat_completion::Content::Text(
-                    result.choices[0]
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or_default(),
-                ),
-                name: None,
-                tool_calls: result.choices[0].message.tool_calls.clone(),
-                tool_call_id: None,
-            });
+        match result.choices[0].finish_reason {
+            None | Some(chat_completion::FinishReason::stop) => {
+                tracing::debug!("Model provided direct response (no tool calls)");
+                final_response = result.choices[0]
+                    .message
+                    .content
+                    .clone()
+                    .unwrap_or_default();
+                break 'agentic;
+            }
+            Some(chat_completion::FinishReason::length) => {
+                fail = true;
+                final_response = "I apologize, but my response was too long. Could you please ask your question in a more specific way? (you were not charged for this message)".to_string();
+                break 'agentic;
+            }
+            Some(chat_completion::FinishReason::content_filter) => {
+                fail = true;
+                final_response = "I apologize, but I cannot provide an answer to that question due to content restrictions. (you were not charged for this message)".to_string();
+                break 'agentic;
+            }
+            Some(chat_completion::FinishReason::null) => {
+                fail = true;
+                final_response = "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string();
+                break 'agentic;
+            }
+            Some(chat_completion::FinishReason::tool_calls) => {
+                tracing::debug!("Model requested tool calls (round {})", round + 1);
 
-            // Add the tool response
-            if let Some(tool_calls) = &result.choices[0].message.tool_calls {
+                let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
+                    Some(calls) => {
+                        tracing::debug!("Found {} tool call(s) in response", calls.len());
+                        calls
+                    }
+                    None => {
+                        tracing::error!(
+                            "No tool calls found in response despite tool_calls finish reason"
+                        );
+                        return SmsResult::SystemError {
+                            log_msg:
+                                "No tool calls found in response despite tool_calls finish reason"
+                                    .to_string(),
+                        }
+                        .into_response();
+                    }
+                };
+
+                // Add assistant message with tool calls to loop messages
+                loop_messages.push(chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::assistant,
+                    content: chat_completion::Content::Text(
+                        result.choices[0]
+                            .message
+                            .content
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
+                    name: None,
+                    tool_calls: result.choices[0].message.tool_calls.clone(),
+                    tool_call_id: None,
+                });
+
+                let mut round_answers: HashMap<String, String> = HashMap::new();
+
                 for tool_call in tool_calls {
-                    let tool_answer = match tool_answers.get(&tool_call.id) {
-                        Some(ans) => ans.clone(),
-                        None => "".to_string(),
+                    let tool_call_id = tool_call.id.clone();
+                    tracing::debug!(
+                        "Processing tool call: {:?} with id: {:?}",
+                        tool_call,
+                        tool_call_id
+                    );
+                    let name = match &tool_call.function.name {
+                        Some(n) => {
+                            tracing::debug!("Tool call function name: {}", n);
+                            options.emit_status(ChatStatus::ToolCall { name: n.clone() });
+                            n
+                        }
+                        None => {
+                            log_tool_error(
+                                user.id,
+                                "unknown",
+                                "llm_malformed",
+                                "missing_function_name",
+                                "Tool call missing function name",
+                            );
+                            return SmsResult::SystemError {
+                                log_msg: "Tool call missing function name".to_string(),
+                            }
+                            .into_response();
+                        }
                     };
-                    follow_up_messages.push(chat_completion::ChatCompletionMessage {
+
+                    // Check subscription access
+                    if crate::tool_call_utils::utils::requires_subscription(
+                        name,
+                        user.sub_tier.clone(),
+                    ) {
+                        tracing::info!(
+                            "Attempted to use subscription-only tool {} without proper subscription",
+                            name
+                        );
+                        round_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
+                        continue;
+                    }
+
+                    let arguments = match &tool_call.function.arguments {
+                        Some(args) => args,
+                        None => {
+                            log_tool_error(
+                                user.id,
+                                name,
+                                "llm_malformed",
+                                "missing_arguments",
+                                "Tool call missing arguments",
+                            );
+                            return SmsResult::SystemError {
+                                log_msg: format!("Tool call {} missing arguments", name),
+                            }
+                            .into_response();
+                        }
+                    };
+
+                    // Mock tool responses for testing
+                    if let Some(ref mock_map) = options.mock_tool_responses {
+                        if let Some(mock_result) = mock_map.get(name) {
+                            tracing::debug!("Using mock response for tool: {}", name);
+                            round_answers.insert(tool_call_id.clone(), mock_result.clone());
+
+                            if terminal_tools.contains(&name.as_str()) {
+                                final_response = mock_result.clone();
+                                tool_answers.extend(round_answers);
+                                break 'agentic;
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Ontology query tools (dynamic, per-user)
+                    if name.starts_with("query_") {
+                        tracing::debug!("Executing ontology tool call: {}", name);
+                        let result =
+                            crate::tools::ontology::handle_query(name, arguments, state, user.id)
+                                .await;
+                        let answer = match result {
+                            Ok(answer) => answer,
+                            Err(e) => e,
+                        };
+                        round_answers.insert(tool_call_id, answer);
+                        continue;
+                    }
+
+                    // Handle MCP tool calls (dynamic, per-user)
+                    if crate::tool_call_utils::mcp::is_mcp_tool(name) {
+                        tracing::debug!("Executing MCP tool call: {}", name);
+                        let result = crate::tool_call_utils::mcp::handle_mcp_tool_call(
+                            state, user.id, name, arguments,
+                        )
+                        .await;
+                        round_answers.insert(tool_call_id, result);
+                        continue;
+                    }
+
+                    // Registry dispatch for static tools
+                    let tool_ctx = crate::tools::registry::ToolContext {
+                        state,
+                        user: &user,
+                        user_id: user.id,
+                        arguments,
+                        image_url: image_url.as_deref(),
+                        tool_call_id: tool_call_id.clone(),
+                        user_given_info,
+                        current_time,
+                        client: Some(&ctx.client),
+                        model: Some(&model),
+                        tools: Some(&tools),
+                        completion_messages: Some(&loop_messages),
+                        assistant_content: result.choices[0].message.content.as_deref(),
+                        tool_call: Some(tool_call),
+                    };
+
+                    match state.tool_registry.get(name) {
+                        Some(handler) => match handler.execute(tool_ctx).await {
+                            Ok(crate::tools::registry::ToolResult::Answer(answer)) => {
+                                // Terminal tool: break the loop
+                                if terminal_tools.contains(&name.as_str()) {
+                                    final_response = answer.clone();
+                                    round_answers.insert(tool_call_id, answer);
+                                    tool_answers.extend(round_answers);
+                                    break 'agentic;
+                                }
+                                round_answers.insert(tool_call_id, answer);
+                            }
+                            Ok(crate::tools::registry::ToolResult::AnswerWithTask {
+                                answer,
+                                task_id,
+                            }) => {
+                                created_item_id = Some(task_id);
+                                final_response = answer.clone();
+                                round_answers.insert(tool_call_id, answer);
+                                tool_answers.extend(round_answers);
+                                break 'agentic;
+                            }
+                            Ok(crate::tools::registry::ToolResult::EarlyReturn {
+                                response,
+                                status,
+                            }) => {
+                                let headers =
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")];
+                                return (status, headers, Json(response));
+                            }
+                            Err(e) => {
+                                log_tool_error(user.id, name, "execution", "handler_error", &e);
+                                let error_msg = e.to_string();
+                                let user_facing_msg = if error_msg.contains("plan")
+                                    || error_msg.contains("feature")
+                                    || error_msg.contains("upgrade")
+                                    || error_msg.contains("Autopilot")
+                                {
+                                    error_msg
+                                } else {
+                                    tool_error_messages::INTERNAL_ERROR.to_string()
+                                };
+                                round_answers.insert(tool_call_id, user_facing_msg);
+                            }
+                        },
+                        None => {
+                            tracing::error!("Unknown tool called: {}", name);
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                Json(TwilioResponse {
+                                    message: format!("Unknown tool: {}", name),
+                                    created_item_id: None,
+                                }),
+                            );
+                        }
+                    }
+                }
+
+                // Store tool responses in history and add to loop messages
+                let hist_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+
+                for tool_call in tool_calls {
+                    let answer = round_answers
+                        .get(&tool_call.id)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Store in history
+                    let tool_message = crate::pg_models::NewPgMessageHistory {
+                        user_id: user.id,
+                        role: "tool".to_string(),
+                        encrypted_content: answer.clone(),
+                        tool_name: tool_call.function.name.clone(),
+                        tool_call_id: Some(tool_call.id.clone()),
+                        tool_calls_json: None,
+                        created_at: hist_time + 1,
+                        conversation_id: "".to_string(),
+                    };
+                    if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                        tracing::error!("Failed to store tool response in history: {}", e);
+                    }
+
+                    // Add to loop messages for next round
+                    loop_messages.push(chat_completion::ChatCompletionMessage {
                         role: chat_completion::MessageRole::tool,
-                        content: chat_completion::Content::Text(tool_answer),
+                        content: chat_completion::Content::Text(answer),
                         name: None,
                         tool_calls: None,
                         tool_call_id: Some(tool_call.id.clone()),
                     });
                 }
-            }
 
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            // Store tool responses in history
-            for (tool_call_id, tool_response) in tool_answers.iter() {
-                let tool_message = crate::models::user_models::NewMessageHistory {
-                    user_id: user.id,
-                    role: "tool".to_string(),
-                    encrypted_content: tool_response.clone(),
-                    tool_name: None, // We could store this if needed
-                    tool_call_id: Some(tool_call_id.clone()),
-                    tool_calls_json: None,
-                    created_at: current_time + 1,
-                    conversation_id: "".to_string(),
-                };
-
-                if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                    tracing::error!("Failed to store tool response in history: {}", e);
-                }
-            }
-
-            tracing::debug!("Making follow-up request to model with tool call answers");
-            options.emit_status(ChatStatus::Thinking);
-
-            // Retry logic for follow-up call
-            const FOLLOWUP_MAX_RETRIES: u32 = 3;
-            let mut followup_last_error = String::new();
-            let mut followup_result = None;
-
-            for attempt in 1..=FOLLOWUP_MAX_RETRIES {
-                let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                    model.clone(),
-                    follow_up_messages.clone(),
-                );
-
-                match state
-                    .ai_config
-                    .chat_completion_streaming(ctx.provider, &follow_up_req, reasoning_tx.clone())
-                    .await
-                {
-                    Ok(result) => {
-                        followup_result = Some(result);
-                        break;
-                    }
-                    Err(e) => {
-                        followup_last_error = format!("{}", e);
-                        tracing::warn!(
-                            "Follow-up completion attempt {}/{} failed: {}",
-                            attempt,
-                            FOLLOWUP_MAX_RETRIES,
-                            e
-                        );
-                        if attempt < FOLLOWUP_MAX_RETRIES {
-                            options.emit_status(ChatStatus::RetryingFollowup {
-                                attempt: attempt + 1,
-                                max: FOLLOWUP_MAX_RETRIES,
-                            });
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                500 * attempt as u64,
-                            ))
-                            .await;
-                        }
-                    }
-                }
-            }
-
-            match followup_result {
-                Some(follow_up_result) => {
-                    tracing::debug!("Received follow-up response from model");
-                    let response = follow_up_result.choices[0]
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or_default();
-
-                    // If we got an empty response, fall back to the tool answer
-                    if response.trim().is_empty() {
-                        tracing::warn!("Follow-up response was empty, using tool answer directly");
-                        // Check if direct_response - don't return internal hint
-                        let was_direct_response = result.choices[0]
-                            .message
-                            .tool_calls
-                            .as_ref()
-                            .map(|calls| {
-                                calls
-                                    .iter()
-                                    .any(|c| c.function.name.as_deref() == Some("direct_response"))
-                            })
-                            .unwrap_or(false);
-
-                        if was_direct_response {
-                            "I processed your request but couldn't generate a response.".to_string()
-                        } else {
-                            tool_answers
-                                .values()
-                                .next()
-                                .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
-                                .unwrap_or_else(|| {
-                                    "I processed your request but couldn't generate a response."
-                                        .to_string()
-                                })
-                        }
-                    } else {
-                        response
-                    }
-                }
-                None => {
-                    tracing::error!(
-                        "Failed to get follow-up completion after {} attempts: {}",
-                        FOLLOWUP_MAX_RETRIES,
-                        followup_last_error
-                    );
-
-                    // Check if this was a direct_response tool - don't return the internal hint
-                    let was_direct_response = result.choices[0]
-                        .message
-                        .tool_calls
-                        .as_ref()
-                        .map(|calls| {
-                            calls
-                                .iter()
-                                .any(|c| c.function.name.as_deref() == Some("direct_response"))
-                        })
-                        .unwrap_or(false);
-
-                    if was_direct_response {
-                        "I apologize, but I encountered an error. Please try again.".to_string()
-                    } else {
-                        // Return the tool answer directly, truncated to SMS limit
-                        tool_answers
-                            .values()
-                            .next()
-                            .map(|ans| truncate_nicely(ans, SmsResponse::MAX_LENGTH))
-                            .unwrap_or_else(|| {
-                                "I apologize, but I encountered an error processing your request. Please try again.".to_string()
-                            })
-                    }
-                }
+                tool_answers.extend(round_answers);
+                // Loop continues to next round
             }
         }
-        Some(chat_completion::FinishReason::length) => {
-            fail = true;
-            "I apologize, but my response was too long. Could you please ask your question in a more specific way? (you were not charged for this message)".to_string()
-        }
-        Some(chat_completion::FinishReason::content_filter) => {
-            fail = true;
-            "I apologize, but I cannot provide an answer to that question due to content restrictions. (you were not charged for this message)".to_string()
-        }
-        Some(chat_completion::FinishReason::null) => {
-            fail = true;
-            "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string()
-        }
-    };
+    }
+
+    // If loop exhausted without a final response, use last tool answer
+    if final_response.is_empty() && !tool_answers.is_empty() {
+        tracing::warn!(
+            "Agentic loop exhausted {} rounds without terminal tool",
+            MAX_ROUNDS
+        );
+        final_response = tool_answers.values().last().cloned().unwrap_or_else(|| {
+            "I was unable to complete your request. Please try again.".to_string()
+        });
+    } else if final_response.is_empty() {
+        final_response = "I was unable to process your request. Please try again.".to_string();
+    }
 
     // Extract any [MEDIA_RESULTS] from tool answers and append to response
     // This ensures media results are passed through even if AI doesn't include them
@@ -1449,7 +1409,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         .unwrap()
         .as_secs() as i32;
 
-    let assistant_message = crate::models::user_models::NewMessageHistory {
+    let assistant_message = crate::pg_models::NewPgMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),
         encrypted_content: final_response_with_notice.clone(),

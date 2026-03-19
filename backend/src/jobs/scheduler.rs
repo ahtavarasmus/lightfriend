@@ -7,213 +7,6 @@ use tracing::{debug, error};
 
 use crate::handlers::imap_handlers;
 
-// ---------------------------------------------------------------------------
-// Migration summary helpers (pure functions, testable from integration tests)
-// ---------------------------------------------------------------------------
-
-/// Map comma-separated legacy source names to the fetch tag format.
-/// "whatsapp", "telegram", "signal" all map to "chat" (deduped).
-/// "email" stays "email".
-/// "items" is always appended.
-pub fn map_sources_to_fetch(sources: &str) -> String {
-    let mut fetch = Vec::new();
-    let mut has_chat = false;
-    for src in sources.split(',').map(|s| s.trim().to_lowercase()) {
-        match src.as_str() {
-            "whatsapp" | "telegram" | "signal" => {
-                if !has_chat {
-                    fetch.push("chat".to_string());
-                    has_chat = true;
-                }
-            }
-            "email" => {
-                if !fetch.contains(&src) {
-                    fetch.push(src);
-                }
-            }
-            other if !other.is_empty() => {
-                if !fetch.contains(&other.to_string()) {
-                    fetch.push(other.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    if !fetch.contains(&"items".to_string()) {
-        fetch.push("items".to_string());
-    }
-    fetch.join(",")
-}
-
-/// Map a weekday number (0=Sun or 1=Mon depending on legacy format) to a name.
-/// The legacy format uses 0=Sunday, 1=Monday, ..., 6=Saturday.
-pub fn weekday_number_to_name(n: u32) -> Option<&'static str> {
-    match n {
-        0 => Some("Sunday"),
-        1 => Some("Monday"),
-        2 => Some("Tuesday"),
-        3 => Some("Wednesday"),
-        4 => Some("Thursday"),
-        5 => Some("Friday"),
-        6 => Some("Saturday"),
-        _ => None,
-    }
-}
-
-/// Build a tagged summary for a digest migration item.
-/// Returns (summary_string, priority).
-pub fn build_digest_migration_summary(
-    time: &str,
-    notification_type: Option<&str>,
-    sources: Option<&str>,
-) -> (String, i32) {
-    let hour_min = normalize_time(time);
-    let (notify_tag, priority) = match notification_type {
-        Some("call") => ("call", 2),
-        _ => ("sms", 1),
-    };
-    let fetch = match sources {
-        Some(s) => map_sources_to_fetch(s),
-        None => "email,chat,items".to_string(),
-    };
-    let tags = format!(
-        "[type:recurring] [notify:{}] [repeat:daily {}] [fetch:{}]",
-        notify_tag, hour_min, fetch
-    );
-    let description = "Summarize recent emails, messages, and tracked items for the user.";
-    (format!("{}\n{}", tags, description), priority)
-}
-
-/// Build a tagged summary for a digest task (from tasks table).
-/// Returns (summary, priority).
-pub fn build_digest_task_summary(
-    notification_type: Option<&str>,
-    recurrence_time: Option<&str>,
-    sources: Option<&str>,
-) -> (String, i32) {
-    let time = recurrence_time.unwrap_or("08:00");
-    build_digest_migration_summary(time, notification_type, sources)
-}
-
-/// Build a tagged summary for a tracking task (from tasks table).
-/// Returns (summary, priority).
-pub fn build_tracking_task_summary(
-    trigger: &str,
-    condition: Option<&str>,
-    notification_type: Option<&str>,
-) -> (String, i32) {
-    let platform = if trigger.starts_with("recurring_email") {
-        "email"
-    } else {
-        "chat"
-    };
-    let fetch = if platform == "email" { "email" } else { "chat" };
-    let (notify_tag, priority) = match notification_type {
-        Some("call") => ("call", 2),
-        _ => ("sms", 1),
-    };
-    let condition_text = condition.unwrap_or("any matching content");
-    let tags = format!(
-        "[type:tracking] [notify:{}] [fetch:{}] [platform:{}] [sender:any] [topic:{}]",
-        notify_tag, fetch, platform, condition_text
-    );
-    (format!("{}\n{}", tags, condition_text), priority)
-}
-
-/// Build a tagged summary for a recurring (non-digest) task.
-/// Returns a Vec of (summary, priority) - multiple items if weekly with multiple days.
-pub fn build_recurring_task_summary(
-    action: &str,
-    recurrence_rule: Option<&str>,
-    recurrence_time: Option<&str>,
-    notification_type: Option<&str>,
-) -> Vec<(String, i32)> {
-    let rule = recurrence_rule.unwrap_or("daily");
-    let time = normalize_time(recurrence_time.unwrap_or("08:00"));
-    let (notify_tag, priority) = match notification_type {
-        Some("call") => ("call", 2),
-        _ => ("sms", 1),
-    };
-
-    if rule == "daily" {
-        let tags = format!(
-            "[type:recurring] [notify:{}] [repeat:daily {}]",
-            notify_tag, time
-        );
-        return vec![(format!("{}\n{}", tags, action), priority)];
-    }
-
-    if rule.starts_with("weekly:") {
-        let days_str = rule.trim_start_matches("weekly:");
-        let day_nums: Vec<u32> = days_str
-            .split(',')
-            .filter_map(|d| d.trim().parse().ok())
-            .collect();
-
-        // Check for weekdays (Mon-Fri = 1,2,3,4,5)
-        if day_nums.len() == 5 && (1..=5).all(|d| day_nums.contains(&d)) {
-            let tags = format!(
-                "[type:recurring] [notify:{}] [repeat:weekdays {}]",
-                notify_tag, time
-            );
-            return vec![(format!("{}\n{}", tags, action), priority)];
-        }
-
-        // Otherwise create one item per day
-        return day_nums
-            .iter()
-            .filter_map(|&d| {
-                weekday_number_to_name(d).map(|name| {
-                    let tags = format!(
-                        "[type:recurring] [notify:{}] [repeat:weekly {} {}]",
-                        notify_tag, name, time
-                    );
-                    (format!("{}\n{}", tags, action), priority)
-                })
-            })
-            .collect();
-    }
-
-    // Fallback: treat as daily
-    let tags = format!(
-        "[type:recurring] [notify:{}] [repeat:daily {}]",
-        notify_tag, time
-    );
-    vec![(format!("{}\n{}", tags, action), priority)]
-}
-
-/// Build a tagged summary for a one-shot reminder.
-/// Returns (summary, priority).
-pub fn build_oneshot_task_summary(action: &str, notification_type: Option<&str>) -> (String, i32) {
-    let (notify_tag, priority) = match notification_type {
-        Some("call") => ("call", 2),
-        _ => ("sms", 1),
-    };
-    let tags = format!("[type:oneshot] [notify:{}]", notify_tag);
-    (format!("{}\n{}", tags, action), priority)
-}
-
-/// Build a tagged summary for a quiet mode task.
-/// Returns (summary, priority).
-pub fn build_quiet_mode_summary() -> (String, i32) {
-    let tags = "[type:oneshot] [notify:silent]";
-    let description = "Quiet mode - suppress notifications until end time.";
-    (format!("{}\n{}", tags, description), 0)
-}
-
-/// Normalize a time string to "HH:MM" format.
-/// Handles inputs like "9:00" -> "09:00", "14:30" -> "14:30".
-fn normalize_time(time: &str) -> String {
-    let parts: Vec<&str> = time.split(':').collect();
-    if parts.len() >= 2 {
-        let hour: u32 = parts[0].parse().unwrap_or(8);
-        let minute: u32 = parts[1].parse().unwrap_or(0);
-        format!("{:02}:{:02}", hour, minute)
-    } else {
-        "08:00".to_string()
-    }
-}
-
 async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
 
@@ -332,36 +125,11 @@ pub async fn check_all_bridges_health(
                     user_id
                 );
 
-                // Record disconnection as an item
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i32;
 
-                let bridge_name = match bridge.bridge_type.as_str() {
-                    "whatsapp" => "WhatsApp",
-                    "telegram" => "Telegram",
-                    "signal" => "Signal",
-                    other => other,
-                };
-
-                let new_item = crate::models::user_models::NewItem {
-                    user_id,
-                    summary: format!("System: {} bridge disconnected.", bridge_name),
-                    due_at: None,
-                    priority: 1,
-                    source_id: None,
-                    created_at: current_time,
-                };
-
-                if let Err(e) = state.item_repository.create_item(&new_item) {
-                    error!(
-                        "Failed to create item for bridge disconnection for user {}: {}",
-                        user_id, e
-                    );
-                }
-
-                // Also record in legacy table for backward compatibility during migration
                 if let Err(e) = state.user_repository.record_bridge_disconnection(
                     user_id,
                     &bridge.bridge_type,
@@ -404,7 +172,7 @@ pub async fn check_all_bridges_health(
 async fn is_bridge_healthy(
     state: &Arc<AppState>,
     user_id: i32,
-    bridge: &crate::models::user_models::Bridge,
+    bridge: &crate::pg_models::PgBridge,
 ) -> bool {
     // Try to get Matrix client and fetch rooms for this bridge type
     // Note: Empty rooms is OK (user might not have any chats yet)
@@ -566,79 +334,102 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         b_date.cmp(&a_date)
                                     });
 
-                                    let contact_profiles = match state.user_repository.get_contact_profiles(user.id) {
-                                        Ok(profiles) => profiles,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get contact profiles for user {}: {}", user.id, e);
-                                            Vec::new()
-                                        }
-                                    };
-                                    // Check if user has auto_create_items enabled
-                                    let auto_create_items = state.user_core.get_auto_create_items(user.id).unwrap_or(false);
-
-                                    // Mark emails as processed and format them for importance checking
-                                    let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
-                                        // Auto-detect trackable items (invoices, shipments, deadlines)
-                                        // Runs for every email - spawned in background to avoid blocking
-                                        if auto_create_items {
-                                            let state_clone = state.clone();
-                                            let user_id = user.id;
-                                            let email_uid = email.id.clone();
-                                            let trackable_content = format!(
-                                                "From: {}\nSubject: {}\nDate: {}\nBody: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject"),
-                                                email.date_formatted.as_deref().unwrap_or("Unknown date"),
-                                                email.body.as_deref().unwrap_or("No content")
-                                            );
-                                            tokio::spawn(async move {
-                                                if let Err(e) = crate::proactive::utils::check_trackable_items(
-                                                    &state_clone,
-                                                    user_id,
-                                                    &email_uid,
-                                                    &trackable_content,
-                                                ).await {
-                                                    tracing::debug!("Trackable item check failed for email {}: {}", email_uid, e);
+                                        // Find matching ontology Person for this email sender
+                                        let mut matched_person_id: Option<i32> = None;
+                                        let mut person_notification = None;
+                                        if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id) {
+                                            let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
+                                            let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
+                                            for pwc in &persons {
+                                                for channel in &pwc.channels {
+                                                    if channel.platform == "email" {
+                                                        if let Some(ref handle) = channel.handle {
+                                                            let handle_lower = handle.to_lowercase();
+                                                            if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower) {
+                                                                matched_person_id = Some(pwc.person.id);
+                                                                // Check if this person has "all" notification mode
+                                                                if pwc.effective_notification_mode(channel, "default") == "all" {
+                                                                    let suffix = match pwc.effective_notification_type(channel, "sms").as_str() {
+                                                                        "call" => "_call",
+                                                                        _ => "_sms",
+                                                                    };
+                                                                    person_notification = Some((
+                                                                        format!("email_priority{}", suffix),
+                                                                        format!(
+                                                                            "Email from: {}\nSubject: {}\nContent: {}",
+                                                                            email.from.as_deref().unwrap_or("Unknown"),
+                                                                            email.subject.as_deref().unwrap_or("No subject"),
+                                                                            email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
+                                                                        ),
+                                                                        format!("Hello, you have a critical email from {} with subject: {}",
+                                                                            email.from.as_deref().unwrap_or("Unknown"),
+                                                                            email.subject.as_deref().unwrap_or("No subject")
+                                                                        ),
+                                                                    ));
+                                                                }
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
                                                 }
-                                            });
+                                                if matched_person_id.is_some() { break; }
+                                            }
                                         }
 
-                                        // Check if sender matches contact profiles with "all" notification mode
-                                        if let Some(matched_profile) = contact_profiles.iter().filter(|p| p.notification_mode == "all").find(|profile| {
-                                            if let Some(ref emails) = profile.email_addresses {
-                                                let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
-                                                let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
-                                                emails.split(',').any(|addr| {
-                                                    let addr_lower = addr.trim().to_lowercase();
-                                                    from_lower.contains(&addr_lower) || from_name_lower.contains(&addr_lower)
-                                                })
-                                            } else {
-                                                false
+                                        // Store email as ont_message + emit ontology change for rule matching
+                                        let now = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs() as i32;
+                                        let email_uid = email.id.clone();
+                                        let sender_name = email.from.as_deref().unwrap_or("Unknown").to_string();
+                                        let content = format!(
+                                            "{}\n{}",
+                                            email.subject.as_deref().unwrap_or(""),
+                                            email.body.as_deref().unwrap_or("").chars().take(500).collect::<String>()
+                                        );
+                                        let msg = crate::models::ontology_models::NewOntMessage {
+                                            user_id: user.id,
+                                            room_id: format!("email_{}", email_uid),
+                                            platform: "email".to_string(),
+                                            sender_name: sender_name.clone(),
+                                            content: content.clone(),
+                                            person_id: matched_person_id,
+                                            created_at: now,
+                                            pinned: false,
+                                            status: None,
+                                        };
+                                        let state_emit = state.clone();
+                                        let uid = user.id;
+                                        tokio::spawn(async move {
+                                            match state_emit.ontology_repository.insert_message(&msg) {
+                                                Ok(created) => {
+                                                    let snapshot = serde_json::json!({
+                                                        "message_id": created.id,
+                                                        "platform": "email",
+                                                        "sender_name": msg.sender_name,
+                                                        "content": msg.content,
+                                                        "room_id": msg.room_id,
+                                                    });
+                                                    crate::proactive::rules::emit_ontology_change(
+                                                        &state_emit,
+                                                        uid,
+                                                        "Message",
+                                                        created.id as i32,
+                                                        "created",
+                                                        snapshot,
+                                                    )
+                                                    .await;
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to store email message: {}", e);
+                                                }
                                             }
-                                        }) {
-                                            tracing::info!("Fast check: Contact profile matched for user {}", user.id);
+                                        });
 
-                                            // Determine suffix based on notification_type
-                                            let suffix = match matched_profile.notification_type.as_str() {
-                                                "call" => "_call",
-                                                _ => "_sms",
-                                            };
-                                            let notification_type = format!("email_priority{}", suffix);
-
-                                            // Format the notification message with sender and content
-                                            let message = format!(
-                                                "Email from: {}\nSubject: {}\nContent: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject"),
-                                                email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
-                                            );
-                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}",
-                                                email.from.as_deref().unwrap_or("Unknown"),
-                                                email.subject.as_deref().unwrap_or("No subject")
-                                            );
-
-                                            // Spawn a new task for sending notification
+                                        // Send notification for "all" mode contacts
+                                        if let Some((notification_type, message, first_message)) = person_notification {
                                             let state_clone = state.clone();
                                             tokio::spawn(async move {
                                                 crate::proactive::utils::send_notification(
@@ -649,117 +440,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     Some(first_message),
                                                 ).await;
                                             });
-                                            continue;
-                                        }
-                                        // Format email content for checking
-                                        let email_content = format!(
-                                            "Platform: email\nFrom: {}\nChat: inbox\nSubject: {}\nContent: {}",
-                                            email.from.as_deref().unwrap_or("Unknown"),
-                                            email.subject.as_deref().unwrap_or("No subject"),
-                                            email.body.as_deref().unwrap_or("No content")
-                                        );
-
-                                        // Check tracking items with email fetch for email matches
-                                        let tracking_items = state.item_repository.get_tracking_items(user.id).unwrap_or_default();
-                                        let now_ts = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap()
-                                            .as_secs() as i32;
-                                        let email_tracking: Vec<_> = tracking_items.into_iter().filter(|item| {
-                                            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                                            tags.fetch.contains(&"email".to_string())
-                                                && item.due_at.is_some_and(|d| d > now_ts)
-                                        }).collect();
-                                        if !email_tracking.is_empty() {
-                                            // Extract data from Result immediately to drop non-Send Box<dyn Error>
-                                            let maybe_match: Option<crate::models::user_models::Item> =
-                                                crate::proactive::utils::check_item_monitor_match(
-                                                    &state,
-                                                    user.id,
-                                                    &email_content,
-                                                    &email_tracking,
-                                                ).await.ok().flatten().and_then(|resp| {
-                                                    let item_id = resp.task_id.unwrap_or(0);
-                                                    email_tracking.iter().find(|i| i.id == Some(item_id)).cloned()
-                                                });
-                                            if let Some(matched_item) = maybe_match {
-                                                let item_id = matched_item.id.unwrap_or(0);
-                                                let priority = matched_item.priority;
-                                                let result: Result<crate::proactive::utils::TriggeredItemResult, String> =
-                                                    crate::proactive::utils::process_triggered_item(
-                                                        &state, user.id, &matched_item, Some(&email_content),
-                                                    ).await.map_err(|e| e.to_string());
-                                                match result {
-                                                    Ok(response) => {
-                                                        crate::proactive::utils::handle_triggered_item_result(
-                                                            &state, user.id, item_id, priority, &response,
-                                                        ).await;
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!("Failed to process tracking match for item {}: {}", item_id, e);
-                                                        crate::proactive::utils::send_notification(
-                                                            &state, user.id, &matched_item.summary,
-                                                            "item_sms".to_string(),
-                                                            Some("Hey, you have a notification!".to_string()),
-                                                        ).await;
-                                                    }
-                                                }
-                                                continue;
-                                            }
-                                        }
-
-                                        // Add email to content string for importance checking
-                                        emails_content.push_str(&email_content);
-                                    }
-
-
-                                    // Check message importance based on waiting checks and criticality
-                                    let user_settings = match state.user_core.get_user_settings(user.id) {
-                                        Ok(settings) => settings,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get user settings: {}", e);
-                                            return;
-                                        }
-                                    };
-
-                                    if user_settings.critical_enabled.is_none() {
-                                        tracing::debug!("Critical message checking disabled for user {}", user.id);
-                                        return;
-                                    }
-
-                                    // Check message importance based on criticality
-                                    match crate::proactive::utils::check_message_importance(&state, user.id, &emails_content, "", "", "", None, "").await {
-                                        Ok((is_critical, message, first_message)) => {
-                                            if is_critical {
-                                                let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());
-                                                let first_message = first_message.unwrap_or("Hey, I found some critical email you should know.".to_string());
-                                                tracing::info!(
-                                                    "Email critical check passed for user {}: {}",
-                                                    user.id, message
-                                                );
-
-                                                // Spawn a new task for sending critical message notification
-                                                let state_clone = state.clone();
-                                                let message_clone= message.clone();
-                                                tokio::spawn(async move {
-                                                    crate::proactive::utils::send_notification(
-                                                        &state_clone,
-                                                        user.id,
-                                                        &message_clone,
-                                                        "email_critical".to_string(),
-                                                        Some(first_message),
-                                                    ).await;
-                                                });
-                                            } else {
-                                                tracing::debug!(
-                                                    "Email not considered important for user {}: {}",
-                                                    user.id, message.unwrap_or("failed to get the email content".to_string())
-                                                );
-
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("Failed to check email importance: {}", e);
                                         }
                                     }
                                 }
@@ -769,18 +449,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             }
                         }
 
-                        // Auto-resolve email tracking items for emails the user has read
-                        {
-                            let state_clone = state.clone();
-                            let user_id = user.id;
-                            tokio::spawn(async move {
-                                if let Err(e) = crate::proactive::utils::resolve_read_email_items(
-                                    &state_clone, user_id
-                                ).await {
-                                    tracing::debug!("Email tracking item resolve failed for user {}: {}", user_id, e);
-                                }
-                            });
-                        }
                     }
                 }
             }
@@ -811,181 +479,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add bridge health check job to scheduler");
 
-    // Triggered items - runs every minute to process items whose due_at has passed
-    let state_clone = Arc::clone(&state);
-    let triggered_items_job = Job::new_async("0 */1 * * * *", move |_, _| {
-        let state = state_clone.clone();
-        Box::pin(async move {
-            debug!("Checking for triggered items...");
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            match state.item_repository.get_triggered_items(now) {
-                Ok(items) => {
-                    debug!("Found {} triggered items", items.len());
-                    for item in items {
-                        let item_id = item.id.unwrap_or(0);
-                        let user_id = item.user_id;
-                        let state = state.clone();
-                        let item_clone = item.clone();
-
-                        // Mark as running BEFORE spawning to prevent duplicate execution
-                        // on the next cron tick (set due_at far in the future temporarily)
-                        let _ = state
-                            .item_repository
-                            .update_due_at(item_id, Some(now + 86400));
-
-                        tokio::spawn(async move {
-                            debug!(
-                                "Processing triggered item {} for user {}: {}",
-                                item_id, user_id, item_clone.summary
-                            );
-
-                            // Unified path for all items: time fired, no matched message
-                            let summary = item_clone.summary.clone();
-                            let priority = item_clone.priority;
-
-                            let result = crate::proactive::utils::process_triggered_item(
-                                &state,
-                                user_id,
-                                &item_clone,
-                                None,
-                            )
-                            .await
-                            .map_err(|e| e.to_string());
-
-                            match result {
-                                Ok(response) => {
-                                    crate::proactive::utils::handle_triggered_item_result(
-                                        &state, user_id, item_id, priority, &response,
-                                    )
-                                    .await;
-                                }
-                                Err(e) => {
-                                    error!("Failed to process triggered item {}: {}", item_id, e);
-                                    // Fallback: send summary as SMS, delete item
-                                    crate::proactive::utils::send_notification(
-                                        &state,
-                                        user_id,
-                                        &summary,
-                                        "item_sms".to_string(),
-                                        Some("Hey, you have a reminder!".to_string()),
-                                    )
-                                    .await;
-                                    let _ = state.item_repository.delete_item(item_id, user_id);
-                                }
-                            }
-                        });
-                    }
-                }
-                Err(e) => error!("Failed to get triggered items: {}", e),
-            }
-        })
-    })
-    .expect("Failed to create triggered items job");
-
-    sched
-        .add(triggered_items_job)
-        .await
-        .expect("Failed to add triggered items job to scheduler");
-
-    // Tracking interval job - runs every hour to process tracking items with internet/weather/items fetch
-    let state_clone = Arc::clone(&state);
-    let tracking_interval_job = Job::new_async("0 0 */1 * * *", move |_, _| {
-        let state = state_clone.clone();
-        Box::pin(async move {
-            debug!("Running hourly tracking interval check...");
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            // Get all users with auto features
-            let users = match state.user_core.get_all_users() {
-                Ok(users) => users,
-                Err(e) => {
-                    error!("Failed to get users for tracking interval: {}", e);
-                    return;
-                }
-            };
-
-            for user in &users {
-                let user_plan = state.user_repository.get_plan_type(user.id).unwrap_or(None);
-                if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
-                    continue;
-                }
-
-                let tracking_items = state
-                    .item_repository
-                    .get_tracking_items(user.id)
-                    .unwrap_or_default();
-                // Filter to items with non-email/chat fetch sources that haven't expired,
-                // OR email/chat-only items within 2 days of their deadline (pre-deadline check)
-                let interval_items: Vec<_> = tracking_items
-                    .into_iter()
-                    .filter(|item| {
-                        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                        let has_interval_fetch = tags
-                            .fetch
-                            .iter()
-                            .any(|f| matches!(f.as_str(), "internet" | "weather" | "items"));
-                        let only_realtime = tags
-                            .fetch
-                            .iter()
-                            .all(|f| matches!(f.as_str(), "email" | "chat"));
-                        let near_deadline =
-                            item.due_at.is_some_and(|d| d > now && d - now <= 2 * 86400);
-
-                        // Include: interval fetch items (not expired), OR email/chat items near deadline
-                        (has_interval_fetch
-                            && !only_realtime
-                            && item.due_at.is_some_and(|d| d > now))
-                            || (only_realtime && near_deadline)
-                    })
-                    .collect();
-
-                for item in interval_items {
-                    let item_id = item.id.unwrap_or(0);
-                    let user_id = item.user_id;
-                    let priority = item.priority;
-                    let state = state.clone();
-
-                    tokio::spawn(async move {
-                        let result = crate::proactive::utils::process_triggered_item(
-                            &state, user_id, &item, None,
-                        )
-                        .await
-                        .map_err(|e| e.to_string());
-
-                        match result {
-                            Ok(response) => {
-                                crate::proactive::utils::handle_triggered_item_result(
-                                    &state, user_id, item_id, priority, &response,
-                                )
-                                .await;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failed to process tracking interval item {}: {}",
-                                    item_id,
-                                    e
-                                );
-                            }
-                        }
-                    });
-                }
-            }
-        })
-    })
-    .expect("Failed to create tracking interval job");
-
-    sched
-        .add(tracking_interval_job)
-        .await
-        .expect("Failed to add tracking interval job to scheduler");
-
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);
     let alert_cleanup_job = Job::new_async("0 0 2 * * *", move |_, _| {
@@ -1013,28 +506,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add alert cleanup job to scheduler");
 
-    // Task cleanup - runs daily at 3am UTC to remove old completed/cancelled tasks
+    // Cleanup job - runs daily at 3am UTC to remove old logs and expire stale records
     let state_clone = Arc::clone(&state);
     let task_cleanup_job = Job::new_async("0 0 3 * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             debug!("Running daily cleanup...");
-
-            // Clean up old items (30 days past due_at)
-            let item_cutoff = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32
-                - (30 * 24 * 60 * 60); // 30 days ago
-
-            match state.item_repository.delete_old_items(item_cutoff) {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!("Cleaned up {} old items", count);
-                    }
-                }
-                Err(e) => error!("Failed to cleanup old items: {}", e),
-            }
 
             // Clean up old message status logs (30 days)
             let message_log_cutoff = std::time::SystemTime::now()
@@ -1051,26 +528,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
             }
 
-            // Auto-expire tracking items with due_at >7 days past
-            let cleanup_now = std::time::SystemTime::now()
+            // Expire stale "ongoing" call records (no webhook received after 1 hour)
+            let call_cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i32;
-
-            match state
-                .item_repository
-                .delete_expired_tracking_items(cleanup_now)
-            {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!("Auto-expired {} stale tracking items", count);
-                    }
-                }
-                Err(e) => error!("Failed to auto-expire tracking items: {}", e),
-            }
-
-            // Expire stale "ongoing" call records (no webhook received after 1 hour)
-            let call_cutoff = cleanup_now - 3600;
+                .as_secs() as i32
+                - 3600;
             match state
                 .user_repository
                 .expire_stale_ongoing_calls(call_cutoff)
@@ -1124,6 +587,106 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(metrics_update_job)
         .await
         .expect("Failed to add metrics update job to scheduler");
+
+    // Daily at 3 AM: purge ont_messages older than 14 days
+    let state_clone = Arc::clone(&state);
+    let message_purge_job = Job::new_async("0 0 3 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let max_age_secs = 14 * 24 * 3600; // 14 days
+            match state.ontology_repository.purge_old_messages(max_age_secs) {
+                Ok(count) if count > 0 => {
+                    tracing::info!("Purged {} old ont_messages (>14 days)", count);
+                }
+                Err(e) => {
+                    error!("Failed to purge old ont_messages: {}", e);
+                }
+                _ => {}
+            }
+
+            // Purge completed/expired rules older than 7 days
+            let rule_max_age = 7 * 24 * 3600;
+            match state.ontology_repository.purge_old_rules(rule_max_age) {
+                Ok(count) if count > 0 => {
+                    tracing::info!("Purged {} old completed/expired rules (>7 days)", count);
+                }
+                Err(e) => {
+                    error!("Failed to purge old rules: {}", e);
+                }
+                _ => {}
+            }
+        })
+    })
+    .expect("Failed to create message purge job");
+
+    sched
+        .add(message_purge_job)
+        .await
+        .expect("Failed to add message purge job to scheduler");
+
+    // Every minute: fire schedule-based ont_rules that are due
+    let state_clone = Arc::clone(&state);
+    let rule_schedule_job = Job::new_async("0 * * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32;
+
+            let due_rules = match state.ontology_repository.get_due_schedule_rules(now) {
+                Ok(rules) => rules,
+                Err(e) => {
+                    error!("Failed to load due schedule rules: {}", e);
+                    return;
+                }
+            };
+
+            for rule in due_rules {
+                let state = state.clone();
+                let rule_clone = rule.clone();
+                tokio::spawn(async move {
+                    // Build trigger context
+                    let ctx = format!(
+                        "Schedule trigger fired at {}",
+                        chrono::Utc::now().to_rfc3339()
+                    );
+                    crate::proactive::rules::evaluate_and_execute(&state, &rule_clone, &ctx, None)
+                        .await;
+
+                    // Compute and set next fire time for recurring rules
+                    let trigger: crate::proactive::rules::TriggerConfig =
+                        serde_json::from_str(&rule_clone.trigger_config).unwrap_or_default();
+                    if trigger.schedule.as_deref() == Some("recurring") {
+                        if let Some(ref pattern) = trigger.pattern {
+                            let user_tz = state
+                                .user_core
+                                .get_user_info(rule_clone.user_id)
+                                .ok()
+                                .and_then(|info| info.timezone)
+                                .unwrap_or_else(|| "UTC".to_string());
+                            if let Some(next) =
+                                crate::proactive::rules::compute_next_fire_at(pattern, &user_tz)
+                            {
+                                let _ = state
+                                    .ontology_repository
+                                    .update_rule_next_fire_at(rule_clone.id, next);
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Also expire old rules
+            let _ = state.ontology_repository.expire_old_rules(now);
+        })
+    })
+    .expect("Failed to create rule schedule job");
+
+    sched
+        .add(rule_schedule_job)
+        .await
+        .expect("Failed to add rule schedule job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

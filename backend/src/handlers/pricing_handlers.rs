@@ -1,7 +1,7 @@
 use crate::api::twilio_availability::get_country_capability;
 use crate::api::twilio_pricing::{get_euro_country_pricing, get_notification_only_pricing};
 use crate::handlers::auth_middleware::AuthUser;
-use crate::schema::usage_logs;
+use crate::pg_schema::usage_logs;
 use crate::utils::country::is_notification_only_country_code;
 use crate::UserCoreOps;
 
@@ -743,21 +743,8 @@ pub async fn get_usage_projection(
             "User not found".to_string(),
         ))?;
 
-    // Get user settings for digest info
-    let (morning_digest, day_digest, evening_digest) = state
-        .user_core
-        .get_digests(auth_user.user_id)
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // Count active digests
-    let digest_count = [
-        morning_digest.as_ref(),
-        day_digest.as_ref(),
-        evening_digest.as_ref(),
-    ]
-    .iter()
-    .filter(|&&x| x.is_some())
-    .count() as i32;
+    // Digests have been removed - always zero
+    let digest_count: i32 = 0;
 
     // Get plan capacity: derive message-equivalent from budget / per-message price
     let plan_type = user.plan_type.clone();
@@ -789,7 +776,7 @@ pub async fn get_usage_projection(
         avg_messages_per_day,
         avg_voice_mins_per_day,
     ) = {
-        let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+        let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
         let now: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -828,7 +815,7 @@ pub async fn get_usage_projection(
         } else {
             // Get oldest day in the period
             let oldest_day: i64 = usage_logs::table
-                .select(sql::<BigInt>("MIN(created_at / 86400)"))
+                .select(sql::<BigInt>("CAST(MIN(created_at / 86400) AS bigint)"))
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
                 .first(&mut conn)
@@ -887,7 +874,7 @@ pub async fn get_usage_projection(
             // Voice minutes: sum of call_duration for voice/call activities
             let voice_seconds: Option<f32> = usage_logs::table
                 .select(sql::<diesel::sql_types::Nullable<Float>>(
-                    "SUM(COALESCE(call_duration, 0))",
+                    "CAST(SUM(COALESCE(call_duration, 0)) AS real)",
                 ))
                 .filter(usage_logs::user_id.eq(auth_user.user_id))
                 .filter(
@@ -924,7 +911,7 @@ pub async fn get_usage_projection(
         actual_messages_used,
         actual_digests_used,
     ) = {
-        let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+        let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
         let now: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -984,7 +971,7 @@ pub async fn get_usage_projection(
         // Actual voice minutes this billing period
         let actual_voice_secs: Option<f32> = usage_logs::table
             .select(sql::<diesel::sql_types::Nullable<Float>>(
-                "SUM(COALESCE(call_duration, 0))",
+                "CAST(SUM(COALESCE(call_duration, 0)) AS real)",
             ))
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
@@ -1363,7 +1350,7 @@ pub async fn get_byot_usage(
         .map(|ts| ((ts as i64 - now) / 86_400).max(0) as i32);
 
     // Query usage from database
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
 
     // Digests
     let digest_count: i64 = usage_logs::table
@@ -1418,7 +1405,7 @@ pub async fn get_byot_usage(
     // Voice minutes
     let voice_seconds: Option<f32> = usage_logs::table
         .select(sql::<diesel::sql_types::Nullable<Float>>(
-            "SUM(COALESCE(call_duration, 0))",
+            "CAST(SUM(COALESCE(call_duration, 0)) AS real)",
         ))
         .filter(usage_logs::user_id.eq(auth_user.user_id))
         .filter(

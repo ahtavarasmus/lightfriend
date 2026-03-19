@@ -14,35 +14,52 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_sessions::MemoryStore;
 
-/// Embedded migrations for in-memory test database
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
+/// Embedded PG migrations for test database
+pub const PG_MIGRATIONS: EmbeddedMigrations = embed_migrations!("./pg_migrations");
 
-/// Create an in-memory SQLite connection pool with migrations applied
+/// Create a test PG connection pool.
 ///
-/// Uses shared cache mode with a unique database name so all connections
-/// from this pool share the same in-memory database, but different tests
-/// get isolated databases.
-pub fn create_test_pool() -> crate::DbPool {
+/// Uses TEST_PG_DATABASE_URL env var. If PG is unavailable, creates a dummy
+/// pool that will error on first real use. Tests that only use SQLite repos
+/// will still pass since they never call pool.get() on the PG pool.
+pub fn create_test_pg_pool() -> crate::PgDbPool {
     use diesel::r2d2::{self, ConnectionManager};
-    use diesel::SqliteConnection;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use diesel::PgConnection;
 
-    // Generate unique database name for this test
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let db_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let db_url = format!("file:testdb_{}?mode=memory&cache=shared", db_id);
+    let pg_url = std::env::var("TEST_PG_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://lightfriend:test@localhost:5432/lightfriend_test".to_string()
+    });
 
-    let manager = ConnectionManager::<SqliteConnection>::new(&db_url);
+    let manager = ConnectionManager::<PgConnection>::new(&pg_url);
     let pool = r2d2::Pool::builder()
-        .max_size(5) // Allow multiple connections with shared cache
-        .connection_customizer(Box::new(crate::SqliteConnectionCustomizer))
-        .build(manager)
-        .expect("Failed to create test pool");
+        .max_size(2)
+        .min_idle(Some(0))
+        .connection_timeout(std::time::Duration::from_secs(1))
+        .build_unchecked(manager);
 
-    // Run migrations
-    let mut conn = pool.get().expect("Failed to get connection");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
+    // Run PG migrations and truncate all tables for test isolation
+    if let Ok(mut conn) = pool.get() {
+        let _ = conn.run_pending_migrations(PG_MIGRATIONS);
+        // Truncate all PG tables so each test starts clean
+        use diesel::RunQueryDsl;
+        // Core tables - always exist
+        let _ = diesel::sql_query(
+            "TRUNCATE users, user_settings, refund_info, \
+             country_availability, message_status_log, admin_alerts, \
+             disabled_alert_types, site_metrics, waitlist, \
+             items, message_history, usage_logs, \
+             bridges, bridge_disconnection_events, \
+             imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
+             totp_backup_codes, webauthn_credentials, webauthn_challenges, \
+             user_secrets, user_info, processed_emails CASCADE",
+        )
+        .execute(&mut conn);
+        // Ontology tables - may not exist yet in all test environments
+        let _ = diesel::sql_query(
+            "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
+        )
+        .execute(&mut conn);
+    }
 
     pool
 }
@@ -68,37 +85,39 @@ fn create_dummy_tesla_oauth_client() -> crate::TeslaOAuthClient {
 /// This creates a real in-memory database with UserCore and UserRepository,
 /// but stubs out OAuth clients and other services not needed for credit tests.
 pub fn create_test_state() -> Arc<crate::AppState> {
-    let pool = create_test_pool();
+    let pg_pool = create_test_pg_pool();
 
-    let user_core = Arc::new(crate::UserCore::new(pool.clone()));
-    let user_repository = Arc::new(crate::UserRepository::new(pool.clone()));
-    let item_repository = Arc::new(crate::ItemRepository::new(pool.clone()));
+    let user_core = Arc::new(crate::UserCore::new(pg_pool.clone()));
+    let user_repository = Arc::new(crate::UserRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
-        pool.clone(),
+        pg_pool.clone(),
     ));
-    let webauthn_repository =
-        Arc::new(crate::repositories::webauthn_repository::WebauthnRepository::new(pool.clone()));
+    let webauthn_repository = Arc::new(
+        crate::repositories::webauthn_repository::WebauthnRepository::new(pg_pool.clone()),
+    );
     let admin_alert_repository = Arc::new(
-        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pool.clone()),
+        crate::repositories::admin_alert_repository::AdminAlertRepository::new(pg_pool.clone()),
     );
     let metrics_repository =
-        Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pool.clone()));
+        Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(
+        crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
     let twilio_client = Arc::new(crate::RealTwilioClient::new());
     let twilio_message_service = Arc::new(crate::TwilioMessageService::new(
         twilio_client.clone(),
-        pool.clone(),
+        pg_pool.clone(),
         user_core.clone(),
         user_repository.clone(),
     ));
 
     Arc::new(crate::AppState {
-        db_pool: pool,
+        pg_pool,
         user_core,
         user_repository,
-        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
@@ -127,6 +146,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
+        ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),
     })
 }
@@ -146,11 +167,9 @@ pub fn create_test_user(
         password_hash,
         phone_number: params.phone_number.clone(),
         time_to_live: 60,
-        verified: true,
         credits: params.credits,
         credits_left: params.credits_left,
         charge_when_under: false,
-        discount: false,
         sub_tier: params.sub_tier.clone(),
     };
 
@@ -492,7 +511,7 @@ pub fn setup_test_encryption() {
 pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
     setup_test_encryption();
     state
-        .user_core
+        .user_repository
         .update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
         .expect("Failed to set BYOT credentials");
     // Also set plan_type to "byot" so is_byot_user() returns true
@@ -501,10 +520,10 @@ pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
 
 /// Set the plan_type for a user (used for BYOT testing)
 pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str) {
-    use crate::schema::users;
+    use crate::pg_schema::users;
     use diesel::prelude::*;
 
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
     diesel::update(users::table.filter(users::id.eq(user_id)))
         .set(users::plan_type.eq(Some(plan_type.to_string())))
         .execute(&mut conn)
@@ -513,10 +532,10 @@ pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str
 
 /// Set the preferred_number for a user
 pub fn set_preferred_number(state: &Arc<crate::AppState>, user_id: i32, number: &str) {
-    use crate::schema::users;
+    use crate::pg_schema::users;
     use diesel::prelude::*;
 
-    let mut conn = state.db_pool.get().expect("Failed to get DB connection");
+    let mut conn = state.pg_pool.get().expect("Failed to get PG connection");
     diesel::update(users::table.filter(users::id.eq(user_id)))
         .set(users::preferred_number.eq(Some(number.to_string())))
         .execute(&mut conn)
@@ -585,8 +604,9 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
 
 pub mod mock_user_core {
     use crate::handlers::profile_handlers::CriticalNotificationInfo;
-    use crate::models::user_models::{User, UserInfo, UserSettings};
-    use crate::repositories::user_core::{DigestSettings, UpdateProfileParams, UserCoreOps};
+    use crate::models::user_models::{User, UserSettings};
+    use crate::pg_models::PgUserInfo;
+    use crate::repositories::user_core::{UpdateProfileParams, UserCoreOps};
     use diesel::result::Error as DieselError;
     use std::collections::HashMap;
     use std::error::Error;
@@ -615,11 +635,11 @@ pub mod mock_user_core {
         pub users_by_phone: Mutex<HashMap<String, User>>,
         pub users_by_email: Mutex<HashMap<String, User>>,
         pub user_settings: Mutex<HashMap<i32, UserSettings>>,
-        pub user_info: Mutex<HashMap<i32, UserInfo>>,
+        pub user_info: Mutex<HashMap<i32, PgUserInfo>>,
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
-        pub quiet_rules: Mutex<HashMap<i32, Vec<crate::models::user_models::Item>>>,
+        pub quiet_rules: Mutex<HashMap<i32, Vec<String>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -684,7 +704,7 @@ pub mod mock_user_core {
             self
         }
 
-        pub fn with_user_info(self, user_id: i32, info: UserInfo) -> Self {
+        pub fn with_user_info(self, user_id: i32, info: PgUserInfo) -> Self {
             self.user_info.lock().unwrap().insert(user_id, info);
             self
         }
@@ -764,10 +784,6 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn verify_user(&self, _user_id: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
         fn update_password(&self, _user_id: i32, _password_hash: &str) -> Result<(), DieselError> {
             Ok(())
         }
@@ -789,19 +805,11 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn update_discount_tier(
-            &self,
-            _user_id: i32,
-            _tier: Option<&str>,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
         fn ensure_user_info_exists(&self, _user_id: i32) -> Result<(), DieselError> {
             Ok(())
         }
 
-        fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError> {
+        fn get_user_info(&self, user_id: i32) -> Result<PgUserInfo, DieselError> {
             self.calls.lock().unwrap().get_user_info_calls.push(user_id);
             self.user_info
                 .lock()
@@ -1006,40 +1014,6 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn update_digests(
-            &self,
-            _user_id: i32,
-            _morning: Option<&str>,
-            _day: Option<&str>,
-            _evening: Option<&str>,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn get_digests(&self, _user_id: i32) -> Result<DigestSettings, DieselError> {
-            Ok((None, None, None))
-        }
-
-        fn get_last_instant_digest_time(&self, _user_id: i32) -> Result<Option<i32>, DieselError> {
-            Ok(None)
-        }
-
-        fn set_last_instant_digest_time(&self, _user_id: i32, _ts: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn update_proactive_agent_on(
-            &self,
-            _user_id: i32,
-            _enabled: bool,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
-        fn get_proactive_agent_on(&self, _user_id: i32) -> Result<bool, DieselError> {
-            Ok(true)
-        }
-
         fn update_critical_enabled(
             &self,
             _user_id: i32,
@@ -1073,59 +1047,9 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn get_twilio_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-            Ok(("test_sid".to_string(), "test_token".to_string()))
-        }
-
-        fn has_twilio_credentials(&self, _user_id: i32) -> bool {
-            false
-        }
-
         fn is_byot_user(&self, user_id: i32) -> bool {
             self.calls.lock().unwrap().is_byot_user_calls.push(user_id);
             self.byot_users.lock().unwrap().contains(&user_id)
-        }
-
-        fn update_twilio_credentials(
-            &self,
-            _user_id: i32,
-            _sid: &str,
-            _token: &str,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn clear_twilio_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn get_textbee_credentials(
-            &self,
-            _user_id: i32,
-        ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-            Err("Not found".into())
-        }
-
-        fn update_textbee_credentials(
-            &self,
-            _user_id: i32,
-            _device_id: &str,
-            _api_key: &str,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn get_openrouter_api_key(
-            &self,
-            _user_id: i32,
-        ) -> Result<String, Box<dyn Error + Send + Sync>> {
-            Err("Not found".into())
         }
 
         fn get_elevenlabs_phone_number_id(
@@ -1220,31 +1144,7 @@ pub mod mock_user_core {
         }
 
         fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
-            // Global quiet mode deletes all items including rules
             self.quiet_rules.lock().unwrap().remove(&user_id);
-            if let Some(ts) = until {
-                // Store as an item in quiet_rules too for get_quiet_rules/check_quiet_with_context
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-                let end_time = if ts == 0 { None } else { Some(ts) };
-                let item = crate::models::user_models::Item {
-                    id: Some(now), // use timestamp as fake id
-                    user_id,
-                    summary: "Quiet mode.".to_string(),
-                    due_at: end_time,
-                    priority: 0,
-                    source_id: Some("quiet_mode".to_string()),
-                    created_at: now,
-                };
-                self.quiet_rules
-                    .lock()
-                    .unwrap()
-                    .entry(user_id)
-                    .or_default()
-                    .push(item);
-            }
             self.quiet_mode.lock().unwrap().insert(user_id, until);
             Ok(())
         }
@@ -1261,278 +1161,31 @@ pub mod mock_user_core {
 
         fn add_quiet_rule(
             &self,
-            user_id: i32,
-            until: i32,
-            rule_type: &str,
-            platform: Option<&str>,
-            sender: Option<&str>,
-            topic: Option<&str>,
-            description: &str,
+            _user_id: i32,
+            _until: i32,
+            _rule_type: &str,
+            _platform: Option<&str>,
+            _sender: Option<&str>,
+            _topic: Option<&str>,
+            _description: &str,
         ) -> Result<i32, DieselError> {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            let mut tags = format!("[quiet:{}]", rule_type);
-            if let Some(p) = platform {
-                tags.push_str(&format!(" [platform:{}]", p));
-            }
-            if let Some(s) = sender {
-                tags.push_str(&format!(" [sender:{}]", s));
-            }
-            if let Some(t) = topic {
-                tags.push_str(&format!(" [topic:{}]", t));
-            }
-            let summary = format!("{}\n{}", tags, description);
-
-            let id = now; // use timestamp as fake id
-            let item = crate::models::user_models::Item {
-                id: Some(id),
-                user_id,
-                summary,
-                due_at: Some(until),
-                priority: 0,
-                source_id: Some("quiet_mode".to_string()),
-                created_at: now,
-            };
-            self.quiet_rules
-                .lock()
-                .unwrap()
-                .entry(user_id)
-                .or_default()
-                .push(item);
-            Ok(id)
+            Ok(0)
         }
 
-        fn get_quiet_rules(
-            &self,
-            user_id: i32,
-        ) -> Result<Vec<crate::models::user_models::Item>, DieselError> {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            let items = self
-                .quiet_rules
-                .lock()
-                .unwrap()
-                .get(&user_id)
-                .cloned()
-                .unwrap_or_default();
-
-            // Filter out expired
-            let active: Vec<_> = items
-                .into_iter()
-                .filter(|item| match item.due_at {
-                    None => true,
-                    Some(ts) => ts > now,
-                })
-                .collect();
-            Ok(active)
+        fn get_quiet_rules(&self, _user_id: i32) -> Result<Vec<String>, DieselError> {
+            Ok(Vec::new())
         }
 
         fn check_quiet_with_context(
             &self,
-            user_id: i32,
-            platform: Option<&str>,
-            sender: Option<&str>,
-            content: Option<&str>,
+            _user_id: i32,
+            _platform: Option<&str>,
+            _sender: Option<&str>,
+            _content: Option<&str>,
         ) -> Result<bool, DieselError> {
-            let items = self.get_quiet_rules(user_id)?;
-
-            if items.is_empty() {
-                return Ok(false);
-            }
-
-            let mut has_global_suppress = false;
-            let mut suppress_rules = Vec::new();
-            let mut allow_rules = Vec::new();
-
-            for item in &items {
-                let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                match tags.quiet.as_deref() {
-                    None => has_global_suppress = true,
-                    Some("suppress") => suppress_rules.push(tags),
-                    Some("allow") => allow_rules.push(tags),
-                    _ => {}
-                }
-            }
-
-            if has_global_suppress {
-                return Ok(true);
-            }
-
-            for rule in &suppress_rules {
-                if crate::repositories::user_core::rule_matches(rule, platform, sender, content) {
-                    return Ok(true);
-                }
-            }
-
-            if !allow_rules.is_empty() {
-                let any_match = allow_rules.iter().any(|rule| {
-                    crate::repositories::user_core::rule_matches(rule, platform, sender, content)
-                });
-                if !any_match {
-                    return Ok(true);
-                }
-            }
-
             Ok(false)
         }
     }
-}
-
-// =============================================================================
-// Task Testing Helpers
-// =============================================================================
-
-// =============================================================================
-// Item Testing Helpers
-// =============================================================================
-
-/// Builder for test item parameters
-#[derive(Debug, Clone)]
-pub struct TestItemParams {
-    pub user_id: i32,
-    pub summary: String,
-    pub due_at: Option<i32>,
-    pub priority: i32,
-    pub source_id: Option<String>,
-}
-
-impl TestItemParams {
-    /// Simple reminder item
-    pub fn reminder(user_id: i32, summary: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Scheduled reminder (fires at due_at)
-    pub fn scheduled_reminder(user_id: i32, summary: &str, trigger_at: i32) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: Some(trigger_at),
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Digest item
-    pub fn digest(user_id: i32, summary: &str, trigger_at: i32) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: Some(trigger_at),
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Tracking item (matches against incoming data)
-    pub fn tracking(user_id: i32, summary: &str) -> Self {
-        // Prepend [type:tracking] tag if not already present
-        let tagged_summary = if summary.contains("[type:tracking]") {
-            summary.to_string()
-        } else {
-            format!("[type:tracking] {}", summary)
-        };
-        Self {
-            user_id,
-            summary: tagged_summary,
-            due_at: None,
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Alert item (system alerts like bridge disconnect)
-    pub fn alert(user_id: i32, summary: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 1,
-            source_id: None,
-        }
-    }
-
-    /// Email-sourced item (with source_id for dedup)
-    pub fn from_email(user_id: i32, summary: &str, source_id: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 0,
-            source_id: Some(source_id.to_string()),
-        }
-    }
-
-    pub fn with_priority(mut self, priority: i32) -> Self {
-        self.priority = priority;
-        self
-    }
-
-    pub fn with_due_at(mut self, ts: i32) -> Self {
-        self.due_at = Some(ts);
-        self
-    }
-
-    pub fn with_source_id(mut self, source_id: &str) -> Self {
-        self.source_id = Some(source_id.to_string());
-        self
-    }
-}
-
-/// Create a test item in the database from TestItemParams, returns the item
-pub fn create_test_item(
-    state: &Arc<crate::AppState>,
-    params: &TestItemParams,
-) -> crate::models::user_models::Item {
-    use crate::models::user_models::NewItem;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    let new_item = NewItem {
-        user_id: params.user_id,
-        summary: params.summary.clone(),
-        due_at: params.due_at,
-        priority: params.priority,
-        source_id: params.source_id.clone(),
-        created_at: now,
-    };
-
-    let item_id = state
-        .item_repository
-        .create_item(&new_item)
-        .expect("Failed to create test item");
-
-    state
-        .item_repository
-        .get_item(item_id, params.user_id)
-        .expect("Failed to get test item")
-        .expect("Item not found after creation")
-}
-
-/// Get all items for a user
-pub fn get_user_items(
-    state: &Arc<crate::AppState>,
-    user_id: i32,
-) -> Vec<crate::models::user_models::Item> {
-    state
-        .item_repository
-        .get_items(user_id)
-        .expect("Failed to get user items")
 }
 
 #[cfg(test)]

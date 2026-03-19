@@ -1,4 +1,3 @@
-use crate::api::internal_routing::is_valid_internal_request;
 use crate::AppState;
 use crate::UserCoreOps;
 use axum::middleware;
@@ -131,17 +130,11 @@ type HmacSha256 = Hmac<Sha256>;
 
 // Middleware for HMAC validation
 pub async fn validate_elevenlabs_hmac(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     headers: HeaderMap,
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
-    // Check for internal routing key first (from new/old server during migration)
-    if is_valid_internal_request(&headers) {
-        tracing::info!("ElevenLabs request validated via internal API key");
-        return Ok(next.run(request).await);
-    }
-
     tracing::info!("\n=== Starting ElevenLabs HMAC Validation ===");
 
     // Get the webhook secret from environment
@@ -223,55 +216,6 @@ pub async fn validate_elevenlabs_hmac(
     }
 
     tracing::info!("✅ HMAC validation successful");
-
-    // Check migration status - extract user_id from payload and proxy if not migrated
-    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
-        let user_id_opt = payload
-            .get("data")
-            .and_then(|d| d.get("conversation_initiation_client_data"))
-            .and_then(|c| c.get("dynamic_variables"))
-            .and_then(|v| v.get("user_id"))
-            .and_then(|id| {
-                if let Some(s) = id.as_str() {
-                    s.parse::<i32>().ok()
-                } else {
-                    id.as_i64().map(|n| n as i32)
-                }
-            });
-
-        if let Some(user_id) = user_id_opt {
-            if let Ok(Some(user)) = state.user_core.find_by_id(user_id) {
-                if !user.migrated_to_new_server {
-                    tracing::info!(
-                        "User {} not migrated, proxying ElevenLabs webhook to old VPS",
-                        user_id
-                    );
-                    match crate::utils::migration_proxy::proxy_bytes_to_old_vps(
-                        "/api/webhook/elevenlabs",
-                        &body_bytes,
-                    )
-                    .await
-                    {
-                        Ok(response) => {
-                            let status =
-                                axum::http::StatusCode::from_u16(response.status().as_u16())
-                                    .unwrap_or(axum::http::StatusCode::OK);
-                            let body = response.text().await.unwrap_or_default();
-                            return Ok(Response::builder()
-                                .status(status)
-                                .header("Content-Type", "application/json")
-                                .body(Body::from(body))
-                                .unwrap());
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to proxy to old VPS: {}", e);
-                            return Err(StatusCode::BAD_GATEWAY);
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // Reconstruct request and pass to next handler
     let request = Request::from_parts(parts, Body::from(body_bytes));
@@ -449,7 +393,7 @@ async fn handle_post_call_transcription(
             let start_epoch = start_dt.timestamp() as i32;
             let end_epoch = now_dt.timestamp() as i32;
 
-            let call_start = crate::models::user_models::NewMessageHistory {
+            let call_start = crate::pg_models::NewPgMessageHistory {
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
@@ -460,7 +404,7 @@ async fn handle_post_call_transcription(
                 created_at: start_epoch,
             };
 
-            let call_end = crate::models::user_models::NewMessageHistory {
+            let call_end = crate::pg_models::NewPgMessageHistory {
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),

@@ -7,20 +7,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use diesel::prelude::*;
 
+use crate::pg_schema::message_status_log;
 use crate::repositories::twilio_status_repository::{
     MessageUserInfo, StatusUpdate, TwilioStatusRepository, TwilioStatusRepositoryError,
 };
-use crate::schema::message_status_log;
-use crate::DbPool;
+use crate::PgDbPool;
 
 /// Real repository implementation using Diesel.
 pub struct DieselTwilioStatusRepository {
-    db_pool: DbPool,
+    db_pool: PgDbPool,
 }
 
 impl DieselTwilioStatusRepository {
     /// Create a new repository with the given database pool.
-    pub fn new(db_pool: DbPool) -> Self {
+    pub fn new(db_pool: PgDbPool) -> Self {
         Self { db_pool }
     }
 

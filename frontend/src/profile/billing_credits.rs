@@ -12,8 +12,6 @@ use crate::profile::billing_models::{ // Import from the new file
     UserProfile,
     UsageProjection,
     MIN_TOPUP_AMOUNT_CREDITS,
-    RefundEligibilityResponse,
-    RefundRequestResponse,
     ByotUsageResponse,
 };
 use wasm_bindgen_futures::spawn_local;
@@ -49,12 +47,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
     // State for cycling through quota display metrics (notifications, voice, messages, digests)
     let quota_display_index = use_state(|| 0_usize);
-
-    // Refund-related states
-    let refund_eligibility = use_state(|| None::<RefundEligibilityResponse>);
-    let refund_loading = use_state(|| false);
-    let refund_processing = use_state(|| false);
-    let show_refund_confirm = use_state(|| false);
 
     // Fetch usage projection on mount (only once)
     {
@@ -105,34 +97,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     }
                 });
             }
-            || ()
-        }, ());
-    }
-
-    // Fetch refund eligibility on mount
-    {
-        let refund_eligibility = refund_eligibility.clone();
-        let refund_loading = refund_loading.clone();
-        use_effect_with_deps(move |_| {
-            refund_loading.set(true);
-            spawn_local(async move {
-                match Api::get("/api/refund/eligibility")
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<RefundEligibilityResponse>().await {
-                                refund_eligibility.set(Some(data));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        web_sys::console::log_1(&format!("Failed to fetch refund eligibility: {:?}", e).into());
-                    }
-                }
-                refund_loading.set(false);
-            });
             || ()
         }, ());
     }
@@ -523,64 +487,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         });
                     }
                 }
-            });
-        })
-    };
-
-    // Handle refund request
-    let handle_refund_request = {
-        let error = error.clone();
-        let success = success.clone();
-        let refund_processing = refund_processing.clone();
-        let show_refund_confirm = show_refund_confirm.clone();
-        let refund_eligibility = refund_eligibility.clone();
-
-        Callback::from(move |_| {
-            let error = error.clone();
-            let success = success.clone();
-            let refund_processing = refund_processing.clone();
-            let show_refund_confirm = show_refund_confirm.clone();
-            let refund_eligibility = refund_eligibility.clone();
-
-            refund_processing.set(true);
-            show_refund_confirm.set(false);
-
-            spawn_local(async move {
-                match Api::post("/api/refund/request")
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if let Ok(data) = response.json::<RefundRequestResponse>().await {
-                            if data.success {
-                                success.set(Some(data.message));
-                                // Update eligibility to show already refunded
-                                if let Some(mut elig) = (*refund_eligibility).clone() {
-                                    elig.already_refunded = true;
-                                    elig.eligible = false;
-                                    elig.reason = "You have already received a refund.".to_string();
-                                    refund_eligibility.set(Some(elig));
-                                }
-                            } else {
-                                error.set(Some(data.message));
-                            }
-                        } else {
-                            error.set(Some("Failed to process refund".to_string()));
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(format!("Network error: {:?}", e)));
-                    }
-                }
-                refund_processing.set(false);
-                // Clear messages after delay
-                let error_clone = error.clone();
-                let success_clone = success.clone();
-                spawn_local(async move {
-                    TimeoutFuture::new(5_000).await;
-                    error_clone.set(None);
-                    success_clone.set(None);
-                });
             });
         })
     };
@@ -1487,113 +1393,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 </div>
                 //<UsageGraph user_id={user_profile.id} />
 
-                // Refund Section
-                <div class="refund-section">
-                    <h3 class="refund-title">{"Refund"}</h3>
-                    {
-                        if *refund_loading {
-                            html! {
-                                <div class="refund-loading">
-                                    {"Checking refund eligibility..."}
-                                </div>
-                            }
-                        } else if let Some(elig) = (*refund_eligibility).as_ref() {
-                            html! {
-                                <div class="refund-content">
-                                    {
-                                        if elig.already_refunded {
-                                            html! {
-                                                <div class="refund-status refund-ineligible">
-                                                    <p class="refund-reason">{&elig.reason}</p>
-                                                </div>
-                                            }
-                                        } else if elig.eligible {
-                                            let refund_amount = elig.refund_amount_cents.map(|c| c as f32 / 100.0).unwrap_or(0.0);
-                                            let _refund_type = elig.refund_type.as_deref().unwrap_or("subscription");
-                                            let days_left = elig.days_remaining.unwrap_or(0);
-                                            let _usage = elig.usage_percent.unwrap_or(0.0);
-
-                                            html! {
-                                                <div class="refund-status refund-eligible">
-                                                    <div class="refund-info">
-                                                        <p class="refund-reason">{&elig.reason}</p>
-                                                        <p class="refund-details">
-                                                            {format!("Refund amount: €{:.2}", refund_amount)}
-                                                        </p>
-                                                        <p class="refund-details">
-                                                            {format!("{} days remaining in refund window", days_left)}
-                                                        </p>
-                                                    </div>
-                                                    {
-                                                        if *show_refund_confirm {
-                                                            let show_refund_confirm = show_refund_confirm.clone();
-                                                            let handle_refund = handle_refund_request.clone();
-                                                            html! {
-                                                                <div class="refund-confirm">
-                                                                    <p>{"Are you sure you want to request a refund? This action cannot be undone."}</p>
-                                                                    <div class="refund-confirm-buttons">
-                                                                        <button
-                                                                            class="refund-cancel-btn"
-                                                                            onclick={Callback::from(move |_| show_refund_confirm.set(false))}
-                                                                        >
-                                                                            {"Cancel"}
-                                                                        </button>
-                                                                        <button
-                                                                            class="refund-confirm-btn"
-                                                                            onclick={handle_refund}
-                                                                            disabled={*refund_processing}
-                                                                        >
-                                                                            {if *refund_processing { "Processing..." } else { "Yes, Refund" }}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            let show_refund_confirm = show_refund_confirm.clone();
-                                                            html! {
-                                                                <button
-                                                                    class="refund-btn"
-                                                                    onclick={Callback::from(move |_| show_refund_confirm.set(true))}
-                                                                >
-                                                                    {"Request Refund"}
-                                                                </button>
-                                                            }
-                                                        }
-                                                    }
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {
-                                                <div class="refund-status refund-ineligible">
-                                                    <p class="refund-reason">{&elig.reason}</p>
-                                                    {
-                                                        if let Some(usage) = elig.usage_percent {
-                                                            html! {
-                                                                <p class="refund-details">{format!("Usage: {:.0}%", usage)}</p>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    <p class="refund-contact">
-                                                        {"Questions? Contact "}
-                                                        <a href={format!("mailto:{}", &elig.contact_email)}>{&elig.contact_email}</a>
-                                                    </p>
-                                                </div>
-                                            }
-                                        }
-                                    }
-                                </div>
-                            }
-                        } else {
-                            html! {
-                                <div class="refund-status">
-                                    <p>{"Unable to check refund eligibility."}</p>
-                                </div>
-                            }
-                        }
-                    }
-                </div>
             </div>
         </div>
         <style>
@@ -2420,114 +2219,7 @@ input:checked + .slider:before {
                     margin: 0;
                 }
 
-                /* Refund Section Styles */
-                .refund-section {
-                    margin-top: 2rem;
-                    padding: 1.5rem;
-                    background: linear-gradient(to bottom, rgba(100, 100, 100, 0.05), rgba(100, 100, 100, 0.02));
-                    border-radius: 12px;
-                    border: 1px solid rgba(100, 100, 100, 0.2);
-                }
-                .refund-title {
-                    font-size: 1.1rem;
-                    margin-bottom: 1rem;
-                    color: #666;
-                }
-                .refund-loading {
-                    color: #888;
-                    font-style: italic;
-                }
-                .refund-content {
-                    padding: 0.5rem 0;
-                }
-                .refund-status {
-                    padding: 1rem;
-                    border-radius: 8px;
-                }
-                .refund-eligible {
-                    background: rgba(76, 175, 80, 0.1);
-                    border: 1px solid rgba(76, 175, 80, 0.3);
-                }
-                .refund-ineligible {
-                    background: rgba(158, 158, 158, 0.1);
-                    border: 1px solid rgba(158, 158, 158, 0.2);
-                }
-                .refund-reason {
-                    font-size: 0.95rem;
-                    margin-bottom: 0.5rem;
-                }
-                .refund-details {
-                    font-size: 0.85rem;
-                    color: #666;
-                    margin: 0.25rem 0;
-                }
-                .refund-contact {
-                    font-size: 0.85rem;
-                    color: #888;
-                    margin-top: 1rem;
-                }
-                .refund-contact a {
-                    color: #1e90ff;
-                    text-decoration: none;
-                }
-                .refund-contact a:hover {
-                    text-decoration: underline;
-                }
-                .refund-btn {
-                    margin-top: 1rem;
-                    padding: 0.75rem 1.5rem;
-                    background: #4CAF50;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    font-size: 0.95rem;
-                    transition: background 0.2s ease;
-                }
-                .refund-btn:hover {
-                    background: #43a047;
-                }
-                .refund-confirm {
-                    margin-top: 1rem;
-                    padding: 1rem;
-                    background: rgba(255, 152, 0, 0.1);
-                    border: 1px solid rgba(255, 152, 0, 0.3);
-                    border-radius: 8px;
-                }
-                .refund-confirm p {
-                    margin-bottom: 1rem;
-                    color: #e65100;
-                }
-                .refund-confirm-buttons {
-                    display: flex;
-                    gap: 1rem;
-                }
-                .refund-cancel-btn {
-                    padding: 0.5rem 1rem;
-                    background: #9e9e9e;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                }
-                .refund-cancel-btn:hover {
-                    background: #757575;
-                }
-                .refund-confirm-btn {
-                    padding: 0.5rem 1rem;
-                    background: #f44336;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                }
-                .refund-confirm-btn:hover {
-                    background: #d32f2f;
-                }
-                .refund-confirm-btn:disabled {
-                    background: #bdbdbd;
-                    cursor: not-allowed;
-                }
+
                 "#}
         </style>
         <style>

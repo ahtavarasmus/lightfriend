@@ -314,6 +314,43 @@ const CHAT_STYLES: &str = r#"
 .chat-shortcut-btn i {
     font-size: 0.7rem;
 }
+.chat-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.5rem 0;
+}
+.chat-suggestion-chip {
+    display: inline-flex;
+    align-items: center;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 0.3rem 0.7rem;
+    color: #888;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+.chat-suggestion-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #bbb;
+}
+@keyframes chatPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+.chat-thinking-dot {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #7EB2FF;
+    margin-right: 0.5rem;
+    animation: chatPulse 1.2s ease-in-out infinite;
+}
 "#;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -490,6 +527,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let focused_item = props.focused_item.clone();
         let on_item_cleared = props.on_item_cleared.clone();
         let on_item_created = props.on_item_created.clone();
+        let on_preview_close = props.on_preview_close.clone();
         let chat_input_ref = chat_input_ref.clone();
 
         Callback::from(move |_| {
@@ -537,6 +575,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             chat_status.set("Thinking...".to_string());
             chat_error.set(None);
             chat_input.set(String::new());
+            on_preview_close.emit(());
 
             // Use SSE streaming for text-only messages and item edits (POST only for image uploads)
             let use_sse = is_item_edit || image_file.is_none();
@@ -552,6 +591,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let media_playing = media_playing.clone();
                 let on_item_created = on_item_created.clone();
                 let focused_item_sse = focused_item.clone();
+                let chat_input_ref_sse = chat_input_ref.clone();
                 spawn_local(async move {
                 use wasm_bindgen::JsCast;
                 use wasm_bindgen::closure::Closure;
@@ -587,6 +627,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         let detected_media = detected_media.clone();
                         let media_playing = media_playing.clone();
                         let on_item_created = on_item_created.clone();
+                        let chat_input_ref_post = chat_input_ref_sse.clone();
                         spawn_local(async move {
                             match Api::post("/api/chat/web")
                                 .json(&json!({ "message": message })).unwrap()
@@ -613,6 +654,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 }
                             }
                             chat_loading.set(false);
+                            if let Some(input) = chat_input_ref_post.cast::<web_sys::HtmlTextAreaElement>() {
+                                let _ = input.focus();
+                            }
                         });
                         return;
                     }
@@ -621,12 +665,14 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 // onmessage handler for SSE events
                 let chat_status_msg = chat_status.clone();
                 let chat_bot_reply_msg = chat_bot_reply.clone();
+                let chat_user_msg_msg = chat_user_msg.clone();
                 let chat_loading_msg = chat_loading.clone();
                 let chat_error_msg = chat_error.clone();
                 let refetch_usage_msg = refetch_usage.clone();
                 let detected_media_msg = detected_media.clone();
                 let media_playing_msg = media_playing.clone();
                 let on_item_created_msg = on_item_created.clone();
+                let chat_input_ref_msg = chat_input_ref_sse.clone();
                 let es_ref = es.clone();
 
                 let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
@@ -663,9 +709,16 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         }
                                     }
 
-                                    // Check if an item was created
-                                    if let Some(item_id) = data["created_item_id"].as_i64() {
-                                        on_item_created_msg.emit(item_id as i32);
+                                    // If a rule was created, dispatch event for preview highlight
+                                    if let Some(rule_id) = data["created_item_id"].as_i64() {
+                                        if let Some(window) = web_sys::window() {
+                                            let detail = wasm_bindgen::JsValue::from_f64(rule_id as f64);
+                                            let mut init = web_sys::CustomEventInit::new();
+                                            init.set_detail(&detail);
+                                            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-rule-created", &init) {
+                                                let _ = window.dispatch_event(&event);
+                                            }
+                                        }
                                     }
 
                                     // Dispatch event for other components
@@ -675,12 +728,18 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     }
 
                                     chat_loading_msg.set(false);
+                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
+                                        let _ = input.focus();
+                                    }
                                     es_ref.close();
                                 }
                                 "error" => {
                                     let msg = data["message"].as_str().unwrap_or("An error occurred").to_string();
                                     chat_error_msg.set(Some(msg));
                                     chat_loading_msg.set(false);
+                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
+                                        let _ = input.focus();
+                                    }
                                     es_ref.close();
                                 }
                                 _ => {}
@@ -803,6 +862,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         }
                     }
                     chat_loading.set(false);
+                    if let Some(input) = chat_input_ref.cast::<web_sys::HtmlTextAreaElement>() {
+                        let _ = input.focus();
+                    }
                 });
             }
         })
@@ -931,6 +993,32 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
 
     let status_text = (*chat_status).clone();
 
+    let suggestion_chips = {
+        let suggestions = vec![
+            "Summarize my emails",
+            "What's the weather?",
+            "Check my messages",
+        ];
+        let chips: Vec<Html> = suggestions.into_iter().map(|text| {
+            let chat_input = chat_input.clone();
+            let chat_input_ref = chat_input_ref.clone();
+            let text_owned = text.to_string();
+            let on_chip = Callback::from(move |_: MouseEvent| {
+                chat_input.set(text_owned.clone());
+                let chat_input_ref = chat_input_ref.clone();
+                gloo_timers::callback::Timeout::new(50, move || {
+                    if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
+                        let _ = input.focus();
+                    }
+                }).forget();
+            });
+            html! {
+                <button class="chat-suggestion-chip" onclick={on_chip}>{text}</button>
+            }
+        }).collect();
+        html! { <div class="chat-suggestions">{for chips}</div> }
+    };
+
     html! {
         <>
             <style>{CHAT_STYLES}</style>
@@ -944,15 +1032,15 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Loading state in task edit mode (no user message shown)
                             (None, None, true) => html! {
-                                <div class="chat-msg assistant loading">{&status_text}</div>
+                                <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                             },
-                            // No messages, not loading - show nothing
-                            (None, None, false) => html! {},
+                            // No messages, not loading - show suggestion chips
+                            (None, None, false) => suggestion_chips.clone(),
                             // Regular chat: user message with loading indicator
                             (Some(user_msg), None, true) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
-                                    <div class="chat-msg assistant loading">{&status_text}</div>
+                                    <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                                 </>
                             },
                             // Regular chat: both messages
@@ -968,7 +1056,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Task edit mode: loading with existing reply
                             (None, Some(_), true) => html! {
-                                <div class="chat-msg assistant loading">{&status_text}</div>
+                                <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                             },
                         }
                     }
@@ -1030,13 +1118,13 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     }}
                                     title="End the call"
                                 >
-                                    {format!("End {mins}:{secs:02}")}
+                                    {format!("End call {mins}:{secs:02}")}
                                 </button>
                             }
                         } else if *call_connecting {
                             html! {
                                 <button class="chat-btn call" disabled=true title="Connecting...">
-                                    {"..."}
+                                    {"Connecting..."}
                                 </button>
                             }
                         } else {
@@ -1052,7 +1140,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     disabled={*chat_loading}
                                     title="Start voice call"
                                 >
-                                    {"Call"}
+                                    {"Voice call"}
                                 </button>
                             }
                         }

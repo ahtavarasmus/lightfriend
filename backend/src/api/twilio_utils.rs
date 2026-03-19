@@ -1,4 +1,3 @@
-use crate::api::internal_routing::is_valid_internal_request;
 use crate::api::twilio_client::{TwilioClient, TwilioCredentials};
 use crate::AppState;
 use crate::UserCoreOps;
@@ -146,12 +145,6 @@ pub async fn validate_twilio_signature(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
-    // Check for internal routing key first (from new/old server during migration)
-    if is_valid_internal_request(request.headers()) {
-        tracing::info!("Twilio request validated via internal API key");
-        return Ok(next.run(request).await);
-    }
-
     tracing::info!("\n=== Starting Twilio Signature Validation ===");
 
     // Get the Twilio signature from headers
@@ -227,7 +220,7 @@ pub async fn validate_twilio_signature(
 
     // BYOT users with their own credentials always use their own account
     let auth_token = if state.user_core.is_byot_user(user.id) {
-        match state.user_core.get_twilio_credentials(user.id) {
+        match state.user_repository.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
@@ -236,7 +229,7 @@ pub async fn validate_twilio_signature(
     {
         std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
-        match state.user_core.get_twilio_credentials(user.id) {
+        match state.user_repository.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
@@ -282,29 +275,6 @@ pub async fn validate_twilio_signature(
 
     tracing::info!("✅ Signature validation successful");
 
-    // Check migration status - proxy to old VPS if user not migrated
-    if !user.migrated_to_new_server {
-        tracing::info!("User {} not migrated, proxying to old VPS", user.id);
-        match crate::utils::migration_proxy::proxy_form_to_old_vps("/api/sms/server", &params_str)
-            .await
-        {
-            Ok(response) => {
-                let status = axum::http::StatusCode::from_u16(response.status().as_u16())
-                    .unwrap_or(axum::http::StatusCode::OK);
-                let body = response.text().await.unwrap_or_default();
-                return Ok(Response::builder()
-                    .status(status)
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body))
-                    .unwrap());
-            }
-            Err(e) => {
-                tracing::error!("Failed to proxy to old VPS: {}", e);
-                return Err(StatusCode::BAD_GATEWAY);
-            }
-        }
-    }
-
     // Rebuild request and pass to next handler
     let request = Request::from_parts(parts, Body::from(params_str));
 
@@ -320,12 +290,6 @@ pub async fn validate_twilio_status_callback_signature(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
-    // Check for internal routing key first (from new/old server during migration)
-    if is_valid_internal_request(request.headers()) {
-        tracing::debug!("Status callback validated via internal API key");
-        return Ok(next.run(request).await);
-    }
-
     tracing::debug!("=== Starting Twilio Status Callback Signature Validation ===");
 
     // Get the Twilio signature from headers

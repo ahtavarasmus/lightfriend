@@ -7,15 +7,15 @@ pub mod handlers {
     pub mod auth_middleware;
     pub mod billing_handlers;
     pub mod bridge_auth_common;
-    pub mod contact_profile_handlers;
     pub mod dashboard_handlers;
-    pub mod filter_handlers;
     pub mod imap_auth;
     pub mod imap_handlers;
     pub mod mcp_handlers;
+    pub mod person_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
-    pub mod refund_handlers;
+    pub mod rule_handlers;
+
     pub mod self_host_handlers;
     pub mod signal_auth;
     pub mod signal_handlers;
@@ -39,7 +39,6 @@ pub mod utils {
     pub mod email;
     pub mod encryption;
     pub mod matrix_auth;
-    pub mod migration_proxy;
     pub mod notification_utils;
     pub mod plan_features;
     pub mod tesla_keys;
@@ -48,6 +47,7 @@ pub mod utils {
     pub mod webauthn_config;
 }
 pub mod proactive {
+    pub mod rules;
     pub mod utils;
 }
 pub mod tool_call_utils {
@@ -64,7 +64,6 @@ pub mod cli;
 pub mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
-    pub mod internal_routing;
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;
@@ -78,12 +77,12 @@ pub mod context;
 pub mod error;
 pub mod tools {
     pub mod email;
-    pub mod items;
     pub mod messaging;
+    pub mod ontology;
     pub mod quiet_mode;
     pub mod registry;
     pub mod respond;
-    pub mod schedule;
+    pub mod rules;
     pub mod search;
     pub mod tesla;
     pub mod weather;
@@ -91,15 +90,16 @@ pub mod tools {
 }
 pub mod models {
     pub mod mcp_models;
+    pub mod ontology_models;
     pub mod user_models;
 }
 pub mod repositories {
     pub mod admin_alert_repository;
-    pub mod item_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
+    pub mod ontology_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod totp_repository;
@@ -118,9 +118,13 @@ pub mod services {
     pub mod twilio_message_service;
     pub mod twilio_status_service;
 }
-pub mod schema;
+pub mod pg_models;
+pub mod pg_schema;
 pub mod jobs {
     pub mod scheduler;
+}
+pub mod ontology {
+    pub mod registry;
 }
 pub mod ai_config;
 pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
@@ -135,8 +139,8 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
-pub use repositories::item_repository::ItemRepository;
 pub use repositories::metrics_repository::MetricsRepository;
+pub use repositories::ontology_repository::OntologyRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
@@ -160,23 +164,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
 
-pub type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
-
-/// SQLite connection customizer that sets busy_timeout on each connection.
-/// This makes SQLite wait up to 5 seconds for locks instead of failing immediately.
-#[derive(Debug)]
-pub struct SqliteConnectionCustomizer;
-
-impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error>
-    for SqliteConnectionCustomizer
-{
-    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-        diesel::sql_query("PRAGMA busy_timeout = 5000;")
-            .execute(conn)
-            .map_err(diesel::r2d2::Error::QueryError)?;
-        Ok(())
-    }
-}
+pub type PgDbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 pub type GoogleOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
@@ -184,10 +172,9 @@ pub type TeslaOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 pub struct AppState {
-    pub db_pool: DbPool,
+    pub pg_pool: PgDbPool,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
-    pub item_repository: Arc<ItemRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub ai_config: AiConfig,
@@ -225,6 +212,8 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub ontology_repository: Arc<OntologyRepository>,
+    pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
 }
 
@@ -254,18 +243,17 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
 
-    // Schedule/management tools
-    registry.register(Arc::new(tools::schedule::CreateItemHandler));
+    // Rules (Automation -> Logic -> Action)
+    registry.register(Arc::new(tools::rules::SetReminderHandler));
+    registry.register(Arc::new(tools::rules::CreateRuleHandler));
+    registry.register(Arc::new(tools::rules::PinMessageHandler));
+    registry.register(Arc::new(tools::rules::UpdateTrackedItemHandler));
 
     // Tesla tools
     registry.register(Arc::new(tools::tesla::TeslaControlHandler));
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
-
-    // Item tracking tools
-    registry.register(Arc::new(tools::items::ListTrackedItemsHandler));
-    registry.register(Arc::new(tools::items::UpdateTrackedItemHandler));
 
     // Direct response
     registry.register(Arc::new(tools::respond::DirectResponseHandler));

@@ -65,7 +65,7 @@ pub async fn create_mcp_server(
         ));
     }
 
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     // Check if server with this name already exists for user
     if let Ok(Some(_)) = mcp_repository.get_server_by_name(auth_user.user_id, &request.name) {
@@ -113,7 +113,7 @@ pub async fn list_mcp_servers(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<McpServerResponse>>, (StatusCode, Json<ErrorResponse>)> {
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     match mcp_repository.get_servers_for_user(auth_user.user_id) {
         Ok(servers) => {
@@ -153,7 +153,7 @@ pub async fn list_server_tools(
     auth_user: AuthUser,
     Path(server_id): Path<i32>,
 ) -> Result<Json<McpTestConnectionResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     // Get the server
     let server = match mcp_repository.get_server_by_id(server_id, auth_user.user_id) {
@@ -210,6 +210,7 @@ pub async fn list_server_tools(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -236,7 +237,7 @@ pub async fn test_server_connection(
     Path(server_id): Path<i32>,
 ) -> Result<Json<McpTestConnectionResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Same as list_server_tools but uses test_connection
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     let server = match mcp_repository.get_server_by_id(server_id, auth_user.user_id) {
         Ok(Some(s)) => s,
@@ -293,6 +294,7 @@ pub async fn test_server_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -323,7 +325,7 @@ pub async fn delete_mcp_server(
         server_id, auth_user.user_id
     );
 
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     match mcp_repository.delete_server(server_id, auth_user.user_id) {
         Ok(()) => Ok(Json(SuccessResponse {
@@ -353,7 +355,7 @@ pub async fn toggle_mcp_server(
         server_id, auth_user.user_id
     );
 
-    let mcp_repository = McpRepository::new(state.db_pool.clone());
+    let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
     match mcp_repository.toggle_server(server_id, auth_user.user_id) {
         Ok(is_enabled) => Ok(Json(ToggleResponse { is_enabled })),
@@ -396,6 +398,7 @@ pub async fn test_url_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 

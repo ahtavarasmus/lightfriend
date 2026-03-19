@@ -24,17 +24,16 @@ use tracing::{debug, error, info};
 
 // Helper function to check if a tool requires subscription
 // Only tier 2 (hosted) subscribers get full access to all tools
-fn requires_subscription(path: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
+fn requires_subscription(path: &str, sub_tier: Option<String>) -> bool {
     debug!(
         path = path,
         subscription = ?sub_tier,
-        discount = has_discount,
         "Checking subscription access"
     );
 
-    // Only tier 2 (hosted) subscribers and users with discount get full access to everything
-    if sub_tier == Some("tier 2".to_string()) || has_discount {
-        debug!("User has tier 2 subscription or discount - granting full access");
+    // Only tier 2 (hosted) subscribers get full access to everything
+    if sub_tier == Some("tier 2".to_string()) {
+        debug!("User has tier 2 subscription - granting full access");
         return false;
     }
 
@@ -103,7 +102,7 @@ pub async fn check_subscription_access(
     };
 
     // Check if the tool requires subscription
-    if requires_subscription(request.uri().path(), user.sub_tier, user.discount) {
+    if requires_subscription(request.uri().path(), user.sub_tier) {
         info!("Tool requires subscription, user doesn't have access");
         return Err((
             StatusCode::FORBIDDEN,

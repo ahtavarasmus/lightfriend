@@ -747,44 +747,102 @@ pub async fn fetch_bridge_room_messages(
     limit: Option<u64>,
 ) -> Result<(Vec<BridgeMessage>, String)> {
     tracing::info!(
-        "Starting {} message fetch - User: {}, chat: {}, limit: {}",
+        "Starting {} message fetch from Postgres - User: {}, chat: {}, limit: {}",
         capitalize(service),
         user_id,
         chat_name,
         limit.unwrap_or(20)
     );
-    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
-        if bridge.status != "connected" {
-            return Err(anyhow!(
-                "{} bridge is not connected. Please log in first.",
-                capitalize(service)
-            ));
-        }
+
+    // Find the room_id for this chat by searching ont_channels or matching room names
+    let room_id = find_room_id_for_chat(service, state, user_id, chat_name).await?;
+    let user_info = state.user_core.get_user_info(user_id)?;
+    let msg_limit = limit.unwrap_or(20) as i64;
+
+    let messages = state
+        .ontology_repository
+        .get_messages_for_room(user_id, &room_id, msg_limit)
+        .map_err(|e| anyhow!("Failed to query messages: {}", e))?;
+
+    let room_name = if !messages.is_empty() {
+        messages[0].sender_name.clone()
     } else {
-        return Err(anyhow!("{} bridge not found", capitalize(service)));
+        chat_name.to_string()
+    };
+
+    let bridge_messages: Vec<BridgeMessage> = messages
+        .into_iter()
+        .map(|m| ont_message_to_bridge_message(&m, user_info.timezone.clone()))
+        .collect();
+
+    Ok((bridge_messages, room_name))
+}
+
+/// Resolve a chat name to a room_id. Checks ontology channels and stored messages first,
+/// then uses Matrix room list for name-to-room-id resolution (not for reading messages).
+async fn find_room_id_for_chat(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+    chat_name: &str,
+) -> Result<String> {
+    // Try ontology Person lookup
+    if let Ok(Some(person)) = state
+        .ontology_repository
+        .find_person_by_name(user_id, chat_name)
+    {
+        if let Some(ch) = person
+            .channels
+            .iter()
+            .find(|c| c.platform == service && c.room_id.is_some())
+        {
+            return Ok(ch.room_id.clone().unwrap());
+        }
     }
+
+    // Search ont_messages for a room matching sender_name
+    if let Ok(candidates) = state
+        .ontology_repository
+        .get_recent_messages(user_id, service, 0)
+    {
+        let chat_lower = chat_name.to_lowercase();
+        if let Some(m) = candidates
+            .iter()
+            .find(|m| m.sender_name.to_lowercase().contains(&chat_lower))
+        {
+            return Ok(m.room_id.clone());
+        }
+    }
+
+    // Use Matrix room list to resolve name -> room_id (not for reading messages)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let rooms = get_service_rooms(&client, service).await?;
     let matching_room = search_best_match(&rooms, chat_name);
-    let user_info = state.user_core.get_user_info(user_id)?;
     match matching_room {
-        Some(room_info) => {
-            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str())
-            {
-                Ok(id) => id,
-                Err(e) => return Err(anyhow!("Invalid room ID: {}", e)),
-            };
-            let room = match client.get_room(&room_id) {
-                Some(r) => r,
-                None => return Err(anyhow!("Room not found")),
-            };
-            fetch_messages_from_room(service, room, limit, user_info.timezone).await
-        }
+        Some(room_info) => Ok(room_info.room_id.clone()),
         None => Err(anyhow!(
             "No matching {} room found for '{}'",
             capitalize(service),
             chat_name
         )),
+    }
+}
+
+/// Convert an OntMessage to a BridgeMessage for display.
+fn ont_message_to_bridge_message(
+    m: &crate::models::ontology_models::OntMessage,
+    timezone: Option<String>,
+) -> BridgeMessage {
+    BridgeMessage {
+        sender: m.sender_name.clone(),
+        sender_display_name: m.sender_name.clone(),
+        content: m.content.clone(),
+        timestamp: m.created_at as i64,
+        formatted_timestamp: format_timestamp(m.created_at as i64, timezone),
+        message_type: "text".to_string(),
+        room_name: m.sender_name.clone(),
+        media_url: None,
+        room_id: Some(m.room_id.clone()),
     }
 }
 
@@ -795,182 +853,51 @@ pub async fn fetch_bridge_messages(
     state: &Arc<AppState>,
     user_id: i32,
     start_time: i64,
-    unread_only: bool,
+    _unread_only: bool,
 ) -> Result<Vec<BridgeMessage>> {
-    tracing::info!("Fetching {} messages for user {}", service, user_id);
+    tracing::info!(
+        "Fetching {} messages from Postgres for user {}",
+        service,
+        user_id
+    );
 
     let user_info = state.user_core.get_user_info(user_id)?;
-    // Get Matrix client and check bridge status (use cached version for better performance)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-    let bridge = state.user_repository.get_bridge(user_id, service)?;
-    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!(
-            "{} bridge is not connected. Please log in first.",
-            capitalize(service)
-        ));
-    }
-    // Get last_seen_online from the bridge for additional filtering when unread_only
-    let bridge_last_seen = state
-        .user_repository
-        .get_bridge(user_id, service)?
-        .and_then(|b| b.last_seen_online)
-        .unwrap_or(0) as i64;
+    let since_ts = start_time as i32;
 
-    let service_rooms = get_service_rooms(&client, service).await?;
-    if user_id == 1 {
-        tracing::info!(
-            "DEBUG user 1: Found {} {} rooms",
-            service_rooms.len(),
-            service
-        );
-        for room in &service_rooms {
-            tracing::info!(
-                "DEBUG user 1: Room: {} (last_activity: {})",
-                room.display_name,
-                room.last_activity_formatted
-            );
-        }
-    }
-    let mut room_infos: Vec<(Room, BridgeRoom, i64)> = Vec::new(); // (room, bridge_room, seen_until)
-    for bridge_room in service_rooms {
-        let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(bridge_room.room_id.as_str()) {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
-        let Some(room) = client.get_room(&room_id) else {
-            continue;
-        };
-        if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
-            continue;
-        }
+    let messages = state
+        .ontology_repository
+        .get_recent_messages(user_id, service, since_ts)
+        .map_err(|e| anyhow!("Failed to query messages: {}", e))?;
 
-        // Calculate seen_until: the timestamp up to which messages should be filtered out
-        let seen_until = if unread_only {
-            // Get the room's seen timestamp from read receipts and user replies
-            let room_seen = get_room_seen_timestamp(&room, &client).await.unwrap_or(0);
-            // Use the max of: start_time, room_seen, bridge_last_seen
-            start_time.max(room_seen).max(bridge_last_seen)
-        } else {
-            // For live fetching, just use start_time (no filtering by seen status)
-            start_time
-        };
+    // Group by room_id, take up to 5 per room (mirroring old behavior)
+    let mut by_room: std::collections::HashMap<
+        String,
+        Vec<&crate::models::ontology_models::OntMessage>,
+    > = std::collections::HashMap::new();
+    for m in &messages {
+        by_room.entry(m.room_id.clone()).or_default().push(m);
+    }
 
-        room_infos.push((room, bridge_room, seen_until));
-    }
-    // Already sorted by last_activity desc from get_service_rooms
-    room_infos.truncate(5);
-    if user_id == 1 {
-        tracing::info!(
-            "DEBUG user 1: Processing {} rooms after truncate, start_time={}, unread_only={}",
-            room_infos.len(),
-            start_time,
-            unread_only
-        );
-        for (_, br, seen_until) in &room_infos {
-            tracing::info!(
-                "DEBUG user 1: Will check room: {} with seen_until={}",
-                br.display_name,
-                seen_until
-            );
+    let mut bridge_messages: Vec<BridgeMessage> = Vec::new();
+    // Take top 5 rooms by most recent message
+    let mut rooms: Vec<_> = by_room.into_iter().collect();
+    rooms.sort_by(|a, b| {
+        let a_ts = a.1.first().map(|m| m.created_at).unwrap_or(0);
+        let b_ts = b.1.first().map(|m| m.created_at).unwrap_or(0);
+        b_ts.cmp(&a_ts)
+    });
+    rooms.truncate(5);
+
+    for (_room_id, room_msgs) in rooms {
+        for m in room_msgs.into_iter().take(5) {
+            bridge_messages.push(ont_message_to_bridge_message(m, user_info.timezone.clone()));
         }
     }
-    // Fetch messages in parallel
-    let user_timezone = user_info.timezone.clone();
-    let sender_prefix = get_sender_prefix(service);
-    let mut futures = Vec::new();
-    for (room, bridge_room, seen_until) in room_infos {
-        let sender_prefix = sender_prefix.clone();
-        let user_timezone = user_timezone.clone();
-        let room_name = remove_bridge_suffix(&bridge_room.display_name);
-        let bridge_room_id = bridge_room.room_id.clone();
-        let debug_user = user_id == 1;
-        if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
-            tracing::info!("Skipping message from a muted room");
-            continue;
-        }
-        futures.push(async move {
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(50).unwrap(); // Fetch enough to cover filters
-            let mut messages: Vec<BridgeMessage> = Vec::new();
-            match room.messages(options).await {
-                Ok(response) => {
-                    for event in response.chunk.iter() {
-                        if let Ok(AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                        )) = event.raw().deserialize() {
-                            let (sender, timestamp, content) = match msg {
-                                SyncRoomMessageEvent::Original(e) => {
-                                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
-                                    (e.sender, timestamp, e.content)
-                                }
-                                _ => continue,
-                            };
-                            // Skip messages that user has already seen (or outside time range)
-                            if timestamp <= seen_until {
-                                if debug_user {
-                                    tracing::info!("DEBUG user 1: Skipping msg in {} - timestamp {} <= seen_until {}", room_name, timestamp, seen_until);
-                                }
-                                continue;
-                            }
-                            if !sender.localpart().starts_with(&sender_prefix) {
-                                if debug_user {
-                                    tracing::info!("DEBUG user 1: Skipping msg in {} - sender {} doesn't start with {}", room_name, sender.localpart(), sender_prefix);
-                                }
-                                continue;
-                            }
-                            let (msgtype, body) = match content.msgtype {
-                                MessageType::Text(t) => ("text", t.body),
-                                MessageType::Notice(n) => ("notice", n.body),
-                                MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
-                                MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
-                                MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
-                                MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
-                                MessageType::Location(_) => ("location", "📍 LOCATION".into()),
-                                MessageType::Emote(t) => ("emote", t.body),
-                                _ => continue,
-                            };
-                            // Skip error messages
-                            if body.contains("Failed to bridge media") ||
-                               body.contains("media no longer available") ||
-                               body.contains("Decrypting message from WhatsApp failed") ||
-                               body.starts_with("* Failed to") {
-                                continue;
-                            }
-                            if debug_user {
-                                tracing::info!("DEBUG user 1: Including msg in {} - timestamp {}", room_name, timestamp);
-                            }
-                            messages.push(BridgeMessage {
-                                sender: sender.to_string(),
-                                sender_display_name: sender.localpart().to_string(),
-                                content: body,
-                                timestamp,
-                                formatted_timestamp: format_timestamp(timestamp, user_timezone.clone()),
-                                message_type: msgtype.to_string(),
-                                room_name: room_name.clone(),
-                                media_url: None,
-                                room_id: Some(bridge_room_id.clone()),
-                            });
-                            if messages.len() == 5 {
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => tracing::error!("Failed to fetch messages: {}", e),
-            }
-            messages
-        });
-    }
-    // Collect results
-    let results = join_all(futures).await;
-    let mut messages: Vec<BridgeMessage> = results.into_iter().flatten().collect();
+
     // Sort by timestamp (most recent first)
-    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    tracing::info!(
-        "Retrieved {} latest messages from most active rooms",
-        messages.len()
-    );
-    Ok(messages)
+    bridge_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    tracing::info!("Retrieved {} messages from Postgres", bridge_messages.len());
+    Ok(bridge_messages)
 }
 
 use futures::future::join_all;
@@ -1085,110 +1012,6 @@ pub async fn send_bridge_message(
 use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
 use matrix_sdk::RoomMemberships;
 use strsim;
-
-async fn fetch_messages_from_room(
-    service: &str,
-    room: matrix_sdk::room::Room,
-    limit: Option<u64>,
-    timezone: Option<String>,
-) -> Result<(Vec<BridgeMessage>, String)> {
-    let room_name = room.display_name().await?.to_string();
-    let room_id_str = room.room_id().to_string();
-    let sender_prefix = get_sender_prefix(service);
-    let mut options = MessagesOptions::backward();
-    options.limit = matrix_sdk::ruma::UInt::new(limit.unwrap_or(20)).unwrap();
-
-    let response = room.messages(options).await?;
-
-    let mut futures = Vec::with_capacity(response.chunk.len());
-    let room_name_clone = room_name.clone();
-
-    for event in response.chunk {
-        let timezone = timezone.clone();
-        let room_name = room_name_clone.clone();
-        let sender_prefix = sender_prefix.clone();
-        let room_id_str = room_id_str.clone();
-        futures.push(async move {
-            if let Ok(AnySyncTimelineEvent::MessageLike(
-                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg),
-            )) = event.raw().deserialize()
-            {
-                let (sender, timestamp, content) = match msg {
-                    SyncRoomMessageEvent::Original(e) => {
-                        (e.sender, i64::from(e.origin_server_ts.0) / 1000, e.content)
-                    }
-                    _ => return None,
-                };
-
-                if !sender.localpart().starts_with(&sender_prefix) {
-                    return None;
-                }
-
-                let (msgtype, body) = match content.msgtype {
-                    MessageType::Text(t) => ("text", t.body),
-                    MessageType::Notice(n) => ("notice", n.body),
-                    MessageType::Image(i) => (
-                        "image",
-                        if i.body.is_empty() {
-                            "📎 IMAGE".into()
-                        } else {
-                            i.body
-                        },
-                    ),
-                    MessageType::Video(v) => (
-                        "video",
-                        if v.body.is_empty() {
-                            "📎 VIDEO".into()
-                        } else {
-                            v.body
-                        },
-                    ),
-                    MessageType::File(f) => (
-                        "file",
-                        if f.body.is_empty() {
-                            "📎 FILE".into()
-                        } else {
-                            f.body
-                        },
-                    ),
-                    MessageType::Audio(a) => (
-                        "audio",
-                        if a.body.is_empty() {
-                            "📎 AUDIO".into()
-                        } else {
-                            a.body
-                        },
-                    ),
-                    MessageType::Location(_) => ("location", "📍 LOCATION".into()), // Location has no body field
-                    MessageType::Emote(t) => ("emote", t.body),
-                    _ => return None,
-                };
-
-                Some(BridgeMessage {
-                    sender: sender.to_string(),
-                    sender_display_name: sender.localpart().to_string(),
-                    content: body,
-                    timestamp,
-                    formatted_timestamp: format_timestamp(timestamp, timezone),
-                    message_type: msgtype.to_string(),
-                    room_name: room_name.clone(),
-                    media_url: None,
-                    room_id: Some(room_id_str.clone()),
-                })
-            } else {
-                None
-            }
-        });
-    }
-
-    // Collect results from parallel processing
-    let mut messages: Vec<BridgeMessage> = join_all(futures).await.into_iter().flatten().collect();
-
-    // Sort messages by timestamp (most recent first)
-    messages.sort_unstable_by_key(|m| std::cmp::Reverse(m.timestamp));
-
-    Ok((messages, room_name))
-}
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1393,33 +1216,12 @@ pub async fn handle_bridge_message(
                 content
             );
 
-            // Record disconnection as triage item + legacy event
+            // Record disconnection event
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i32;
 
-            let bridge_name = match bridge.bridge_type.as_str() {
-                "whatsapp" => "WhatsApp",
-                "telegram" => "Telegram",
-                "signal" => "Signal",
-                other => other,
-            };
-
-            let new_item = crate::models::user_models::NewItem {
-                user_id,
-                summary: format!("System: {} bridge disconnected.", bridge_name),
-                due_at: None,
-                priority: 1,
-                source_id: None,
-                created_at: current_time,
-            };
-
-            if let Err(e) = state.item_repository.create_item(&new_item) {
-                tracing::error!("Failed to create item for bridge disconnection: {}", e);
-            }
-
-            // Legacy table (backward compat)
             if let Err(e) = state.user_repository.record_bridge_disconnection(
                 user_id,
                 &bridge.bridge_type,
@@ -1565,11 +1367,6 @@ pub async fn handle_bridge_message(
                         );
                     }
                     tracing::info!("set the last_seen_online to: {}", last_seen_online);
-                    // Auto-dismiss any pending tracking items for this room
-                    let source_prefix = format!("msg_{}_{}", service, room_id_str);
-                    let _ = state
-                        .item_repository
-                        .delete_items_by_source_prefix(user_id, &source_prefix);
                     return;
                 }
             }
@@ -1615,11 +1412,6 @@ pub async fn handle_bridge_message(
         }
 
         if found_user_reply {
-            // Auto-dismiss any pending tracking items for this room
-            let source_prefix = format!("msg_{}_{}", service, room_id_str);
-            let _ = state
-                .item_repository
-                .delete_items_by_source_prefix(user_id, &source_prefix);
             return;
         }
     }
@@ -1628,23 +1420,7 @@ pub async fn handle_bridge_message(
     let sender_prefix = get_sender_prefix(&service);
     tracing::debug!("sender_prefix: {}", sender_prefix);
     if !sender_localpart.starts_with(&sender_prefix) {
-        // User sent a message in this room - resolve tracking items
-        let source_prefix = format!("msg_{}_{}", service, room_id_str);
-        match state
-            .item_repository
-            .delete_items_by_source_prefix(user_id, &source_prefix)
-        {
-            Ok(count) if count > 0 => {
-                tracing::info!(
-                    "Auto-resolved {} tracking item(s) for user {} in room {}",
-                    count,
-                    user_id,
-                    room_id_str
-                );
-            }
-            Err(e) => tracing::error!("Failed to auto-resolve tracking items: {}", e),
-            _ => {}
-        }
+        // User sent a message in this room, not an incoming bridge message
         return;
     }
     // Check if user has valid subscription
@@ -1669,14 +1445,6 @@ pub async fn handle_bridge_message(
         );
         return;
     }
-    if !state
-        .user_core
-        .get_proactive_agent_on(user_id)
-        .unwrap_or(true)
-    {
-        tracing::debug!("User {} does not have monitoring enabled", user_id);
-        return;
-    }
     // Extract message content
     let content = match event.content.msgtype {
         MessageType::Text(t) => t.body,
@@ -1691,208 +1459,72 @@ pub async fn handle_bridge_message(
     };
     tracing::debug!("message: {}", content);
 
-    // Check monitor items for messaging matches
-    let message_context = format!(
-        "Platform: {}\nFrom: {}\nChat: {}\nContent: {}",
-        service,
-        sender_localpart,
-        room_name.as_str(),
-        content
-    );
-    let tracking_items = state
-        .item_repository
-        .get_tracking_items(user_id)
-        .unwrap_or_default();
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-    let chat_tracking: Vec<_> = tracking_items
-        .into_iter()
-        .filter(|item| {
-            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-            tags.fetch.contains(&"chat".to_string()) && item.due_at.is_some_and(|d| d > now_ts)
-        })
-        .collect();
-    if !chat_tracking.is_empty() {
-        // Extract data from Result immediately to drop non-Send Box<dyn Error> before any .await
-        let maybe_match: Option<crate::models::user_models::Item> =
-            crate::proactive::utils::check_item_monitor_match(
-                &state,
-                user_id,
-                &message_context,
-                &chat_tracking,
-            )
-            .await
-            .ok()
-            .flatten()
-            .and_then(|resp| {
-                let item_id = resp.task_id.unwrap_or(0);
-                chat_tracking
-                    .iter()
-                    .find(|i| i.id == Some(item_id))
-                    .cloned()
-            });
-        if let Some(matched_item) = maybe_match {
-            let item_id = matched_item.id.unwrap_or(0);
-            let priority = matched_item.priority;
-            // Process through unified path with matched message context
-            // Convert Result to drop non-Send Box<dyn Error> before any .await
-            let result: Result<crate::proactive::utils::TriggeredItemResult, String> =
-                crate::proactive::utils::process_triggered_item(
-                    &state,
-                    user_id,
-                    &matched_item,
-                    Some(&message_context),
-                )
-                .await
-                .map_err(|e| e.to_string());
-            match result {
-                Ok(response) => {
-                    crate::proactive::utils::handle_triggered_item_result(
-                        &state, user_id, item_id, priority, &response,
+    // Extract chat_name early for Person lookup and notification routing
+    let chat_name = remove_bridge_suffix(room_name.as_str());
+    let current_room_id = room.room_id().to_string();
+
+    // --- Ontology Person + Channel lookup ---
+    let matching_person = state
+        .ontology_repository
+        .find_person_by_room_id(user_id, &current_room_id)
+        .unwrap_or_else(|e| {
+            tracing::warn!("Ontology lookup failed for room {}: {}", current_room_id, e);
+            None
+        });
+
+    // --- Store message in ont_messages + emit ontology change (non-blocking) ---
+    {
+        let person_id = matching_person.as_ref().map(|p| p.person.id);
+        let msg = crate::models::ontology_models::NewOntMessage {
+            user_id,
+            room_id: current_room_id.clone(),
+            platform: service.clone(),
+            sender_name: chat_name.clone(),
+            content: content.clone(),
+            person_id,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32,
+            pinned: false,
+            status: None,
+        };
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            match state_clone.ontology_repository.insert_message(&msg) {
+                Ok(created) => {
+                    let snapshot = serde_json::json!({
+                        "message_id": created.id,
+                        "platform": msg.platform,
+                        "sender_name": msg.sender_name,
+                        "content": msg.content,
+                        "room_id": msg.room_id,
+                    });
+                    crate::proactive::rules::emit_ontology_change(
+                        &state_clone,
+                        user_id,
+                        "Message",
+                        created.id as i32,
+                        "created",
+                        snapshot,
                     )
                     .await;
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "Failed to process tracking match for item {}: {}",
-                        item_id,
-                        e
-                    );
-                    // Fallback: send item summary as notification
-                    crate::proactive::utils::send_notification(
-                        &state,
-                        user_id,
-                        &matched_item.summary,
-                        "item_sms".to_string(),
-                        Some("Hey, you have a notification!".to_string()),
-                    )
-                    .await;
+                    tracing::warn!("Failed to store bridge message: {}", e);
                 }
             }
+        });
+    }
+
+    // Get user settings for default notification mode (needed for both group and notification routing)
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
             return;
         }
-    }
-
-    // Auto-create tracking items from actionable messages (non-blocking)
-    if state
-        .user_core
-        .get_auto_create_items(user_id)
-        .unwrap_or(false)
-    {
-        let state_clone = state.clone();
-        let service_clone = service.clone();
-        let room_id_clone = room.room_id().to_string();
-        let sender_clone = sender_localpart.clone();
-        let content_clone = content.clone();
-        tokio::spawn(async move {
-            if let Err(e) = crate::proactive::utils::check_message_trackable_items(
-                &state_clone,
-                user_id,
-                &service_clone,
-                &room_id_clone,
-                &sender_clone,
-                &content_clone,
-            )
-            .await
-            {
-                tracing::debug!("Message trackable check failed for user {}: {}", user_id, e);
-            }
-        });
-    }
-
-    // Extract chat_name early for contact profile matching
-    let chat_name = remove_bridge_suffix(room_name.as_str());
-    let current_room_id = room.room_id().to_string();
-
-    // Load contact profiles for matching
-    let contact_profiles = state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default();
-
-    // Find matching contact profile - try room_id first (stable), then display name
-    let matching_profile = contact_profiles
-        .iter()
-        .find(|p| {
-            // Try room_id match first
-            let profile_room_id = match service.as_str() {
-                "whatsapp" => p.whatsapp_room_id.as_deref(),
-                "telegram" => p.telegram_room_id.as_deref(),
-                "signal" => p.signal_room_id.as_deref(),
-                _ => None,
-            };
-            profile_room_id == Some(current_room_id.as_str())
-        })
-        .or_else(|| {
-            // Fall back to display name matching for legacy/proactive profiles
-            let name_match = contact_profiles.iter().find(|p| {
-                let chat_lower = chat_name.to_lowercase();
-                match service.as_str() {
-                    "whatsapp" => p
-                        .whatsapp_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    "telegram" => p
-                        .telegram_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    "signal" => p
-                        .signal_chat
-                        .as_ref()
-                        .map(|c| {
-                            let c_lower = remove_bridge_suffix(c).to_lowercase();
-                            chat_lower.contains(&c_lower) || c_lower.contains(&chat_lower)
-                        })
-                        .unwrap_or(false),
-                    _ => false,
-                }
-            });
-
-            // Auto-save room_id on name-based match so future messages use room_id directly
-            if let Some(profile) = name_match {
-                let profile_room_id = match service.as_str() {
-                    "whatsapp" => profile.whatsapp_room_id.as_deref(),
-                    "telegram" => profile.telegram_room_id.as_deref(),
-                    "signal" => profile.signal_room_id.as_deref(),
-                    _ => None,
-                };
-                if profile_room_id.is_none() || profile_room_id == Some("") {
-                    if let Some(pid) = profile.id {
-                        if let Err(e) = state.user_repository.update_profile_room_id(
-                            pid,
-                            &service,
-                            &current_room_id,
-                        ) {
-                            tracing::warn!(
-                                "Failed to auto-save room_id for profile {}: {}",
-                                pid,
-                                e
-                            );
-                        } else {
-                            tracing::info!(
-                                "Auto-saved {} room_id {} for profile {} ({})",
-                                service,
-                                current_room_id,
-                                pid,
-                                profile.nickname
-                            );
-                        }
-                    }
-                }
-            }
-
-            name_match
-        });
+    };
 
     // Check if this is a group room (more than 3 members)
     let members = match room.members(RoomMemberships::JOIN).await {
@@ -1907,19 +1539,27 @@ pub async fn handle_bridge_message(
 
     // Group chat handling: check notification mode to bypass @mention requirement
     if member_count > 3 {
-        // Check platform-specific exception mode first, then fall back to profile mode
-        let effective_mode = matching_profile
-            .and_then(|p| {
-                let profile_id = p.id.unwrap_or(0);
-                state
-                    .user_repository
-                    .get_profile_exception_for_platform(profile_id, &service)
-                    .ok()
-                    .flatten()
-                    .map(|exc| exc.notification_mode)
-                    .or_else(|| Some(p.notification_mode.clone()))
-            })
-            .unwrap_or_default();
+        let effective_mode = if let Some(ref person_with_channels) = matching_person {
+            if let Some(channel) = person_with_channels
+                .channels
+                .iter()
+                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
+            {
+                let user_default_mode = user_settings
+                    .phone_contact_notification_mode
+                    .as_deref()
+                    .unwrap_or("critical");
+                person_with_channels.effective_notification_mode(channel, user_default_mode)
+            } else {
+                String::new()
+            }
+        } else {
+            // No Person found - use user defaults
+            user_settings
+                .phone_contact_notification_mode
+                .clone()
+                .unwrap_or_else(|| "critical".to_string())
+        };
         let is_priority_group = effective_mode == "all";
 
         if !is_priority_group {
@@ -1945,6 +1585,7 @@ pub async fn handle_bridge_message(
             );
         }
     }
+
     // Skip error messages using pure function
     if is_error_message(&content) {
         tracing::debug!("Skipping error message because content contained error messages");
@@ -2016,7 +1657,7 @@ pub async fn handle_bridge_message(
             }
         }
     }
-    // chat_name and sender_name already defined earlier for contact profile matching
+    // chat_name already defined earlier for Person lookup
 
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
         let prefix = format!("{} from ", capitalize(service));
@@ -2042,89 +1683,71 @@ pub async fn handle_bridge_message(
 
     let service_cap = capitalize(&service);
 
-    // Get user settings for default notification mode
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get user settings: {}", e);
-            return;
+    // Determine notification mode and type.
+    // Priority: ontology Person+Channel -> user defaults
+    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) = {
+        let ontology_settings = matching_person.as_ref().and_then(|pwc| {
+            pwc.channels
+                .iter()
+                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
+                .map(|channel| {
+                    let user_default_mode = user_settings
+                        .phone_contact_notification_mode
+                        .as_deref()
+                        .unwrap_or("critical");
+                    let user_default_type = user_settings
+                        .phone_contact_notification_type
+                        .as_deref()
+                        .unwrap_or("sms");
+                    let user_default_on_call = user_settings.phone_contact_notify_on_call != 0;
+
+                    let mode = pwc.effective_notification_mode(channel, user_default_mode);
+                    let ntype = pwc.effective_notification_type(channel, user_default_type);
+                    let on_call = pwc.effective_notify_on_call(channel, user_default_on_call);
+                    let nickname = Some(pwc.display_name().to_string());
+
+                    tracing::info!(
+                        "Using ontology Person '{}' settings: mode={}, type={}, on_call={}",
+                        pwc.display_name(),
+                        mode,
+                        ntype,
+                        on_call
+                    );
+
+                    (mode, ntype, on_call, nickname)
+                })
+        });
+
+        if let Some(settings) = ontology_settings {
+            settings
+        } else {
+            // No Person found - use user defaults based on contact type
+            let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
+            if is_phone_contact.unwrap_or(true) {
+                let mode = user_settings
+                    .phone_contact_notification_mode
+                    .clone()
+                    .unwrap_or_else(|| "critical".to_string());
+                let ntype = user_settings
+                    .phone_contact_notification_type
+                    .clone()
+                    .unwrap_or_else(|| "sms".to_string());
+                let notify = user_settings.phone_contact_notify_on_call != 0;
+                (mode, ntype, notify, None)
+            } else {
+                let mode = user_settings
+                    .default_notification_mode
+                    .clone()
+                    .unwrap_or_else(|| "critical".to_string());
+                let ntype = user_settings
+                    .default_notification_type
+                    .clone()
+                    .unwrap_or_else(|| "sms".to_string());
+                let notify = user_settings.default_notify_on_call != 0;
+                (mode, ntype, notify, None)
+            }
         }
     };
-
-    // Extract contact notes before the match consumes matching_profile
-    let contact_notes = matching_profile.as_ref().and_then(|p| p.notes.clone());
-
-    // Determine notification mode and type based on contact profile or default
-    // Check for platform-specific exceptions if a profile matches
-    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) =
-        match matching_profile {
-            Some(profile) => {
-                let profile_id = profile.id.unwrap_or(0);
-                // Check for platform-specific exception
-                let exception = state
-                    .user_repository
-                    .get_profile_exception_for_platform(profile_id, &service)
-                    .ok()
-                    .flatten();
-
-                match exception {
-                    Some(exc) => {
-                        tracing::info!(
-                            "Using {} exception for profile '{}': mode={}, type={}",
-                            service,
-                            profile.nickname,
-                            exc.notification_mode,
-                            exc.notification_type
-                        );
-                        (
-                            exc.notification_mode.clone(),
-                            exc.notification_type.clone(),
-                            exc.notify_on_call != 0,
-                            Some(profile.nickname.clone()),
-                        )
-                    }
-                    None => (
-                        profile.notification_mode.clone(),
-                        profile.notification_type.clone(),
-                        profile.notify_on_call != 0,
-                        Some(profile.nickname.clone()),
-                    ),
-                }
-            }
-            None => {
-                let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
-                // is_phone_contact:
-                //   Some(true)  = phone contact (WA/Signal, has FullName) -> Tier 2
-                //   Some(false) = not phone contact (WA~/Signal~) -> Tier 3
-                //   None        = Telegram or unknown -> default to Tier 2
-
-                if is_phone_contact.unwrap_or(true) {
-                    // Tier 2: Phone contact (or Telegram where we can't distinguish)
-                    let mode = user_settings
-                        .phone_contact_notification_mode
-                        .clone()
-                        .unwrap_or_else(|| "critical".to_string());
-                    let ntype = user_settings
-                        .phone_contact_notification_type
-                        .clone()
-                        .unwrap_or_else(|| "sms".to_string());
-                    let notify = user_settings.phone_contact_notify_on_call != 0;
-                    (mode, ntype, notify, None)
-                } else {
-                    // Tier 3: Unknown person (not in phone contacts)
-                    let mode = user_settings
-                        .default_notification_mode
-                        .clone()
-                        .unwrap_or_else(|| "critical".to_string());
-                    let ntype = user_settings
-                        .default_notification_type
-                        .clone()
-                        .unwrap_or_else(|| "sms".to_string());
-                    let notify = user_settings.default_notify_on_call != 0;
-                    (mode, ntype, notify, None)
-                }
-            }
-        };
 
     tracing::debug!("notification_mode: {}", notification_mode);
     tracing::debug!("notification_type: {}", notification_type_str);
@@ -2226,82 +1849,12 @@ pub async fn handle_bridge_message(
             }
         }
         "critical" => {
-            // Only notify if AI deems the message critical
-            if user_settings.critical_enabled.is_none() {
-                tracing::debug!("Critical message checking disabled for user {}", user_id);
-                return;
-            }
-
-            tracing::debug!("service: {}", service);
-            tracing::debug!("chat_name: {}", chat_name);
-            tracing::debug!("content: {}", content);
-
-            // Use profile nickname for critical message detection if available
-            let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
-            if let Ok((is_critical, message_opt, first_message_opt)) =
-                crate::proactive::utils::check_message_importance(
-                    &state,
-                    user_id,
-                    &format!("{} from {}: {}", service_cap, sender_display, content),
-                    service_cap.as_str(),
-                    sender_display.as_str(),
-                    content.as_str(),
-                    contact_notes.as_deref(),
-                    "",
-                )
-                .await
-            {
-                tracing::debug!("is_critical: {}", is_critical);
-
-                if is_critical {
-                    // Check if we recently sent a critical notification to avoid duplicates
-                    let suffix = match notification_type_str.as_str() {
-                        "call" => "_call",
-                        _ => "_sms",
-                    };
-                    let notification_type = format!("{}_critical{}", service, suffix);
-                    const NOTIFICATION_COOLDOWN: i32 = 600; // 10 minutes
-
-                    if let Ok(has_recent) = state.user_repository.has_recent_notification(
-                        user_id,
-                        &notification_type,
-                        NOTIFICATION_COOLDOWN,
-                    ) {
-                        if has_recent {
-                            tracing::info!("Skipping notification - already sent {} notification within last {} seconds",
-                                notification_type, NOTIFICATION_COOLDOWN);
-                            return;
-                        }
-                    }
-
-                    let message = message_opt.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
-                    let first_message = first_message_opt.unwrap_or(format!(
-                        "Hey, I found some critical {} message.",
-                        service_cap
-                    ));
-
-                    // Spawn a new task for sending critical message notification
-                    let state_clone = state.clone();
-                    let meta_service = service.clone();
-                    let meta_sender = chat_name.clone();
-                    let meta_content = content.clone();
-                    tokio::spawn(async move {
-                        crate::proactive::utils::send_notification_with_context(
-                            &state_clone,
-                            user_id,
-                            &message,
-                            notification_type,
-                            Some(first_message),
-                            Some(crate::proactive::utils::NotificationMeta {
-                                platform: Some(meta_service),
-                                sender: Some(meta_sender),
-                                content: Some(meta_content),
-                            }),
-                        )
-                        .await;
-                    });
-                }
-            }
+            // Critical message checking removed (legacy item system deleted).
+            // Ontology rules now handle message-triggered notifications.
+            tracing::debug!(
+                "Critical mode is no longer supported (items system removed), skipping for user {}",
+                user_id
+            );
         }
         "mention" => {
             // @mention only mode: already handled by the group member check above

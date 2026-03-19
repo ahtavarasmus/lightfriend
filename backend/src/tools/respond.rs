@@ -14,10 +14,13 @@ impl ToolHandler for DirectResponseHandler {
         crate::tool_call_utils::internet::get_direct_response_tool()
     }
 
-    async fn execute(&self, _ctx: ToolContext<'_>) -> Result<ToolResult, String> {
+    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
         tracing::debug!("Executing direct_response tool call");
-        Ok(ToolResult::Answer(
-            "No external data needed for this question. Answer the user's question directly and helpfully from your own knowledge.".to_string()
-        ))
+        let args: serde_json::Value = serde_json::from_str(ctx.arguments).unwrap_or_default();
+        let response = args["response"]
+            .as_str()
+            .unwrap_or("I'm not sure how to respond to that.")
+            .to_string();
+        Ok(ToolResult::Answer(response))
     }
 }

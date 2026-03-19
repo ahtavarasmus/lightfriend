@@ -16,10 +16,10 @@ use crate::api::twilio_client::{
     MessagePrice, SendMessageOptions, TwilioClient, TwilioClientError, TwilioCredentials,
 };
 use crate::models::user_models::{NewMessageStatusLog, User};
+use crate::pg_schema::message_status_log;
 use crate::repositories::user_core::UserCore;
 use crate::repositories::user_repository::UserRepository;
-use crate::schema::message_status_log;
-use crate::DbPool;
+use crate::PgDbPool;
 
 /// Errors that can occur during message operations.
 #[derive(Debug, Error)]
@@ -71,7 +71,7 @@ pub struct MessageSendResult {
 /// - Database logging for message status tracking
 pub struct TwilioMessageService<T: TwilioClient> {
     twilio_client: Arc<T>,
-    db_pool: DbPool,
+    db_pool: PgDbPool,
     user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
 }
@@ -80,7 +80,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     /// Create a new TwilioMessageService.
     pub fn new(
         twilio_client: Arc<T>,
-        db_pool: DbPool,
+        db_pool: PgDbPool,
         user_core: Arc<UserCore>,
         user_repository: Arc<UserRepository>,
     ) -> Self {
@@ -105,7 +105,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         // BYOT users with their own credentials always use their own account
         if self.user_core.is_byot_user(user.id) {
             let (account_sid, auth_token) = self
-                .user_core
+                .user_repository
                 .get_twilio_credentials(user.id)
                 .map_err(|e| TwilioMessageError::Database(e.to_string()))?;
             return Ok(TwilioCredentials::new(account_sid, auth_token));
@@ -127,7 +127,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         // Non-supported country must have their own credentials
         let (account_sid, auth_token) = self
-            .user_core
+            .user_repository
             .get_twilio_credentials(user.id)
             .map_err(|_| TwilioMessageError::NoCredentials)?;
         Ok(TwilioCredentials::new(account_sid, auth_token))
@@ -278,7 +278,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         user: &User,
     ) -> Result<String, TwilioMessageError> {
         // Log to message history using repository
-        let history_entry = crate::models::user_models::NewMessageHistory {
+        let history_entry = crate::pg_models::NewPgMessageHistory {
             user_id: user.id,
             role: "assistant".to_string(),
             encrypted_content: body.to_string(),
@@ -548,10 +548,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
     /// Log message to user's message history.
     fn log_message_history(&self, user_id: i32, body: &str) -> Result<(), TwilioMessageError> {
-        use crate::models::user_models::NewMessageHistory;
-        use crate::schema::message_history;
-
-        let history_entry = NewMessageHistory {
+        let history_entry = crate::pg_models::NewPgMessageHistory {
             user_id,
             role: "assistant".to_string(),
             encrypted_content: body.to_string(),
@@ -562,14 +559,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             conversation_id: "".to_string(),
         };
 
-        let mut conn = self
-            .db_pool
-            .get()
-            .map_err(|e| TwilioMessageError::Database(e.to_string()))?;
-
-        diesel::insert_into(message_history::table)
-            .values(&history_entry)
-            .execute(&mut conn)
+        self.user_repository
+            .create_message_history(&history_entry)
             .map_err(|e| {
                 tracing::error!("Failed to store message in history: {}", e);
                 TwilioMessageError::Database(e.to_string())

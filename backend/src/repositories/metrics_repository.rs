@@ -1,18 +1,18 @@
 use crate::{
     models::user_models::{NewSiteMetric, SiteMetric},
-    schema::site_metrics,
-    DbPool,
+    pg_schema::site_metrics,
+    PgDbPool,
 };
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct MetricsRepository {
-    pool: DbPool,
+    pool: PgDbPool,
 }
 
 impl MetricsRepository {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }
 

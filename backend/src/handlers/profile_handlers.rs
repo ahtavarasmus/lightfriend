@@ -29,11 +29,6 @@ async fn geocode_location(location: &str) -> Option<(f64, f64)> {
     Some((lat, lon))
 }
 
-#[derive(Serialize)]
-pub struct ProactiveAgentEnabledResponse {
-    enabled: bool,
-}
-
 #[derive(Deserialize)]
 pub struct TimezoneUpdateRequest {
     timezone: String,
@@ -79,7 +74,6 @@ pub struct ProfileResponse {
     email: String,
     phone_number: String,
     nickname: Option<String>,
-    verified: bool,
     credits: f32,
     notify: bool,
     info: Option<String>,
@@ -91,7 +85,6 @@ pub struct ProfileResponse {
     timezone_auto: Option<bool>,
     sub_tier: Option<String>,
     credits_left: f32,
-    discount: bool,
     agent_language: String,
     notification_type: Option<String>,
     sub_country: Option<String>,
@@ -99,9 +92,6 @@ pub struct ProfileResponse {
     days_until_billing: Option<i32>,
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
-    openrouter_api_key: Option<String>,
-    textbee_device_id: Option<String>,
-    textbee_api_key: Option<String>,
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
@@ -119,6 +109,7 @@ pub async fn get_profile(
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Get user profile and settings from database
     let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| {
+        tracing::error!("get_profile: find_by_id failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
@@ -130,6 +121,7 @@ pub async fn get_profile(
                 .user_core
                 .get_user_settings(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_user_settings failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
@@ -139,31 +131,12 @@ pub async fn get_profile(
                 .user_core
                 .get_user_info(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_user_info failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
                     )
                 })?;
-            // Get current digest settings
-            let (morning_digest_time, day_digest_time, evening_digest_time) = state
-                .user_core
-                .get_digests(auth_user.user_id)
-                .map_err(|e| {
-                    tracing::error!("Failed to get digest settings: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Failed to get digest settings: {}", e)})),
-                    )
-                })?;
-            // Count current active digests
-            let current_count: i32 = [
-                morning_digest_time.as_ref(),
-                day_digest_time.as_ref(),
-                evening_digest_time.as_ref(),
-            ]
-            .iter()
-            .filter(|&&x| x.is_some())
-            .count() as i32;
             let days_until_billing: Option<i32> = user.next_billing_date_timestamp.map(|date| {
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -172,85 +145,42 @@ pub async fn get_profile(
                 (date - current_time) / (24 * 60 * 60)
             });
             // Fetch Twilio credentials and mask them
-            let (twilio_sid, twilio_token) =
-                match state.user_core.get_twilio_credentials(auth_user.user_id) {
-                    Ok((sid, token)) => {
-                        let masked_sid = if sid.len() >= 4 {
-                            format!("...{}", &sid[sid.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        let masked_token = if token.len() >= 4 {
-                            format!("...{}", &token[token.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        (Some(masked_sid), Some(masked_token))
-                    }
-                    Err(_) => (None, None),
-                };
-            // Fetch Textbee credentials and mask them
-            let (textbee_device_id, textbee_api_key) =
-                match state.user_core.get_textbee_credentials(auth_user.user_id) {
-                    Ok((id, key)) => {
-                        let masked_key = if key.len() >= 4 {
-                            format!("...{}", &key[key.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        let masked_id = if id.len() >= 4 {
-                            format!("...{}", &id[id.len() - 4..])
-                        } else {
-                            "...".to_string()
-                        };
-                        (Some(masked_id), Some(masked_key))
-                    }
-                    Err(_) => (None, None),
-                };
-            let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id)
+            let (twilio_sid, twilio_token) = match state
+                .user_repository
+                .get_twilio_credentials(auth_user.user_id)
             {
-                Ok(key) => {
-                    let masked_key = if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
+                Ok((sid, token)) => {
+                    let masked_sid = if sid.len() >= 4 {
+                        format!("...{}", &sid[sid.len() - 4..])
                     } else {
                         "...".to_string()
                     };
-                    Some(masked_key)
+                    let masked_token = if token.len() >= 4 {
+                        format!("...{}", &token[token.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    (Some(masked_sid), Some(masked_token))
                 }
-                Err(_) => None,
+                Err(_) => (None, None),
             };
             // Determine country based on phone number (default to "US" if unknown)
-            let country =
+            let _country =
                 get_country_code_from_phone(&user.phone_number).unwrap_or_else(|| "US".to_string());
             // Get critical notification info
             let critical_info = state
                 .user_core
                 .get_critical_notification_info(auth_user.user_id)
                 .map_err(|e| {
+                    tracing::error!("get_profile: get_critical_notification_info failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": format!("Database error: {}", e)})),
                     )
                 })?;
             let estimated_critical_monthly = critical_info.estimated_monthly_price;
-            let estimated_priority_monthly = 0.0_f32;
-            // Calculate digest estimated monthly cost
-            let estimated_digest_monthly = if current_count > 0 {
-                let active_count_f = current_count as f32;
-                let cost_per_digest = if country == "US" {
-                    0.5
-                } else if country == "Other" {
-                    0.0
-                } else {
-                    0.30
-                };
-                active_count_f * 30.0 * cost_per_digest
-            } else {
-                0.0
-            };
             // Calculate total estimated monitoring cost
-            let estimated_monitoring_cost =
-                estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
+            let estimated_monitoring_cost = estimated_critical_monthly;
             // Check if user has any connected services (for onboarding modal)
             let has_any_connection = state
                 .user_repository
@@ -281,7 +211,6 @@ pub async fn get_profile(
                 email: user.email,
                 phone_number: user.phone_number,
                 nickname: user.nickname,
-                verified: user.verified,
                 credits: user.credits,
                 notify: user_settings.notify,
                 info: user_info.info,
@@ -293,7 +222,6 @@ pub async fn get_profile(
                 timezone_auto: user_settings.timezone_auto,
                 sub_tier: user.sub_tier,
                 credits_left: user.credits_left,
-                discount: user.discount,
                 agent_language: user_settings.agent_language,
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
@@ -301,9 +229,6 @@ pub async fn get_profile(
                 days_until_billing,
                 twilio_sid,
                 twilio_token,
-                openrouter_api_key,
-                textbee_device_id,
-                textbee_api_key,
                 estimated_monitoring_cost,
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
@@ -1271,68 +1196,6 @@ pub async fn get_nearby_places(
     }
 }
 
-#[derive(Serialize)]
-pub struct DigestsResponse {
-    morning_digest_time: Option<String>,
-    day_digest_time: Option<String>,
-    evening_digest_time: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateDigestsRequest {
-    morning_digest_time: Option<String>,
-    day_digest_time: Option<String>,
-    evening_digest_time: Option<String>,
-}
-
-pub async fn get_digests(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Get current digest settings
-    let (morning_digest_time, day_digest_time, evening_digest_time) = state
-        .user_core
-        .get_digests(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to get digest settings: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get digest settings: {}", e)})),
-            )
-        })?;
-
-    Ok(Json(DigestsResponse {
-        morning_digest_time,
-        day_digest_time,
-        evening_digest_time,
-    }))
-}
-
-pub async fn update_digests(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<UpdateDigestsRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.update_digests(
-        auth_user.user_id,
-        request.morning_digest_time.as_deref(),
-        request.day_digest_time.as_deref(),
-        request.evening_digest_time.as_deref(),
-    ) {
-        Ok(_) => {
-            let message = String::from("Digest settings updated successfully");
-            let response = json!({
-                "message": message,
-            });
-            Ok(Json(response))
-        }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update digest settings: {}", e)})),
-        )),
-    }
-}
-
 #[derive(Deserialize)]
 pub struct UpdateCriticalRequest {
     #[serde(default, deserialize_with = "deserialize_double_option")]
@@ -1435,22 +1298,6 @@ pub async fn get_critical_settings(
     }
 }
 
-pub async fn get_proactive_agent_on(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<ProactiveAgentEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_proactive_agent_on(auth_user.user_id) {
-        Ok(enabled) => Ok(Json(ProactiveAgentEnabledResponse { enabled })),
-        Err(e) => {
-            tracing::error!("Failed to get critical enabled setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)})),
-            ))
-        }
-    }
-}
-
 // Quiet Mode endpoints
 #[derive(Serialize)]
 pub struct QuietModeStatus {
@@ -1486,30 +1333,7 @@ pub struct AddQuietRuleRequest {
     pub description: Option<String>,
 }
 
-/// Parse quiet rule info from an item's tagged summary.
-fn parse_rule_info_from_item(
-    item: &crate::models::user_models::Item,
-    user_id: i32,
-    state: &Arc<AppState>,
-) -> Option<QuietRuleInfo> {
-    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-    // Only return items that have a [quiet:...] tag (not backward-compat global items)
-    let rule_type = tags.quiet?;
-
-    let until_display = item
-        .due_at
-        .map(|ts| format_quiet_until_display(ts, user_id, state));
-
-    Some(QuietRuleInfo {
-        id: item.id.unwrap_or(0),
-        rule_type,
-        platform: tags.platform,
-        sender: tags.sender,
-        topic: tags.topic,
-        until: item.due_at,
-        until_display,
-    })
-}
+// parse_rule_info_from_item removed - items system has been removed
 
 /// GET /api/profile/quiet-mode
 pub async fn get_quiet_mode(
@@ -1539,14 +1363,8 @@ pub async fn get_quiet_mode(
                 }
             };
 
-            // Get quiet rules
-            let rules = match state.user_core.get_quiet_rules(auth_user.user_id) {
-                Ok(items) => items
-                    .iter()
-                    .filter_map(|item| parse_rule_info_from_item(item, auth_user.user_id, &state))
-                    .collect(),
-                Err(_) => Vec::new(),
-            };
+            // Items system removed - quiet rules are no longer stored as items
+            let rules: Vec<QuietRuleInfo> = Vec::new();
 
             // is_quiet should also be true if there are active rules
             let effective_quiet = is_quiet || !rules.is_empty();
@@ -2204,319 +2022,6 @@ pub async fn web_chat_stream(
             .interval(std::time::Duration::from_secs(15))
             .text("keep-alive"),
     )
-}
-
-// On-demand "What's new?" digest endpoint
-pub async fn get_instant_digest(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<WebChatResponse>, (StatusCode, Json<serde_json::Value>)> {
-    use crate::proactive::utils::{generate_digest, DigestData, MessageInfo};
-    use chrono::{Duration, Utc};
-    use std::collections::{HashMap, HashSet};
-
-    // Get the user
-    let user = state
-        .user_core
-        .find_by_id(auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            )
-        })?;
-
-    // Check subscription
-    if user.sub_tier.is_none() {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Please subscribe to use the digest feature"})),
-        ));
-    }
-
-    // Get user info for timezone
-    let user_info = state
-        .user_core
-        .get_user_info(auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get user info: {}", e)})),
-            )
-        })?;
-
-    let timezone = user_info
-        .timezone
-        .clone()
-        .unwrap_or_else(|| "UTC".to_string());
-    let tz: chrono_tz::Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
-
-    // Charge same as web_chat
-    let is_us_or_ca = user.phone_number.starts_with("+1");
-    let (credits_left_cost, credits_cost) = if is_us_or_ca {
-        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
-    } else {
-        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
-    };
-
-    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
-    if !has_credits {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
-        ));
-    }
-
-    // Deduct credits
-    let charged_amount = if user.credits_left >= credits_left_cost {
-        let new_credits_left = user.credits_left - credits_left_cost;
-        state
-            .user_repository
-            .update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_left_cost
-    } else {
-        let new_credits = user.credits - credits_cost;
-        state
-            .user_repository
-            .update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_cost
-    };
-
-    // Log usage
-    let _ = state.user_repository.log_usage(LogUsageParams {
-        user_id: auth_user.user_id,
-        sid: None,
-        activity_type: "instant_digest".to_string(),
-        credits: Some(charged_amount),
-        time_consumed: None,
-        success: Some(true),
-        reason: Some("On-demand digest request".to_string()),
-        status: None,
-        recharge_threshold_timestamp: None,
-        zero_credits_timestamp: None,
-    });
-
-    // Calculate cutoff time - use last instant digest time or 12 hours ago
-    let now = Utc::now();
-    let last_instant_time = state
-        .user_core
-        .get_last_instant_digest_time(auth_user.user_id)
-        .unwrap_or(None);
-
-    let cutoff_timestamp = match last_instant_time {
-        Some(ts) => ts as i64,
-        None => (now - Duration::hours(12)).timestamp(),
-    };
-    let cutoff_time =
-        chrono::DateTime::from_timestamp(cutoff_timestamp, 0).unwrap_or(now - Duration::hours(12));
-
-    // Collect messages from all sources
-    let mut messages: Vec<MessageInfo> = Vec::new();
-
-    // Fetch emails if IMAP is configured
-    if let Ok(Some(_)) = state
-        .user_repository
-        .get_imap_credentials(auth_user.user_id)
-    {
-        if let Ok(emails) = crate::handlers::imap_handlers::fetch_emails_imap(
-            &state,
-            auth_user.user_id,
-            false,
-            Some(50),
-            false,
-            true,
-        )
-        .await
-        {
-            let email_msgs: Vec<MessageInfo> = emails
-                .into_iter()
-                .filter(|email| {
-                    if let Some(date) = email.date {
-                        date >= cutoff_time
-                    } else {
-                        false
-                    }
-                })
-                .map(|email| MessageInfo {
-                    sender: email.from.unwrap_or_else(|| "Unknown".to_string()),
-                    content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                    timestamp_rfc: email
-                        .date_formatted
-                        .unwrap_or_else(|| "No timestamp".to_string()),
-                    platform: "email".to_string(),
-                    room_id: None,
-                })
-                .collect();
-            messages.extend(email_msgs);
-        }
-    }
-
-    // Fetch bridge messages (WhatsApp, Telegram, Signal)
-    for bridge_type in &["whatsapp", "telegram", "signal"] {
-        if let Ok(Some(_)) = state
-            .user_repository
-            .get_bridge(auth_user.user_id, bridge_type)
-        {
-            if let Ok(bridge_msgs) = crate::utils::bridge::fetch_bridge_messages(
-                bridge_type,
-                &state,
-                auth_user.user_id,
-                cutoff_timestamp,
-                true,
-            )
-            .await
-            {
-                let infos: Vec<MessageInfo> = bridge_msgs
-                    .into_iter()
-                    .map(|msg| MessageInfo {
-                        sender: msg.room_name,
-                        content: msg.content,
-                        timestamp_rfc: msg.formatted_timestamp,
-                        platform: bridge_type.to_string(),
-                        room_id: msg.room_id.clone(),
-                    })
-                    .collect();
-                messages.extend(infos);
-            }
-        }
-    }
-
-    // Check if there's anything to report
-    if messages.is_empty() {
-        // Update last instant digest time even if empty
-        let _ = state
-            .user_core
-            .set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
-
-        return Ok(Json(WebChatResponse {
-            message: "Nothing new since your last check!".to_string(),
-            credits_charged: charged_amount,
-            media: None,
-            created_item_id: None,
-        }));
-    }
-
-    // Build priority map from contact profiles for digest generation
-    let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
-    priority_map.insert("email".to_string(), HashSet::new());
-    priority_map.insert("whatsapp".to_string(), HashSet::new());
-    priority_map.insert("telegram".to_string(), HashSet::new());
-    priority_map.insert("signal".to_string(), HashSet::new());
-
-    if let Ok(profiles) = state
-        .user_repository
-        .get_contact_profiles(auth_user.user_id)
-    {
-        for profile in profiles {
-            if let Some(ref emails) = profile.email_addresses {
-                for addr in emails.split(',') {
-                    let addr = addr.trim().to_string();
-                    if !addr.is_empty() {
-                        priority_map
-                            .entry("email".to_string())
-                            .or_default()
-                            .insert(addr);
-                    }
-                }
-            }
-            if let Some(ref chat) = profile.whatsapp_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("whatsapp".to_string())
-                        .or_default()
-                        .insert(chat.clone());
-                }
-            }
-            if let Some(ref chat) = profile.telegram_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("telegram".to_string())
-                        .or_default()
-                        .insert(chat.clone());
-                }
-            }
-            if let Some(ref chat) = profile.signal_chat {
-                if !chat.is_empty() {
-                    priority_map
-                        .entry("signal".to_string())
-                        .or_default()
-                        .insert(chat.clone());
-                }
-            }
-        }
-    }
-
-    // Sort messages
-    messages.sort_by(|a, b| {
-        let plat_cmp = a.platform.cmp(&b.platform);
-        if plat_cmp == std::cmp::Ordering::Equal {
-            let a_pri = priority_map
-                .get(&a.platform)
-                .is_some_and(|set| set.contains(&a.sender));
-            let b_pri = priority_map
-                .get(&b.platform)
-                .is_some_and(|set| set.contains(&b.sender));
-            b_pri
-                .cmp(&a_pri)
-                .then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
-        } else {
-            plat_cmp
-        }
-    });
-
-    // Get current datetime in user's timezone
-    let now_local = now.with_timezone(&tz);
-    let current_datetime_local = now_local.format("%Y-%m-%d %H:%M:%S").to_string();
-
-    // Calculate hours since cutoff
-    let hours_since = ((now.timestamp() - cutoff_timestamp) / 3600) as u32;
-
-    // Prepare digest data
-    let digest_data = DigestData {
-        messages,
-        time_period_hours: hours_since.max(1),
-        current_datetime_local,
-    };
-
-    // Generate digest
-    let digest_message =
-        match generate_digest(&state, auth_user.user_id, digest_data, priority_map).await {
-            Ok(digest) => digest,
-            Err(e) => {
-                tracing::error!("Failed to generate digest: {}", e);
-                "Failed to generate digest. Please try again.".to_string()
-            }
-        };
-
-    // Update last instant digest time
-    let _ = state
-        .user_core
-        .set_last_instant_digest_time(auth_user.user_id, now.timestamp() as i32);
-
-    Ok(Json(WebChatResponse {
-        message: digest_message,
-        credits_charged: charged_amount,
-        media: None,
-        created_item_id: None,
-    }))
 }
 
 /// Web Chat with Image support - allows users to send messages with images through the dashboard
