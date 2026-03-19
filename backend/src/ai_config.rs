@@ -1,8 +1,7 @@
 //! Centralized AI provider configuration
 //!
-//! Provider priority: Tinfoil > Anthropic > OpenRouter.
-//! Anthropic uses a different API format (Messages API) which is converted
-//! from/to the OpenAI-compatible format used internally.
+//! Tinfoil is the sole AI provider for all users.
+//! OpenRouter code is kept as dead-code fallback but never selected.
 
 use openai_api_rs::v1::api::OpenAIClient;
 
@@ -10,7 +9,6 @@ use openai_api_rs::v1::api::OpenAIClient;
 pub enum AiProvider {
     OpenRouter,
     Tinfoil,
-    Anthropic,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +23,6 @@ pub struct AiConfig {
     // OpenRouter key kept as optional fallback (only needed if OpenRouter is used directly)
     openrouter_api_key: Option<String>,
     tinfoil_api_key: Option<String>,
-    anthropic_api_key: Option<String>,
 }
 
 impl AiConfig {
@@ -34,64 +31,34 @@ impl AiConfig {
         Self {
             openrouter_api_key: Some("test_openrouter_key".to_string()),
             tinfoil_api_key: Some("test_tinfoil_key".to_string()),
-            anthropic_api_key: Some("test_anthropic_key".to_string()),
         }
     }
 
     pub fn from_env() -> Self {
-        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let tinfoil_api_key = std::env::var("TINFOIL_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY").ok();
 
-        let providers: Vec<&str> = [
-            tinfoil_api_key.as_ref().map(|_| "Tinfoil"),
-            anthropic_api_key.as_ref().map(|_| "Anthropic"),
-            openrouter_api_key.as_ref().map(|_| "OpenRouter"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let tinfoil_api_key =
+            Some(std::env::var("TINFOIL_API_KEY").expect("TINFOIL_API_KEY required"));
 
-        if providers.is_empty() {
-            panic!("At least one AI provider API key must be set (TINFOIL_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY)");
-        }
-
-        tracing::info!(
-            "AI config initialized: {} (priority order)",
-            providers.join(" > ")
-        );
+        tracing::info!("AI config initialized: Tinfoil (primary)");
 
         Self {
             openrouter_api_key,
             tinfoil_api_key,
-            anthropic_api_key,
         }
     }
 
-    /// Select provider by priority: Tinfoil > Anthropic > OpenRouter.
-    /// The preference parameter is accepted for backward compatibility but ignored.
+    /// Always returns Tinfoil. The preference parameter is accepted for
+    /// backward compatibility but ignored.
     pub fn provider_for_user_with_preference(&self, _preference: Option<&str>) -> AiProvider {
-        if self.tinfoil_api_key.is_some() {
-            AiProvider::Tinfoil
-        } else if self.anthropic_api_key.is_some() {
-            AiProvider::Anthropic
-        } else {
-            AiProvider::OpenRouter
-        }
+        AiProvider::Tinfoil
     }
 
     /// Get the endpoint URL for a provider
     pub fn endpoint(&self, provider: AiProvider) -> &str {
         match provider {
-            AiProvider::OpenRouter => "https://api.groq.com/openai/v1",
+            AiProvider::OpenRouter => "https://openrouter.ai/api/v1",
             AiProvider::Tinfoil => "https://inference.tinfoil.sh/v1",
-            AiProvider::Anthropic => "https://api.anthropic.com/v1",
         }
     }
 
@@ -106,38 +73,22 @@ impl AiConfig {
                 .tinfoil_api_key
                 .as_ref()
                 .expect("Tinfoil API key not configured"),
-            AiProvider::Anthropic => self
-                .anthropic_api_key
-                .as_ref()
-                .expect("ANTHROPIC_API_KEY not set but Anthropic provider requested"),
         }
     }
 
     /// Get the model name for a provider and purpose
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
-            (AiProvider::OpenRouter, ModelPurpose::Default) => "llama-3.1-8b-instant",
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "llama3-3-70b",
-            (AiProvider::Anthropic, ModelPurpose::Default) => "claude-sonnet-4-20250514",
+            (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
         }
     }
 
-    /// Create an OpenAI-compatible client for a specific provider.
-    /// Not supported for Anthropic (uses custom HTTP path instead).
+    /// Create an OpenAI-compatible client for a specific provider
     pub fn create_client(
         &self,
         provider: AiProvider,
     ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
-        if provider == AiProvider::Anthropic {
-            // Return a dummy OpenAI client for Anthropic.
-            // Actual API calls go through ai_config.chat_completion() which
-            // handles Anthropic natively. This client is only needed to satisfy
-            // AgentContext's type requirement.
-            return OpenAIClient::builder()
-                .with_endpoint("https://api.anthropic.com/v1")
-                .with_api_key(self.api_key(provider))
-                .build();
-        }
         OpenAIClient::builder()
             .with_endpoint(self.endpoint(provider))
             .with_api_key(self.api_key(provider))
@@ -167,454 +118,9 @@ impl AiConfig {
         }
     }
 
-    /// Convert an OpenAI-format request body to Anthropic Messages API format.
-    fn convert_openai_to_anthropic_request(
-        openai_body: &serde_json::Value,
-        model: &str,
-    ) -> serde_json::Value {
-        let max_tokens = openai_body
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(4096);
-
-        let mut anthropic = serde_json::json!({
-            "model": model,
-            "max_tokens": max_tokens,
-            "stream": true,
-        });
-
-        // Extract system messages and convert the rest
-        let mut system_parts: Vec<String> = Vec::new();
-        let mut messages: Vec<serde_json::Value> = Vec::new();
-
-        if let Some(msgs) = openai_body.get("messages").and_then(|m| m.as_array()) {
-            for msg in msgs {
-                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
-                match role {
-                    "system" => {
-                        if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
-                            system_parts.push(content.to_string());
-                        }
-                    }
-                    "assistant" => {
-                        let mut content_blocks: Vec<serde_json::Value> = Vec::new();
-
-                        // Add text content if present
-                        if let Some(text) = msg.get("content").and_then(|c| c.as_str()) {
-                            if !text.is_empty() {
-                                content_blocks.push(serde_json::json!({
-                                    "type": "text",
-                                    "text": text
-                                }));
-                            }
-                        }
-
-                        // Convert tool_calls to tool_use content blocks
-                        if let Some(tool_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array())
-                        {
-                            for tc in tool_calls {
-                                let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                                let name = tc
-                                    .get("function")
-                                    .and_then(|f| f.get("name"))
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("");
-                                let args_str = tc
-                                    .get("function")
-                                    .and_then(|f| f.get("arguments"))
-                                    .and_then(|a| a.as_str())
-                                    .unwrap_or("{}");
-                                let input: serde_json::Value =
-                                    serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
-
-                                content_blocks.push(serde_json::json!({
-                                    "type": "tool_use",
-                                    "id": id,
-                                    "name": name,
-                                    "input": input
-                                }));
-                            }
-                        }
-
-                        if content_blocks.is_empty() {
-                            content_blocks.push(serde_json::json!({
-                                "type": "text",
-                                "text": ""
-                            }));
-                        }
-
-                        messages.push(serde_json::json!({
-                            "role": "assistant",
-                            "content": content_blocks
-                        }));
-                    }
-                    "tool" => {
-                        // Anthropic requires tool_result in a user message
-                        let tool_use_id = msg
-                            .get("tool_call_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-
-                        let tool_result = serde_json::json!({
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_id,
-                            "content": content
-                        });
-
-                        // Merge with previous user message if it only contains tool_results
-                        let merged = if let Some(last) = messages.last_mut() {
-                            if last.get("role").and_then(|r| r.as_str()) == Some("user") {
-                                if let Some(content_arr) =
-                                    last.get_mut("content").and_then(|c| c.as_array_mut())
-                                {
-                                    if content_arr.iter().all(|b| {
-                                        b.get("type").and_then(|t| t.as_str())
-                                            == Some("tool_result")
-                                    }) {
-                                        content_arr.push(tool_result.clone());
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-
-                        if !merged {
-                            messages.push(serde_json::json!({
-                                "role": "user",
-                                "content": [tool_result]
-                            }));
-                        }
-                    }
-                    "user" => {
-                        let content = msg.get("content").cloned().unwrap_or(serde_json::json!(""));
-                        messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": content
-                        }));
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if !system_parts.is_empty() {
-            anthropic["system"] = serde_json::json!(system_parts.join("\n\n"));
-        }
-        anthropic["messages"] = serde_json::json!(messages);
-
-        // Convert tools
-        if let Some(tools) = openai_body.get("tools").and_then(|t| t.as_array()) {
-            let anthropic_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .filter_map(|tool| {
-                    let func = tool.get("function")?;
-                    let name = func.get("name")?;
-                    let description = func
-                        .get("description")
-                        .cloned()
-                        .unwrap_or(serde_json::json!(""));
-                    let parameters = func
-                        .get("parameters")
-                        .cloned()
-                        .unwrap_or(serde_json::json!({"type": "object"}));
-
-                    Some(serde_json::json!({
-                        "name": name,
-                        "description": description,
-                        "input_schema": parameters
-                    }))
-                })
-                .collect();
-
-            if !anthropic_tools.is_empty() {
-                anthropic["tools"] = serde_json::json!(anthropic_tools);
-            }
-        }
-
-        // Convert tool_choice
-        if let Some(tc) = openai_body.get("tool_choice") {
-            if let Some(tc_str) = tc.as_str() {
-                match tc_str {
-                    "required" => {
-                        anthropic["tool_choice"] = serde_json::json!({"type": "any"});
-                    }
-                    "auto" => {
-                        anthropic["tool_choice"] = serde_json::json!({"type": "auto"});
-                    }
-                    _ => {}
-                }
-            } else if tc.is_object() {
-                if let Some(name) = tc
-                    .get("function")
-                    .and_then(|f| f.get("name"))
-                    .and_then(|n| n.as_str())
-                {
-                    anthropic["tool_choice"] = serde_json::json!({"type": "tool", "name": name});
-                }
-            }
-        }
-
-        anthropic
-    }
-
-    /// Assemble a ChatCompletionResponse from Anthropic SSE streaming text.
-    fn assemble_anthropic_sse_response(
-        sse_text: &str,
-    ) -> Result<openai_api_rs::v1::chat_completion::ChatCompletionResponse, String> {
-        let mut response_id = String::new();
-        let mut response_model = String::new();
-        let mut content = String::new();
-        let mut finish_reason: Option<String> = None;
-        // tool_calls: block_index -> (id, name, arguments_json)
-        let mut tool_calls: std::collections::BTreeMap<u64, (String, String, String)> =
-            std::collections::BTreeMap::new();
-        let mut has_data = false;
-
-        for line in sse_text.lines() {
-            let line = line.trim();
-            let data = match line.strip_prefix("data: ") {
-                Some(d) => d,
-                None => continue,
-            };
-
-            let event: serde_json::Value = match serde_json::from_str(data) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            has_data = true;
-
-            let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-            match event_type {
-                "message_start" => {
-                    if let Some(msg) = event.get("message") {
-                        if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
-                            response_id = id.to_string();
-                        }
-                        if let Some(model) = msg.get("model").and_then(|v| v.as_str()) {
-                            response_model = model.to_string();
-                        }
-                    }
-                }
-                "content_block_start" => {
-                    let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-                    if let Some(block) = event.get("content_block") {
-                        let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        if block_type == "tool_use" {
-                            let id = block
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let name = block
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            tool_calls.insert(index, (id, name, String::new()));
-                        }
-                    }
-                }
-                "content_block_delta" => {
-                    let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-                    if let Some(delta) = event.get("delta") {
-                        let delta_type = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        match delta_type {
-                            "text_delta" => {
-                                if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                                    content.push_str(text);
-                                }
-                            }
-                            "input_json_delta" => {
-                                if let Some(json) =
-                                    delta.get("partial_json").and_then(|j| j.as_str())
-                                {
-                                    if let Some(tc) = tool_calls.get_mut(&index) {
-                                        tc.2.push_str(json);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                "message_delta" => {
-                    if let Some(delta) = event.get("delta") {
-                        if let Some(reason) = delta.get("stop_reason").and_then(|r| r.as_str()) {
-                            finish_reason = Some(match reason {
-                                "tool_use" => "tool_calls".to_string(),
-                                "end_turn" => "stop".to_string(),
-                                "max_tokens" => "length".to_string(),
-                                other => other.to_string(),
-                            });
-                        }
-                    }
-                }
-                "error" => {
-                    let err_msg = event
-                        .get("error")
-                        .and_then(|e| e.get("message"))
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("unknown error");
-                    return Err(format!("Anthropic API error: {}", err_msg));
-                }
-                _ => {}
-            }
-        }
-
-        if !has_data {
-            return Err("No data received from Anthropic streaming response".to_string());
-        }
-
-        let content = content.trim().to_string();
-        let message_content = if content.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::json!(content)
-        };
-
-        let mut message = serde_json::json!({
-            "role": "assistant",
-            "content": message_content,
-        });
-
-        if !tool_calls.is_empty() {
-            let tc_array: Vec<serde_json::Value> = tool_calls
-                .into_iter()
-                .map(|(_, (id, name, args))| {
-                    serde_json::json!({
-                        "id": id,
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": args
-                        }
-                    })
-                })
-                .collect();
-            message
-                .as_object_mut()
-                .unwrap()
-                .insert("tool_calls".into(), serde_json::json!(tc_array));
-        }
-
-        let mut json = serde_json::json!({
-            "id": if response_id.is_empty() { "msg-anthropic".to_string() } else { response_id },
-            "object": "chat.completion",
-            "created": 0,
-            "model": if response_model.is_empty() { "claude-sonnet-4-20250514".to_string() } else { response_model },
-            "choices": [{
-                "index": 0,
-                "message": message,
-                "finish_reason": finish_reason,
-            }],
-            "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
-            }
-        });
-
-        Self::inject_missing_fields(&mut json);
-
-        serde_json::from_value(json)
-            .map_err(|e| format!("Failed to deserialize Anthropic response: {}", e))
-    }
-
-    /// Anthropic-specific chat completion: converts request, calls Messages API,
-    /// parses SSE response. Retries up to 3 times.
-    async fn anthropic_chat_completion(
-        &self,
-        request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
-    ) -> Result<
-        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
-        openai_api_rs::v1::error::APIError,
-    > {
-        let anthropic_url = format!("{}/messages", self.endpoint(AiProvider::Anthropic));
-        let api_key = self.api_key(AiProvider::Anthropic);
-        let model = self.model(AiProvider::Anthropic, ModelPurpose::Default);
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
-        let openai_body = serde_json::to_value(request).map_err(|e| {
-            openai_api_rs::v1::error::APIError::CustomError {
-                message: format!("Failed to serialize request: {}", e),
-            }
-        })?;
-        let anthropic_body = Self::convert_openai_to_anthropic_request(&openai_body, model);
-
-        tracing::debug!(
-            "Anthropic request: {}",
-            serde_json::to_string_pretty(&anthropic_body).unwrap_or_default()
-        );
-
-        let mut last_error = String::new();
-        for attempt in 1..=3u32 {
-            let response = client
-                .post(&anthropic_url)
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .json(&anthropic_body)
-                .send()
-                .await?;
-
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-
-            if !status.is_success() {
-                last_error = format!("{}: {}", status, text);
-                if attempt < 3 {
-                    tracing::warn!("Anthropic attempt {}/3 failed: {}", attempt, last_error);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
-                        .await;
-                    continue;
-                }
-                return Err(openai_api_rs::v1::error::APIError::CustomError {
-                    message: last_error,
-                });
-            }
-
-            match Self::assemble_anthropic_sse_response(&text) {
-                Ok(response) => return Ok(response),
-                Err(e) => {
-                    last_error = format!("Anthropic SSE error: {}", e);
-                    if attempt < 3 {
-                        tracing::warn!("Anthropic attempt {}/3 SSE error: {}", attempt, last_error);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                            500 * attempt as u64,
-                        ))
-                        .await;
-                        continue;
-                    }
-                    return Err(openai_api_rs::v1::error::APIError::CustomError {
-                        message: last_error,
-                    });
-                }
-            }
-        }
-
-        Err(openai_api_rs::v1::error::APIError::CustomError {
-            message: format!("All 3 Anthropic attempts failed: {}", last_error),
-        })
-    }
-
     /// Make a chat completion request directly via reqwest.
     /// For Tinfoil: uses streaming (SSE) to avoid a bug where non-streaming + tools + long
     /// content fails. SSE chunks are collected and reassembled into a normal response.
-    /// For Anthropic: handled separately via anthropic_chat_completion().
     /// For OpenRouter: uses standard non-streaming mode.
     /// Retries up to 3 times on transient errors.
     pub async fn chat_completion(
@@ -625,11 +131,6 @@ impl AiConfig {
         openai_api_rs::v1::chat_completion::ChatCompletionResponse,
         openai_api_rs::v1::error::APIError,
     > {
-        // Anthropic uses a completely different API format
-        if provider == AiProvider::Anthropic {
-            return self.anthropic_chat_completion(request).await;
-        }
-
         let url = format!("{}/chat/completions", self.endpoint(provider));
         let api_key = self.api_key(provider);
         let use_streaming = provider == AiProvider::Tinfoil;
@@ -1001,12 +502,6 @@ impl AiConfig {
         openai_api_rs::v1::chat_completion::ChatCompletionResponse,
         openai_api_rs::v1::error::APIError,
     > {
-        // Anthropic doesn't expose reasoning tokens; use the non-streaming path
-        // which internally streams and assembles the response
-        if provider == AiProvider::Anthropic {
-            return self.chat_completion(provider, request).await;
-        }
-
         // Fast path: no reasoning channel -> reuse existing method unchanged
         let reasoning_tx = match reasoning_tx {
             Some(tx) => tx,
