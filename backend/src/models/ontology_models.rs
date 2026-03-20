@@ -1,4 +1,6 @@
-use crate::pg_schema::{ont_changelog, ont_channels, ont_person_edits, ont_persons};
+use crate::pg_schema::{
+    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons, ont_rules,
+};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +108,115 @@ pub struct NewOntChangelog {
     pub changed_fields: Option<String>,
     pub source: String,
     pub created_at: i32,
+}
+
+// -- ont_links --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = ont_links)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OntLink {
+    pub id: i32,
+    pub user_id: i32,
+    pub source_type: String,
+    pub source_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub link_type: String,
+    pub metadata: Option<String>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = ont_links)]
+pub struct NewOntLink {
+    pub user_id: i32,
+    pub source_type: String,
+    pub source_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub link_type: String,
+    pub metadata: Option<String>,
+    pub created_at: i32,
+}
+
+// -- ont_messages --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = ont_messages)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OntMessage {
+    pub id: i64,
+    pub user_id: i32,
+    pub room_id: String,
+    pub platform: String,
+    pub sender_name: String,
+    pub content: String,
+    pub person_id: Option<i32>,
+    pub created_at: i32,
+    pub pinned: bool,
+    pub status: Option<String>,
+    pub review_after: Option<i32>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = ont_messages)]
+pub struct NewOntMessage {
+    pub user_id: i32,
+    pub room_id: String,
+    pub platform: String,
+    pub sender_name: String,
+    pub content: String,
+    pub person_id: Option<i32>,
+    pub created_at: i32,
+    pub pinned: bool,
+    pub status: Option<String>,
+    pub review_after: Option<i32>,
+}
+
+// -- ont_rules --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = ont_rules)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OntRule {
+    pub id: i32,
+    pub user_id: i32,
+    pub name: String,
+    pub trigger_type: String,
+    pub trigger_config: String,
+    pub logic_type: String,
+    pub logic_prompt: Option<String>,
+    pub logic_fetch: Option<String>,
+    pub action_type: String,
+    pub action_config: String,
+    pub status: String,
+    pub next_fire_at: Option<i32>,
+    pub expires_at: Option<i32>,
+    pub last_triggered_at: Option<i32>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub flow_config: Option<String>,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = ont_rules)]
+pub struct NewOntRule {
+    pub user_id: i32,
+    pub name: String,
+    pub trigger_type: String,
+    pub trigger_config: String,
+    pub logic_type: String,
+    pub logic_prompt: Option<String>,
+    pub logic_fetch: Option<String>,
+    pub action_type: String,
+    pub action_config: String,
+    pub status: String,
+    pub next_fire_at: Option<i32>,
+    pub expires_at: Option<i32>,
+    pub created_at: i32,
+    pub updated_at: i32,
+    pub flow_config: Option<String>,
 }
 
 // -- Composite view types for API responses --

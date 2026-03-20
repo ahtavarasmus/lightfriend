@@ -210,6 +210,7 @@ pub async fn list_server_tools(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -293,6 +294,7 @@ pub async fn test_server_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -396,6 +398,7 @@ pub async fn test_url_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 

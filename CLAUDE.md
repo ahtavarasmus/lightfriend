@@ -6,8 +6,8 @@ Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum we
 
 **Backend (Axum + Diesel):**
 ```bash
-cd backend && cargo run          # Run server (port 3000)
-cd backend && cargo test          # Run tests
+cd backend && cargo run --bin backend   # Run server (port 3000) - rpaths baked in via .cargo/config.toml
+cd backend && cargo test                # Run tests
 cd backend && diesel migration run
 ```
 
@@ -57,6 +57,7 @@ just logs                        # View logs
 - `require_auth` - JWT validation
 - `require_admin` - Admin check
 - `check_subscription_access` - Tier validation
+- **NEVER use `Extension<i32>` for user_id in handlers.** Always use `AuthUser` extractor: `auth_user: AuthUser` then `let user_id = auth_user.user_id;`
 
 **Security & Encryption:**
 - AES-256-GCM encryption for all sensitive data
@@ -106,6 +107,12 @@ For step-by-step guides, use skills in `.claude/skills/`:
 - `lightfriend-db-migration` - Database schema modifications using Diesel
 - `lightfriend-add-integration` - Adding new OAuth integrations
 - `lightfriend-add-frontend-page` - Adding new Yew frontend pages
+
+## gstack
+
+Use `/browse` from gstack for all web browsing. **Never use `mcp__claude-in-chrome__*` tools.**
+
+Available skills: `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/review`, `/ship`, `/browse`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`
 
 ## License
 

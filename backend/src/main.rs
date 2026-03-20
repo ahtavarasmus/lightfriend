@@ -20,15 +20,14 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
-    TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, TotpRepository, UserCore,
+    UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
-    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
-    self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
-    telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
-    youtube_auth,
+    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, dashboard_handlers,
+    imap_auth, imap_handlers, person_handlers, profile_handlers, rule_handlers, self_host_handlers,
+    signal_auth, signal_handlers, stripe_handlers, telegram_auth, telegram_handlers, tesla_auth,
+    twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -228,11 +227,11 @@ async fn main() {
     }
 
     let user_repository = Arc::new(UserRepository::new(pg_pool.clone()));
-    let item_repository = Arc::new(ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pg_pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -298,7 +297,6 @@ async fn main() {
         pg_pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
-        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: AiConfig::from_env(),
@@ -327,7 +325,10 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
+        ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
+        pending_rule_tests: Arc::new(DashMap::new()),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -377,11 +378,6 @@ async fn main() {
             post(elevenlabs::handle_respond_to_email),
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
-        .route(
-            "/api/call/items/create",
-            post(elevenlabs::handle_create_item_voice),
-        )
-        .route("/api/call/items", get(elevenlabs::handle_fetch_items_voice))
         .route(
             "/api/call/cancel-message",
             get(elevenlabs::handle_cancel_pending_message_tool_call),
@@ -727,10 +723,6 @@ async fn main() {
             post(profile_handlers::web_chat_with_image),
         )
         .route(
-            "/api/chat/digest",
-            get(profile_handlers::get_instant_digest),
-        )
-        .route(
             "/api/billing/increase-credits/{user_id}",
             post(billing_handlers::increase_credits),
         )
@@ -981,57 +973,69 @@ async fn main() {
             delete(bridge_auth_common::reset_matrix_connection),
         )
         // Item edit with AI
-        .route(
-            "/api/items/{id}/edit-ai",
-            post(filter_handlers::edit_item_with_ai),
-        )
-        .route(
-            "/api/items/{id}/edit-ai-stream",
-            get(filter_handlers::edit_item_with_ai_stream),
-        )
         // Dashboard routes
         .route(
             "/api/dashboard/summary",
             get(dashboard_handlers::get_dashboard_summary),
         )
-        // Item routes
-        .route("/api/items", get(dashboard_handlers::get_items))
         .route(
-            "/api/items/{id}/snooze",
-            post(dashboard_handlers::snooze_item),
+            "/api/dashboard/activity-feed",
+            get(dashboard_handlers::get_activity_feed),
         )
         .route(
-            "/api/items/{id}",
-            get(dashboard_handlers::get_item_detail).delete(dashboard_handlers::dismiss_item),
-        )
-        // Contact Profiles routes
-        .route(
-            "/api/contact-profiles",
-            get(contact_profile_handlers::get_contact_profiles),
+            "/api/dashboard/senders",
+            get(dashboard_handlers::get_senders),
         )
         .route(
-            "/api/contact-profiles",
-            post(contact_profile_handlers::create_contact_profile),
+            "/api/dashboard/rule-sources",
+            get(dashboard_handlers::get_rule_sources),
         )
         .route(
-            "/api/contact-profiles/default-mode",
-            put(contact_profile_handlers::update_default_mode),
+            "/api/messages/{id}/unpin",
+            post(dashboard_handlers::unpin_message),
+        )
+        // Person + Channel (ontology) routes
+        .route(
+            "/api/persons",
+            get(person_handlers::get_persons).post(person_handlers::create_person),
         )
         .route(
-            "/api/contact-profiles/phone-contact-mode",
-            put(contact_profile_handlers::update_phone_contact_mode),
+            "/api/persons/{id}",
+            put(person_handlers::update_person).delete(person_handlers::delete_person),
         )
         .route(
-            "/api/contact-profiles/search/{service}",
-            get(contact_profile_handlers::search_chats),
+            "/api/persons/{id}/channels",
+            post(person_handlers::add_person_channel),
         )
         .route(
-            "/api/contact-profiles/{id}",
-            put(contact_profile_handlers::update_contact_profile),
+            "/api/persons/{person_id}/channels/{channel_id}",
+            put(person_handlers::update_person_channel)
+                .delete(person_handlers::delete_person_channel),
+        )
+        .route("/api/persons/merge", post(person_handlers::merge_persons))
+        .route(
+            "/api/persons/search/{service}",
+            get(person_handlers::search_chats),
+        )
+        // Rule (automation) routes
+        .route(
+            "/api/rules",
+            get(rule_handlers::list_rules).post(rule_handlers::create_rule),
+        )
+        .route("/api/rules/test", post(rule_handlers::start_rule_test))
+        .route(
+            "/api/rules/test-stream",
+            get(rule_handlers::test_rule_stream),
         )
         .route(
-            "/api/contact-profiles/{id}",
-            delete(contact_profile_handlers::delete_contact_profile),
+            "/api/rules/{id}",
+            get(rule_handlers::get_rule)
+                .put(rule_handlers::update_rule)
+                .delete(rule_handlers::delete_rule),
+        )
+        .route(
+            "/api/rules/{id}/status",
+            patch(rule_handlers::update_rule_status),
         )
         // Web-based voice call routes (browser to ElevenLabs)
         .route(
