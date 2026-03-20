@@ -156,6 +156,7 @@ pub struct OntMessage {
     pub created_at: i32,
     pub pinned: bool,
     pub status: Option<String>,
+    pub review_after: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]
@@ -170,6 +171,7 @@ pub struct NewOntMessage {
     pub created_at: i32,
     pub pinned: bool,
     pub status: Option<String>,
+    pub review_after: Option<i32>,
 }
 
 // -- ont_rules --

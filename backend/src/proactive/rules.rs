@@ -129,6 +129,10 @@ pub struct TriggerConfig {
     // Common: fire once then auto-complete
     #[serde(default)]
     pub fire_once: bool,
+    // Delay before evaluating (seconds). During this window, check if user
+    // already saw the message. None or 0 = immediate (no seen-check).
+    // Default 300 (5 min) for ontology_change rules.
+    pub delay_seconds: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -172,11 +176,10 @@ pub fn matches_trigger(
         return false;
     }
 
-    // Must match change type
-    if let Some(ref expected_change) = config.change {
-        if !expected_change.eq_ignore_ascii_case(change_type) {
-            return false;
-        }
+    // Must match change type (default to "created" if not specified)
+    let expected_change = config.change.as_deref().unwrap_or("created");
+    if !expected_change.eq_ignore_ascii_case(change_type) {
+        return false;
     }
 
     // Check filters against entity snapshot
@@ -209,12 +212,7 @@ pub async fn evaluate_and_execute(
     trigger_context: &str,
     trigger_snapshot: Option<&serde_json::Value>,
 ) {
-    // Mark as triggered
-    let _ = state
-        .ontology_repository
-        .update_rule_last_triggered(rule.id);
-
-    // Check expiry
+    // Check expiry FIRST (before marking as triggered)
     if let Some(expires) = rule.expires_at {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -227,6 +225,11 @@ pub async fn evaluate_and_execute(
             return;
         }
     }
+
+    // Mark as triggered (only if not expired)
+    let _ = state
+        .ontology_repository
+        .update_rule_last_triggered(rule.id);
 
     // All rules use flow_config
     if let Some(ref flow_json) = rule.flow_config {
@@ -534,6 +537,10 @@ pub(crate) async fn prefetch_sources(
                     .get_pinned_messages(rule.user_id)
                     .unwrap_or_default();
                 if !pinned.is_empty() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i32;
                     let formatted: Vec<String> = pinned
                         .iter()
                         .map(|m| {
@@ -542,9 +549,29 @@ pub(crate) async fn prefetch_sources(
                                 .as_deref()
                                 .map(|s| format!(" [status={}]", s))
                                 .unwrap_or_default();
+                            let deadline_tag = m
+                                .review_after
+                                .map(|ra| {
+                                    if now > ra {
+                                        " [OVERDUE]".to_string()
+                                    } else {
+                                        let days_left = (ra - now) / 86400;
+                                        if days_left <= 2 {
+                                            format!(" [due in {} days]", days_left)
+                                        } else {
+                                            String::new()
+                                        }
+                                    }
+                                })
+                                .unwrap_or_default();
                             format!(
-                                "[id={}] [{}]{} {}: {}",
-                                m.id, m.platform, status_tag, m.sender_name, m.content
+                                "[id={}] [{}]{}{} {}: {}",
+                                m.id,
+                                m.platform,
+                                status_tag,
+                                deadline_tag,
+                                m.sender_name,
+                                m.content
                             )
                         })
                         .collect();
@@ -942,6 +969,104 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
 }
 
 // ---------------------------------------------------------------------------
+// Message seen-check: did the user already see this message?
+// ---------------------------------------------------------------------------
+
+/// Check if the user has already seen a message (via read receipts or email
+/// Seen flag). Returns true if the message was seen and should be skipped.
+async fn check_message_seen(
+    state: &Arc<AppState>,
+    user_id: i32,
+    platform: &str,
+    room_id: &str,
+    message_created_at: i32,
+) -> bool {
+    match platform {
+        "email" => {
+            // Check IMAP \Seen flag for this email
+            let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
+            check_email_seen(state, user_id, uid).await
+        }
+        // Bridge platforms: check Matrix read receipts
+        _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
+    }
+}
+
+/// Check if user read the email in their actual email app via IMAP \Seen flag.
+async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) -> bool {
+    use crate::repositories::user_core::UserCoreOps;
+
+    let creds = match state.user_repository.get_imap_credentials(user_id) {
+        Ok(Some(c)) => c,
+        _ => return false,
+    };
+    let (_description, password, server, port) = creds;
+    let server = match server {
+        Some(s) => s,
+        None => return false,
+    };
+    let port = port.unwrap_or(993) as u16;
+    let email = match state.user_core.find_by_id(user_id) {
+        Ok(Some(u)) => u.email,
+        _ => return false,
+    };
+
+    // Run in spawn_blocking since imap is synchronous
+    let uid = email_uid.to_string();
+    tokio::task::spawn_blocking(move || {
+        let tls = match native_tls::TlsConnector::new() {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        let client = match imap::connect((server.as_str(), port), &server, &tls) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let mut session = match client.login(&email, &password) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let _ = session.select("INBOX");
+
+        let is_seen = match session.uid_fetch(&uid, "FLAGS") {
+            Ok(messages) => messages
+                .iter()
+                .any(|msg| msg.flags().iter().any(|flag| flag.to_string() == "\\Seen")),
+            Err(_) => false,
+        };
+        let _ = session.logout();
+        is_seen
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Check if user saw a bridge message via Matrix read receipts.
+async fn check_bridge_seen(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    message_created_at: i32,
+) -> bool {
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let matrix_room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_id) {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+    let room = match client.get_room(&matrix_room_id) {
+        Some(r) => r,
+        None => return false,
+    };
+    match crate::utils::bridge::get_room_seen_timestamp(&room, &client).await {
+        Some(seen_ts) => seen_ts >= message_created_at as i64,
+        None => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Ontology change signal
 // ---------------------------------------------------------------------------
 
@@ -954,6 +1079,15 @@ pub async fn emit_ontology_change(
     change_type: &str,
     entity_snapshot: serde_json::Value,
 ) {
+    // Skip completed messages early (before evaluating any rules)
+    if entity_type == "Message" {
+        if let Some(status) = entity_snapshot.get("status").and_then(|v| v.as_str()) {
+            if status == "completed" {
+                return;
+            }
+        }
+    }
+
     let rules = match state.ontology_repository.get_ontology_change_rules(user_id) {
         Ok(r) => r,
         Err(e) => {
@@ -973,13 +1107,52 @@ pub async fn emit_ontology_change(
         serde_json::to_string(&entity_snapshot).unwrap_or_default()
     );
 
+    // Extract message metadata for seen-checks (if this is a Message event)
+    let msg_platform = entity_snapshot
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let msg_room_id = entity_snapshot
+        .get("room_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let msg_created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
     for rule in rules {
         if matches_trigger(&rule, entity_type, change_type, &entity_snapshot) {
             let state = Arc::clone(state);
             let rule = rule.clone();
             let ctx = trigger_context.clone();
             let snap = entity_snapshot.clone();
+            let platform = msg_platform.clone();
+            let room_id = msg_room_id.clone();
+            let is_message = entity_type == "Message";
+
+            // Parse delay from trigger config (default 300s for ontology_change)
+            let trigger: TriggerConfig =
+                serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+            let delay = trigger.delay_seconds.unwrap_or(300);
+
             tokio::spawn(async move {
+                if delay > 0 && is_message {
+                    // Wait, then check if user already saw the message
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
+
+                    if check_message_seen(&state, rule.user_id, &platform, &room_id, msg_created_at)
+                        .await
+                    {
+                        info!(
+                            "Rule {} ({}): skipping - user already saw the message",
+                            rule.id, rule.name
+                        );
+                        return;
+                    }
+                }
                 evaluate_and_execute(&state, &rule, &ctx, Some(&snap)).await;
             });
         }

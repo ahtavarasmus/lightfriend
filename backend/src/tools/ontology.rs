@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::models::ontology_models::PersonWithChannels;
+use crate::models::ontology_models::{OntMessage, PersonWithChannels};
 use crate::AppState;
 
 /// Handle a query_* ontology tool call. Returns formatted text for the LLM.
@@ -20,6 +20,7 @@ pub async fn handle_query(
     match entity_type {
         "person" => query_person(&params, state, user_id),
         "channel" => query_channel(&params, state, user_id),
+        "message" => query_message(&params, state, user_id),
         _ => Err(format!("Unknown ontology entity type: {}", entity_type)),
     }
 }
@@ -215,6 +216,150 @@ fn query_channel(
     }
 
     Ok(output.trim().to_string())
+}
+
+fn query_message(
+    params: &serde_json::Value,
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<String, String> {
+    let pinned_filter = param_str(params, "pinned");
+    let platform_filter = param_str(params, "platform");
+    let sender_filter = param_str(params, "sender_name");
+    let query_filter = param_str(params, "query");
+
+    let is_pinned = pinned_filter.as_deref() == Some("true");
+
+    let messages: Vec<OntMessage> = if is_pinned {
+        let mut msgs = state
+            .ontology_repository
+            .get_pinned_messages(user_id)
+            .map_err(|e| format!("Failed to query pinned messages: {}", e))?;
+
+        // Apply optional platform filter
+        if let Some(ref plat) = platform_filter {
+            if plat != "all" {
+                msgs.retain(|m| m.platform == *plat);
+            }
+        }
+        msgs
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let twelve_hours_ago = now - 12 * 3600;
+
+        let plat = platform_filter.as_deref().filter(|p| *p != "all");
+        state
+            .ontology_repository
+            .get_recent_messages_filtered(user_id, plat, twelve_hours_ago, 20)
+            .map_err(|e| format!("Failed to query messages: {}", e))?
+    };
+
+    // Apply sender_name filter
+    let messages: Vec<OntMessage> = if let Some(ref sender) = sender_filter {
+        if sender != "all" {
+            let s_lower = sender.to_lowercase();
+            messages
+                .into_iter()
+                .filter(|m| m.sender_name.to_lowercase().contains(&s_lower))
+                .collect()
+        } else {
+            messages
+        }
+    } else {
+        messages
+    };
+
+    // Apply query (free-text keyword) filter
+    let messages: Vec<OntMessage> = if let Some(ref q) = query_filter {
+        let q_lower = q.to_lowercase();
+        messages
+            .into_iter()
+            .filter(|m| {
+                m.sender_name.to_lowercase().contains(&q_lower)
+                    || m.content.to_lowercase().contains(&q_lower)
+                    || m.platform.to_lowercase().contains(&q_lower)
+            })
+            .collect()
+    } else {
+        messages
+    };
+
+    // Limit to 20
+    let messages: Vec<&OntMessage> = messages.iter().take(20).collect();
+
+    if messages.is_empty() {
+        return Ok(if is_pinned {
+            "No pinned/tracked items found.".to_string()
+        } else {
+            "No messages found matching your query.".to_string()
+        });
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let mut output = if is_pinned {
+        format!("Found {} tracked item(s):\n\n", messages.len())
+    } else {
+        format!("Found {} message(s):\n\n", messages.len())
+    };
+
+    for (i, m) in messages.iter().enumerate() {
+        let content_preview: String = m.content.chars().take(100).collect();
+
+        if is_pinned {
+            let status_str = m
+                .status
+                .as_deref()
+                .map(|s| format!(", status: {}", s))
+                .unwrap_or_default();
+
+            let deadline_str = match m.review_after {
+                Some(ts) => {
+                    let remaining = ts - now;
+                    let days = remaining / 86400;
+                    if days == 0 {
+                        let hours = (remaining / 3600).max(1);
+                        format!(", due in {} hours", hours)
+                    } else {
+                        format!(", due in {} days", days)
+                    }
+                }
+                None => String::new(),
+            };
+
+            output.push_str(&format!(
+                "{}. [id={}] {} via {}{}{} - \"{}\"",
+                i + 1,
+                m.id,
+                m.sender_name,
+                m.platform,
+                status_str,
+                deadline_str,
+                content_preview
+            ));
+        } else {
+            output.push_str(&format!(
+                "{}. [id={}] {} via {} - \"{}\"",
+                i + 1,
+                m.id,
+                m.sender_name,
+                m.platform,
+                content_preview
+            ));
+        }
+
+        if i + 1 < messages.len() {
+            output.push_str("\n\n");
+        }
+    }
+
+    Ok(output)
 }
 
 // ---------------------------------------------------------------------------

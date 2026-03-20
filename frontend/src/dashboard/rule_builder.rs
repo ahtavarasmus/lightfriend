@@ -1231,6 +1231,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_filter_key = use_state(|| "sender".to_string());
     let event_filter_value = use_state(|| String::new());
     let event_fire_once = use_state(|| true); // default: one-shot
+    let event_delay = use_state(|| 300i32); // default: 5 min delay before rule fires
     let sender_suggestions = use_state(|| Vec::<(String, Option<String>)>::new()); // (display, platform?)
     let sender_dropdown_open = use_state(|| false);
 
@@ -1390,6 +1391,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let event_filter_key = event_filter_key.clone();
         let event_filter_value = event_filter_value.clone();
         let event_fire_once = event_fire_once.clone();
+        let event_delay = event_delay.clone();
         let logic_mode = logic_mode.clone();
         let logic_prompt = logic_prompt.clone();
         let active_sources_init = active_sources.clone();
@@ -1491,6 +1493,9 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         // fire_once defaults to true if not explicitly false
                         let fo = tc.get("fire_once").and_then(|v| v.as_bool()).unwrap_or(true);
                         event_fire_once.set(fo);
+                        // delay_seconds defaults to 300 if not set
+                        let ds = tc.get("delay_seconds").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
+                        event_delay.set(ds);
                     }
 
                     // Parse logic
@@ -1678,6 +1683,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 active_sources_tmpl.set(vec![
                                     SourceConfig::Email,
                                     SourceConfig::Chat { platform: "all".to_string(), limit: 50 },
+                                    SourceConfig::Pinned,
                                 ]);
                                 action_mode.set(ActionMode::Notify);
                                 notify_method.set(NotifyMethod::Sms);
@@ -1925,6 +1931,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let event_filter_key = event_filter_key.clone();
         let event_filter_value = event_filter_value.clone();
         let event_fire_once = event_fire_once.clone();
+        let event_delay = event_delay.clone();
         let logic_mode = logic_mode.clone();
         let logic_prompt = logic_prompt.clone();
         let active_sources_submit = active_sources.clone();
@@ -1980,6 +1987,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         "entity_type": *event_entity,
                         "change": *event_change,
                         "fire_once": *event_fire_once,
+                        "delay_seconds": *event_delay,
                     });
                     let fv = (*event_filter_value).clone();
                     let fk = (*event_filter_key).clone();
@@ -2582,6 +2590,31 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                 </button>
                                             </div>
                                         </div>
+                                        <div class="rb-field" style="margin-top: 0.5rem;">
+                                            <div class="rb-field-label">{"Wait before acting"}</div>
+                                            <div class="rb-field-hint">{
+                                                if *event_delay == 0 {
+                                                    "Fires instantly, even if you already saw the message"
+                                                } else {
+                                                    "Waits this long, then skips if you already saw the message"
+                                                }
+                                            }</div>
+                                            <div style="display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem;">
+                                                {for [(0, "Immediate"), (120, "2 min"), (300, "5 min"), (600, "10 min")].iter().map(|(secs, label)| {
+                                                    let is_active = *event_delay == *secs;
+                                                    let delay = event_delay.clone();
+                                                    let val = *secs;
+                                                    html! {
+                                                        <button
+                                                            class={if is_active { "rb-toggle-btn active" } else { "rb-toggle-btn" }}
+                                                            onclick={Callback::from(move |_: MouseEvent| delay.set(val))}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    }
+                                                })}
+                                            </div>
+                                        </div>
                                     }
                                 </>
                             })}
@@ -2668,7 +2701,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             match &tmpl_clone {
                                                                 PromptTemplate::Summarize => match *wm {
                                                                     WhenMode::Schedule => {
-                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }]);
+                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Pinned]);
                                                                     }
                                                                     WhenMode::Event => {
                                                                         as_tmpl.set(vec![SourceConfig::Chat { platform: "all".to_string(), limit: 50 }]);
@@ -3959,6 +3992,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                 let running_handle = test_running.clone();
                                                 let es_ref = es.clone();
 
+                                                // Fresh accumulator per run - avoids stale Yew state reads
+                                                let acc = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, String, String)>::new()));
+                                                let acc_msg = acc.clone();
+
                                                 let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                                                     if let Some(data_str) = event.data().as_string() {
                                                         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&data_str) {
@@ -4019,9 +4056,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                 }
                                                                 _ => return,
                                                             };
-                                                            let mut current = (*steps_handle).clone();
-                                                            current.push((css, icon, text));
-                                                            steps_handle.set(current);
+                                                            acc_msg.borrow_mut().push((css, icon, text));
+                                                            steps_handle.set(acc_msg.borrow().clone());
                                                         }
                                                     }
                                                 }) as Box<dyn FnMut(web_sys::MessageEvent)>);
@@ -4033,10 +4069,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                 let running_err = test_running.clone();
                                                 let steps_err = test_steps.clone();
                                                 let es_err = es.clone();
+                                                let acc_err = acc.clone();
                                                 let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
-                                                    let mut current = (*steps_err).clone();
-                                                    current.push(("fail".into(), "x".into(), "Stream connection error".into()));
-                                                    steps_err.set(current);
+                                                    acc_err.borrow_mut().push(("fail".into(), "x".into(), "Stream connection error".into()));
+                                                    steps_err.set(acc_err.borrow().clone());
                                                     running_err.set(false);
                                                     es_err.close();
                                                 }) as Box<dyn FnMut(web_sys::Event)>);
@@ -4311,7 +4347,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                             };
                             let new_fetch = match &tmpl_clone {
                                 PromptTemplate::Summarize => match wm {
-                                    WhenMode::Schedule => vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }],
+                                    WhenMode::Schedule => vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Pinned],
                                     WhenMode::Event => vec![SourceConfig::Chat { platform: "all".to_string(), limit: 50 }],
                                 },
                                 PromptTemplate::FilterImportant => match wm {
@@ -5553,12 +5589,12 @@ fn render_llm_params_hint(tool: &str) -> Html {
 fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, condition: &str) -> String {
     match template {
         PromptTemplate::Summarize => match when_mode {
-            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention.".to_string(),
+            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked items with approaching deadlines. Format as a numbered list, one item per line.".to_string(),
             WhenMode::Event => "Summarize this message along with recent conversation context. Highlight key points and any action needed.".to_string(),
         },
         PromptTemplate::FilterImportant => match when_mode {
-            WhenMode::Schedule => "Review recent messages and emails. Only notify if something is urgent, time-sensitive, or requires immediate attention. If nothing important, respond with just 'skip'.".to_string(),
-            WhenMode::Event => "Only notify if this message seems important, urgent, or time-sensitive. If it's routine or low-priority, respond with just 'skip'.".to_string(),
+            WhenMode::Schedule => "Review recent messages and emails. Only notify if delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are NOT critical. If nothing critical, respond with just 'skip'.".to_string(),
+            WhenMode::Event => "Only notify if delaying this message over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates, casual messages, and vague requests are NOT critical. If not critical, respond with just 'skip'.".to_string(),
         },
         PromptTemplate::CheckCondition => match when_mode {
             WhenMode::Schedule => format!("Check if the following condition is met based on recent messages: {}. If the condition is not met, respond with just 'skip'.", condition),

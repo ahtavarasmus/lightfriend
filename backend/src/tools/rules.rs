@@ -516,6 +516,17 @@ impl ToolHandler for PinMessageHandler {
                 ..Default::default()
             }),
         );
+        properties.insert(
+            "review_after_days".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Number),
+                description: Some(
+                    "Days until review deadline, 1-30. Default 7. Set based on item type: delivery=5, invoice=30, appointment=1."
+                        .to_string(),
+                ),
+                ..Default::default()
+            }),
+        );
 
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
@@ -541,14 +552,22 @@ impl ToolHandler for PinMessageHandler {
             .as_i64()
             .ok_or_else(|| "message_id is required".to_string())?;
 
+        let review_after_days = args["review_after_days"].as_i64().unwrap_or(7).clamp(1, 30) as i32;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+        let review_after = now + review_after_days * 86400;
+
         ctx.state
             .ontology_repository
-            .pin_message(ctx.user_id, message_id)
+            .pin_message_with_deadline(ctx.user_id, message_id, review_after)
             .map_err(|e| format!("Failed to pin message: {}", e))?;
 
         Ok(ToolResult::Answer(format!(
-            "Message {} pinned to dashboard.",
-            message_id
+            "Message {} pinned to dashboard (review in {} days).",
+            message_id, review_after_days
         )))
     }
 }
@@ -584,6 +603,7 @@ impl ToolHandler for UpdateTrackedItemHandler {
                     "active".to_string(),
                     "updated".to_string(),
                     "completed".to_string(),
+                    "extend_deadline".to_string(),
                 ]),
                 ..Default::default()
             }),

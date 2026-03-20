@@ -40,6 +40,7 @@ pub struct PinnedMessageItem {
     pub platform: String,
     pub content: String,
     pub created_at: i32,
+    pub review_after: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -213,6 +214,7 @@ pub async fn get_dashboard_summary(
                 m.content
             },
             created_at: m.created_at,
+            review_after: m.review_after,
         })
         .collect();
 

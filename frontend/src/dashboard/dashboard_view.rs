@@ -401,6 +401,8 @@ struct PinnedMessageResponse {
     platform: String,
     content: String,
     created_at: i32,
+    #[serde(default)]
+    review_after: Option<i32>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -765,6 +767,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 } else {
                                     msg.content.clone()
                                 };
+                                let now_ts = (js_sys::Date::now() / 1000.0) as i32;
+                                let deadline_html = msg.review_after.map(|ra| {
+                                    if now_ts > ra {
+                                        html! { <span style="color: #ff6b6b; font-size: 0.65rem; font-weight: 600;">{"overdue"}</span> }
+                                    } else {
+                                        let days_left = (ra - now_ts) / 86400;
+                                        if days_left <= 2 {
+                                            html! { <span style="color: #fbbf24; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                                        } else {
+                                            html! { <span style="color: #666; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                                        }
+                                    }
+                                });
                                 let on_unpin = {
                                     let fetch_summary = fetch_summary.clone();
                                     Callback::from(move |e: MouseEvent| {
@@ -783,7 +798,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                             <i class={platform_icon} style="color: #666; font-size: 0.8rem;"></i>
                                         </div>
                                         <div class="pinned-card-body">
-                                            <div class="pinned-card-sender">{&msg.sender_name}</div>
+                                            <div class="pinned-card-sender">
+                                                {&msg.sender_name}
+                                                if let Some(ref dl) = deadline_html {
+                                                    <span style="margin-left: 0.4rem;">{dl.clone()}</span>
+                                                }
+                                            </div>
                                             <div class="pinned-card-preview">{preview}</div>
                                         </div>
                                         <button class="pinned-card-unpin" onclick={on_unpin} title="Unpin">
