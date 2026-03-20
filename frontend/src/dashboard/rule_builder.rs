@@ -1281,6 +1281,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let test_sender = use_state(|| "Test Sender".to_string());
     let test_running = use_state(|| false);
     let test_steps = use_state(|| Vec::<(String, String, String)>::new()); // (css_class, icon, text)
+    let test_es_ref = use_mut_ref(|| None::<web_sys::EventSource>);
 
     // Fetch senders for autocomplete (persons + chat room names from all networks)
     {
@@ -3753,7 +3754,12 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         let tc_mcp_params = tc_mcp_params.clone();
                                         let else_flow = else_flow.clone();
                                         let when_mode = when_mode.clone();
+                                        let test_es_ref = test_es_ref.clone();
                                         Callback::from(move |_: MouseEvent| {
+                                            // Close any previous EventSource
+                                            if let Some(old_es) = test_es_ref.borrow_mut().take() {
+                                                old_es.close();
+                                            }
                                             test_running.set(true);
                                             test_steps.set(vec![]);
 
@@ -3886,6 +3892,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
 
                                             let test_running = test_running.clone();
                                             let test_steps = test_steps.clone();
+                                            let test_es_ref = test_es_ref.clone();
 
                                             spawn_local(async move {
                                                 // Pre-flight auth refresh
@@ -3944,6 +3951,9 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         return;
                                                     }
                                                 };
+
+                                                // Store ref so next run can close it
+                                                *test_es_ref.borrow_mut() = Some(es.clone());
 
                                                 let steps_handle = test_steps.clone();
                                                 let running_handle = test_running.clone();
