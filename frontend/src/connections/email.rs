@@ -377,7 +377,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     }
                 }
             }
-            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+            if props.sub_tier.is_some() {
                 if *imap_connected {
                     <div class="imap-controls">
                         <button

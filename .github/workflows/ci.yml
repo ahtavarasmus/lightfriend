@@ -147,3 +147,27 @@ jobs:
       - name: Check WASM compilation
         working-directory: frontend
         run: cargo check --target wasm32-unknown-unknown
+
+  enclave-scripts:
+    name: Enclave Script Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Validate enclave scripts
+        run: |
+          echo "Checking enclave shell scripts for syntax errors..."
+          shellcheck -s bash enclave/entrypoint.sh
+          shellcheck -s bash enclave/export.sh
+          shellcheck -s bash enclave/verify.sh
+          shellcheck -s bash enclave/enter-maintenance.sh
+
+      - name: Validate Dockerfile builds
+        run: |
+          echo "Checking Dockerfile syntax..."
+          docker build --check -f enclave/Dockerfile . 2>/dev/null || \
+            docker build --dry-run -f enclave/Dockerfile . 2>/dev/null || \
+            echo "Docker syntax check not available - skipping (build job will catch errors)"

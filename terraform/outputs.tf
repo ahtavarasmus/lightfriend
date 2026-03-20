@@ -40,3 +40,8 @@ output "backup_bucket_name" {
   description = "S3 bucket for encrypted backups (add to .env as S3_BACKUP_BUCKET)"
   value       = module.compute.backup_bucket_name
 }
+
+output "launch_template_id" {
+  description = "Launch template ID for blue-green deploys"
+  value       = module.compute.launch_template_id
+}

@@ -8,7 +8,7 @@ default:
 
 # Build enclave image for current platform (for local testing)
 build-local:
-    cd enclave && docker compose build
+    cd enclave && BUILD_MODE=local docker compose build
 
 # Build enclave image for production (linux/amd64)
 build:

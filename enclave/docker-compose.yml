@@ -4,6 +4,8 @@ services:
     build:
       context: ..
       dockerfile: enclave/Dockerfile
+      args:
+        BUILD_MODE: ${BUILD_MODE:-production}
     container_name: lightfriend-enclave
     environment:
       # Core application

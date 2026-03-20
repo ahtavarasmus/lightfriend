@@ -681,7 +681,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 </div>
                             }
                         } else {
-                            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+                            if props.sub_tier.is_some() {
                                 <p class="service-description">
                                     {format!("Send and receive {} messages through SMS or voice calls.", bridge_name)}
                                 </p>

@@ -6,6 +6,14 @@ set -euo pipefail
 # All plaintext stays in /tmp/ (enclave ephemeral space).
 # The export NEVER produces a partial or unverified backup.
 
+# Load env vars (needed when invoked via supervisord's export-trigger,
+# which doesn't inherit entrypoint.sh's environment)
+if [ -f /etc/lightfriend/env ]; then
+    set -a
+    source /etc/lightfriend/env
+    set +a
+fi
+
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP_NAME="lightfriend-full-backup-${TIMESTAMP}"
 STAGING="/tmp/backup-staging/${BACKUP_NAME}"
@@ -62,6 +70,14 @@ if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
     abort "BACKUP_ENCRYPTION_KEY is not set" "preflight"
 fi
 
+# Verify there is data to export
+LIVE_USER_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
+    -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
+if [ "${LIVE_USER_COUNT}" -eq 0 ]; then
+    abort "No users in database - nothing to export" "preflight"
+fi
+echo "  Live user count: ${LIVE_USER_COUNT}"
+
 # ── Stop services (PG stays up - MVCC snapshots) ────────────────────────────
 
 echo "Stopping services for consistent snapshot..."
@@ -84,8 +100,8 @@ mkdir -p "${STAGING}/postgres"
 for db in lightfriend_db whatsapp_db signal_db telegram_db; do
     echo "  Dumping ${db}..."
     pg_dump -h localhost -U postgres --no-owner --no-acl "${db}" \
-        > "${STAGING}/postgres/${db}.sql" 2>/dev/null \
-        || abort "pg_dump of ${db} failed" "dump-${db}"
+        > "${STAGING}/postgres/${db}.sql" 2>>"${STAGING}/pg_dump_errors.log" \
+        || abort "pg_dump of ${db} failed - see pg_dump_errors.log" "dump-${db}"
 done
 
 # Tar filesystem stores
@@ -132,6 +148,11 @@ for db in lightfriend_db whatsapp_db signal_db telegram_db; do
     if ! echo "${first_line}" | grep -qE '^(--|SET |CREATE )'; then
         abort "pg_dump of ${db} does not start with valid SQL: ${first_line}" "verify-dumps"
     fi
+    # Check dump is complete (ends with PostgreSQL footer)
+    last_line=$(tail -1 "${dump_file}")
+    if ! echo "${last_line}" | grep -qE '(PostgreSQL database dump complete|^$)'; then
+        abort "pg_dump of ${db} appears truncated (no completion footer)" "verify-dumps"
+    fi
     echo "  ${db}.sql: ${dump_size} bytes, valid SQL header"
 done
 
@@ -148,6 +169,20 @@ for tar_path in \
     tar_size=$(stat -c%s "${tar_path}" 2>/dev/null || stat -f%z "${tar_path}" 2>/dev/null || echo "0")
     echo "  ${tar_name}: ${tar_size} bytes, integrity OK"
 done
+
+# Cross-validate user count: DB is still running, count should match pre-export
+POST_DUMP_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
+    -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
+if [ "${POST_DUMP_COUNT}" != "${LIVE_USER_COUNT}" ]; then
+    abort "User count changed during export: before=${LIVE_USER_COUNT} after=${POST_DUMP_COUNT}" "verify-dumps"
+fi
+
+# Verify lightfriend_db dump has actual data statements
+DATA_STMT_COUNT=$(grep -c "^COPY\|^INSERT INTO" "${STAGING}/postgres/lightfriend_db.sql" 2>/dev/null || echo "0")
+if [ "${DATA_STMT_COUNT}" -eq 0 ]; then
+    abort "lightfriend_db dump contains no data statements (COPY/INSERT)" "verify-dumps"
+fi
+echo "  lightfriend_db: ${DATA_STMT_COUNT} data statements, user count verified"
 
 echo "Phase B complete."
 

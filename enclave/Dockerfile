@@ -97,6 +97,10 @@ FROM dock.mau.dev/mautrix/telegram:latest AS telegram-src
 
 FROM debian:bookworm-slim
 
+# BUILD_MODE: "production" (default) includes cloudflared for tunnel access.
+#             "local" skips it (not needed for local testing).
+ARG BUILD_MODE=production
+
 # Install runtime dependencies + PostgreSQL + supervisord
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -113,12 +117,17 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install cloudflared for Cloudflare tunnel inside enclave ─────────────────
-RUN curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+# ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
+ARG TARGETARCH
+RUN if [ "$BUILD_MODE" = "production" ]; then \
+        curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
+            -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared; \
+    fi
 
-# ── Copy Tuwunel binary ────────────────────────────────────────────────────
-COPY --from=tuwunel-src /usr/local/bin/tuwunel /usr/local/bin/tuwunel
+# ── Copy Tuwunel binary (path varies by arch: /usr/local/bin on amd64, /usr/bin on arm64)
+RUN --mount=from=tuwunel-src,target=/tuwunel-img \
+    cp /tuwunel-img/usr/local/bin/tuwunel /usr/local/bin/tuwunel 2>/dev/null || \
+    cp /tuwunel-img/usr/bin/tuwunel /usr/local/bin/tuwunel
 
 # ── Copy mautrix-whatsapp binary ───────────────────────────────────────────
 COPY --from=whatsapp-src /usr/bin/mautrix-whatsapp /usr/local/bin/mautrix-whatsapp
@@ -149,8 +158,9 @@ RUN mkdir -p \
     /var/log/supervisor \
     /run/postgresql
 
-# Set PostgreSQL data dir ownership
-RUN chown -R postgres:postgres /run/postgresql
+# Set PostgreSQL data dir ownership and log dir permissions
+RUN chown -R postgres:postgres /run/postgresql && \
+    chown -R postgres:postgres /var/log/supervisor
 
 # ── Copy config templates and scripts ─────────────────────────────────────
 COPY enclave/configs/ /etc/enclave-configs/
@@ -158,7 +168,8 @@ COPY enclave/supervisord.conf /etc/supervisor/conf.d/lightfriend.conf
 COPY enclave/entrypoint.sh /entrypoint.sh
 COPY enclave/export.sh /app/export.sh
 COPY enclave/verify.sh /app/verify.sh
-RUN chmod +x /entrypoint.sh /app/export.sh /app/verify.sh
+COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
+RUN chmod +x /entrypoint.sh /app/export.sh /app/verify.sh /app/enter-maintenance.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh

@@ -16,6 +16,7 @@ pub mod handlers {
     pub mod profile_handlers;
     pub mod rule_handlers;
 
+    pub mod maintenance_handlers;
     pub mod self_host_handlers;
     pub mod signal_auth;
     pub mod signal_handlers;
@@ -160,6 +161,7 @@ use diesel::r2d2::{self, ConnectionManager};
 use governor::{clock::DefaultClock, state::keyed::DefaultKeyedStateStore, RateLimiter};
 use oauth2::{basic::BasicClient, EndpointNotSet, EndpointSet};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
@@ -216,6 +218,7 @@ pub struct AppState {
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
+    pub maintenance_mode: Arc<AtomicBool>,
 }
 
 /// Build the tool registry with all static tool handlers.

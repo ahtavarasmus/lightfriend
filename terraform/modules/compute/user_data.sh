@@ -67,7 +67,7 @@ Listen 127.0.0.1
 Timeout 600
 MaxClients 100
 Allow 127.0.0.1/8
-ConnectPort 0
+ConnectPort 443
 PROXYEOF
 
 systemctl enable tinyproxy
@@ -120,8 +120,8 @@ BACKUP_DIR="/opt/lightfriend/backups"
 mkdir -p "$BACKUP_DIR"
 while true; do
     TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    socat -u VSOCK-LISTEN:9001,reuseaddr CREATE:"${BACKUP_DIR}/backup-${TIMESTAMP}.tar.gz.enc" 2>/dev/null
-    echo "Received backup: backup-${TIMESTAMP}.tar.gz.enc"
+    socat -u VSOCK-LISTEN:9001,reuseaddr CREATE:"$${BACKUP_DIR}/backup-$${TIMESTAMP}.tar.gz.enc" 2>/dev/null
+    echo "Received backup: backup-$${TIMESTAMP}.tar.gz.enc"
 done
 SCRIPT
 chmod +x /opt/lightfriend/backup-receiver.sh
@@ -186,9 +186,14 @@ EIF_PATH="/opt/lightfriend/lightfriend.eif"
 
 [ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
 
-docker pull "$IMAGE"
-nitro-cli build-enclave --docker-uri "$IMAGE" --output-file "$EIF_PATH" 2>&1 | tee /tmp/eif-build.log
-grep -E "PCR[0-9]" /tmp/eif-build.log || true
+# Skip pull+build if EIF already exists (pre-warmed)
+if [ ! -f "$EIF_PATH" ]; then
+    docker pull "$IMAGE"
+    nitro-cli build-enclave --docker-uri "$IMAGE" --output-file "$EIF_PATH" 2>&1 | tee /tmp/eif-build.log
+    grep -E "PCR[0-9]" /tmp/eif-build.log || true
+else
+    echo "Using pre-built EIF: $EIF_PATH"
+fi
 
 EXISTING=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty' 2>/dev/null)
 [ -n "$EXISTING" ] && nitro-cli terminate-enclave --enclave-id "$EXISTING" && sleep 2
@@ -207,8 +212,21 @@ BACKUP=$(ls -t /opt/lightfriend/backups/*.tar.gz.enc 2>/dev/null | head -1)
 [ -z "$BACKUP" ] && { echo "No backup found"; exit 1; }
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-aws s3 cp "$BACKUP" "s3://${BUCKET}/backups/$(basename $BACKUP)"
-echo "Uploaded: s3://${BUCKET}/backups/$(basename $BACKUP)"
+
+LOCAL_SIZE=$(stat -c%s "$BACKUP" 2>/dev/null || stat -f%z "$BACKUP" 2>/dev/null)
+S3_KEY="backups/$(basename $BACKUP)"
+
+# Upload with checksum verification (S3 validates Content-MD5 on receipt)
+aws s3 cp "$BACKUP" "s3://$${BUCKET}/$${S3_KEY}" --sse AES256
+
+# Verify: S3 object exists and size matches local file
+S3_SIZE=$(aws s3api head-object --bucket "$${BUCKET}" --key "$${S3_KEY}" --query ContentLength --output text 2>/dev/null || echo "0")
+if [ "$${LOCAL_SIZE}" != "$${S3_SIZE}" ]; then
+    echo "FATAL: S3 size mismatch - local=$${LOCAL_SIZE} s3=$${S3_SIZE}"
+    exit 1
+fi
+
+echo "Uploaded and verified: s3://$${BUCKET}/$${S3_KEY} ($${S3_SIZE} bytes)"
 SCRIPT
 chmod +x /opt/lightfriend/upload-backup.sh
 
@@ -217,14 +235,230 @@ cat > /opt/lightfriend/download-backup.sh <<'SCRIPT'
 set -e
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-LATEST=$(aws s3 ls "s3://${BUCKET}/backups/" | sort | tail -1 | awk '{print $4}')
+LATEST=$(aws s3 ls "s3://$${BUCKET}/backups/" | sort | tail -1 | awk '{print $4}')
 [ -z "$LATEST" ] && { echo "No backups in S3"; exit 1; }
 mkdir -p /opt/lightfriend/seed
-aws s3 cp "s3://${BUCKET}/backups/${LATEST}" "/opt/lightfriend/seed/${LATEST}"
-echo "Downloaded: ${LATEST}"
+
+# Get expected size from S3 before download
+S3_SIZE=$(aws s3api head-object --bucket "$${BUCKET}" --key "backups/$${LATEST}" --query ContentLength --output text)
+echo "Expected size: $${S3_SIZE} bytes"
+
+aws s3 cp "s3://$${BUCKET}/backups/$${LATEST}" "/opt/lightfriend/seed/$${LATEST}"
+
+# Verify downloaded file matches S3 size
+LOCAL_SIZE=$(stat -c%s "/opt/lightfriend/seed/$${LATEST}" 2>/dev/null || stat -f%z "/opt/lightfriend/seed/$${LATEST}" 2>/dev/null)
+if [ "$${LOCAL_SIZE}" != "$${S3_SIZE}" ]; then
+    echo "FATAL: Download size mismatch - expected=$${S3_SIZE} got=$${LOCAL_SIZE}"
+    rm -f "/opt/lightfriend/seed/$${LATEST}"
+    exit 1
+fi
+echo "Downloaded and verified: $${LATEST} ($${LOCAL_SIZE} bytes)"
 SCRIPT
 chmod +x /opt/lightfriend/download-backup.sh
+
+# ── Pre-deploy script (run on OLD instance before blue-green) ────────────
+
+cat > /opt/lightfriend/trigger-export.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+echo "Triggering export in enclave via VSOCK port 9003..."
+echo "This will block until export completes (5-10 minutes)..."
+# Connect to enclave CID 16, port 9003. The enclave runs export.sh,
+# sends backup via port 9001, then closes this connection.
+timeout 900 socat -T600 - VSOCK-CONNECT:16:9003 || { echo "Export trigger failed or timed out"; exit 1; }
+echo "Export complete."
+ls -la /opt/lightfriend/backups/ | tail -3
+SCRIPT
+chmod +x /opt/lightfriend/trigger-export.sh
+
+cat > /opt/lightfriend/upload-env.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+[ -f /opt/lightfriend/.env ] || { echo "No .env file found"; exit 1; }
+BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
+[ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
+aws s3 cp /opt/lightfriend/.env "s3://$BUCKET/config/.env" --sse AES256
+echo "Uploaded .env to s3://$BUCKET/config/.env"
+SCRIPT
+chmod +x /opt/lightfriend/upload-env.sh
+
+cat > /opt/lightfriend/trigger-maintenance.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+ACTION="${1:-status}"
+RESULT=$(echo "$ACTION" | timeout 30 socat - VSOCK-CONNECT:16:9005 2>&1) || {
+    echo "FATAL: Maintenance trigger via VSOCK failed"
+    exit 1
+}
+echo "$RESULT"
+SCRIPT
+chmod +x /opt/lightfriend/trigger-maintenance.sh
+
+cat > /opt/lightfriend/pre-deploy.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+LOCKFILE="/tmp/lightfriend-backup.lock"
+exec 200>"$LOCKFILE"
+flock -n 200 || { echo "FATAL: Another backup/export is already running"; exit 1; }
+echo "=== Pre-deploy: maintenance mode + export + upload ==="
+echo "Enabling maintenance mode..."
+/opt/lightfriend/trigger-maintenance.sh enable
+/opt/lightfriend/trigger-export.sh
+/opt/lightfriend/upload-backup.sh
+/opt/lightfriend/upload-env.sh
+echo "=== Pre-deploy complete ==="
+SCRIPT
+chmod +x /opt/lightfriend/pre-deploy.sh
+
+# ── Scheduled daily backup ───────────────────────────────────────────────
+# Triggers enclave export + S3 upload daily at 03:00 UTC.
+# Same scripts as pre-deploy, so backup format is identical and verified.
+# Worst-case data loss: 24 hours instead of "time since last deploy".
+
+cat > /opt/lightfriend/scheduled-backup.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+LOCKFILE="/tmp/lightfriend-backup.lock"
+exec 200>"$LOCKFILE"
+flock -n 200 || { echo "Skipping: another backup/deploy is running"; exit 0; }
+LOG="/var/log/lightfriend-backup.log"
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "=== Scheduled backup: $${TIMESTAMP} ===" >> "$LOG"
+
+# Step 1: Trigger export inside enclave
+/opt/lightfriend/trigger-export.sh >> "$LOG" 2>&1 || {
+    echo "FAILED: export trigger failed at $${TIMESTAMP}" >> "$LOG"
+    exit 1
+}
+
+# Step 2: Upload to S3 (upload-backup.sh verifies size match after upload)
+/opt/lightfriend/upload-backup.sh >> "$LOG" 2>&1 || {
+    echo "FAILED: S3 upload/verify failed at $${TIMESTAMP}" >> "$LOG"
+    exit 1
+}
+
+# Step 3: Clean up old local backups (keep last 3)
+cd /opt/lightfriend/backups
+ls -t *.tar.gz.enc 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+
+echo "=== Backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
+SCRIPT
+chmod +x /opt/lightfriend/scheduled-backup.sh
+
+echo "0 3 * * * root /opt/lightfriend/scheduled-backup.sh" > /etc/cron.d/lightfriend-backup
+chmod 644 /etc/cron.d/lightfriend-backup
 
 chown -R ec2-user:ec2-user /opt/lightfriend
 
 echo "Lightfriend enclave host setup complete!"
+
+# ── Auto-bootstrap (two-phase for blue-green deploys) ─────────────────────
+# Phase 1: Pre-warm (docker pull + EIF build) while old instance still serves
+# Phase 2: Wait for CI proceed signal, then download backup + launch enclave
+
+BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || echo "")
+
+if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
+    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+    VERIFY="/opt/lightfriend/verify-result.json"
+
+    # ── Phase 1: Pre-warm ─────────────────────────────────────────────────
+    echo "=== Phase 1: Pre-warming (docker pull + EIF build) ==="
+
+    # Download .env (needed for launch-enclave.sh .env check)
+    aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
+    chmod 600 /opt/lightfriend/.env
+
+    # Pull image and build EIF (the slow part - 10-15 min)
+    IMAGE="ahtavarasmus/lightfriend-enclave:latest"
+    EIF_PATH="/opt/lightfriend/lightfriend.eif"
+    if ! docker pull "$IMAGE" 2>&1 | tee /tmp/pull.log; then
+        echo "{\"status\": \"PULL_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/pre-warm-$INSTANCE_ID.json"
+        exit 1
+    fi
+    if ! nitro-cli build-enclave --docker-uri "$IMAGE" --output-file "$EIF_PATH" 2>&1 | tee /tmp/eif-build.log; then
+        LAUNCH_ERR=$(tail -5 /tmp/eif-build.log | tr '\n' ' ' | head -c 500)
+        echo "{\"status\": \"BUILD_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"error\": \"$LAUNCH_ERR\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/pre-warm-$INSTANCE_ID.json"
+        exit 1
+    fi
+
+    # Signal pre-warm complete
+    echo "{\"status\": \"PRE_WARM_COMPLETE\", \"instance_id\": \"$INSTANCE_ID\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" | \
+        aws s3 cp - "s3://$BUCKET/deploy/pre-warm-$INSTANCE_ID.json"
+    echo "=== Phase 1 complete: EIF built, waiting for proceed signal ==="
+
+    # ── Phase 2: Wait for proceed, then restore + launch ──────────────────
+    echo "Polling s3://$BUCKET/deploy/proceed-$INSTANCE_ID.json..."
+    PROCEED=""
+    for i in $(seq 1 180); do
+        PROCEED=$(aws s3 cp "s3://$BUCKET/deploy/proceed-$INSTANCE_ID.json" - 2>/dev/null || echo "")
+        if [ -n "$PROCEED" ]; then
+            echo "Proceed signal received"
+            break
+        fi
+        sleep 10
+    done
+
+    if [ -z "$PROCEED" ]; then
+        echo "{\"status\": \"PROCEED_TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        echo "FATAL: No proceed signal after 30 minutes"
+        exit 1
+    fi
+
+    # Re-download .env (CI may have uploaded a fresh one from old instance)
+    aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
+    chmod 600 /opt/lightfriend/.env
+
+    # Download backup - MUST succeed if this is a migration (not first deploy)
+    echo "Downloading backup from S3..."
+    BACKUP_LIST=$(aws s3 ls "s3://$BUCKET/backups/" 2>/dev/null || echo "")
+    if echo "$BACKUP_LIST" | grep -q ".tar.gz.enc"; then
+        /opt/lightfriend/download-backup.sh || {
+            echo "FATAL: Backup exists in S3 but download failed"
+            echo "{\"status\": \"DOWNLOAD_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        }
+    else
+        # Check if an old instance exists - if so, backups MUST exist
+        OLD_INSTANCE=$(aws ssm get-parameter --name /lightfriend/instance-id --query Parameter.Value --output text 2>/dev/null || echo "")
+        if [ -n "$OLD_INSTANCE" ] && [ "$OLD_INSTANCE" != "$INSTANCE_ID" ]; then
+            echo "FATAL: Old instance $OLD_INSTANCE exists but no backups found in S3"
+            echo "{\"status\": \"NO_BACKUP_FOR_MIGRATION\", \"instance_id\": \"$INSTANCE_ID\", \"old_instance\": \"$OLD_INSTANCE\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        fi
+        echo "No backups in S3 (first deploy)"
+    fi
+
+    # Launch enclave (EIF already built - just nitro-cli run-enclave)
+    echo "Launching enclave..."
+    if ! /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log; then
+        LAUNCH_ERR=$(tail -5 /tmp/launch.log | tr '\n' ' ' | head -c 500)
+        echo "{\"status\": \"LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"error\": \"$LAUNCH_ERR\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        exit 1
+    fi
+
+    # Wait for enclave verify result via VSOCK port 9004
+    echo "Waiting for enclave verify result (up to 5 min)..."
+    timeout 300 socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" 2>/dev/null || echo "Verify signal timeout"
+
+    if [ -s "$VERIFY" ]; then
+        aws s3 cp "$VERIFY" "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        echo "Verify result uploaded"
+        cat "$VERIFY"
+    else
+        ENCLAVE_STATUS=$(nitro-cli describe-enclaves 2>/dev/null | jq -r '.[0].State // "unknown"')
+        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        echo "WARNING: No verify result received (enclave state: $ENCLAVE_STATUS)"
+    fi
+
+    echo "=== Auto-bootstrap complete ==="
+else
+    echo "No .env in S3 - skipping auto-bootstrap (manual first-time setup required)"
+fi

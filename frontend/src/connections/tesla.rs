@@ -618,7 +618,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             }
 
             // Check subscription tier
-            if props.sub_tier == Some("tier 2".to_string()) {
+            if props.sub_tier.is_some() {
                 if !*tesla_connected {
                     <div class="tesla-connect-hint" style="
                         background: rgba(30, 144, 255, 0.08);

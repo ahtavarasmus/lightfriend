@@ -4,6 +4,7 @@ set -e
 echo "=== Lightfriend Enclave Entrypoint ==="
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
+ENV_LOADED=false
 if [ -e /dev/vsock ]; then
     echo "Fetching environment from host via VSOCK..."
     for attempt in $(seq 1 10); do
@@ -12,12 +13,22 @@ if [ -e /dev/vsock ]; then
             source /tmp/host_env
             set +a
             echo "Environment loaded from host (attempt $attempt)"
+            # Persist env for supervisord-managed processes (export-trigger, etc.)
+            mkdir -p /etc/lightfriend
+            cp /tmp/host_env /etc/lightfriend/env
+            chmod 600 /etc/lightfriend/env
             rm -f /tmp/host_env
+            ENV_LOADED=true
             break
         fi
         echo "  Waiting for host config server (attempt $attempt/10)..."
         sleep 2
     done
+
+    if [ "$ENV_LOADED" = "false" ]; then
+        echo "FATAL: Failed to load environment from host after 10 attempts"
+        exit 1
+    fi
 fi
 
 # ── 0b. Set internal defaults ────────────────────────────────────────────────
@@ -56,7 +67,7 @@ if [ -e /dev/vsock ]; then
     echo "Checking host for backup to restore..."
     mkdir -p /data/seed
     RECEIVED="/data/seed/backup-received.tar.gz.enc"
-    socat -T10 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
+    socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
         echo "Backup received from host (${RECEIVED_SIZE} bytes)"
@@ -141,6 +152,11 @@ REOF
         local step="$2"
         echo "RESTORE FAILED: ${msg} (step: ${step})"
         write_restore_status "FAILED" "${msg}" "${step}"
+        # Send failure to host via VSOCK so CI gets the actual error, not just TIMEOUT
+        if [ -e /dev/vsock ]; then
+            echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
+            socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
+        fi
         echo "Old enclave is still running. Fix the issue and retry."
         su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA stop -w" 2>/dev/null || true
         exit 1
@@ -203,7 +219,7 @@ REOF
         su postgres -c "psql -c \"DROP DATABASE IF EXISTS ${db}\"" 2>/dev/null || true
         su postgres -c "psql -c \"CREATE DATABASE ${db}\"" 2>/dev/null \
             || restore_abort "Failed to create database ${db}" "restore-${db}"
-        su postgres -c "psql -d ${db} < ${dump_file}" 2>/dev/null \
+        su postgres -c "psql --set ON_ERROR_STOP=on -d ${db} < ${dump_file}" \
             || restore_abort "psql restore of ${db} failed" "restore-${db}"
         # Grant ownership
         for db_info in "lightfriend lightfriend_db" "whatsapp_user whatsapp_db" "signal_user signal_db" "telegram_user telegram_db"; do
@@ -448,6 +464,21 @@ for bridge in whatsapp signal telegram; do
     fi
 done
 
+# Inject tokens into bridge configs (mautrix -g doesn't patch configs automatically)
+for bridge in whatsapp signal telegram; do
+    config_file="/data/bridges/${bridge}/config.yaml"
+    reg_file="/data/bridges/${bridge}/${bridge}-registration.yaml"
+    if [ -f "$config_file" ] && [ -f "$reg_file" ]; then
+        as_token=$(extract_yaml_value "$reg_file" "as_token")
+        hs_token=$(extract_yaml_value "$reg_file" "hs_token")
+        if [ -n "$as_token" ] && [ -n "$hs_token" ]; then
+            sed -i "s|as_token:.*\"This value is generated when generating the registration\"|as_token: \"${as_token}\"|" "$config_file"
+            sed -i "s|hs_token:.*\"This value is generated when generating the registration\"|hs_token: \"${hs_token}\"|" "$config_file"
+            echo "  Injected tokens into ${bridge} config"
+        fi
+    fi
+done
+
 # Regenerate Tuwunel config with actual bridge tokens
 substitute_vars /etc/enclave-configs/tuwunel.toml.template /etc/tuwunel/tuwunel.toml
 echo "  Regenerated Tuwunel config with bridge tokens."
@@ -518,7 +549,7 @@ if [ "${SKIP_BACKEND}" != "true" ]; then
     supervisorctl start lightfriend
 fi
 
-if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true" ]; then
     supervisorctl start cloudflared
     echo "Cloudflare tunnel started"
 fi
@@ -531,15 +562,67 @@ chmod +x /tmp/start-services.sh
 if [ "${FULL_RESTORE_DONE}" = "true" ]; then
     cat > /tmp/start-and-verify.sh <<'VERIFYEOF'
 #!/bin/bash
+# Start services but DO NOT start cloudflared yet (defer until verified)
+DEFER_CLOUDFLARED=true
+export DEFER_CLOUDFLARED
 /tmp/start-services.sh
-echo "Running post-restore verification..."
+
+echo "Running post-restore verification (pre-cloudflared)..."
 sleep 5
+
+# Start cloudflared BEFORE final verify so the check includes tunnel status
+if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+    supervisorctl start cloudflared
+    echo "Cloudflare tunnel starting..."
+    # Wait for cloudflared to be RUNNING (up to 30s)
+    for i in $(seq 1 15); do
+        if supervisorctl status cloudflared 2>/dev/null | grep -q "RUNNING"; then
+            echo "Cloudflare tunnel confirmed running"
+            break
+        fi
+        sleep 2
+    done
+fi
+
+# Now run verification (includes cloudflared check)
 /app/verify.sh || echo "WARNING: Post-restore verification reported failures. Check /data/seed/verify-result.json"
+
+# Send verify result to host via VSOCK port 9004
+if [ -e /dev/vsock ] && [ -f /data/seed/verify-result.json ]; then
+    echo "Sending verify result to host via VSOCK..."
+    socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null \
+        || echo "WARNING: Failed to send verify result via VSOCK"
+fi
 VERIFYEOF
     chmod +x /tmp/start-and-verify.sh
     STARTUP_SCRIPT="/tmp/start-and-verify.sh"
 else
-    STARTUP_SCRIPT="/tmp/start-services.sh"
+    # Fresh start (no restore) - run full verification before signaling
+    cat > /tmp/start-and-signal.sh <<'SIGNALEOF'
+#!/bin/bash
+/tmp/start-services.sh
+
+# Wait for backend to be ready before running verification
+echo "Waiting for backend to start..."
+for i in $(seq 1 60); do
+    if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+        echo "Backend ready"
+        break
+    fi
+    sleep 5
+done
+
+echo "Running verification..."
+sleep 3
+/app/verify.sh || echo "WARNING: Verification reported failures"
+
+# Send verify result to host via VSOCK port 9004
+if [ -e /dev/vsock ] && [ -f /data/seed/verify-result.json ]; then
+    socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
+fi
+SIGNALEOF
+    chmod +x /tmp/start-and-signal.sh
+    STARTUP_SCRIPT="/tmp/start-and-signal.sh"
 fi
 
 # Enable PostgreSQL autostart and run the startup orchestrator in background

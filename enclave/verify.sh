@@ -113,45 +113,77 @@ if [ -f "${MANIFEST}" ]; then
             record_check "data_integrity" "false" "user count ${DB_USER_COUNT} != manifest ${EXPECTED_COUNT}"
         fi
     else
-        echo "  SKIP: could not compare counts"
-        record_check "data_integrity" "true"
+        echo "  FAIL: manifest exists but could not parse user count or query database"
+        record_check "data_integrity" "false" "manifest present but comparison failed: expected=${EXPECTED_COUNT:-missing} actual=${DB_USER_COUNT}"
     fi
 else
     echo "  SKIP: no manifest available (not a restore verification)"
     record_check "data_integrity" "true"
 fi
 
-# ── 7. Export capability (dry-run) ─────────────────────────────────────────
+# ── 7. Bridge databases have schema ───────────────────────────────────
 
-echo "Check 7: export capability..."
-DRYRUN_DUMP="/tmp/verify-dryrun.sql"
-pg_dump -h localhost -U postgres --no-owner --no-acl lightfriend_db \
-    > "${DRYRUN_DUMP}" 2>/dev/null || true
-DRYRUN_SIZE=$(stat -c%s "${DRYRUN_DUMP}" 2>/dev/null || stat -f%z "${DRYRUN_DUMP}" 2>/dev/null || echo "0")
-if [ "${DRYRUN_SIZE}" -gt 0 ]; then
-    FIRST_LINE=$(head -1 "${DRYRUN_DUMP}")
-    if echo "${FIRST_LINE}" | grep -qE '^(--|SET |CREATE )'; then
-        # Verify row count matches
-        DUMP_COUNT=$(grep -c "^INSERT\|^COPY" "${DRYRUN_DUMP}" 2>/dev/null || echo "0")
-        echo "  OK: pg_dump produces valid SQL (${DRYRUN_SIZE} bytes, ${DUMP_COUNT} data statements)"
-        record_check "export_capability" "true"
+echo "Check 7: bridge database schemas..."
+BRIDGE_DB_OK=true
+for bridge_db in whatsapp_db signal_db telegram_db; do
+    TABLE_COUNT=$(psql -h localhost -U postgres -d "$bridge_db" -t -A \
+        -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "0")
+    if [ "${TABLE_COUNT}" -gt 0 ]; then
+        echo "  OK: ${bridge_db} has ${TABLE_COUNT} tables"
     else
-        echo "  FAIL: pg_dump output does not start with valid SQL"
-        record_check "export_capability" "false" "invalid SQL header in dry-run dump"
+        BRIDGE_DB_OK=false
+        echo "  FAIL: ${bridge_db} has no tables"
+    fi
+done
+if [ "${BRIDGE_DB_OK}" = "true" ]; then
+    record_check "bridge_databases" "true"
+else
+    record_check "bridge_databases" "false" "one or more bridge databases have no tables"
+fi
+
+# ── 8. Tuwunel data directory ────────────────────────────────────────
+
+echo "Check 8: Tuwunel data..."
+TUWUNEL_FILES=$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)
+if [ "${TUWUNEL_FILES}" -gt 0 ]; then
+    echo "  OK: /var/lib/tuwunel has ${TUWUNEL_FILES} files"
+    record_check "tuwunel_data" "true"
+else
+    echo "  FAIL: /var/lib/tuwunel is empty"
+    record_check "tuwunel_data" "false" "tuwunel data directory is empty"
+fi
+
+# ── 9. Cloudflared tunnel connected ──────────────────────────────────────
+
+echo "Check 9: cloudflared tunnel..."
+if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+    CF_STATUS=$(supervisorctl status cloudflared 2>/dev/null || echo "")
+    if echo "${CF_STATUS}" | grep -q "RUNNING"; then
+        echo "  OK: cloudflared running"
+        record_check "cloudflared" "true"
+    else
+        echo "  FAIL: cloudflared not running"
+        record_check "cloudflared" "false" "cloudflared process not RUNNING"
     fi
 else
-    echo "  FAIL: pg_dump produced empty output"
-    record_check "export_capability" "false" "dry-run pg_dump returned empty"
+    echo "  SKIP: no CLOUDFLARE_TUNNEL_TOKEN set"
+    record_check "cloudflared" "true"
 fi
-rm -f "${DRYRUN_DUMP}" 2>/dev/null || true
 
 # ── Write result ───────────────────────────────────────────────────────────
 
 CHECKS_JSON=$(printf '%s' "${ALL_CHECKS[*]}" | sed 's/" "/", "/g')
 
+# Determine restore type
+if [ -f /tmp/backup-manifest.json ]; then
+    RESTORE_TYPE="full_restore"
+else
+    RESTORE_TYPE="fresh_start"
+fi
+
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
     cat > "${RESULT_FILE}" <<EOF
-{"status": "HEALTHY", "timestamp": "${TIMESTAMP}", "checks": {${CHECKS_JSON}}, "user_count": ${DB_USER_COUNT:-0}}
+{"status": "HEALTHY", "restore_type": "${RESTORE_TYPE}", "timestamp": "${TIMESTAMP}", "checks": {${CHECKS_JSON}}, "user_count": ${DB_USER_COUNT:-0}}
 EOF
     echo ""
     echo "=== Verification: HEALTHY ==="
@@ -160,7 +192,7 @@ else
     FAILED_LIST=$(printf '"%s", ' "${FAILED_CHECKS[@]}")
     FAILED_LIST="${FAILED_LIST%, }"
     cat > "${RESULT_FILE}" <<EOF
-{"status": "FAILED", "timestamp": "${TIMESTAMP}", "failed_checks": [${FAILED_LIST}], "details": "${CHECK_DETAILS}"}
+{"status": "FAILED", "restore_type": "${RESTORE_TYPE}", "timestamp": "${TIMESTAMP}", "failed_checks": [${FAILED_LIST}], "details": "${CHECK_DETAILS}", "user_count": ${DB_USER_COUNT:-0}}
 EOF
     echo ""
     echo "=== Verification: FAILED ==="

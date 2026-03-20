@@ -8,6 +8,7 @@ use dashmap::DashMap;
 use diesel::r2d2::{self, ConnectionManager};
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -329,6 +330,7 @@ async fn main() {
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),
+        maintenance_mode: Arc::new(AtomicBool::new(false)),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -1074,7 +1076,23 @@ async fn main() {
             post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
+    // Internal maintenance endpoints (localhost-only, no auth)
+    let maintenance_routes = Router::new()
+        .route(
+            "/api/internal/maintenance/enable",
+            post(handlers::maintenance_handlers::enable_maintenance),
+        )
+        .route(
+            "/api/internal/maintenance/disable",
+            post(handlers::maintenance_handlers::disable_maintenance),
+        )
+        .route(
+            "/api/internal/maintenance/status",
+            get(handlers::maintenance_handlers::maintenance_status),
+        );
+
     let app = Router::new()
+        .merge(maintenance_routes)
         .merge(public_routes)
         .merge(admin_routes)
         .merge(protected_routes)
@@ -1092,6 +1110,10 @@ async fn main() {
         .fallback_service(
             ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handlers::maintenance_handlers::maintenance_guard,
+        ))
         .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()

@@ -10,7 +10,6 @@ use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::rules_section::RulesSection;
 use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
 use super::activity_feed::ActivityFeed;
-use super::people_list::PeopleList;
 
 const DASHBOARD_STYLES: &str = r#"
 .palantir-dashboard {
@@ -59,54 +58,6 @@ const DASHBOARD_STYLES: &str = r#"
     flex: 1;
     overflow-y: auto;
     min-height: 0;
-}
-
-/* ---- People list (simple) ---- */
-.people-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-}
-.people-list-empty {
-    font-size: 0.8rem;
-    color: #555;
-    padding: 0.5rem 0;
-}
-.person-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-.person-row:hover {
-    background: rgba(255, 255, 255, 0.04);
-}
-.person-name {
-    font-size: 0.85rem;
-    color: #ddd;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.person-channels {
-    display: flex;
-    gap: 0.3rem;
-}
-.person-channel-badge {
-    font-size: 0.6rem;
-    color: #777;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-    text-transform: capitalize;
 }
 
 /* ---- Status Hero (compact) ---- */
@@ -896,9 +847,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     </div>
 
                     <div class="peace-separator"></div>
-
-                    // ---- People ----
-                    <PeopleList />
                 </div>
 
                 // ======== RIGHT PANEL ========

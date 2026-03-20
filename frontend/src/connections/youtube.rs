@@ -254,7 +254,7 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                     </button>
                 </div>
             } else {
-                if props.sub_tier.is_some() || props.discount {
+                if props.sub_tier.is_some() {
                     <button
                         onclick={onclick_connect}
                         class="connect-button"

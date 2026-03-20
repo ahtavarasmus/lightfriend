@@ -4,6 +4,7 @@ use crate::auth::connect::Connect;
 use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
+use super::people_list::PeopleList;
 
 const SETTINGS_STYLES: &str = r#"
 .settings-panel-overlay {
@@ -95,6 +96,7 @@ const SETTINGS_STYLES: &str = r#"
 #[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
     Capabilities,
+    People,
     Account,
     Billing,
 }
@@ -147,6 +149,14 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 }
             } else {
                 html! { <div class="settings-content">{"Loading..."}</div> }
+            }
+        }
+        SettingsTab::People => {
+            html! {
+                <div class="settings-content">
+                    <h3>{"People"}</h3>
+                    <PeopleList />
+                </div>
             }
         }
         SettingsTab::Account => {
@@ -216,6 +226,15 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         }}
                     >
                         {"Capabilities"}
+                    </button>
+                    <button
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::People).then(|| "active"))}
+                        onclick={{
+                            let active_tab = active_tab.clone();
+                            Callback::from(move |_| active_tab.set(SettingsTab::People))
+                        }}
+                    >
+                        {"People"}
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Account).then(|| "active"))}
