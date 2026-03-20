@@ -140,7 +140,7 @@ pub struct ActionConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct LogicResult {
+pub(crate) struct LogicResult {
     should_act: bool,
     message: Option<String>,
     #[serde(flatten)]
@@ -379,7 +379,7 @@ async fn evaluate_flow(
 /// Peek at a branch node: if it's a tool_call Action, look up the tool's
 /// parameter schema and return params that the LLM should fill (excluding
 /// auto-injected ones).
-fn extract_tool_params(
+pub(crate) fn extract_tool_params(
     state: &Arc<AppState>,
     branch: &Option<FlowNode>,
 ) -> Option<HashMap<String, Box<types::JSONSchemaDefine>>> {
@@ -411,7 +411,7 @@ fn extract_tool_params(
 // Prefetch sources helper
 // ---------------------------------------------------------------------------
 
-async fn prefetch_sources(
+pub(crate) async fn prefetch_sources(
     state: &Arc<AppState>,
     rule: &OntRule,
     sources: &[FetchSource],
@@ -563,7 +563,7 @@ async fn prefetch_sources(
 // LLM condition evaluation
 // ---------------------------------------------------------------------------
 
-async fn call_llm_condition(
+pub(crate) async fn call_llm_condition(
     state: &Arc<AppState>,
     rule: &OntRule,
     trigger_context: &str,
@@ -982,6 +982,201 @@ pub async fn emit_ontology_change(
             tokio::spawn(async move {
                 evaluate_and_execute(&state, &rule, &ctx, Some(&snap)).await;
             });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rule test: step-by-step evaluation for the test panel
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum RuleTestStep {
+    Prefetching {
+        sources: Vec<String>,
+    },
+    EvaluatingLlm {
+        prompt_preview: String,
+    },
+    LlmResult {
+        decided: bool,
+        message: Option<String>,
+    },
+    CheckingKeyword {
+        keyword: String,
+    },
+    KeywordResult {
+        matched: bool,
+    },
+    WouldExecute {
+        action_type: String,
+        description: String,
+    },
+    NoAction {
+        reason: String,
+    },
+    Error {
+        message: String,
+    },
+    Complete,
+}
+
+/// Walk a flow tree for testing: real LLM calls, but actions are described
+/// instead of executed. Each step is sent through `tx`.
+pub async fn evaluate_flow_test(
+    state: &Arc<AppState>,
+    rule: &OntRule,
+    trigger_context: &str,
+    node: &FlowNode,
+    tx: &tokio::sync::mpsc::Sender<RuleTestStep>,
+) {
+    match node {
+        FlowNode::LlmCondition {
+            prompt,
+            fetch,
+            true_branch,
+            false_branch,
+        } => {
+            // Prefetch
+            if !fetch.is_empty() {
+                let source_names: Vec<String> = fetch
+                    .iter()
+                    .map(|s| match s {
+                        FetchSource::Email => "email".into(),
+                        FetchSource::Chat { platform, .. } => format!("chat ({})", platform),
+                        FetchSource::Weather { .. } => "weather".into(),
+                        FetchSource::Internet { query } => format!("internet: {}", query),
+                        FetchSource::Tesla => "tesla".into(),
+                        FetchSource::Mcp { server, tool, .. } => format!("mcp {}:{}", server, tool),
+                        FetchSource::Pinned => "pinned items".into(),
+                    })
+                    .collect();
+                let _ = tx
+                    .send(RuleTestStep::Prefetching {
+                        sources: source_names,
+                    })
+                    .await;
+            }
+            let prefetched = prefetch_sources(state, rule, fetch).await;
+
+            let preview = if prompt.len() > 120 {
+                format!("{}...", &prompt[..120])
+            } else {
+                prompt.clone()
+            };
+            let _ = tx
+                .send(RuleTestStep::EvaluatingLlm {
+                    prompt_preview: preview,
+                })
+                .await;
+
+            let extra_params = extract_tool_params(state, true_branch.as_ref());
+            match call_llm_condition(
+                state,
+                rule,
+                trigger_context,
+                prompt,
+                &prefetched,
+                extra_params.as_ref(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let decided = result.should_act;
+                    let msg = result.message.clone();
+                    let _ = tx
+                        .send(RuleTestStep::LlmResult {
+                            decided,
+                            message: msg,
+                        })
+                        .await;
+
+                    let next = if decided { true_branch } else { false_branch };
+                    if let Some(branch) = next.as_ref() {
+                        Box::pin(evaluate_flow_test(state, rule, trigger_context, branch, tx))
+                            .await;
+                    } else {
+                        let reason = if decided {
+                            "Condition was true but no action configured"
+                        } else {
+                            "Condition was false and no else branch"
+                        };
+                        let _ = tx
+                            .send(RuleTestStep::NoAction {
+                                reason: reason.to_string(),
+                            })
+                            .await;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(RuleTestStep::Error {
+                            message: format!("LLM error: {}", e),
+                        })
+                        .await;
+                }
+            }
+        }
+        FlowNode::KeywordCondition {
+            keyword,
+            true_branch,
+            false_branch,
+        } => {
+            let _ = tx
+                .send(RuleTestStep::CheckingKeyword {
+                    keyword: keyword.clone(),
+                })
+                .await;
+            let matched = !keyword.is_empty()
+                && trigger_context
+                    .to_lowercase()
+                    .contains(&keyword.to_lowercase());
+            let _ = tx.send(RuleTestStep::KeywordResult { matched }).await;
+
+            let next = if matched { true_branch } else { false_branch };
+            if let Some(branch) = next.as_ref() {
+                Box::pin(evaluate_flow_test(state, rule, trigger_context, branch, tx)).await;
+            } else {
+                let reason = if matched {
+                    "Keyword matched but no action configured"
+                } else {
+                    "Keyword did not match and no else branch"
+                };
+                let _ = tx
+                    .send(RuleTestStep::NoAction {
+                        reason: reason.to_string(),
+                    })
+                    .await;
+            }
+        }
+        FlowNode::Action {
+            action_type,
+            config,
+        } => {
+            let description = match action_type.as_str() {
+                "notify" => {
+                    let method = config
+                        .get("method")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("sms");
+                    format!("send {} notification", method)
+                }
+                "tool_call" => {
+                    let tool = config
+                        .get("tool")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    format!("call tool '{}'", tool)
+                }
+                other => format!("execute '{}' action", other),
+            };
+            let _ = tx
+                .send(RuleTestStep::WouldExecute {
+                    action_type: action_type.clone(),
+                    description,
+                })
+                .await;
         }
     }
 }

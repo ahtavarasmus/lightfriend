@@ -332,6 +332,7 @@ async fn main() {
         ontology_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
+        pending_rule_tests: Arc::new(DashMap::new()),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -1024,6 +1025,11 @@ async fn main() {
         .route(
             "/api/rules",
             get(rule_handlers::list_rules).post(rule_handlers::create_rule),
+        )
+        .route("/api/rules/test", post(rule_handlers::start_rule_test))
+        .route(
+            "/api/rules/test-stream",
+            get(rule_handlers::test_rule_stream),
         )
         .route(
             "/api/rules/{id}",

@@ -215,6 +215,7 @@ pub struct AppState {
     pub ontology_repository: Arc<OntologyRepository>,
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
+    pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
 }
 
 /// Build the tool registry with all static tool handlers.

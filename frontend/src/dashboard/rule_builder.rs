@@ -656,6 +656,132 @@ const BUILDER_STYLES: &str = r#"
     font-style: italic;
     margin-top: 0.3rem;
 }
+/* Test panel */
+.rb-test-toggle {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    color: #888;
+    font-size: 0.8rem;
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 0.75rem;
+    transition: all 0.15s;
+}
+.rb-test-toggle:hover {
+    border-color: rgba(126, 178, 255, 0.3);
+    color: #7EB2FF;
+}
+.rb-test-toggle.open {
+    border-color: rgba(126, 178, 255, 0.2);
+    color: #7EB2FF;
+    border-style: solid;
+}
+.rb-test-panel {
+    border: 1px solid rgba(126, 178, 255, 0.12);
+    border-radius: 10px;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+    background: rgba(126, 178, 255, 0.03);
+}
+.rb-test-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.5rem;
+}
+.rb-test-preset {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #777;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.rb-test-preset:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #aaa;
+}
+.rb-test-preset.active {
+    color: #7EB2FF;
+    background: rgba(126, 178, 255, 0.1);
+    border-color: rgba(126, 178, 255, 0.25);
+}
+.rb-test-run {
+    width: 100%;
+    background: rgba(126, 178, 255, 0.15);
+    border: 1px solid rgba(126, 178, 255, 0.25);
+    color: #7EB2FF;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.45rem;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 0.4rem;
+    transition: all 0.15s;
+}
+.rb-test-run:hover { background: rgba(126, 178, 255, 0.25); }
+.rb-test-run:disabled { opacity: 0.4; cursor: not-allowed; }
+.rb-test-steps {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.rb-test-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    padding: 0.3rem 0;
+    border-left: 2px solid rgba(255, 255, 255, 0.08);
+    padding-left: 0.6rem;
+}
+.rb-test-step.deciding {
+    border-left-color: rgba(126, 178, 255, 0.4);
+    color: #aaa;
+}
+.rb-test-step.yes {
+    border-left-color: rgba(74, 222, 128, 0.5);
+    color: #8fd8a8;
+}
+.rb-test-step.no {
+    border-left-color: rgba(255, 165, 0, 0.5);
+    color: #d4a06a;
+}
+.rb-test-step.action {
+    border-left-color: rgba(126, 178, 255, 0.5);
+    color: #7EB2FF;
+}
+.rb-test-step.inactive {
+    border-left-color: rgba(255, 255, 255, 0.06);
+    color: #555;
+}
+.rb-test-step.fail {
+    border-left-color: rgba(255, 107, 107, 0.5);
+    color: #ff6b6b;
+}
+.rb-test-step-icon {
+    flex-shrink: 0;
+    width: 1rem;
+    text-align: center;
+}
+.rb-test-step-msg {
+    font-style: italic;
+    color: #888;
+    font-size: 0.75rem;
+    margin-top: 0.1rem;
+}
+.rb-test-cost-hint {
+    font-size: 0.7rem;
+    color: #666;
+    margin-top: 0.3rem;
+    text-align: center;
+}
 "#;
 
 // ---------------------------------------------------------------------------
@@ -665,7 +791,7 @@ const BUILDER_STYLES: &str = r#"
 #[derive(Clone, PartialEq, Debug)]
 pub enum RuleTemplate {
     CriticalMessages,
-    DailyDigest,
+    DailyDigest { time: String },
     TrackItems,
     Custom,
 }
@@ -674,7 +800,7 @@ impl RuleTemplate {
     fn label(&self) -> &'static str {
         match self {
             RuleTemplate::CriticalMessages => "Critical Messages",
-            RuleTemplate::DailyDigest => "Daily Digest",
+            RuleTemplate::DailyDigest { .. } => "Daily Digest",
             RuleTemplate::TrackItems => "Track Items",
             RuleTemplate::Custom => "Something else",
         }
@@ -683,7 +809,7 @@ impl RuleTemplate {
     fn description(&self) -> &'static str {
         match self {
             RuleTemplate::CriticalMessages => "Get notified about urgent or important messages",
-            RuleTemplate::DailyDigest => "Daily summary of messages and emails at 9am",
+            RuleTemplate::DailyDigest { .. } => "Daily summary of messages and emails",
             RuleTemplate::TrackItems => "Auto-track deliveries, invoices, and deadlines",
             RuleTemplate::Custom => "Start blank and tell AI what to do",
         }
@@ -692,7 +818,7 @@ impl RuleTemplate {
     fn example(&self) -> &'static str {
         match self {
             RuleTemplate::CriticalMessages => "e.g., 'Urgent: server is down' -> SMS alert",
-            RuleTemplate::DailyDigest => "e.g., summary of 12 messages -> morning SMS",
+            RuleTemplate::DailyDigest { .. } => "e.g., summary of 12 messages -> morning SMS",
             RuleTemplate::TrackItems => "e.g., 'Package shipped' -> tracked on dashboard",
             RuleTemplate::Custom => "",
         }
@@ -705,7 +831,7 @@ impl RuleTemplate {
     fn icon(&self) -> &'static str {
         match self {
             RuleTemplate::CriticalMessages => "fa-solid fa-bell",
-            RuleTemplate::DailyDigest => "fa-solid fa-newspaper",
+            RuleTemplate::DailyDigest { .. } => "fa-solid fa-newspaper",
             RuleTemplate::TrackItems => "fa-solid fa-thumbtack",
             RuleTemplate::Custom => "fa-solid fa-wrench",
         }
@@ -834,6 +960,26 @@ pub struct TemplatePickerProps {
 
 #[function_component(RuleTemplatePicker)]
 pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
+    let existing_rules = use_state(|| Vec::<RuleData>::new());
+
+    // Fetch existing rules when picker opens
+    {
+        let existing_rules = existing_rules.clone();
+        use_effect_with_deps(move |open| {
+            if *open {
+                let existing_rules = existing_rules.clone();
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/rules").send().await {
+                        if let Ok(rules) = r.json::<Vec<RuleData>>().await {
+                            existing_rules.set(rules);
+                        }
+                    }
+                });
+            }
+            || ()
+        }, props.is_open);
+    }
+
     if !props.is_open {
         return html! {};
     }
@@ -851,12 +997,99 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
         })
     };
 
-    let templates = [
-        RuleTemplate::CriticalMessages,
-        RuleTemplate::DailyDigest,
-        RuleTemplate::TrackItems,
+    // Check what templates are already covered by existing rules
+    let has_critical = existing_rules.iter().any(|r| {
+        r.trigger_type == "ontology_change"
+            && r.logic_type == "llm"
+            && r.action_type == "notify"
+            && r.status == "active"
+            && r.logic_prompt.as_deref().map(|p| {
+                let p = p.to_lowercase();
+                p.contains("important") || p.contains("urgent") || p.contains("critical")
+            }).unwrap_or(false)
+    });
+    let has_tracking = existing_rules.iter().any(|r| {
+        r.trigger_type == "ontology_change"
+            && r.status == "active"
+            && (r.action_config.contains("pin_message") || r.action_config.contains("update_tracked_item"))
+    });
+
+    // For digest, find existing schedule times to suggest alternatives
+    let existing_digest_times: Vec<String> = existing_rules.iter()
+        .filter(|r| {
+            r.trigger_type == "schedule"
+                && r.logic_type == "llm"
+                && r.status == "active"
+                && r.logic_prompt.as_deref().map(|p| {
+                    let p = p.to_lowercase();
+                    p.contains("summar") || p.contains("digest") || p.contains("review")
+                }).unwrap_or(false)
+        })
+        .filter_map(|r| {
+            // Extract time from trigger_config pattern like "daily 09:00"
+            let tc: serde_json::Value = serde_json::from_str(&r.trigger_config).ok()?;
+            let pattern = tc.get("pattern")?.as_str()?;
+            let parts: Vec<&str> = pattern.split_whitespace().collect();
+            parts.get(1).map(|t| t.to_string())
+        })
+        .collect();
+
+    let has_any_digest = !existing_digest_times.is_empty();
+
+    // Pick a digest time that doesn't conflict
+    let digest_time = if existing_digest_times.contains(&"09:00".to_string()) {
+        if existing_digest_times.contains(&"18:00".to_string()) {
+            if existing_digest_times.contains(&"12:00".to_string()) {
+                None // they have morning, evening, and noon - skip
+            } else {
+                Some("12:00")
+            }
+        } else {
+            Some("18:00")
+        }
+    } else {
+        Some("09:00")
+    };
+    let digest_label = match digest_time {
+        Some("09:00") => "Morning Digest",
+        Some("12:00") => "Midday Digest",
+        Some("18:00") => "Evening Digest",
+        _ => "Daily Digest",
+    };
+    let digest_desc = match digest_time {
+        Some("09:00") => "Daily summary of messages and emails at 9am",
+        Some("12:00") => "Midday summary of messages and emails at noon",
+        Some("18:00") => "Evening summary of messages and emails at 6pm",
+        _ => "Daily summary of messages and emails",
+    };
+
+    let mut templates: Vec<(RuleTemplate, String, String)> = Vec::new();
+    if !has_critical {
+        templates.push((
+            RuleTemplate::CriticalMessages,
+            RuleTemplate::CriticalMessages.label().to_string(),
+            RuleTemplate::CriticalMessages.description().to_string(),
+        ));
+    }
+    if let Some(time) = digest_time {
+        templates.push((
+            RuleTemplate::DailyDigest { time: time.to_string() },
+            digest_label.to_string(),
+            digest_desc.to_string(),
+        ));
+    }
+    if !has_tracking {
+        templates.push((
+            RuleTemplate::TrackItems,
+            RuleTemplate::TrackItems.label().to_string(),
+            RuleTemplate::TrackItems.description().to_string(),
+        ));
+    }
+    templates.push((
         RuleTemplate::Custom,
-    ];
+        RuleTemplate::Custom.label().to_string(),
+        RuleTemplate::Custom.description().to_string(),
+    ));
 
     html! {
         <>
@@ -865,7 +1098,7 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
                 <div class="rule-template-modal">
                     <h3>{"New Rule"}</h3>
                     <div class="rtm-subtitle">{"What kind of rule?"}</div>
-                    { for templates.iter().map(|tmpl| {
+                    { for templates.iter().map(|(tmpl, label, desc)| {
                         let tmpl_clone = tmpl.clone();
                         let on_select = props.on_select.clone();
                         let example = tmpl.example();
@@ -879,12 +1112,12 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
                                 </div>
                                 <div class="rtc-body" style="position: relative;">
                                     <div class="rtc-label">
-                                        {tmpl.label()}
+                                        {label.clone()}
                                         if is_popular {
                                             <span class="rtc-popular">{"Popular"}</span>
                                         }
                                     </div>
-                                    <div class="rtc-desc">{tmpl.description()}</div>
+                                    <div class="rtc-desc">{desc.clone()}</div>
                                     if !example.is_empty() {
                                         <div class="rtc-example">{example}</div>
                                     }
@@ -1041,6 +1274,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
 
     let saving = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
+
+    // Test panel state
+    let test_open = use_state(|| false);
+    let test_message = use_state(|| String::new());
+    let test_sender = use_state(|| "Test Sender".to_string());
+    let test_running = use_state(|| false);
+    let test_steps = use_state(|| Vec::<(String, String, String)>::new()); // (css_class, icon, text)
 
     // Fetch senders for autocomplete (persons + chat room names from all networks)
     {
@@ -1420,12 +1660,17 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 else_flow.set(None);
                                 expanded_card.set(Some(Card::If));
                             }
-                            RuleTemplate::DailyDigest => {
-                                name.set("Daily digest".to_string());
+                            RuleTemplate::DailyDigest { ref time } => {
+                                let label = match time.as_str() {
+                                    "18:00" => "Evening digest",
+                                    "12:00" => "Midday digest",
+                                    _ => "Morning digest",
+                                };
+                                name.set(label.to_string());
                                 when_mode.set(WhenMode::Schedule);
                                 schedule_mode.set(ScheduleMode::Recurring);
                                 recurring_freq.set(RecurringFreq::Daily);
-                                recurring_time.set("09:00".to_string());
+                                recurring_time.set(time.clone());
                                 logic_mode.set(LogicMode::Llm);
                                 selected_template.set(PromptTemplate::Summarize);
                                 logic_prompt.set(String::new());
@@ -3394,6 +3639,423 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             &*else_flow,
                             &rule_missing,
                         )}
+
+                        // Test panel
+                        <button
+                            class={if *test_open { "rb-test-toggle open" } else { "rb-test-toggle" }}
+                            onclick={{
+                                let test_open = test_open.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    test_open.set(!*test_open);
+                                })
+                            }}
+                        >
+                            {if *test_open { "Hide test panel" } else { "Test this rule" }}
+                        </button>
+
+                        if *test_open {
+                            <div class="rb-test-panel">
+                                <div class="rb-field-label">{"Sample message"}</div>
+                                <div class="rb-test-presets">
+                                    {{
+                                        let presets: Vec<(&str, &str)> = vec![
+                                            ("Hey, can we meet tomorrow at 3pm?", "Alex"),
+                                            ("URGENT: Server is down!", "DevOps Alert"),
+                                            ("Click here for free iPhone!", "Unknown"),
+                                            ("Flight AA1234 delayed 2hrs", "Airline"),
+                                        ];
+                                        presets.into_iter().map(|(msg, sender)| {
+                                            let test_message = test_message.clone();
+                                            let test_sender = test_sender.clone();
+                                            let msg_str = msg.to_string();
+                                            let sender_str = sender.to_string();
+                                            let is_active = *test_message == msg_str;
+                                            html! {
+                                                <button
+                                                    class={if is_active { "rb-test-preset active" } else { "rb-test-preset" }}
+                                                    onclick={{
+                                                        let test_message = test_message.clone();
+                                                        let test_sender = test_sender.clone();
+                                                        let m = msg_str.clone();
+                                                        let s = sender_str.clone();
+                                                        Callback::from(move |_: MouseEvent| {
+                                                            test_message.set(m.clone());
+                                                            test_sender.set(s.clone());
+                                                        })
+                                                    }}
+                                                >
+                                                    {format!("{}: {}", sender, if msg.len() > 28 { &msg[..28] } else { msg })}
+                                                </button>
+                                            }
+                                        }).collect::<Html>()
+                                    }}
+                                </div>
+                                <div class="rb-field">
+                                    <div class="rb-field-label">{"Sender"}</div>
+                                    <input
+                                        class="rb-input"
+                                        type="text"
+                                        value={(*test_sender).clone()}
+                                        oninput={{
+                                            let test_sender = test_sender.clone();
+                                            Callback::from(move |e: InputEvent| {
+                                                if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                                                    test_sender.set(input.value());
+                                                }
+                                            })
+                                        }}
+                                    />
+                                </div>
+                                <div class="rb-field">
+                                    <div class="rb-field-label">{"Message"}</div>
+                                    <textarea
+                                        class="rb-textarea"
+                                        value={(*test_message).clone()}
+                                        oninput={{
+                                            let test_message = test_message.clone();
+                                            Callback::from(move |e: InputEvent| {
+                                                if let Some(input) = e.target_dyn_into::<web_sys::HtmlTextAreaElement>() {
+                                                    test_message.set(input.value());
+                                                }
+                                            })
+                                        }}
+                                        placeholder="Type a test message or pick a preset above..."
+                                    />
+                                </div>
+                                <button
+                                    class="rb-test-run"
+                                    disabled={*test_running || (*test_message).is_empty() || !rule_complete}
+                                    onclick={{
+                                        let test_running = test_running.clone();
+                                        let test_steps = test_steps.clone();
+                                        let test_message = test_message.clone();
+                                        let test_sender = test_sender.clone();
+                                        let name = name.clone();
+                                        let logic_mode = logic_mode.clone();
+                                        let selected_template = selected_template.clone();
+                                        let logic_prompt = logic_prompt.clone();
+                                        let condition_input = condition_input.clone();
+                                        let keyword_input = keyword_input.clone();
+                                        let active_sources = active_sources.clone();
+                                        let action_mode = action_mode.clone();
+                                        let notify_method = notify_method.clone();
+                                        let notify_message = notify_message.clone();
+                                        let tool_name = tool_name.clone();
+                                        let tc_platform = tc_platform.clone();
+                                        let tc_chat_name = tc_chat_name.clone();
+                                        let tc_chat_room_id = tc_chat_room_id.clone();
+                                        let tc_message = tc_message.clone();
+                                        let tc_email_to = tc_email_to.clone();
+                                        let tc_email_subject = tc_email_subject.clone();
+                                        let tc_email_body = tc_email_body.clone();
+                                        let tc_reply_text = tc_reply_text.clone();
+                                        let tc_tesla_cmd = tc_tesla_cmd.clone();
+                                        let tc_mcp_params = tc_mcp_params.clone();
+                                        let else_flow = else_flow.clone();
+                                        let when_mode = when_mode.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            test_running.set(true);
+                                            test_steps.set(vec![]);
+
+                                            // Build flow_config (same logic as on_submit)
+                                            let action_config_json = match *action_mode {
+                                                ActionMode::Notify => {
+                                                    let method = match *notify_method {
+                                                        NotifyMethod::Sms => "sms",
+                                                        NotifyMethod::Call => "call",
+                                                    };
+                                                    let mut c = serde_json::json!({ "method": method });
+                                                    let msg = (*notify_message).clone();
+                                                    if !msg.is_empty() { c["message"] = serde_json::json!(msg); }
+                                                    c
+                                                }
+                                                ActionMode::ToolCall => {
+                                                    let tn = (*tool_name).clone();
+                                                    let params = match tn.as_str() {
+                                                        "send_chat_message" => {
+                                                            let mut p = serde_json::json!({
+                                                                "platform": *tc_platform,
+                                                                "chat_name": *tc_chat_name,
+                                                                "message": *tc_message,
+                                                            });
+                                                            if let Some(ref rid) = *tc_chat_room_id {
+                                                                p["room_id"] = serde_json::json!(rid);
+                                                            }
+                                                            p
+                                                        },
+                                                        "send_email" => serde_json::json!({
+                                                            "to": *tc_email_to,
+                                                            "subject": *tc_email_subject,
+                                                            "body": *tc_email_body,
+                                                        }),
+                                                        "respond_to_email" => serde_json::json!({
+                                                            "response_text": *tc_reply_text,
+                                                        }),
+                                                        "control_tesla" => serde_json::json!({
+                                                            "command": *tc_tesla_cmd,
+                                                        }),
+                                                        "pin_message" => serde_json::json!({}),
+                                                        "update_tracked_item" => serde_json::json!({}),
+                                                        _ => {
+                                                            let map = &*tc_mcp_params;
+                                                            let obj: serde_json::Map<String, serde_json::Value> = map.iter()
+                                                                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                                                                .collect();
+                                                            serde_json::Value::Object(obj)
+                                                        }
+                                                    };
+                                                    serde_json::json!({ "tool": tn, "params": params })
+                                                }
+                                            };
+                                            let action_type = match *action_mode {
+                                                ActionMode::Notify => "notify",
+                                                ActionMode::ToolCall => "tool_call",
+                                            };
+                                            let action_node = serde_json::json!({
+                                                "type": "action",
+                                                "action_type": action_type,
+                                                "config": action_config_json
+                                            });
+                                            let else_branch_json: serde_json::Value = match &*else_flow {
+                                                Some(node) => serde_json::to_value(node).unwrap_or(serde_json::Value::Null),
+                                                None => serde_json::Value::Null,
+                                            };
+
+                                            let lp = match *logic_mode {
+                                                LogicMode::Keyword => {
+                                                    let k = (*keyword_input).clone();
+                                                    if k.is_empty() { None } else { Some(k) }
+                                                }
+                                                LogicMode::Llm => {
+                                                    match *selected_template {
+                                                        PromptTemplate::Custom => {
+                                                            let v = (*logic_prompt).clone();
+                                                            if v.is_empty() { None } else { Some(v) }
+                                                        }
+                                                        PromptTemplate::CheckCondition => {
+                                                            let prompt = get_template_prompt(
+                                                                &PromptTemplate::CheckCondition,
+                                                                &*when_mode,
+                                                                &*condition_input,
+                                                            );
+                                                            if prompt.is_empty() { None } else { Some(prompt) }
+                                                        }
+                                                        ref tmpl => {
+                                                            Some(get_template_prompt(tmpl, &*when_mode, ""))
+                                                        }
+                                                    }
+                                                }
+                                                _ => None,
+                                            };
+                                            let lf: Option<String> = if *logic_mode == LogicMode::Llm && !active_sources.is_empty() {
+                                                Some(serde_json::to_string(&*active_sources).unwrap_or_default())
+                                            } else {
+                                                None
+                                            };
+
+                                            let flow_config = match *logic_mode {
+                                                LogicMode::Llm => {
+                                                    let fetch_sources: serde_json::Value = lf.as_deref()
+                                                        .and_then(|f| serde_json::from_str(f).ok())
+                                                        .unwrap_or(serde_json::json!([]));
+                                                    serde_json::json!({
+                                                        "type": "llm_condition",
+                                                        "prompt": lp.as_deref().unwrap_or("Evaluate and decide"),
+                                                        "fetch": fetch_sources,
+                                                        "true_branch": action_node,
+                                                        "false_branch": else_branch_json
+                                                    })
+                                                }
+                                                LogicMode::Keyword => {
+                                                    serde_json::json!({
+                                                        "type": "keyword_condition",
+                                                        "keyword": lp.as_deref().unwrap_or(""),
+                                                        "true_branch": action_node,
+                                                        "false_branch": else_branch_json
+                                                    })
+                                                }
+                                                _ => action_node,
+                                            };
+
+                                            let body = serde_json::json!({
+                                                "flow_config": flow_config.to_string(),
+                                                "message": *test_message,
+                                                "sender": *test_sender,
+                                                "rule_name": *name,
+                                            });
+
+                                            let test_running = test_running.clone();
+                                            let test_steps = test_steps.clone();
+
+                                            spawn_local(async move {
+                                                // Pre-flight auth refresh
+                                                let _ = Api::get("/api/auth/status").send().await;
+
+                                                // POST to get test_id
+                                                let request = match Api::post("/api/rules/test").json(&body) {
+                                                    Ok(r) => r,
+                                                    Err(_) => {
+                                                        test_steps.set(vec![("fail".into(), "x".into(), "Failed to build request".into())]);
+                                                        test_running.set(false);
+                                                        return;
+                                                    }
+                                                };
+                                                let response = match request.send().await {
+                                                    Ok(r) => r,
+                                                    Err(_) => {
+                                                        test_steps.set(vec![("fail".into(), "x".into(), "Network error".into())]);
+                                                        test_running.set(false);
+                                                        return;
+                                                    }
+                                                };
+                                                if !response.ok() {
+                                                    let msg = response.text().await.unwrap_or_else(|_| "Request failed".into());
+                                                    test_steps.set(vec![("fail".into(), "x".into(), msg)]);
+                                                    test_running.set(false);
+                                                    return;
+                                                }
+                                                let data: serde_json::Value = match response.json().await {
+                                                    Ok(d) => d,
+                                                    Err(_) => {
+                                                        test_steps.set(vec![("fail".into(), "x".into(), "Invalid response".into())]);
+                                                        test_running.set(false);
+                                                        return;
+                                                    }
+                                                };
+                                                let test_id = data["test_id"].as_str().unwrap_or("").to_string();
+                                                if test_id.is_empty() {
+                                                    test_steps.set(vec![("fail".into(), "x".into(), "No test_id returned".into())]);
+                                                    test_running.set(false);
+                                                    return;
+                                                }
+
+                                                // Open SSE stream
+                                                let url = format!("{}/api/rules/test-stream?test_id={}", crate::config::get_backend_url(), test_id);
+                                                use wasm_bindgen::JsCast;
+                                                use wasm_bindgen::closure::Closure;
+
+                                                let mut init = web_sys::EventSourceInit::new();
+                                                init.set_with_credentials(true);
+                                                let es = match web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
+                                                    Ok(es) => es,
+                                                    Err(_) => {
+                                                        test_steps.set(vec![("fail".into(), "x".into(), "Failed to open stream".into())]);
+                                                        test_running.set(false);
+                                                        return;
+                                                    }
+                                                };
+
+                                                let steps_handle = test_steps.clone();
+                                                let running_handle = test_running.clone();
+                                                let es_ref = es.clone();
+
+                                                let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+                                                    if let Some(data_str) = event.data().as_string() {
+                                                        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&data_str) {
+                                                            let step = data["step"].as_str().unwrap_or("");
+                                                            let (css, icon, text) = match step {
+                                                                "prefetching" => {
+                                                                    let sources = data["sources"].as_array()
+                                                                        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "))
+                                                                        .unwrap_or_default();
+                                                                    ("deciding".to_string(), "...".to_string(), format!("Fetching {}...", sources))
+                                                                }
+                                                                "evaluating_llm" => {
+                                                                    let preview = data["prompt_preview"].as_str().unwrap_or("").to_string();
+                                                                    ("deciding".to_string(), "...".to_string(), format!("Evaluating AI condition: {}", preview))
+                                                                }
+                                                                "llm_result" => {
+                                                                    let decided = data["decided"].as_bool().unwrap_or(false);
+                                                                    if decided {
+                                                                        let msg = data["message"].as_str().unwrap_or("").to_string();
+                                                                        let text = if msg.is_empty() {
+                                                                            "AI decided: Yes".to_string()
+                                                                        } else {
+                                                                            format!("AI decided: Yes - \"{}\"", msg)
+                                                                        };
+                                                                        ("yes".to_string(), "Y".to_string(), text)
+                                                                    } else {
+                                                                        ("no".to_string(), "-".to_string(), "AI decided: No".to_string())
+                                                                    }
+                                                                }
+                                                                "checking_keyword" => {
+                                                                    let kw = data["keyword"].as_str().unwrap_or("").to_string();
+                                                                    ("deciding".to_string(), "...".to_string(), format!("Checking for keyword '{}'...", kw))
+                                                                }
+                                                                "keyword_result" => {
+                                                                    let matched = data["matched"].as_bool().unwrap_or(false);
+                                                                    if matched {
+                                                                        ("yes".to_string(), "Y".to_string(), "Keyword matched".to_string())
+                                                                    } else {
+                                                                        ("no".to_string(), "-".to_string(), "No match".to_string())
+                                                                    }
+                                                                }
+                                                                "would_execute" => {
+                                                                    let desc = data["description"].as_str().unwrap_or("").to_string();
+                                                                    ("action".to_string(), ">".to_string(), format!("Would {}", desc))
+                                                                }
+                                                                "no_action" => {
+                                                                    let reason = data["reason"].as_str().unwrap_or("").to_string();
+                                                                    ("inactive".to_string(), "-".to_string(), format!("No action: {}", reason))
+                                                                }
+                                                                "error" => {
+                                                                    let msg = data["message"].as_str().unwrap_or("Unknown error").to_string();
+                                                                    ("fail".to_string(), "x".to_string(), msg)
+                                                                }
+                                                                "complete" => {
+                                                                    running_handle.set(false);
+                                                                    es_ref.close();
+                                                                    return;
+                                                                }
+                                                                _ => return,
+                                                            };
+                                                            let mut current = (*steps_handle).clone();
+                                                            current.push((css, icon, text));
+                                                            steps_handle.set(current);
+                                                        }
+                                                    }
+                                                }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+
+                                                es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                                                onmessage.forget();
+
+                                                // onerror
+                                                let running_err = test_running.clone();
+                                                let steps_err = test_steps.clone();
+                                                let es_err = es.clone();
+                                                let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                                                    let mut current = (*steps_err).clone();
+                                                    current.push(("fail".into(), "x".into(), "Stream connection error".into()));
+                                                    steps_err.set(current);
+                                                    running_err.set(false);
+                                                    es_err.close();
+                                                }) as Box<dyn FnMut(web_sys::Event)>);
+
+                                                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                                                onerror.forget();
+                                            });
+                                        })
+                                    }}
+                                >
+                                    {if *test_running { "Running..." } else { "Run Test" }}
+                                </button>
+
+                                if !test_steps.is_empty() {
+                                    <div class="rb-test-steps">
+                                        {for (*test_steps).iter().map(|(css, icon, text)| {
+                                            html! {
+                                                <div class={format!("rb-test-step {}", css)}>
+                                                    <span class="rb-test-step-icon">{icon}</span>
+                                                    <span>{text}</span>
+                                                </div>
+                                            }
+                                        })}
+                                    </div>
+                                }
+
+                                <div class="rb-test-cost-hint">{"Uses 1 credit (same as web chat)"}</div>
+                            </div>
+                        }
 
                         if let Some(ref err) = *error_msg {
                             <div class="rb-error">{err}</div>
