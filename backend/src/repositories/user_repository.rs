@@ -11,11 +11,8 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    pg_models::{
-        NewPgBridge, NewPgContactProfile, NewPgContactProfileException, NewPgImapConnection,
-        NewPgUsageLog, PgBridge, PgContactProfile, PgContactProfileException,
-    },
-    pg_schema::{contact_profile_exceptions, contact_profiles, usage_logs},
+    pg_models::{NewPgBridge, NewPgImapConnection, NewPgUsageLog, PgBridge},
+    pg_schema::usage_logs,
     PgDbPool,
 };
 
@@ -34,24 +31,6 @@ pub struct LogUsageParams {
     pub status: Option<String>,
     pub recharge_threshold_timestamp: Option<i32>,
     pub zero_credits_timestamp: Option<i32>,
-}
-
-/// Parameters for updating a contact profile
-pub struct UpdateContactProfileParams {
-    pub user_id: i32,
-    pub profile_id: i32,
-    pub nickname: String,
-    pub whatsapp_chat: Option<String>,
-    pub telegram_chat: Option<String>,
-    pub signal_chat: Option<String>,
-    pub email_addresses: Option<String>,
-    pub notification_mode: String,
-    pub notification_type: String,
-    pub notify_on_call: i32,
-    pub whatsapp_room_id: Option<String>,
-    pub telegram_room_id: Option<String>,
-    pub signal_room_id: Option<String>,
-    pub notes: Option<String>,
 }
 
 pub struct UserRepository {
@@ -322,6 +301,44 @@ impl UserRepository {
     // TODO(pg-migration): is_credits_under_threshold moved to UserCore - it queries
     // the users table which remains in SQLite. Callers should use UserCore instead.
 
+    /// Count successful notification-related usage logs since a timestamp.
+    pub fn count_notifications_since(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .filter(usage_logs::success.eq(true))
+            .filter(
+                usage_logs::activity_type
+                    .like("%_sms")
+                    .or(usage_logs::activity_type.like("%_call"))
+                    .or(usage_logs::activity_type.eq("noti_msg"))
+                    .or(usage_logs::activity_type.eq("noti_call")),
+            )
+            .count()
+            .get_result(&mut conn)
+    }
+
+    /// Get recent usage logs for a user (for activity feed).
+    pub fn get_recent_usage_logs(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        limit: i64,
+    ) -> Result<Vec<crate::pg_models::PgUsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .order(usage_logs::created_at.desc())
+            .limit(limit)
+            .load(&mut conn)
+    }
+
     pub fn get_usage_data(
         &self,
         _user_id: i32,
@@ -484,201 +501,6 @@ impl UserRepository {
 
     // TODO(pg-migration): delete_old_message_status_logs moved to UserCore - it queries
     // the message_status_log table which remains in SQLite. Callers should use UserCore instead.
-
-    // Contact Profiles methods
-    pub fn create_contact_profile(
-        &self,
-        new_profile: &NewPgContactProfile,
-    ) -> Result<PgContactProfile, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::insert_into(contact_profiles::table)
-            .values(new_profile)
-            .execute(&mut conn)?;
-
-        // Return the created profile
-        contact_profiles::table
-            .filter(contact_profiles::user_id.eq(new_profile.user_id))
-            .filter(contact_profiles::nickname.eq(&new_profile.nickname))
-            .order(contact_profiles::id.desc())
-            .first::<PgContactProfile>(&mut conn)
-    }
-
-    pub fn get_contact_profiles(&self, user_id: i32) -> Result<Vec<PgContactProfile>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profiles::table
-            .filter(contact_profiles::user_id.eq(user_id))
-            .order(contact_profiles::nickname.asc())
-            .load::<PgContactProfile>(&mut conn)
-    }
-
-    pub fn update_contact_profile(
-        &self,
-        params: UpdateContactProfileParams,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(contact_profiles::table)
-            .filter(contact_profiles::user_id.eq(params.user_id))
-            .filter(contact_profiles::id.eq(params.profile_id))
-            .set((
-                contact_profiles::nickname.eq(params.nickname),
-                contact_profiles::whatsapp_chat.eq(params.whatsapp_chat),
-                contact_profiles::telegram_chat.eq(params.telegram_chat),
-                contact_profiles::signal_chat.eq(params.signal_chat),
-                contact_profiles::email_addresses.eq(params.email_addresses),
-                contact_profiles::notification_mode.eq(params.notification_mode),
-                contact_profiles::notification_type.eq(params.notification_type),
-                contact_profiles::notify_on_call.eq(params.notify_on_call),
-                contact_profiles::whatsapp_room_id.eq(params.whatsapp_room_id),
-                contact_profiles::telegram_room_id.eq(params.telegram_room_id),
-                contact_profiles::signal_room_id.eq(params.signal_room_id),
-                contact_profiles::notes.eq(params.notes),
-            ))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    /// Update only the room_id for a specific service on a contact profile.
-    /// Used to auto-capture room_id on first name-based match from the bridge.
-    pub fn update_profile_room_id(
-        &self,
-        profile_id: i32,
-        service: &str,
-        room_id: &str,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        match service {
-            "whatsapp" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::whatsapp_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            "telegram" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::telegram_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            "signal" => {
-                diesel::update(contact_profiles::table.filter(contact_profiles::id.eq(profile_id)))
-                    .set(contact_profiles::signal_room_id.eq(Some(room_id)))
-                    .execute(&mut conn)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Find contact profiles that use any of the given room IDs.
-    /// Returns a map of room_id -> nickname for rooms that are already assigned.
-    pub fn find_profiles_by_room_ids(
-        &self,
-        user_id: i32,
-        room_ids: &[String],
-        exclude_profile_id: Option<i32>,
-    ) -> Result<std::collections::HashMap<String, String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let mut query = contact_profiles::table
-            .filter(contact_profiles::user_id.eq(user_id))
-            .into_boxed();
-
-        if let Some(excl_id) = exclude_profile_id {
-            query = query.filter(contact_profiles::id.ne(excl_id));
-        }
-
-        let profiles: Vec<PgContactProfile> = query.load(&mut conn)?;
-
-        let mut result = std::collections::HashMap::new();
-        for profile in profiles {
-            for rid in room_ids {
-                if profile.whatsapp_room_id.as_deref() == Some(rid.as_str())
-                    || profile.telegram_room_id.as_deref() == Some(rid.as_str())
-                    || profile.signal_room_id.as_deref() == Some(rid.as_str())
-                {
-                    result.insert(rid.clone(), profile.nickname.clone());
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    pub fn delete_contact_profile(&self, user_id: i32, profile_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(contact_profiles::table)
-            .filter(contact_profiles::user_id.eq(user_id))
-            .filter(contact_profiles::id.eq(profile_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // Contact Profile Exception methods
-    pub fn get_profile_exceptions(
-        &self,
-        profile_id: i32,
-    ) -> Result<Vec<PgContactProfileException>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profile_exceptions::table
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .select(PgContactProfileException::as_select())
-            .load::<PgContactProfileException>(&mut conn)
-    }
-
-    pub fn get_profile_exception_for_platform(
-        &self,
-        profile_id: i32,
-        platform: &str,
-    ) -> Result<Option<PgContactProfileException>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        contact_profile_exceptions::table
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .filter(contact_profile_exceptions::platform.eq(platform))
-            .select(PgContactProfileException::as_select())
-            .first::<PgContactProfileException>(&mut conn)
-            .optional()
-    }
-
-    pub fn set_profile_exception(
-        &self,
-        profile_id: i32,
-        platform: &str,
-        notification_mode: &str,
-        notification_type: &str,
-        notify_on_call: i32,
-    ) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Try to update first, if no rows updated, insert
-        let updated = diesel::update(contact_profile_exceptions::table)
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .filter(contact_profile_exceptions::platform.eq(platform))
-            .set((
-                contact_profile_exceptions::notification_mode.eq(notification_mode),
-                contact_profile_exceptions::notification_type.eq(notification_type),
-                contact_profile_exceptions::notify_on_call.eq(notify_on_call),
-            ))
-            .execute(&mut conn)?;
-
-        if updated == 0 {
-            // Insert new exception
-            let new_exception = NewPgContactProfileException {
-                profile_id,
-                platform: platform.to_string(),
-                notification_mode: notification_mode.to_string(),
-                notification_type: notification_type.to_string(),
-                notify_on_call,
-            };
-            diesel::insert_into(contact_profile_exceptions::table)
-                .values(&new_exception)
-                .execute(&mut conn)?;
-        }
-        Ok(())
-    }
-
-    pub fn delete_all_profile_exceptions(&self, profile_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(contact_profile_exceptions::table)
-            .filter(contact_profile_exceptions::profile_id.eq(profile_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
 
     // YouTube integration methods
     pub fn has_active_youtube(&self, user_id: i32) -> Result<bool, DieselError> {

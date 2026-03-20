@@ -7,32 +7,50 @@ use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use std::collections::HashMap;
+
 use crate::{handlers::auth_middleware::AuthUser, AppState, UserCoreOps};
 
 #[derive(Deserialize)]
 pub struct DashboardQuery {
-    /// Unix timestamp for the end of the timeline range (default: now + 7 days)
     pub until: Option<i32>,
 }
 
 #[derive(Serialize)]
 pub struct DashboardSummaryResponse {
-    pub attention_count: i32,
-    pub attention_items: Vec<AttentionItem>,
-    pub next_scheduled: Option<ScheduledItem>,
-    pub upcoming_items: Vec<UpcomingItem>,
-    pub upcoming_digests: Vec<UpcomingDigest>,
-    pub watched_contacts: Vec<WatchedContact>,
-    pub next_digest: Option<NextDigestInfo>,
+    // Calm dashboard fields
+    pub status: String, // "all_caught_up" | "needs_attention"
+    pub messages_handled_today: i64,
+    pub notifications_sent_today: i64,
+    pub rules_active: i64,
+    pub action_items: Vec<ActionItem>,
+    pub filtered_count: i64,
+    pub pinned_messages: Vec<PinnedMessageItem>,
+    // Existing fields kept for compatibility
     pub quiet_mode: QuietModeInfo,
     pub sunrise_hour: Option<f32>,
     pub sunset_hour: Option<f32>,
-    /// Items beyond the current timeline range (for preview in extend button tooltip)
-    pub items_beyond: Vec<UpcomingItem>,
-    /// Total count of items beyond the current timeline range
-    pub items_beyond_count: i32,
-    /// Total number of tracked items (for status line display)
-    pub total_tracked_count: i32,
+    pub watched_contacts: Vec<WatchedContact>,
+}
+
+#[derive(Serialize)]
+pub struct PinnedMessageItem {
+    pub id: i64,
+    pub sender_name: String,
+    pub platform: String,
+    pub content: String,
+    pub created_at: i32,
+    pub review_after: Option<i32>,
+}
+
+#[derive(Serialize)]
+pub struct ActionItem {
+    pub message_id: i64,
+    pub person_name: String,
+    pub platform: String,
+    pub preview: String,
+    pub timestamp: i32,
+    pub person_id: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -44,77 +62,15 @@ pub struct QuietModeInfo {
 }
 
 #[derive(Serialize)]
-pub struct AttentionItem {
-    pub id: i32,
-    pub item_type: String, // "tracking", "tracked_item"
-    pub summary: String,
-    pub description: String,
-    pub priority: i32,
-    pub due_at: Option<i32>,
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notify: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sender: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub time_display: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub relative_display: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct ScheduledItem {
-    pub time_display: String, // "2:30pm"
-    pub description: String,  // "Check on Mom"
-    pub item_id: Option<i32>,
-}
-
-#[derive(Serialize, Clone)]
-pub struct UpcomingItem {
-    pub item_id: Option<i32>,
-    pub timestamp: i32,           // Unix timestamp for positioning
-    pub time_display: String,     // "2:30pm"
-    pub description: String,      // "Check on Mom"
-    pub date_display: String,     // "Feb 10"
-    pub relative_display: String, // "in 5 days"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub item_type: Option<String>, // "oneshot", "tracking", "recurring"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notify: Option<String>, // "call", "sms"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources_display: Option<String>, // formatted: "Weather (Helsinki) + Email"
-}
-
-#[derive(Serialize)]
 pub struct WatchedContact {
     pub nickname: String,
     pub notification_mode: String,
 }
 
-#[derive(Serialize)]
-pub struct NextDigestInfo {
-    pub time_display: String, // "9am tomorrow"
-}
-
-#[derive(Serialize, Clone)]
-pub struct UpcomingDigest {
-    pub item_id: Option<i32>,
-    pub timestamp: i32,
-    pub time_display: String,
-    pub sources: Option<String>, // "email,whatsapp,telegram"
-}
-
 /// GET /api/dashboard/summary
-/// Returns a minimal dashboard summary for the "peace of mind" view
-/// Query params:
-/// - `until`: Unix timestamp for the end of the timeline range (default: now + 7 days)
 pub async fn get_dashboard_summary(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<DashboardQuery>,
+    Query(_query): Query<DashboardQuery>,
     auth_user: AuthUser,
 ) -> Result<Json<DashboardSummaryResponse>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
@@ -130,11 +86,19 @@ pub async fn get_dashboard_summary(
     let now = chrono::Utc::now();
     let now_ts = now.timestamp() as i32;
 
-    // Calculate max_ts for timeline range (default: 7 days from now)
-    let seven_days = 7 * 24 * 60 * 60;
-    let max_ts = query.until.unwrap_or(now_ts + seven_days);
+    // Calculate start of today in user's timezone
+    let local_now = now.with_timezone(&tz);
+    let today_start_local = local_now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+    let today_start_ts = today_start_local
+        .and_local_timezone(tz)
+        .earliest()
+        .map(|dt| dt.timestamp() as i32)
+        .unwrap_or(now_ts - 86400);
 
-    // Use stored lat/lon (geocoded when user sets location)
+    // 24h ago for action items
+    let last_24h_ts = now_ts - 86400;
+
+    // Use stored lat/lon
     let (latitude, longitude) = match user_info.as_ref() {
         Some(info) => (
             info.latitude.map(|l| l as f64),
@@ -143,284 +107,130 @@ pub async fn get_dashboard_summary(
         None => (None, None),
     };
 
-    // Calculate sunrise/sunset based on user's coordinates
     let (sunrise_hour, sunset_hour) =
         calculate_sun_times_from_coords(latitude, longitude, now, &tz);
 
-    // Get all items for this user
-    let items = state
-        .item_repository
-        .get_dashboard_items(user_id)
+    // Count messages handled today
+    let messages_handled_today = state
+        .ontology_repository
+        .count_messages_since(user_id, today_start_ts)
+        .unwrap_or(0);
+
+    // Count notifications sent today
+    let notifications_sent_today = state
+        .user_repository
+        .count_notifications_since(user_id, today_start_ts)
+        .unwrap_or(0);
+
+    // Count active rules
+    let active_rules = state
+        .ontology_repository
+        .get_active_rules(user_id)
+        .unwrap_or_default();
+    let rules_active = active_rules.len() as i64;
+
+    // Get persons with channels for name lookups
+    let persons = state
+        .ontology_repository
+        .get_persons_with_channels(user_id)
         .unwrap_or_default();
 
-    // Split items into categories for display
-    let total_tracked_count = items.len() as i32;
-    let mut attention_items: Vec<AttentionItem> = Vec::new();
-    for item in &items {
-        // All items go into the unified attention list
-        // Parse tags and strip tag line from description
-        let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-        let item_type = match tags.item_type.as_deref() {
-            Some("tracking") => "tracking",
-            Some("recurring") => "recurring",
-            Some("oneshot") => "oneshot",
-            _ => "tracked_item", // legacy items without [type:X] tag
-        };
-        let description = item
-            .summary
-            .lines()
-            .skip(if tags.has_tags { 1 } else { 0 })
-            .collect::<Vec<_>>()
-            .join("\n");
+    // Get notifiable messages (from known persons in last 24h)
+    let notifiable_messages = state
+        .ontology_repository
+        .get_notifiable_messages(user_id, last_24h_ts, 20)
+        .unwrap_or_default();
 
-        // Format time/relative display from due_at
-        let time_display = item.due_at.map(|nca| format_time_display(nca, &tz));
-        let relative_display = item.due_at.map(|nca| {
-            if nca <= now_ts {
-                "overdue".to_string()
+    // Build action items with person name lookups
+    let action_items: Vec<ActionItem> = notifiable_messages
+        .iter()
+        .map(|msg| {
+            let person_name = msg
+                .person_id
+                .and_then(|pid| persons.iter().find(|p| p.person.id == pid))
+                .map(|p| p.display_name().to_string())
+                .unwrap_or_else(|| msg.sender_name.clone());
+
+            let preview = if msg.content.len() > 100 {
+                format!("{}...", &msg.content[..100])
             } else {
-                format_relative_days(nca, now_ts, &tz)
+                msg.content.clone()
+            };
+
+            ActionItem {
+                message_id: msg.id,
+                person_name,
+                platform: msg.platform.clone(),
+                preview,
+                timestamp: msg.created_at,
+                person_id: msg.person_id,
             }
-        });
+        })
+        .collect();
 
-        // For tracking items, derive platform from fetch sources if no explicit platform tag
-        let platform = tags.platform.or_else(|| {
-            if item_type == "tracking" {
-                tags.fetch.first().cloned()
-            } else {
-                None
-            }
-        });
+    let action_count = action_items.len() as i64;
+    let filtered_count = (messages_handled_today - action_count).max(0);
+    let status = if action_items.is_empty() {
+        "all_caught_up".to_string()
+    } else {
+        "needs_attention".to_string()
+    };
 
-        attention_items.push(AttentionItem {
-            id: item.id,
-            item_type: item_type.to_string(),
-            summary: item.summary.clone(),
-            description,
-            priority: item.priority,
-            due_at: item.due_at,
-            source: item.source_id.clone(),
-            source_id: item.source_id.clone(),
-            notify: tags.notify,
-            sender: tags.sender,
-            platform,
-            time_display,
-            relative_display,
-        });
-    }
-
-    // Sort by due_at (soonest first, items without it sort last)
-    attention_items.sort_by(|a, b| match (a.due_at, b.due_at) {
-        (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
-    });
-    let attention_count = attention_items.len() as i32;
-
-    // Find next scheduled item (soonest upcoming non-digest item)
-    let next_scheduled = find_next_scheduled_item(&items, now_ts, &tz);
-
-    // Find all upcoming items within the timeline range
-    let upcoming_items = find_upcoming_items(&items, now_ts, max_ts, &tz);
-
-    // Find all upcoming digests within the timeline range
-    let upcoming_digests = find_upcoming_digest_items(&items, now_ts, max_ts, &tz);
-
-    // Find items beyond the timeline range (for extend button)
-    let (items_beyond, items_beyond_count) = find_items_beyond(&items, now_ts, max_ts, &tz);
-
-    // Get watched contacts (contact profiles with notification modes)
-    let watched_contacts = get_watched_contacts(&state, user_id);
-
-    // Find next digest time
-    let next_digest = find_next_digest_item(&items, now_ts, &tz);
+    // Get watched contacts
+    let watched_contacts: Vec<WatchedContact> = persons
+        .iter()
+        .flat_map(|person| {
+            let name = person.display_name().to_string();
+            person.channels.iter().filter_map(move |channel| {
+                let mode = person.effective_notification_mode(channel, "digest");
+                if mode != "digest" {
+                    Some(WatchedContact {
+                        nickname: format!("{} ({})", name, channel.platform),
+                        notification_mode: mode,
+                    })
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
 
     // Get quiet mode status
     let quiet_mode = get_quiet_mode_info(&state, user_id, now_ts, &tz);
 
+    // Get pinned messages
+    let pinned_messages: Vec<PinnedMessageItem> = state
+        .ontology_repository
+        .get_pinned_messages(user_id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| PinnedMessageItem {
+            id: m.id,
+            sender_name: m.sender_name,
+            platform: m.platform,
+            content: if m.content.len() > 200 {
+                format!("{}...", &m.content[..200])
+            } else {
+                m.content
+            },
+            created_at: m.created_at,
+            review_after: m.review_after,
+        })
+        .collect();
+
     Ok(Json(DashboardSummaryResponse {
-        attention_count,
-        attention_items,
-        next_scheduled,
-        upcoming_items,
-        upcoming_digests,
-        watched_contacts,
-        next_digest,
+        status,
+        messages_handled_today,
+        notifications_sent_today,
+        rules_active,
+        action_items,
+        filtered_count,
+        pinned_messages,
         quiet_mode,
         sunrise_hour,
         sunset_hour,
-        items_beyond,
-        items_beyond_count,
-        total_tracked_count,
+        watched_contacts,
     }))
-}
-
-fn find_next_scheduled_item(
-    items: &[crate::pg_models::PgItem],
-    now_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> Option<ScheduledItem> {
-    items
-        .iter()
-        .filter_map(|item| {
-            item.due_at
-                .filter(|&nca| nca > now_ts)
-                .map(|nca| (item, nca))
-        })
-        .min_by_key(|(_, nca)| *nca)
-        .map(|(item, nca)| ScheduledItem {
-            time_display: format_time_display(nca, tz),
-            description: item.summary.clone(),
-            item_id: Some(item.id),
-        })
-}
-
-fn find_upcoming_items(
-    items: &[crate::pg_models::PgItem],
-    now_ts: i32,
-    max_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> Vec<UpcomingItem> {
-    let mut upcoming: Vec<UpcomingItem> = items
-        .iter()
-        .filter_map(|item| {
-            item.due_at
-                .filter(|&nca| nca > now_ts && nca <= max_ts)
-                .map(|nca| {
-                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                    let description = item
-                        .summary
-                        .lines()
-                        .skip(if tags.has_tags { 1 } else { 0 })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let sources_display = if !tags.fetch.is_empty() {
-                        Some(tags.fetch.join(", "))
-                    } else {
-                        None
-                    };
-                    UpcomingItem {
-                        item_id: Some(item.id),
-                        timestamp: nca,
-                        time_display: format_time_display(nca, tz),
-                        description,
-                        date_display: format_date_display(nca, tz),
-                        relative_display: format_relative_days(nca, now_ts, tz),
-                        item_type: tags.item_type,
-                        notify: tags.notify,
-                        sources_display,
-                    }
-                })
-        })
-        .collect();
-
-    upcoming.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-    upcoming
-}
-
-fn find_upcoming_digest_items(
-    items: &[crate::pg_models::PgItem],
-    now_ts: i32,
-    max_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> Vec<UpcomingDigest> {
-    let mut digests: Vec<UpcomingDigest> = items
-        .iter()
-        .filter(|item| item.summary.starts_with("Daily digest"))
-        .filter_map(|item| {
-            item.due_at
-                .filter(|&nca| nca > now_ts && nca <= max_ts)
-                .map(|nca| UpcomingDigest {
-                    item_id: Some(item.id),
-                    timestamp: nca,
-                    time_display: format_time_display(nca, tz),
-                    sources: None,
-                })
-        })
-        .collect();
-
-    digests.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-    digests
-}
-
-/// Find items beyond the current timeline range (for the extend button)
-/// Returns up to 5 items for preview and the total count
-fn find_items_beyond(
-    items: &[crate::pg_models::PgItem],
-    now_ts: i32,
-    max_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> (Vec<UpcomingItem>, i32) {
-    let ninety_days = 90 * 24 * 60 * 60;
-    let lookahead_ts = max_ts + ninety_days;
-
-    let mut beyond: Vec<UpcomingItem> = items
-        .iter()
-        .filter_map(|item| {
-            item.due_at
-                .filter(|&nca| nca > max_ts && nca <= lookahead_ts)
-                .map(|nca| {
-                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                    let description = item
-                        .summary
-                        .lines()
-                        .skip(if tags.has_tags { 1 } else { 0 })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let sources_display = if !tags.fetch.is_empty() {
-                        Some(tags.fetch.join(", "))
-                    } else {
-                        None
-                    };
-                    UpcomingItem {
-                        item_id: Some(item.id),
-                        timestamp: nca,
-                        time_display: format_time_display(nca, tz),
-                        description,
-                        date_display: format_date_display(nca, tz),
-                        relative_display: format_relative_days(nca, now_ts, tz),
-                        item_type: tags.item_type,
-                        notify: tags.notify,
-                        sources_display,
-                    }
-                })
-        })
-        .collect();
-
-    beyond.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-    let total_count = beyond.len() as i32;
-    let preview = beyond.into_iter().take(5).collect();
-    (preview, total_count)
-}
-
-fn get_watched_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<WatchedContact> {
-    state
-        .user_repository
-        .get_contact_profiles(user_id)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| p.notification_mode != "digest") // Only show those with active watching
-        .map(|p| WatchedContact {
-            nickname: p.nickname,
-            notification_mode: p.notification_mode,
-        })
-        .collect()
-}
-
-fn find_next_digest_item(
-    items: &[crate::pg_models::PgItem],
-    now_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> Option<NextDigestInfo> {
-    let earliest_nca = items
-        .iter()
-        .filter(|item| item.summary.starts_with("Daily digest"))
-        .filter_map(|item| item.due_at.filter(|&nca| nca > now_ts))
-        .min()?;
-
-    let time_display = format_relative_time(earliest_nca, now_ts, tz);
-    Some(NextDigestInfo { time_display })
 }
 
 pub fn format_time_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {
@@ -484,7 +294,6 @@ fn format_relative_time(timestamp: i32, now_ts: i32, tz: &chrono_tz::Tz) -> Stri
     }
 }
 
-/// Format a date for tooltip display (e.g., "Feb 10")
 pub fn format_date_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {
     use chrono::TimeZone;
 
@@ -499,7 +308,6 @@ pub fn format_date_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {
     }
 }
 
-/// Format relative days for tooltip display (e.g., "in 5 days", "tomorrow", "today")
 pub fn format_relative_days(timestamp: i32, now_ts: i32, tz: &chrono_tz::Tz) -> String {
     use chrono::TimeZone;
 
@@ -539,25 +347,15 @@ fn get_quiet_mode_info(
 ) -> QuietModeInfo {
     let quiet_until = state.user_core.get_quiet_mode(user_id).ok().flatten();
 
-    // Count active rules (items with [quiet:...] tags)
     let rule_count = state
-        .user_core
-        .get_quiet_rules(user_id)
-        .ok()
-        .map(|items| {
-            items
-                .iter()
-                .filter(|item| {
-                    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                    tags.quiet.is_some()
-                })
-                .count() as i32
-        })
+        .ontology_repository
+        .get_active_rules(user_id)
+        .map(|r| r.len() as i32)
         .unwrap_or(0);
 
     match quiet_until {
         None => QuietModeInfo {
-            is_quiet: rule_count > 0,
+            is_quiet: false, // only quiet if explicitly set via quiet_until
             until: None,
             until_display: None,
             rule_count,
@@ -570,16 +368,14 @@ fn get_quiet_mode_info(
         },
         Some(ts) => {
             if ts <= now_ts {
-                // Quiet mode expired - clear it and return not quiet
                 let _ = state.user_core.set_quiet_mode(user_id, None);
                 QuietModeInfo {
-                    is_quiet: rule_count > 0,
+                    is_quiet: false,
                     until: None,
                     until_display: None,
                     rule_count,
                 }
             } else {
-                // Still in quiet mode - format the display time
                 let until_display = format_relative_time(ts, now_ts, tz);
                 QuietModeInfo {
                     is_quiet: true,
@@ -593,7 +389,6 @@ fn get_quiet_mode_info(
 }
 
 /// Calculate sunrise and sunset hours from coordinates
-/// Uses a simplified solar position algorithm
 fn calculate_sun_times_from_coords(
     latitude: Option<f64>,
     longitude: Option<f64>,
@@ -605,242 +400,601 @@ fn calculate_sun_times_from_coords(
         _ => return (None, None),
     };
 
-    // Convert to local date and get timezone offset
     let local_now = now.with_timezone(tz);
     let local_date = local_now.date_naive();
     let day_of_year = local_date.ordinal() as f64;
 
-    // Get timezone offset in hours (e.g., UTC+2 = 2.0)
     use chrono::Offset;
     let tz_offset_hours = local_now.offset().fix().local_minus_utc() as f64 / 3600.0;
 
-    // Solar declination (simplified equation)
     let gamma = ((360.0_f64 / 365.0) * (day_of_year - 81.0)).to_radians();
     let declination = 23.45_f64.to_radians() * gamma.sin();
 
-    // Hour angle at sunrise/sunset
     let lat_rad = lat.to_radians();
     let cos_hour_angle = -(lat_rad.tan() * declination.tan());
 
-    // Check for polar day/night
     if cos_hour_angle < -1.0 {
-        // Polar day - sun never sets
         return (Some(0.0), Some(24.0));
     } else if cos_hour_angle > 1.0 {
-        // Polar night - sun never rises
         return (Some(12.0), Some(12.0));
     }
 
     let hour_angle = cos_hour_angle.acos().to_degrees();
 
-    // Solar noon in UTC: 12:00 adjusted for longitude
-    // Then convert to local time by adding timezone offset
     let solar_noon_utc = 12.0 - (lon / 15.0);
     let solar_noon_local = solar_noon_utc + tz_offset_hours;
 
-    // Calculate sunrise and sunset in local time
     let sunrise = solar_noon_local - (hour_angle / 15.0);
     let sunset = solar_noon_local + (hour_angle / 15.0);
 
-    // Clamp to valid range
     let sunrise = sunrise.clamp(0.0, 24.0) as f32;
     let sunset = sunset.clamp(0.0, 24.0) as f32;
 
     (Some(sunrise), Some(sunset))
 }
 
-// Item API types
+// -----------------------------------------------------------------------
+// Activity Feed
+// -----------------------------------------------------------------------
 
 #[derive(Serialize)]
-pub struct ItemResponse {
-    pub id: i32,
-    pub summary: String,
-    pub due_at: Option<i32>,
-    pub priority: i32,
-    pub source_id: Option<String>,
-    pub created_at: i32,
-}
-
-#[derive(Serialize)]
-pub struct ItemListResponse {
-    pub items: Vec<ItemResponse>,
-    pub count: i32,
+pub struct ActivityFeedEntry {
+    pub id: String,
+    pub entry_type: String, // "changelog", "notification", "message"
+    pub timestamp: i32,
+    pub title: String,
+    pub detail: Option<String>,
+    pub icon: String, // FA icon class
+    pub success: Option<bool>,
 }
 
 #[derive(Deserialize)]
-pub struct SnoozeRequest {
-    pub minutes: Option<i32>, // default 60
+pub struct ActivityFeedQuery {
+    pub since: Option<i32>,
+    pub limit: Option<i64>,
 }
 
-fn item_to_response(item: crate::pg_models::PgItem) -> ItemResponse {
-    ItemResponse {
-        id: item.id,
-        summary: item.summary,
-        due_at: item.due_at,
-        priority: item.priority,
-        source_id: item.source_id,
-        created_at: item.created_at,
-    }
-}
-
-/// GET /api/items
-/// Returns all items for the authenticated user.
-pub async fn get_items(
+/// GET /api/dashboard/activity-feed
+pub async fn get_activity_feed(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<ActivityFeedQuery>,
     auth_user: AuthUser,
-) -> Result<Json<ItemListResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let items = state
-        .item_repository
-        .get_items(auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to get items: {}", e)})),
-            )
-        })?;
-
-    let count = items.len() as i32;
-    let responses: Vec<ItemResponse> = items.into_iter().map(item_to_response).collect();
-
-    Ok(Json(ItemListResponse {
-        items: responses,
-        count,
-    }))
-}
-
-/// GET /api/items/{id}
-/// Returns a single item with formatted display fields for preview.
-pub async fn get_item_detail(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(id): Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let item = state
-        .item_repository
-        .get_item(id, auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("DB error: {}", e)})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Item not found"})),
-            )
-        })?;
-
-    let user_info = state.user_core.get_user_info(auth_user.user_id).ok();
-    let tz: chrono_tz::Tz = user_info
-        .as_ref()
-        .and_then(|info| info.timezone.clone())
-        .unwrap_or_else(|| "UTC".to_string())
-        .parse()
-        .unwrap_or(chrono_tz::UTC);
+) -> Result<Json<Vec<ActivityFeedEntry>>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
     let now_ts = chrono::Utc::now().timestamp() as i32;
+    let since_ts = query.since.unwrap_or(now_ts - 7 * 86400);
+    let limit = query.limit.unwrap_or(100);
 
-    let trigger_ts = item.due_at.unwrap_or(item.created_at);
+    // Fetch all data sources
+    let changelog = state
+        .ontology_repository
+        .get_recent_changelog(user_id, since_ts, 50)
+        .unwrap_or_default();
 
-    // Parse structured tags from summary and extract clean description
-    let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-    let description = item
-        .summary
-        .lines()
-        .skip(if tags.has_tags { 1 } else { 0 })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let usage_logs = state
+        .user_repository
+        .get_recent_usage_logs(user_id, since_ts, 50)
+        .unwrap_or_default();
 
-    // Build sources_display from [fetch:...] tags (e.g. "email, chat")
-    let sources_display = if !tags.fetch.is_empty() {
-        Some(tags.fetch.join(", "))
-    } else {
-        None
-    };
+    let messages = state
+        .ontology_repository
+        .get_recent_messages_all_platforms(user_id, since_ts)
+        .unwrap_or_default();
 
-    Ok(Json(serde_json::json!({
-        "id": item.id,
-        "trigger_timestamp": trigger_ts,
-        "time_display": format_time_display(trigger_ts, &tz),
-        "date_display": format_date_display(trigger_ts, &tz),
-        "relative_display": format_relative_days(trigger_ts, now_ts, &tz),
-        "description": description,
-        "item_type": tags.item_type,
-        "notify": tags.notify,
-        "sources_display": sources_display,
-    })))
-}
+    // Build name lookup maps
+    let persons = state
+        .ontology_repository
+        .get_persons_with_channels(user_id)
+        .unwrap_or_default();
+    let person_names: HashMap<i32, String> = persons
+        .iter()
+        .map(|p| (p.person.id, p.display_name().to_string()))
+        .collect();
 
-/// POST /api/items/{id}/snooze
-/// Snoozes an item by setting due_at to a future time.
-pub async fn snooze_item(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(id): Path<i32>,
-    body: Option<Json<SnoozeRequest>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Verify ownership
-    let item = state
-        .item_repository
-        .get_item(id, auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("DB error: {}", e)})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Item not found"})),
-            )
-        })?;
+    let rules = state
+        .ontology_repository
+        .get_rules(user_id)
+        .unwrap_or_default();
+    let rule_names: HashMap<i32, String> = rules.iter().map(|r| (r.id, r.name.clone())).collect();
 
-    let minutes = body.as_ref().and_then(|b| b.minutes).unwrap_or(60);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-    let snooze_until = now + (minutes * 60);
+    let mut entries: Vec<ActivityFeedEntry> = Vec::new();
 
-    state
-        .item_repository
-        .update_due_at(item.id, Some(snooze_until))
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to snooze: {}", e)})),
-            )
-        })?;
+    // Convert changelog entries
+    for entry in &changelog {
+        let entity_name = match entry.entity_type.to_lowercase().as_str() {
+            "person" => person_names
+                .get(&entry.entity_id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{}", entry.entity_id)),
+            "rule" => rule_names
+                .get(&entry.entity_id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{}", entry.entity_id)),
+            "channel" => person_names
+                .get(&entry.entity_id)
+                .cloned()
+                .unwrap_or_else(|| "channel".to_string()),
+            _ => format!("#{}", entry.entity_id),
+        };
 
-    Ok(Json(
-        serde_json::json!({"success": true, "snooze_until": snooze_until}),
-    ))
-}
+        let (title, icon) = match (
+            entry.entity_type.to_lowercase().as_str(),
+            entry.change_type.as_str(),
+        ) {
+            ("person", "created") => (format!("New person: {}", entity_name), "fa-user-plus"),
+            ("person", "updated") => (format!("Updated {}", entity_name), "fa-user-pen"),
+            ("person", "deleted") => (format!("Removed {}", entity_name), "fa-user-minus"),
+            ("person", "merged") => (format!("Merged into {}", entity_name), "fa-people-arrows"),
+            ("channel", "created") => (format!("Channel added for {}", entity_name), "fa-plug"),
+            ("channel", "deleted") => ("Channel removed".to_string(), "fa-plug-circle-minus"),
+            ("rule", "created") => (
+                format!("Rule created: {}", entity_name),
+                "fa-wand-magic-sparkles",
+            ),
+            ("rule", "deleted") => (format!("Rule deleted: {}", entity_name), "fa-trash-can"),
+            _ => (
+                format!(
+                    "{} {} {}",
+                    entry.change_type, entry.entity_type, entity_name
+                ),
+                "fa-circle-info",
+            ),
+        };
 
-/// DELETE /api/items/{id}
-/// Dismisses an item by deleting it.
-pub async fn dismiss_item(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(id): Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let deleted = state
-        .item_repository
-        .delete_item(id, auth_user.user_id)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to dismiss: {}", e)})),
-            )
-        })?;
+        // Build human-readable detail from changed_fields JSON
+        let detail = {
+            let mut parts: Vec<String> = Vec::new();
+            if entry.source == "pipeline" {
+                parts.push("automatic".to_string());
+            }
+            if let Some(ref fields_json) = entry.changed_fields {
+                if let Ok(fields) = serde_json::from_str::<serde_json::Value>(fields_json) {
+                    if let Some(obj) = fields.as_object() {
+                        for (key, val) in obj {
+                            let val_str = val
+                                .as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| val.to_string());
+                            // Skip internal fields, show user-facing ones
+                            match key.as_str() {
+                                "name" | "nickname" => parts.push(format!("Name: {}", val_str)),
+                                "platform" => parts.push(format!("Platform: {}", val_str)),
+                                "handle" => parts.push(format!("Handle: {}", val_str)),
+                                "trigger_type" => {
+                                    let t = match val_str.as_str() {
+                                        "schedule" => "Scheduled",
+                                        "ontology_change" => "Monitoring",
+                                        _ => &val_str,
+                                    };
+                                    parts.push(format!("Type: {}", t));
+                                }
+                                "action_type" => {
+                                    let a = match val_str.as_str() {
+                                        "notify" => "Notify",
+                                        "tool_call" => "Run action",
+                                        _ => &val_str,
+                                    };
+                                    parts.push(format!("Action: {}", a));
+                                }
+                                _ => parts.push(format!("{}={}", key, val_str)),
+                            }
+                        }
+                    } else {
+                        // Not an object - use as-is
+                        let s = fields_json.trim().to_string();
+                        if !s.is_empty() && s != "null" {
+                            parts.push(s);
+                        }
+                    }
+                }
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" - "))
+            }
+        };
 
-    if deleted {
-        Ok(Json(serde_json::json!({"success": true})))
-    } else {
-        Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Item not found"})),
-        ))
+        entries.push(ActivityFeedEntry {
+            id: format!("changelog-{}", entry.id),
+            entry_type: "changelog".to_string(),
+            timestamp: entry.created_at,
+            title,
+            detail,
+            icon: format!("fa-solid {}", icon),
+            success: None,
+        });
     }
+
+    // Convert usage logs
+    for log in &usage_logs {
+        let humanize_platform = |p: &str| -> String {
+            match p {
+                "whatsapp" | "Whatsapp" => "WhatsApp".to_string(),
+                "telegram" | "Telegram" => "Telegram".to_string(),
+                "signal" | "Signal" => "Signal".to_string(),
+                "email" | "Email" => "email".to_string(),
+                "rule" => "rule trigger".to_string(),
+                "item" => "scheduled item".to_string(),
+                other => other.to_string(),
+            }
+        };
+
+        let (title, icon, detail) = match log.activity_type.as_str() {
+            "noti_msg" => (
+                "Sent you an SMS notification".to_string(),
+                "fa-comment-sms",
+                log.reason.clone(),
+            ),
+            "noti_call" => {
+                let duration_str = log.call_duration.map(|d| {
+                    if d < 60 {
+                        format!("{}s", d)
+                    } else {
+                        format!("{}m {}s", d / 60, d % 60)
+                    }
+                });
+                let detail = match (&log.reason, duration_str) {
+                    (Some(r), Some(d)) => Some(format!("{} ({})", r, d)),
+                    (Some(r), None) => Some(r.clone()),
+                    (None, Some(d)) => Some(format!("Duration: {}", d)),
+                    (None, None) => None,
+                };
+                (
+                    "Called you with a notification".to_string(),
+                    "fa-phone",
+                    detail,
+                )
+            }
+            "sms" => (
+                "You sent an SMS".to_string(),
+                "fa-message",
+                log.reason.clone(),
+            ),
+            "call" => {
+                let duration_str = log.call_duration.map(|d| {
+                    if d < 60 {
+                        format!("{}s", d)
+                    } else {
+                        format!("{}m {}s", d / 60, d % 60)
+                    }
+                });
+                (
+                    "You made a voice call".to_string(),
+                    "fa-phone-volume",
+                    duration_str.or(log.reason.clone()),
+                )
+            }
+            "web_call" => {
+                let duration_str = log.call_duration.map(|d| {
+                    if d < 60 {
+                        format!("{}s", d)
+                    } else {
+                        format!("{}m {}s", d / 60, d % 60)
+                    }
+                });
+                (
+                    "Web voice call".to_string(),
+                    "fa-headset",
+                    duration_str.or(log.reason.clone()),
+                )
+            }
+            "web_chat" => (
+                "You chatted via web dashboard".to_string(),
+                "fa-comments",
+                log.reason.clone(),
+            ),
+            "sms_test" => ("SMS test sent".to_string(), "fa-vial", log.reason.clone()),
+            at if at.ends_with("_sms") => {
+                let platform = humanize_platform(at.trim_end_matches("_sms"));
+                (
+                    format!("Notified you about a {} message", platform),
+                    "fa-bell",
+                    log.reason.clone(),
+                )
+            }
+            at if at.ends_with("_call_conditional") => {
+                let platform = humanize_platform(at.split('_').next().unwrap_or("unknown"));
+                (
+                    format!("Called you about a {} message", platform),
+                    "fa-phone-flip",
+                    log.reason.clone(),
+                )
+            }
+            at if at.ends_with("_call") => {
+                let platform = humanize_platform(at.trim_end_matches("_call"));
+                (
+                    format!("Called you about a {} message", platform),
+                    "fa-phone-flip",
+                    log.reason.clone(),
+                )
+            }
+            _ => (
+                format!("Activity: {}", log.activity_type),
+                "fa-circle-dot",
+                log.reason.clone(),
+            ),
+        };
+
+        entries.push(ActivityFeedEntry {
+            id: format!("usage-{}", log.id),
+            entry_type: "notification".to_string(),
+            timestamp: log.created_at,
+            title,
+            detail,
+            icon: format!("fa-solid {}", icon),
+            success: log.success,
+        });
+    }
+
+    // Convert messages (only from known persons to reduce noise)
+    for msg in messages.iter().filter(|m| m.person_id.is_some()).take(50) {
+        let person_name = msg
+            .person_id
+            .and_then(|pid| person_names.get(&pid))
+            .cloned()
+            .unwrap_or_else(|| msg.sender_name.clone());
+
+        let preview = if msg.content.len() > 120 {
+            format!("{}...", &msg.content[..120])
+        } else {
+            msg.content.clone()
+        };
+
+        let platform_display = match msg.platform.as_str() {
+            "whatsapp" => "WhatsApp",
+            "telegram" => "Telegram",
+            "signal" => "Signal",
+            "email" => "email",
+            other => other,
+        };
+
+        let icon = match msg.platform.as_str() {
+            "whatsapp" => "fa-brands fa-whatsapp",
+            "telegram" => "fa-brands fa-telegram",
+            "signal" => "fa-solid fa-comment-dots",
+            "email" => "fa-solid fa-envelope",
+            _ => "fa-solid fa-message",
+        };
+
+        entries.push(ActivityFeedEntry {
+            id: format!("message-{}", msg.id),
+            entry_type: "message".to_string(),
+            timestamp: msg.created_at,
+            title: format!("{} via {}", person_name, platform_display),
+            detail: Some(preview),
+            icon: icon.to_string(),
+            success: None,
+        });
+    }
+
+    // Sort by timestamp descending, truncate
+    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    entries.truncate(limit as usize);
+
+    Ok(Json(entries))
+}
+
+// -----------------------------------------------------------------------
+// Rule Sources (available prefetch sources for rule builder)
+// -----------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct RuleSourceOption {
+    pub source_type: String,
+    pub label: String,
+    pub available: bool,
+    pub meta: serde_json::Value,
+}
+
+/// GET /api/dashboard/rule-sources
+/// Returns available prefetch source types for the rule builder,
+/// with availability based on user's connected services.
+pub async fn get_rule_sources(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<RuleSourceOption>>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let mut sources = Vec::new();
+
+    // Email: available if user has IMAP credentials
+    let has_email = state
+        .user_repository
+        .get_imap_credentials(user_id)
+        .ok()
+        .flatten()
+        .is_some();
+    sources.push(RuleSourceOption {
+        source_type: "email".to_string(),
+        label: "Email".to_string(),
+        available: has_email,
+        meta: serde_json::json!({}),
+    });
+
+    // Chat: always available. Include distinct platforms.
+    let platforms: Vec<String> = state
+        .ontology_repository
+        .get_distinct_senders(user_id)
+        .unwrap_or_default()
+        .iter()
+        .map(|(_, plat, _)| plat.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    sources.push(RuleSourceOption {
+        source_type: "chat".to_string(),
+        label: "Chat".to_string(),
+        available: true,
+        meta: serde_json::json!({ "platforms": platforms }),
+    });
+
+    // Weather: always available (user can type location manually)
+    let user_info = state.user_core.get_user_info(user_id).ok();
+    let location_name = user_info
+        .as_ref()
+        .and_then(|i| i.location.clone())
+        .unwrap_or_default();
+    sources.push(RuleSourceOption {
+        source_type: "weather".to_string(),
+        label: "Weather".to_string(),
+        available: true,
+        meta: serde_json::json!({ "location": location_name }),
+    });
+
+    // Internet: always available
+    sources.push(RuleSourceOption {
+        source_type: "internet".to_string(),
+        label: "Internet".to_string(),
+        available: true,
+        meta: serde_json::json!({}),
+    });
+
+    // Tesla: available if user has Tesla connection
+    let has_tesla = state
+        .user_repository
+        .get_tesla_token_info(user_id)
+        .ok()
+        .is_some();
+    sources.push(RuleSourceOption {
+        source_type: "tesla".to_string(),
+        label: "Tesla".to_string(),
+        available: has_tesla,
+        meta: serde_json::json!({}),
+    });
+
+    // Pinned: available if user has pinned messages
+    let pinned_count = state
+        .ontology_repository
+        .get_pinned_messages(user_id)
+        .map(|p| p.len())
+        .unwrap_or(0);
+    sources.push(RuleSourceOption {
+        source_type: "pinned".to_string(),
+        label: "Tracked items".to_string(),
+        available: true,
+        meta: serde_json::json!({ "count": pinned_count }),
+    });
+
+    // MCP: available if user has enabled MCP servers
+    let mcp_repo = crate::repositories::mcp_repository::McpRepository::new(state.pg_pool.clone());
+    let mcp_servers = mcp_repo
+        .get_enabled_servers_for_user(user_id)
+        .unwrap_or_default();
+    if !mcp_servers.is_empty() {
+        let server_list: Vec<serde_json::Value> = mcp_servers
+            .iter()
+            .map(|s| serde_json::json!({ "id": s.id, "name": s.name }))
+            .collect();
+        sources.push(RuleSourceOption {
+            source_type: "mcp".to_string(),
+            label: "MCP".to_string(),
+            available: true,
+            meta: serde_json::json!({ "servers": server_list }),
+        });
+    } else {
+        sources.push(RuleSourceOption {
+            source_type: "mcp".to_string(),
+            label: "MCP".to_string(),
+            available: false,
+            meta: serde_json::json!({ "servers": [] }),
+        });
+    }
+
+    Ok(Json(sources))
+}
+
+// -----------------------------------------------------------------------
+// Senders list (for rule builder autocomplete)
+// -----------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct SenderOption {
+    pub name: String,
+    pub platform: Option<String>, // None = person (matches all channels), Some = specific channel
+    pub source: String,           // "person", "chat"
+    pub msg_count: Option<i64>,
+}
+
+/// GET /api/dashboard/senders
+/// Returns known senders for rule builder autocomplete.
+/// Combines: persons (with their channels) + distinct senders from ont_messages.
+pub async fn get_senders(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<SenderOption>>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let mut options: Vec<SenderOption> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 1. Persons with channels (highest priority)
+    let persons = state
+        .ontology_repository
+        .get_persons_with_channels(user_id)
+        .unwrap_or_default();
+
+    for person in &persons {
+        let display = person.display_name().to_string();
+
+        // Person-level entry (matches all channels)
+        let key = format!("person:{}", display.to_lowercase());
+        if seen.insert(key) {
+            options.push(SenderOption {
+                name: display.clone(),
+                platform: None,
+                source: "person".to_string(),
+                msg_count: None,
+            });
+        }
+
+        // Per-channel entries
+        for ch in &person.channels {
+            let key = format!("channel:{}:{}", display.to_lowercase(), ch.platform);
+            if seen.insert(key) {
+                options.push(SenderOption {
+                    name: display.clone(),
+                    platform: Some(ch.platform.clone()),
+                    source: "person".to_string(),
+                    msg_count: None,
+                });
+            }
+        }
+    }
+
+    // 2. Distinct senders from ont_messages (chat rooms not yet assigned to persons)
+    let senders = state
+        .ontology_repository
+        .get_distinct_senders(user_id)
+        .unwrap_or_default();
+
+    for (sender_name, platform, count) in &senders {
+        let key = format!("chat:{}:{}", sender_name.to_lowercase(), platform);
+        if seen.insert(key) {
+            options.push(SenderOption {
+                name: sender_name.clone(),
+                platform: Some(platform.clone()),
+                source: "chat".to_string(),
+                msg_count: Some(*count),
+            });
+        }
+    }
+
+    Ok(Json(options))
+}
+
+/// POST /api/messages/{id}/unpin
+pub async fn unpin_message(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(message_id): Path<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ontology_repository
+        .unpin_message(auth_user.user_id, message_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to unpin: {}", e) })),
+            )
+        })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

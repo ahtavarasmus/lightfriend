@@ -64,6 +64,12 @@ pub trait ToolHandler: Send + Sync {
         false
     }
 
+    /// Params that are auto-injected from trigger context (not filled by LLM).
+    /// Used by dynamic tool param injection in rule evaluation.
+    fn auto_injected_params(&self) -> Vec<&'static str> {
+        vec![]
+    }
+
     /// Execute the tool
     async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String>;
 }
