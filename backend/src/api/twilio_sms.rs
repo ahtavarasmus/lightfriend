@@ -44,6 +44,7 @@ fn log_tool_error(
 }
 
 /// LLM call with retry logic, used by the agentic loop.
+#[allow(clippy::too_many_arguments)]
 async fn llm_call_with_retry(
     state: &Arc<AppState>,
     provider: AiProvider,

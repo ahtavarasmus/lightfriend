@@ -113,6 +113,42 @@ impl FlowNode {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt templates: stored as "template:<id>" in flow_config, resolved at eval time
+// ---------------------------------------------------------------------------
+
+/// Resolve a prompt string. If it starts with "template:", expand to the
+/// current canonical prompt text. Otherwise return as-is (custom prompt).
+pub fn resolve_prompt_template(prompt: &str, trigger_type: &str) -> String {
+    let id = match prompt.strip_prefix("template:") {
+        Some(id) => id,
+        None => return prompt.to_string(),
+    };
+    let is_schedule = trigger_type == "schedule";
+    match id {
+        "summarize" => if is_schedule {
+            "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked items with approaching deadlines. Format as a numbered list, one item per line."
+        } else {
+            "Summarize this message along with recent conversation context. Highlight key points and any action needed."
+        }.to_string(),
+        "filter_important" => if is_schedule {
+            "Review recent messages and emails. Only notify if delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are NOT critical. If nothing critical, respond with just 'skip'."
+        } else {
+            "Only notify if delaying this message over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates, casual messages, and vague requests are NOT critical. If not critical, respond with just 'skip'."
+        }.to_string(),
+        "track_items" => "Does this message relate to an already-tracked/pinned item? If it updates a tracked item (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        _ if id.starts_with("check_condition:") => {
+            let condition = id.strip_prefix("check_condition:").unwrap_or("");
+            if is_schedule {
+                format!("Check if the following condition is met based on recent messages: {}. If the condition is not met, respond with just 'skip'.", condition)
+            } else {
+                format!("Check if this message matches the following condition: {}. If it doesn't match, respond with just 'skip'.", condition)
+            }
+        }
+        _ => prompt.to_string(), // unknown template, use as-is
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config types (deserialized from JSON columns)
 // ---------------------------------------------------------------------------
 
@@ -290,6 +326,8 @@ async fn evaluate_flow(
             true_branch,
             false_branch,
         } => {
+            // Resolve template prompts to actual text
+            let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
             // Peek at true_branch to extract tool params for LLM
             let extra_params = extract_tool_params(state, true_branch.as_ref());
             let prefetched = prefetch_sources(state, rule, fetch).await;
@@ -297,7 +335,7 @@ async fn evaluate_flow(
                 state,
                 rule,
                 trigger_context,
-                prompt,
+                &resolved_prompt,
                 &prefetched,
                 extra_params.as_ref(),
             )
@@ -1233,10 +1271,11 @@ pub async fn evaluate_flow_test(
             }
             let prefetched = prefetch_sources(state, rule, fetch).await;
 
-            let preview = if prompt.len() > 120 {
-                format!("{}...", &prompt[..120])
+            let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
+            let preview = if resolved_prompt.len() > 120 {
+                format!("{}...", &resolved_prompt[..120])
             } else {
-                prompt.clone()
+                resolved_prompt.clone()
             };
             let _ = tx
                 .send(RuleTestStep::EvaluatingLlm {
@@ -1249,7 +1288,7 @@ pub async fn evaluate_flow_test(
                 state,
                 rule,
                 trigger_context,
-                prompt,
+                &resolved_prompt,
                 &prefetched,
                 extra_params.as_ref(),
             )

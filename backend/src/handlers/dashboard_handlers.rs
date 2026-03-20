@@ -355,7 +355,7 @@ fn get_quiet_mode_info(
 
     match quiet_until {
         None => QuietModeInfo {
-            is_quiet: rule_count > 0 && false, // only quiet if explicitly set
+            is_quiet: false, // only quiet if explicitly set via quiet_until
             until: None,
             until_display: None,
             rule_count,
@@ -526,7 +526,7 @@ pub async fn get_activity_feed(
             ("person", "deleted") => (format!("Removed {}", entity_name), "fa-user-minus"),
             ("person", "merged") => (format!("Merged into {}", entity_name), "fa-people-arrows"),
             ("channel", "created") => (format!("Channel added for {}", entity_name), "fa-plug"),
-            ("channel", "deleted") => (format!("Channel removed"), "fa-plug-circle-minus"),
+            ("channel", "deleted") => ("Channel removed".to_string(), "fa-plug-circle-minus"),
             ("rule", "created") => (
                 format!("Rule created: {}", entity_name),
                 "fa-wand-magic-sparkles",

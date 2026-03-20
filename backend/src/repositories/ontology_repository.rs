@@ -769,6 +769,7 @@ impl OntologyRepository {
     // -----------------------------------------------------------------------
 
     /// Create a link between two entities. Uses ON CONFLICT to avoid duplicates.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_link(
         &self,
         user_id: i32,
@@ -1151,6 +1152,7 @@ impl OntologyRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_rule(
         &self,
         user_id: i32,

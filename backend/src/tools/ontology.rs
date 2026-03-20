@@ -66,8 +66,8 @@ fn query_person(
     };
 
     // Apply keyword filter if both name and query are specified
-    let persons = if name_filter.is_some() && query_filter.is_some() {
-        let q = query_filter.as_ref().unwrap().to_lowercase();
+    let persons = if let (Some(_), Some(ref q_ref)) = (&name_filter, &query_filter) {
+        let q = q_ref.to_lowercase();
         persons
             .into_iter()
             .filter(|p| {

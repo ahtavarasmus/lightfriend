@@ -1501,10 +1501,45 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     // Parse logic
                     if rule.logic_type == "llm" {
                         logic_mode.set(LogicMode::Llm);
-                        logic_prompt
-                            .set(rule.logic_prompt.clone().unwrap_or_default());
-                        selected_template.set(PromptTemplate::Custom);
-                        condition_input.set(String::new());
+                        // Check flow_config prompt for template IDs
+                        let fc_prompt = rule.flow_config.as_ref()
+                            .and_then(|fc| serde_json::from_str::<serde_json::Value>(fc).ok())
+                            .and_then(|v| v.get("prompt").and_then(|p| p.as_str()).map(|s| s.to_string()))
+                            .unwrap_or_default();
+                        if fc_prompt.starts_with("template:") {
+                            match fc_prompt.as_str() {
+                                "template:summarize" => {
+                                    selected_template.set(PromptTemplate::Summarize);
+                                    logic_prompt.set(String::new());
+                                    condition_input.set(String::new());
+                                }
+                                "template:filter_important" => {
+                                    selected_template.set(PromptTemplate::FilterImportant);
+                                    logic_prompt.set(String::new());
+                                    condition_input.set(String::new());
+                                }
+                                "template:track_items" => {
+                                    selected_template.set(PromptTemplate::TrackItems);
+                                    logic_prompt.set(String::new());
+                                    condition_input.set(String::new());
+                                }
+                                s if s.starts_with("template:check_condition:") => {
+                                    selected_template.set(PromptTemplate::CheckCondition);
+                                    let cond = s.strip_prefix("template:check_condition:").unwrap_or("");
+                                    condition_input.set(cond.to_string());
+                                    logic_prompt.set(String::new());
+                                }
+                                _ => {
+                                    selected_template.set(PromptTemplate::Custom);
+                                    logic_prompt.set(fc_prompt);
+                                    condition_input.set(String::new());
+                                }
+                            }
+                        } else {
+                            selected_template.set(PromptTemplate::Custom);
+                            logic_prompt.set(rule.logic_prompt.clone().unwrap_or_else(|| fc_prompt));
+                            condition_input.set(String::new());
+                        }
                         if let Some(ref fetch_raw) = rule.logic_fetch {
                             let trimmed = fetch_raw.trim();
                             if trimmed.starts_with('[') {
@@ -2016,16 +2051,12 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             if v.is_empty() { None } else { Some(v) }
                         }
                         PromptTemplate::CheckCondition => {
-                            let prompt = get_template_prompt(
-                                &PromptTemplate::CheckCondition,
-                                &*when_mode,
-                                &*condition_input,
-                            );
-                            if prompt.is_empty() { None } else { Some(prompt) }
+                            let ci = (*condition_input).clone();
+                            if ci.is_empty() { None } else { Some(format!("template:check_condition:{}", ci)) }
                         }
-                        ref tmpl => {
-                            Some(get_template_prompt(tmpl, &*when_mode, ""))
-                        }
+                        PromptTemplate::Summarize => Some("template:summarize".to_string()),
+                        PromptTemplate::FilterImportant => Some("template:filter_important".to_string()),
+                        PromptTemplate::TrackItems => Some("template:track_items".to_string()),
                     }
                 }
                 _ => None,
@@ -2685,6 +2716,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             {for [
                                                 (PromptTemplate::Summarize, "Summarize"),
                                                 (PromptTemplate::FilterImportant, "Only if important"),
+                                                (PromptTemplate::TrackItems, "AI tracks"),
                                                 (PromptTemplate::CheckCondition, "Check condition"),
                                                 (PromptTemplate::Custom, "Custom"),
                                             ].iter().map(|(tmpl, label)| {
@@ -3872,16 +3904,12 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             if v.is_empty() { None } else { Some(v) }
                                                         }
                                                         PromptTemplate::CheckCondition => {
-                                                            let prompt = get_template_prompt(
-                                                                &PromptTemplate::CheckCondition,
-                                                                &*when_mode,
-                                                                &*condition_input,
-                                                            );
-                                                            if prompt.is_empty() { None } else { Some(prompt) }
+                                                            let ci = (*condition_input).clone();
+                                                            if ci.is_empty() { None } else { Some(format!("template:check_condition:{}", ci)) }
                                                         }
-                                                        ref tmpl => {
-                                                            Some(get_template_prompt(tmpl, &*when_mode, ""))
-                                                        }
+                                                        PromptTemplate::Summarize => Some("template:summarize".to_string()),
+                                                        PromptTemplate::FilterImportant => Some("template:filter_important".to_string()),
+                                                        PromptTemplate::TrackItems => Some("template:track_items".to_string()),
                                                     }
                                                 }
                                                 _ => None,
