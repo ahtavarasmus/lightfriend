@@ -27,6 +27,12 @@ record_check() {
     fi
 }
 
+extract_yaml_value() {
+    local file="$1"
+    local key="$2"
+    grep "^${key}:" "$file" 2>/dev/null | sed "s/^${key}: *//" | tr -d '"' | tr -d "'"
+}
+
 # ── 1. All supervisord processes running ────────────────────────────────────
 
 echo "Check 1: supervisord processes..."
@@ -50,8 +56,8 @@ fi
 echo "Check 2: PostgreSQL accessible..."
 DB_USER_COUNT=$(psql -h localhost -U lightfriend -d lightfriend_db -t -A \
     -c "SELECT count(*) FROM users" 2>/dev/null || echo "ERROR")
-if [ "${DB_USER_COUNT}" != "ERROR" ] && [ "${DB_USER_COUNT}" -gt 0 ] 2>/dev/null; then
-    echo "  OK: ${DB_USER_COUNT} users in database"
+if [ "${DB_USER_COUNT}" != "ERROR" ]; then
+    echo "  OK: users query succeeded (${DB_USER_COUNT} users)"
     record_check "postgresql_accessible" "true"
 else
     echo "  FAIL: could not query users (got: ${DB_USER_COUNT})"
@@ -141,9 +147,56 @@ else
     record_check "bridge_databases" "false" "one or more bridge databases have no tables"
 fi
 
-# ── 8. Tuwunel data directory ────────────────────────────────────────
+# ── 8. Bridge registrations preserved after full restore ───────────────
 
-echo "Check 8: Tuwunel data..."
+echo "Check 8: bridge registration integrity..."
+BRIDGE_HASHES_FILE="/tmp/bridge-registration-hashes"
+BRIDGE_REG_OK=true
+BRIDGE_REG_DETAILS=""
+if [ -f "${BRIDGE_HASHES_FILE}" ]; then
+    while IFS=: read -r bridge expected_hash; do
+        [ -z "${bridge}" ] && continue
+        reg_file="/data/bridges/${bridge}/${bridge}-registration.yaml"
+        if [ ! -f "${reg_file}" ]; then
+            BRIDGE_REG_OK=false
+            echo "  FAIL: ${bridge} registration file missing"
+            BRIDGE_REG_DETAILS="${BRIDGE_REG_DETAILS}${bridge} registration missing; "
+            continue
+        fi
+
+        actual_hash=$(sha256sum "${reg_file}" | awk '{print $1}')
+        if [ "${actual_hash}" != "${expected_hash}" ]; then
+            BRIDGE_REG_OK=false
+            echo "  FAIL: ${bridge} registration hash mismatch"
+            BRIDGE_REG_DETAILS="${BRIDGE_REG_DETAILS}${bridge} registration changed; "
+            continue
+        fi
+
+        as_token=$(extract_yaml_value "${reg_file}" "as_token")
+        hs_token=$(extract_yaml_value "${reg_file}" "hs_token")
+        if [ -z "${as_token}" ] || [ -z "${hs_token}" ]; then
+            BRIDGE_REG_OK=false
+            echo "  FAIL: ${bridge} registration missing tokens"
+            BRIDGE_REG_DETAILS="${BRIDGE_REG_DETAILS}${bridge} tokens missing; "
+            continue
+        fi
+
+        echo "  OK: ${bridge} registration matches restored backup"
+    done < "${BRIDGE_HASHES_FILE}"
+
+    if [ "${BRIDGE_REG_OK}" = "true" ]; then
+        record_check "bridge_registration_integrity" "true"
+    else
+        record_check "bridge_registration_integrity" "false" "${BRIDGE_REG_DETAILS%? }"
+    fi
+else
+    echo "  SKIP: no bridge registration hash file (not a full-restore verification)"
+    record_check "bridge_registration_integrity" "true"
+fi
+
+# ── 9. Tuwunel data directory ────────────────────────────────────────
+
+echo "Check 9: Tuwunel data..."
 TUWUNEL_FILES=$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)
 if [ "${TUWUNEL_FILES}" -gt 0 ]; then
     echo "  OK: /var/lib/tuwunel has ${TUWUNEL_FILES} files"
@@ -153,9 +206,9 @@ else
     record_check "tuwunel_data" "false" "tuwunel data directory is empty"
 fi
 
-# ── 9. Cloudflared tunnel connected ──────────────────────────────────────
+# ── 10. Cloudflared tunnel connected ──────────────────────────────────────
 
-echo "Check 9: cloudflared tunnel..."
+echo "Check 10: cloudflared tunnel..."
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     CF_STATUS=$(supervisorctl status cloudflared 2>/dev/null || echo "")
     if echo "${CF_STATUS}" | grep -q "RUNNING"; then

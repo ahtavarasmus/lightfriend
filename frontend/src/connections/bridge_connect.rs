@@ -27,6 +27,19 @@ pub struct BridgeConfig {
 const POLL_INTERVAL_MS: i32 = 5000;        // 5 seconds
 const POLL_DURATION_MS: i32 = 300000;      // 5 minutes
 
+/// Map backend error strings to user-friendly messages
+fn humanize_error(raw: &str) -> String {
+    match raw {
+        "cleanup_in_progress" => "Previous connection is still being cleaned up. Please wait a moment and try again.".to_string(),
+        "bridge_not_found" => "The messaging bridge could not be found. Please try again.".to_string(),
+        "already_connected" => "This account is already connected.".to_string(),
+        "rate_limited" => "Too many attempts. Please wait a minute before trying again.".to_string(),
+        "invalid_qr" | "qr_expired" => "The QR code has expired. Please try connecting again.".to_string(),
+        "matrix_error" => "There was an issue with the messaging server. Please try again later.".to_string(),
+        other => other.to_string(),
+    }
+}
+
 // Bridge configs
 pub const WHATSAPP_CONFIG: BridgeConfig = BridgeConfig {
     name: "WhatsApp",
@@ -113,7 +126,6 @@ struct ErrorResponse {
 pub struct BridgeConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
     pub config: BridgeConfig,
 }
 
@@ -137,6 +149,40 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let is_resetting = use_state(|| false);
     let reset_success = use_state(|| false);
     let is_cleaning_up = use_state(|| false);
+    let remaining_seconds = use_state(|| 0_i32);
+    let poll_start_time = use_state(|| 0.0_f64);
+
+    // Countdown timer effect - ticks every second while connecting
+    {
+        let remaining_seconds = remaining_seconds.clone();
+        let poll_start_time = poll_start_time.clone();
+        let is_connecting_dep = *is_connecting;
+        use_effect_with_deps(
+            move |is_conn: &bool| {
+                let interval_holder: std::rc::Rc<std::cell::RefCell<Option<gloo_timers::callback::Interval>>> =
+                    std::rc::Rc::new(std::cell::RefCell::new(None));
+                if *is_conn {
+                    let remaining_seconds = remaining_seconds.clone();
+                    let poll_start_time_val = *poll_start_time;
+                    let interval = gloo_timers::callback::Interval::new(1_000, move || {
+                        if poll_start_time_val > 0.0 {
+                            let elapsed = (js_sys::Date::now() - poll_start_time_val) / 1000.0;
+                            let remaining = ((POLL_DURATION_MS as f64 / 1000.0) - elapsed).max(0.0) as i32;
+                            remaining_seconds.set(remaining);
+                        }
+                    });
+                    *interval_holder.borrow_mut() = Some(interval);
+                } else {
+                    remaining_seconds.set(0);
+                }
+                let holder = interval_holder;
+                move || {
+                    holder.borrow_mut().take();
+                }
+            },
+            is_connecting_dep,
+        );
+    }
 
     // Function to fetch status
     let fetch_status = {
@@ -225,6 +271,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         let error = error.clone();
         let fetch_status = fetch_status.clone();
         let is_cleaning_up = is_cleaning_up.clone();
+        let poll_start_time = poll_start_time.clone();
+        let remaining_seconds = remaining_seconds.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -234,10 +282,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let error = error.clone();
             let fetch_status = fetch_status.clone();
             let is_cleaning_up = is_cleaning_up.clone();
+            let poll_start_time = poll_start_time.clone();
+            let remaining_seconds = remaining_seconds.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
             is_connecting.set(true);
             was_connecting.set(true);
+            poll_start_time.set(js_sys::Date::now());
+            remaining_seconds.set(POLL_DURATION_MS / 1000);
             spawn_local(async move {
                 // Retry loop for cleanup_in_progress
                 let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
@@ -329,7 +381,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 // Other error
                                 is_connecting.set(false);
                                 if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    error.set(Some(err_response.error));
+                                    error.set(Some(humanize_error(&err_response.error)));
                                 } else {
                                     error.set(Some(format!("Failed to start {} connection", bridge_name)));
                                 }
@@ -662,6 +714,11 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     { for config.instructions.iter().enumerate().map(|(i, instruction)| {
                                         html! { <p class="instruction">{format!("{}. {}", i + 1, instruction)}</p> }
                                     })}
+                                    if *remaining_seconds > 0 {
+                                        <div class="poll-countdown">
+                                            {format!("{}:{:02} remaining", *remaining_seconds / 60, *remaining_seconds % 60)}
+                                        </div>
+                                    }
                                 </div>
                             } else {
                                 <div class="loading-container">
@@ -1071,6 +1128,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         color: #999;
                         margin-top: 0.5rem;
                         font-size: 0.9rem;
+                    }
+                    .poll-countdown {
+                        color: #888;
+                        font-size: 0.85rem;
+                        margin-top: 1rem;
+                        padding: 0.5rem 1rem;
+                        background: rgba(255, 255, 255, 0.05);
+                        border-radius: 6px;
+                        display: inline-block;
                     }
                     .loading-container {
                         text-align: center;

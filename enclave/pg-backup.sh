@@ -1,13 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# PostgreSQL-only backup for daily scheduled runs.
+# PostgreSQL-only backup for scheduled runs.
 # Zero downtime - uses pg_dump's MVCC snapshot (no service stops).
 # Produces a single .tar.gz.enc file in /data/seed/.
 #
 # For full backups (all data stores), use export.sh (requires stopping services).
 
-# Load env vars (needed when invoked via supervisord's pg-backup-trigger)
+# Load non-secret env vars persisted by entrypoint.sh. BACKUP_ENCRYPTION_KEY
+# must come from the live inherited process environment, not from disk.
 if [ -f /etc/lightfriend/env ]; then
     set -a
     source /etc/lightfriend/env

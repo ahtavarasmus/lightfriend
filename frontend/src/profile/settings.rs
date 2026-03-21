@@ -132,7 +132,7 @@ async fn perform_profile_update_email(
             save_state.set(FieldSaveState::Success);
             let save_state_clone = save_state.clone();
             spawn_local(async move {
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                gloo_timers::future::TimeoutFuture::new(3_000).await;
                 save_state_clone.set(FieldSaveState::Idle);
             });
         }
@@ -393,7 +393,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -481,7 +481,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -570,7 +570,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -658,7 +658,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -745,7 +745,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -792,7 +792,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -839,7 +839,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -886,7 +886,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -934,7 +934,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -981,7 +981,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             save_state.set(FieldSaveState::Success);
                             let save_state_clone = save_state.clone();
                             spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                gloo_timers::future::TimeoutFuture::new(3_000).await;
                                 save_state_clone.set(FieldSaveState::Idle);
                             });
                         }
@@ -1029,7 +1029,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1072,7 +1072,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1119,7 +1119,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1617,7 +1617,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     save_state.set(FieldSaveState::Success);
                                     let save_state_clone = save_state.clone();
                                     spawn_local(async move {
-                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                        gloo_timers::future::TimeoutFuture::new(3_000).await;
                                         save_state_clone.set(FieldSaveState::Idle);
                                     });
                                 }

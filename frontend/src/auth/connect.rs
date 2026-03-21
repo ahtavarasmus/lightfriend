@@ -17,7 +17,6 @@ use serde_json::Value;
 pub struct ConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
     pub phone_number: String,
     pub estimated_monitoring_cost: f32,
 }
@@ -200,12 +199,12 @@ pub fn connect(props: &ConnectProps) -> Html {
     );
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
-            "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
+            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
+            "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
+            "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
-            "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
             "mcp" => html! { <McpConnect user_id={props.user_id} /> },
             "perplexity" => html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> },
             "weather" => html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> },

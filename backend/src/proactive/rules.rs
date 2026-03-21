@@ -169,6 +169,8 @@ pub struct TriggerConfig {
     // already saw the message. None or 0 = immediate (no seen-check).
     // Default 300 (5 min) for ontology_change rules.
     pub delay_seconds: Option<i32>,
+    // Group chat mode: "all" = all messages, "mention_only" = only @mentions
+    pub group_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -229,6 +231,20 @@ pub fn matches_trigger(
                 .to_lowercase()
                 .contains(&expected_value.to_lowercase())
             {
+                return false;
+            }
+        }
+    }
+
+    // Group chat "mention_only" filter: skip messages that don't contain @mention
+    if let Some(ref mode) = config.group_mode {
+        if mode == "mention_only" {
+            let content = entity_snapshot
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            // Check for @mention patterns (bridged platforms relay mentions as @name)
+            if !content.contains('@') {
                 return false;
             }
         }
@@ -326,6 +342,30 @@ async fn evaluate_flow(
             true_branch,
             false_branch,
         } => {
+            // Safety: group chat messages must never be evaluated with LLM.
+            // If the trigger has group_mode set, skip LLM and execute true_branch directly.
+            let trigger: TriggerConfig =
+                serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+            if trigger.group_mode.is_some() {
+                info!(
+                    "Rule {} ({}): skipping LLM eval for group chat, executing action directly",
+                    rule.id, rule.name
+                );
+                if let Some(branch) = true_branch.as_ref() {
+                    return Box::pin(evaluate_flow(
+                        state,
+                        rule,
+                        trigger_context,
+                        trigger_snapshot,
+                        branch,
+                        prev_message,
+                        prev_extras,
+                    ))
+                    .await;
+                }
+                return Ok(());
+            }
+
             // Resolve template prompts to actual text
             let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
             // Peek at true_branch to extract tool params for LLM

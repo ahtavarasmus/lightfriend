@@ -162,7 +162,7 @@ pub fn Home() -> Html {
             html! {
                 <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
                     <div style="text-align: center;">
-                        <p>{"Loading..."}</p>
+                        <div class="loading-spinner-inline"></div>
                     </div>
                 </div>
             }

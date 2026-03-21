@@ -1335,6 +1335,12 @@ pub async fn handle_bridge_message(
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
+    // Check if this is a group chat (same heuristic as get_service_rooms)
+    let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+        Ok(members) => members.len() > 3,
+        Err(_) => false,
+    };
+
     // Ontology Person lookup (for person_id on the message)
     let matching_person = state
         .ontology_repository
@@ -1372,6 +1378,7 @@ pub async fn handle_bridge_message(
                     "sender_name": msg.sender_name,
                     "content": msg.content,
                     "room_id": msg.room_id,
+                    "is_group": is_group,
                 });
                 crate::proactive::rules::emit_ontology_change(
                     &state_clone,

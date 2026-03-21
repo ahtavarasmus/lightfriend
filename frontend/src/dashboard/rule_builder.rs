@@ -1232,8 +1232,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_filter_value = use_state(|| String::new());
     let event_fire_once = use_state(|| true); // default: one-shot
     let event_delay = use_state(|| 300i32); // default: 5 min delay before rule fires
-    let sender_suggestions = use_state(|| Vec::<(String, Option<String>)>::new()); // (display, platform?)
+    // (display_name, platform, is_group, group_mode)
+    // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
+    let sender_suggestions = use_state(|| Vec::<(String, Option<String>, bool, Option<String>)>::new());
     let sender_dropdown_open = use_state(|| false);
+    let selected_group_mode = use_state(|| None::<String>); // None = not a group, Some("all") or Some("mention_only")
 
     // IF state
     let logic_mode = use_state(|| LogicMode::Always);
@@ -1284,7 +1287,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let test_steps = use_state(|| Vec::<(String, String, String)>::new()); // (css_class, icon, text)
     let test_es_ref = use_mut_ref(|| None::<web_sys::EventSource>);
 
-    // Fetch senders for autocomplete (persons + chat room names from all networks)
+    // Fetch senders for autocomplete (persons + chat room names + group chats)
     {
         let sender_suggestions = sender_suggestions.clone();
         use_effect_with_deps(move |open| {
@@ -1293,16 +1296,26 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                 spawn_local(async move {
                     if let Ok(r) = Api::get("/api/dashboard/senders").send().await {
                         if let Ok(senders) = r.json::<Vec<serde_json::Value>>().await {
-                            let suggestions: Vec<(String, Option<String>)> = senders
-                                .iter()
-                                .filter_map(|s| {
-                                    let name = s.get("name")?.as_str()?;
-                                    let platform = s.get("platform")
-                                        .and_then(|p| p.as_str())
-                                        .map(|p| p.to_string());
-                                    Some((name.to_string(), platform))
-                                })
-                                .collect();
+                            let mut suggestions: Vec<(String, Option<String>, bool, Option<String>)> = Vec::new();
+                            for s in &senders {
+                                let name = match s.get("name").and_then(|n| n.as_str()) {
+                                    Some(n) => n.to_string(),
+                                    None => continue,
+                                };
+                                let platform = s.get("platform")
+                                    .and_then(|p| p.as_str())
+                                    .map(|p| p.to_string());
+                                let is_group = s.get("is_group")
+                                    .and_then(|g| g.as_bool())
+                                    .unwrap_or(false);
+                                if is_group {
+                                    // Add two entries for groups: (all) and (mention only)
+                                    suggestions.push((name.clone(), platform.clone(), true, Some("all".to_string())));
+                                    suggestions.push((name, platform, true, Some("mention_only".to_string())));
+                                } else {
+                                    suggestions.push((name, platform, false, None));
+                                }
+                            }
                             sender_suggestions.set(suggestions);
                         }
                     }
@@ -1416,6 +1429,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let keyword_input = keyword_input.clone();
         let else_flow_init = else_flow.clone();
         let user_touched_form = user_touched_form.clone();
+        let selected_group_mode = selected_group_mode.clone();
 
         use_effect_with_deps(
             move |editing: &Option<RuleData>| {
@@ -1496,6 +1510,12 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         // delay_seconds defaults to 300 if not set
                         let ds = tc.get("delay_seconds").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
                         event_delay.set(ds);
+                        // Restore group_mode if present
+                        if let Some(gm) = tc.get("group_mode").and_then(|v| v.as_str()) {
+                            selected_group_mode.set(Some(gm.to_string()));
+                        } else {
+                            selected_group_mode.set(None);
+                        }
                     }
 
                     // Parse logic
@@ -1988,6 +2008,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let tc_tesla_cmd = tc_tesla_cmd.clone();
         let tc_mcp_params = tc_mcp_params.clone();
         let else_flow_submit = else_flow.clone();
+        let selected_group_mode = selected_group_mode.clone();
         let saving = saving.clone();
         let error_msg = error_msg.clone();
         let on_saved = props.on_saved.clone();
@@ -2028,6 +2049,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     let fk = (*event_filter_key).clone();
                     if fk != "none" && !fv.is_empty() {
                         config["filters"] = serde_json::json!({ fk: fv });
+                    }
+                    // Include group_mode if a group chat sender is selected
+                    if let Some(ref gm) = *selected_group_mode {
+                        config["group_mode"] = serde_json::json!(gm);
                     }
                     ("ontology_change".to_string(), config.to_string())
                 }
@@ -2507,12 +2532,15 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     onchange={{
                                                         let fk = event_filter_key.clone();
                                                         let fv = event_filter_value.clone();
+                                                        let sgm = selected_group_mode.clone();
                                                         Callback::from(move |e: Event| {
                                                             if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                                                                 if sel.value() == "none" {
                                                                     fv.set(String::new());
                                                                 }
                                                                 fk.set(sel.value());
+                                                                // Clear group mode when filter type changes
+                                                                sgm.set(None);
                                                             }
                                                         })
                                                     }}
@@ -2524,7 +2552,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             </div>
                                             if *event_filter_key == "sender" {
                                                 <div class="rb-field" style="position: relative;">
-                                                    <div class="rb-field-label">{"Person"}</div>
+                                                    <div class="rb-field-label">{"Person / Group"}</div>
                                                     <input
                                                         class="rb-input"
                                                         type="text"
@@ -2533,10 +2561,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         oninput={{
                                                             let fv = event_filter_value.clone();
                                                             let sd = sender_dropdown_open.clone();
+                                                            let sgm = selected_group_mode.clone();
                                                             Callback::from(move |e: InputEvent| {
                                                                 if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                                                                     fv.set(input.value());
                                                                     sd.set(true);
+                                                                    // Clear group mode when user types (deselects group)
+                                                                    sgm.set(None);
                                                                 }
                                                             })
                                                         }}
@@ -2548,18 +2579,33 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     if *sender_dropdown_open {
                                                         <div class="rb-autocomplete">
                                                             { for sender_suggestions.iter()
-                                                                .filter(|(name, _)| {
+                                                                .filter(|(name, _, _, _)| {
                                                                     let q = event_filter_value.to_lowercase();
                                                                     q.is_empty() || name.to_lowercase().contains(&q)
                                                                 })
-                                                                .map(|(name, platform)| {
-                                                                    let display = match platform {
-                                                                        Some(p) => format!("{} ({})", name, p),
-                                                                        None => name.clone(),
+                                                                .map(|(name, platform, is_group, group_mode)| {
+                                                                    let display = if *is_group {
+                                                                        let mode_label = match group_mode.as_deref() {
+                                                                            Some("mention_only") => "(mention only)",
+                                                                            _ => "(all)",
+                                                                        };
+                                                                        match platform {
+                                                                            Some(p) => format!("{} ({}) (group){}", name, p, mode_label),
+                                                                            None => format!("{} (group){}", name, mode_label),
+                                                                        }
+                                                                    } else {
+                                                                        match platform {
+                                                                            Some(p) => format!("{} ({})", name, p),
+                                                                            None => name.clone(),
+                                                                        }
                                                                     };
                                                                     let set_val = name.clone();
                                                                     let fv = event_filter_value.clone();
                                                                     let sd = sender_dropdown_open.clone();
+                                                                    let sgm = selected_group_mode.clone();
+                                                                    let gm = group_mode.clone();
+                                                                    let is_grp = *is_group;
+                                                                    let lm = logic_mode.clone();
                                                                     html! {
                                                                         <div class="rb-autocomplete-item"
                                                                             onmousedown={{
@@ -2567,6 +2613,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                                     e.prevent_default();
                                                                                     fv.set(set_val.clone());
                                                                                     sd.set(false);
+                                                                                    if is_grp {
+                                                                                        sgm.set(gm.clone());
+                                                                                        // Force logic mode to non-LLM when group is selected
+                                                                                        lm.set(LogicMode::Always);
+                                                                                    } else {
+                                                                                        sgm.set(None);
+                                                                                    }
                                                                                 })
                                                                             }}
                                                                         >
@@ -2682,12 +2735,18 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         >{"Keyword"}</button>
                                         <button
                                             class={classes!("rb-toggle-btn", (*logic_mode == LogicMode::Llm).then(|| "active"))}
-                                            disabled={!is_autopilot}
+                                            disabled={!is_autopilot || selected_group_mode.is_some()}
                                             onclick={{
                                                 let lm = logic_mode.clone();
                                                 Callback::from(move |_: MouseEvent| lm.set(LogicMode::Llm))
                                             }}
-                                        >{if is_autopilot { "AI decides" } else { "AI decides (Autopilot)" }}</button>
+                                        >{if selected_group_mode.is_some() {
+                                            "AI decides (not for groups)"
+                                        } else if is_autopilot {
+                                            "AI decides"
+                                        } else {
+                                            "AI decides (Autopilot)"
+                                        }}</button>
                                     </div>
                                     if *logic_mode == LogicMode::Keyword {
                                         <div class="rb-field">
@@ -5543,8 +5602,13 @@ fn auto_generate_name(
         if let Some(f) = filters {
             if let Some((key, val)) = f.iter().next() {
                 let val_str = val.as_str().unwrap_or("");
+                let group_mode = tc.get("group_mode").and_then(|v| v.as_str());
                 if key == "sender" && !val_str.is_empty() {
-                    format!("From {}", val_str)
+                    match group_mode {
+                        Some("mention_only") => format!("Group {} (mentions)", val_str),
+                        Some("all") => format!("Group {} (all)", val_str),
+                        _ => format!("From {}", val_str),
+                    }
                 } else if !val_str.is_empty() {
                     format!("{} {}", capitalize_first(key), val_str)
                 } else {

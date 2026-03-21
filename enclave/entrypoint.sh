@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "=== Lightfriend Enclave Entrypoint ==="
 
@@ -13,9 +13,16 @@ if [ -e /dev/vsock ]; then
             source /tmp/host_env
             set +a
             echo "Environment loaded from host (attempt $attempt)"
-            # Persist env for supervisord-managed processes (export-trigger, etc.)
+            # Never persist BACKUP_ENCRYPTION_KEY to disk. The trustless backup
+            # key must be derived again on each boot and only exist in memory.
+            if [ -n "${BACKUP_ENCRYPTION_KEY:-}" ] && [ "${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-false}" = "true" ]; then
+                export INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK="${BACKUP_ENCRYPTION_KEY}"
+            fi
+            unset BACKUP_ENCRYPTION_KEY
+
+            # Persist non-secret env for supervisord-managed processes.
             mkdir -p /etc/lightfriend
-            cp /tmp/host_env /etc/lightfriend/env
+            grep -v '^BACKUP_ENCRYPTION_KEY=' /tmp/host_env > /etc/lightfriend/env || true
             chmod 600 /etc/lightfriend/env
             rm -f /tmp/host_env
             ENV_LOADED=true
@@ -40,6 +47,7 @@ export SIGNAL_BRIDGE_BOT="${SIGNAL_BRIDGE_BOT:-@signalbot:localhost}"
 export TELEGRAM_BRIDGE_BOT="${TELEGRAM_BRIDGE_BOT:-@telegrambot:localhost}"
 export PORT="${PORT:-3000}"
 export SKIP_BACKEND="${SKIP_BACKEND:-false}"
+export RESTORE_MODE="${RESTORE_MODE:-none}"
 
 # ── 0c. Start VSOCK outbound proxy bridge ────────────────────────────────────
 
@@ -62,21 +70,49 @@ else
     echo "No VSOCK device - running in direct network mode"
 fi
 
-# ── 0d. Fetch backup from host via VSOCK (if available) ─────────────────────
-if [ -e /dev/vsock ]; then
-    echo "Checking host for backup to restore..."
+# ── 0d. Derive backup encryption key (runtime only, never persisted) ────────
+echo "Deriving runtime backup encryption key..."
+if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh)"; then
+    echo "FATAL: Failed to derive BACKUP_ENCRYPTION_KEY"
+    exit 1
+fi
+if [ -z "${BACKUP_ENCRYPTION_KEY}" ]; then
+    echo "FATAL: Derived BACKUP_ENCRYPTION_KEY is empty"
+    exit 1
+fi
+export BACKUP_ENCRYPTION_KEY
+unset INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK
+
+BACKUP_KEY_FINGERPRINT="$(printf '%s' "${BACKUP_ENCRYPTION_KEY}" | sha256sum | awk '{print $1}' | cut -c1-16)"
+echo "Runtime backup key ready (fingerprint: ${BACKUP_KEY_FINGERPRINT})"
+
+# ── 0e. Fetch backup from host via VSOCK (explicit restore only) ────────────
+if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" != "none" ]; then
+    echo "Restore requested (mode: ${RESTORE_MODE}) - fetching backup from host..."
     mkdir -p /data/seed
     RECEIVED="/data/seed/backup-received.tar.gz.enc"
     socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
         echo "Backup received from host (${RECEIVED_SIZE} bytes)"
-        # Rename to match expected pattern for full restore
-        mv "$RECEIVED" "/data/seed/lightfriend-full-backup-received.tar.gz.enc"
+        case "${RESTORE_MODE}" in
+            pg_only)
+                mv "$RECEIVED" "/data/seed/lightfriend-pg-backup-received.tar.gz.enc"
+                ;;
+            *)
+                mv "$RECEIVED" "/data/seed/lightfriend-full-backup-received.tar.gz.enc"
+                ;;
+        esac
     else
         rm -f "$RECEIVED"
-        echo "No backup available from host - starting fresh"
+        echo "FATAL: Restore requested but no backup available from host"
+        exit 1
     fi
+elif [ "${RESTORE_MODE}" != "none" ]; then
+    echo "FATAL: Restore requested but no VSOCK device is available"
+    exit 1
+else
+    echo "No restore requested - starting with current state"
 fi
 
 # ── 1. Initialize PostgreSQL if needed ──────────────────────────────────────
@@ -204,6 +240,18 @@ REOF
     if [ -f manifest.json ]; then
         cp manifest.json /tmp/backup-manifest.json
     fi
+
+    # Save expected bridge registration hashes from the backup so verification
+    # can confirm startup didn't regenerate or overwrite bridge tokens.
+    BRIDGE_HASHES_FILE="/tmp/bridge-registration-hashes"
+    : > "${BRIDGE_HASHES_FILE}"
+    for bridge in whatsapp signal telegram; do
+        backup_reg="bridges/${bridge}/${bridge}-registration.yaml"
+        if [ -f "${backup_reg}" ]; then
+            reg_hash=$(sha256sum "${backup_reg}" | awk '{print $1}')
+            echo "${bridge}:${reg_hash}" >> "${BRIDGE_HASHES_FILE}"
+        fi
+    done
 
     RESTORED_COMPONENTS=""
 
@@ -373,6 +421,10 @@ if [ -n "${PG_BACKUP}" ]; then
         cp manifest.json /tmp/backup-manifest.json
     fi
 
+    # PG-only restores intentionally do not preserve bridge state. Remove any
+    # stale hash file so verification doesn't expect full-restore semantics.
+    rm -f /tmp/bridge-registration-hashes
+
     # Restore all 4 PostgreSQL databases
     echo "Restoring PostgreSQL databases..."
     RESTORED_COMPONENTS=""
@@ -510,10 +562,16 @@ substitute_vars() {
 substitute_vars /etc/enclave-configs/tuwunel.toml.template /etc/tuwunel/tuwunel.toml
 echo "  Generated /etc/tuwunel/tuwunel.toml"
 
-# Generate bridge configs
+# Generate bridge configs (only if not already present - mautrix -g merges the
+# template into a full config on first run, and we must not overwrite that)
 for bridge in whatsapp signal telegram; do
-    substitute_vars "/etc/enclave-configs/${bridge}.yaml.template" "/data/bridges/${bridge}/config.yaml"
-    echo "  Generated /data/bridges/${bridge}/config.yaml"
+    config_file="/data/bridges/${bridge}/config.yaml"
+    if [ ! -f "$config_file" ]; then
+        substitute_vars "/etc/enclave-configs/${bridge}.yaml.template" "$config_file"
+        echo "  Generated ${config_file}"
+    else
+        echo "  ${config_file} exists, skipping template generation"
+    fi
 done
 
 # Generate doublepuppet registration
@@ -581,6 +639,7 @@ for bridge in whatsapp signal telegram; do
 done
 
 # Inject tokens into bridge configs (mautrix -g doesn't patch configs automatically)
+# Uses awk for reliable replacement - sed can mangle tokens with special characters
 for bridge in whatsapp signal telegram; do
     config_file="/data/bridges/${bridge}/config.yaml"
     reg_file="/data/bridges/${bridge}/${bridge}-registration.yaml"
@@ -588,8 +647,16 @@ for bridge in whatsapp signal telegram; do
         as_token=$(extract_yaml_value "$reg_file" "as_token")
         hs_token=$(extract_yaml_value "$reg_file" "hs_token")
         if [ -n "$as_token" ] && [ -n "$hs_token" ]; then
-            sed -i "s|as_token:.*\"This value is generated when generating the registration\"|as_token: \"${as_token}\"|" "$config_file"
-            sed -i "s|hs_token:.*\"This value is generated when generating the registration\"|hs_token: \"${hs_token}\"|" "$config_file"
+            # Replace any as_token/hs_token line under the appservice section
+            # Matches the placeholder text OR empty strings from a previous failed injection
+            awk -v tok="$as_token" '
+                /^    as_token:/ && !/localhost:/ { print "    as_token: \"" tok "\""; next }
+                { print }
+            ' "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+            awk -v tok="$hs_token" '
+                /^    hs_token:/ { print "    hs_token: \"" tok "\""; next }
+                { print }
+            ' "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
             echo "  Injected tokens into ${bridge} config"
         fi
     fi

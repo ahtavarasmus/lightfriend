@@ -7,7 +7,6 @@ use crate::utils::api::Api;
 pub struct YouTubeConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
 }
 
 #[function_component(YouTubeConnect)]

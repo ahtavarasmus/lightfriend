@@ -143,13 +143,55 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   bucket = aws_s3_bucket.backups.id
 
   rule {
-    id     = "retain-backups-30-days"
+    id     = "retain-hourly-backups-72-hours"
     status = "Enabled"
     filter {
-      prefix = "backups/"
+      prefix = "backups/hourly/"
     }
     expiration {
-      days = 30
+      days = 3
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "retain-daily-backups-35-days"
+    status = "Enabled"
+    filter {
+      prefix = "backups/daily/"
+    }
+    expiration {
+      days = 35
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "retain-weekly-backups-84-days"
+    status = "Enabled"
+    filter {
+      prefix = "backups/weekly/"
+    }
+    expiration {
+      days = 84
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "retain-monthly-backups-365-days"
+    status = "Enabled"
+    filter {
+      prefix = "backups/monthly/"
+    }
+    expiration {
+      days = 365
     }
     noncurrent_version_expiration {
       noncurrent_days = 7
@@ -191,6 +233,20 @@ resource "aws_iam_role_policy" "enclave_s3" {
         aws_s3_bucket.backups.arn,
         "${aws_s3_bucket.backups.arn}/*"
       ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "enclave_ssm_parameters" {
+  name = "ssm-parameter-read-access"
+  role = aws_iam_role.enclave.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:*:*:parameter/lightfriend/*"
     }]
   })
 }

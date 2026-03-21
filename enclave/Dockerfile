@@ -67,6 +67,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release && \
     sccache --show-stats && \
     cp target/release/backend /backend && \
+    cp target/release/tuwunel_checkpoint /tuwunel_checkpoint && \
+    strip /tuwunel_checkpoint && \
     strip /backend
 
 # ── Stage 2: Build Frontend (Yew/WASM) ──────────────────────────────────────
@@ -85,6 +87,28 @@ COPY frontend/Trunk.toml ./
 COPY frontend/robots.txt ./
 
 RUN trunk build --release
+
+# ── Stage 2b: Build pinned Marlin Oyster KMS helpers ────────────────────────
+
+FROM rust:1.88-bookworm AS marlin-builder
+
+ARG OYSTER_MONOREPO_COMMIT=f60874a27f56eee2974cf0099ff80e9627c8f1dd
+
+RUN apt-get update && apt-get install -y \
+    git \
+    libsodium-dev \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/oyster
+
+RUN git clone https://github.com/marlinprotocol/oyster-monorepo . && \
+    git checkout "${OYSTER_MONOREPO_COMMIT}"
+
+RUN cargo build --release --manifest-path initialization/keygen/Cargo.toml --bin keygen-x25519 && \
+    cargo build --release --manifest-path attestation/server-custom/Cargo.toml && \
+    cargo build --release --manifest-path kms/derive-server/Cargo.toml
 
 # ── Stage 3: Collect bridge binaries from official images ───────────────────
 
@@ -108,6 +132,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     curl \
     socat \
+    sqlite3 \
     postgresql-15 \
     openssl \
     supervisor \
@@ -142,6 +167,14 @@ COPY --from=telegram-src /opt/mautrix-telegram /opt/mautrix-telegram
 # ── Copy Lightfriend backend ──────────────────────────────────────────────
 WORKDIR /app
 COPY --from=builder /backend ./backend
+COPY --from=builder /tuwunel_checkpoint /usr/local/bin/tuwunel_checkpoint
+# ── Copy Marlin Oyster binaries (production only, skipped for local builds) ──
+RUN --mount=from=marlin-builder,target=/marlin-img \
+    if [ "$BUILD_MODE" = "production" ]; then \
+        cp /marlin-img/src/oyster/target/release/keygen-x25519 /usr/local/bin/keygen-x25519 && \
+        cp /marlin-img/src/oyster/target/release/oyster-attestation-server-custom /usr/local/bin/oyster-attestation-server && \
+        cp /marlin-img/src/oyster/target/release/kms-derive-server /usr/local/bin/kms-derive-server; \
+    fi
 COPY --from=frontend-builder /app/dist ./public/
 
 # Create runtime directories
@@ -166,12 +199,14 @@ RUN chown -R postgres:postgres /run/postgresql && \
 COPY enclave/configs/ /etc/enclave-configs/
 COPY enclave/supervisord.conf /etc/supervisor/conf.d/lightfriend.conf
 COPY enclave/entrypoint.sh /entrypoint.sh
+COPY enclave/derive-backup-key.sh /usr/local/bin/derive-backup-key.sh
+COPY enclave/start-marlin-kms.sh /usr/local/bin/start-marlin-kms.sh
 COPY enclave/export.sh /app/export.sh
 COPY enclave/pg-backup.sh /app/pg-backup.sh
 COPY enclave/verify.sh /app/verify.sh
 COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
 COPY enclave/service-watchdog.sh /app/service-watchdog.sh
-RUN chmod +x /entrypoint.sh /app/export.sh /app/pg-backup.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/pg-backup.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh

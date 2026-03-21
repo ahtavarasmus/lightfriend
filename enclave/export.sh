@@ -6,8 +6,8 @@ set -euo pipefail
 # All plaintext stays in /tmp/ (enclave ephemeral space).
 # The export NEVER produces a partial or unverified backup.
 
-# Load env vars (needed when invoked via supervisord's export-trigger,
-# which doesn't inherit entrypoint.sh's environment)
+# Load non-secret env vars persisted by entrypoint.sh. BACKUP_ENCRYPTION_KEY
+# must come from the live inherited process environment, not from disk.
 if [ -f /etc/lightfriend/env ]; then
     set -a
     source /etc/lightfriend/env
@@ -21,18 +21,9 @@ ARCHIVE="/tmp/${BACKUP_NAME}.tar.gz"
 ENCRYPTED="/data/seed/${BACKUP_NAME}.tar.gz.enc"
 STATUS_FILE="/data/seed/export-status.json"
 
-# Cleanup function - restart services and remove staging
+# Cleanup function - remove staging artifacts
 cleanup() {
-    echo "Restarting services..."
-    supervisorctl start tuwunel 2>/dev/null || true
-    sleep 2
-    supervisorctl start mautrix-whatsapp 2>/dev/null || true
-    supervisorctl start mautrix-signal 2>/dev/null || true
-    supervisorctl start mautrix-telegram 2>/dev/null || true
-    sleep 1
-    supervisorctl start lightfriend 2>/dev/null || true
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" 2>/dev/null || true
-    echo "Services restarted."
 }
 trap cleanup EXIT
 
@@ -78,20 +69,10 @@ if [ "${PREFLIGHT_COUNT}" -eq 0 ]; then
 fi
 echo "  Preflight user count: ${PREFLIGHT_COUNT}"
 
-# ── Stop services (PG stays up - MVCC snapshots) ────────────────────────────
+# ── Take live snapshots ─────────────────────────────────────────────────────
 
-echo "Stopping services for consistent snapshot..."
-supervisorctl stop lightfriend 2>/dev/null || true
-sleep 1
-supervisorctl stop mautrix-whatsapp 2>/dev/null || true
-supervisorctl stop mautrix-signal 2>/dev/null || true
-supervisorctl stop mautrix-telegram 2>/dev/null || true
-sleep 1
-supervisorctl stop tuwunel 2>/dev/null || true
-sleep 2
-echo "Services stopped."
-
-# Authoritative user count taken AFTER services stop (no new writes possible)
+# User count from live PostgreSQL snapshot point. Full backup may be slightly
+# cross-store stale, but each backing store snapshot must be internally valid.
 LIVE_USER_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
     -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
 echo "  Snapshot user count: ${LIVE_USER_COUNT}"
@@ -109,16 +90,43 @@ for db in lightfriend_db whatsapp_db signal_db telegram_db; do
         || abort "pg_dump of ${db} failed - see pg_dump_errors.log" "dump-${db}"
 done
 
-# Tar filesystem stores
-echo "  Archiving /var/lib/tuwunel (RocksDB)..."
+# Create Tuwunel checkpoint (RocksDB-consistent snapshot)
+echo "  Creating Tuwunel checkpoint..."
 mkdir -p "${STAGING}/tuwunel"
-tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C / var/lib/tuwunel 2>/dev/null \
+TUWUNEL_SNAPSHOT_ROOT="${STAGING}/tuwunel-snapshot"
+mkdir -p "${TUWUNEL_SNAPSHOT_ROOT}/var/lib"
+/usr/local/bin/tuwunel_checkpoint /var/lib/tuwunel "${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel" \
+    || abort "RocksDB checkpoint for /var/lib/tuwunel failed" "dump-tuwunel"
+tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C "${TUWUNEL_SNAPSHOT_ROOT}" var/lib/tuwunel 2>/dev/null \
     || abort "tar of /var/lib/tuwunel failed" "dump-tuwunel"
 
-echo "  Archiving /app/matrix_store (per-user SQLite)..."
+# Create SQLite backups for matrix store files
+echo "  Backing up /app/matrix_store (SQLite online backup)..."
 mkdir -p "${STAGING}/matrix_store"
-tar cf "${STAGING}/matrix_store/matrix_store.tar" -C /app matrix_store 2>/dev/null \
-    || abort "tar of /app/matrix_store failed" "dump-matrix_store"
+MATRIX_SNAPSHOT_ROOT="${STAGING}/matrix-store-snapshot"
+mkdir -p "${MATRIX_SNAPSHOT_ROOT}/matrix_store"
+
+while IFS= read -r -d '' db_file; do
+    rel_path="${db_file#/app/matrix_store/}"
+    dest_db="${MATRIX_SNAPSHOT_ROOT}/matrix_store/${rel_path}"
+    mkdir -p "$(dirname "${dest_db}")"
+    sqlite3 "${db_file}" ".backup '${dest_db}'" \
+        || abort "SQLite backup failed for ${rel_path}" "dump-matrix_store"
+    if [ "$(sqlite3 "${dest_db}" "PRAGMA integrity_check;" 2>/dev/null || echo "failed")" != "ok" ]; then
+        abort "SQLite integrity_check failed for ${rel_path}" "verify-matrix_store"
+    fi
+done < <(find /app/matrix_store -type f -name '*.sqlite3' -print0)
+
+while IFS= read -r -d '' extra_file; do
+    rel_path="${extra_file#/app/matrix_store/}"
+    dest_file="${MATRIX_SNAPSHOT_ROOT}/matrix_store/${rel_path}"
+    mkdir -p "$(dirname "${dest_file}")"
+    cp -p "${extra_file}" "${dest_file}" \
+        || abort "Failed to copy matrix store side file ${rel_path}" "dump-matrix_store"
+done < <(find /app/matrix_store -type f ! -name '*.sqlite3' ! -name '*.sqlite3-wal' ! -name '*.sqlite3-shm' -print0)
+
+tar cf "${STAGING}/matrix_store/matrix_store.tar" -C "${MATRIX_SNAPSHOT_ROOT}" matrix_store 2>/dev/null \
+    || abort "tar of matrix store snapshot failed" "dump-matrix_store"
 
 echo "  Archiving /data/bridges (registrations + device state)..."
 mkdir -p "${STAGING}/bridges"
@@ -175,7 +183,8 @@ for tar_path in \
     echo "  ${tar_name}: ${tar_size} bytes, integrity OK"
 done
 
-# Cross-validate user count: DB is still running, count should match pre-export
+# Cross-validate user count: during deploy-time export, maintenance mode should
+# block writes to the app database, so user count should remain stable.
 POST_DUMP_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
     -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
 if [ "${POST_DUMP_COUNT}" != "${LIVE_USER_COUNT}" ]; then
