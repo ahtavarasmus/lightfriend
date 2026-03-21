@@ -285,7 +285,7 @@ chmod +x /opt/lightfriend/upload-env.sh
 cat > /opt/lightfriend/trigger-maintenance.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-ACTION="${1:-status}"
+ACTION="$${1:-status}"
 RESULT=$(echo "$ACTION" | timeout 30 socat - VSOCK-CONNECT:16:9005 2>&1) || {
     echo "FATAL: Maintenance trigger via VSOCK failed"
     exit 1
