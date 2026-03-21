@@ -32,6 +32,17 @@ pub async fn enable_maintenance(
     }
     state.maintenance_mode.store(true, Ordering::SeqCst);
     tracing::warn!("Maintenance mode ENABLED - write operations will return 503");
+
+    // Auto-disable after 30 minutes in case CI crashes and never sends disable
+    let flag = state.maintenance_mode.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+        if flag.load(Ordering::SeqCst) {
+            flag.store(false, Ordering::SeqCst);
+            tracing::warn!("Maintenance mode AUTO-DISABLED after 30 minute timeout");
+        }
+    });
+
     Json(json!({"status": "maintenance_enabled"})).into_response()
 }
 

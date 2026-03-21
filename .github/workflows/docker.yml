@@ -124,6 +124,27 @@ jobs:
           echo "- Launch Template: $LAUNCH_TEMPLATE" >> $GITHUB_STEP_SUMMARY
           echo "- Old Instance: ${OLD_INSTANCE:-none (first deploy)}" >> $GITHUB_STEP_SUMMARY
 
+      # ── Safety: warn if daily backups have been failing ──
+      - name: Check backup health
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          HEALTH=$(aws s3 cp "s3://$S3_BUCKET/backups/backup-health.json" - 2>/dev/null || echo "")
+          if [ -n "$HEALTH" ]; then
+            LAST_SUCCESS=$(echo "$HEALTH" | jq -r '.last_success // "never"')
+            LAST_FAILURE=$(echo "$HEALTH" | jq -r '.last_failure // "none"')
+            echo "## Backup Health" >> $GITHUB_STEP_SUMMARY
+            echo "- Last successful daily backup: $LAST_SUCCESS" >> $GITHUB_STEP_SUMMARY
+            if [ "$LAST_FAILURE" != "none" ] && [ "$LAST_FAILURE" != "null" ]; then
+              echo "- :warning: Last failure: $LAST_FAILURE" >> $GITHUB_STEP_SUMMARY
+            fi
+            # Warn but don't block - the deploy itself takes a fresh full backup
+            if [ "$LAST_SUCCESS" = "never" ]; then
+              echo "WARNING: No successful daily backup recorded"
+            fi
+          else
+            echo "No backup health marker found (first deploy or daily backups not yet configured)"
+          fi
+
       # ── Safety: clean up orphaned instances from crashed prior deploys ──
       - name: Cleanup stale deploys
         run: |

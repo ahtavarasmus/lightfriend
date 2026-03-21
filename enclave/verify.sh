@@ -176,7 +176,12 @@ CHECKS_JSON=$(printf '%s' "${ALL_CHECKS[*]}" | sed 's/" "/", "/g')
 
 # Determine restore type
 if [ -f /tmp/backup-manifest.json ]; then
-    RESTORE_TYPE="full_restore"
+    MANIFEST_FORMAT=$(cat /tmp/backup-manifest.json | grep -o '"format": "[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
+    if [ "${MANIFEST_FORMAT}" = "lightfriend-pg-backup" ]; then
+        RESTORE_TYPE="pg_only_restore"
+    else
+        RESTORE_TYPE="full_restore"
+    fi
 else
     RESTORE_TYPE="fresh_start"
 fi

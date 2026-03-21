@@ -70,13 +70,13 @@ if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
     abort "BACKUP_ENCRYPTION_KEY is not set" "preflight"
 fi
 
-# Verify there is data to export
-LIVE_USER_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
+# Quick sanity check: is there data to export?
+PREFLIGHT_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
     -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
-if [ "${LIVE_USER_COUNT}" -eq 0 ]; then
+if [ "${PREFLIGHT_COUNT}" -eq 0 ]; then
     abort "No users in database - nothing to export" "preflight"
 fi
-echo "  Live user count: ${LIVE_USER_COUNT}"
+echo "  Preflight user count: ${PREFLIGHT_COUNT}"
 
 # ── Stop services (PG stays up - MVCC snapshots) ────────────────────────────
 
@@ -90,6 +90,11 @@ sleep 1
 supervisorctl stop tuwunel 2>/dev/null || true
 sleep 2
 echo "Services stopped."
+
+# Authoritative user count taken AFTER services stop (no new writes possible)
+LIVE_USER_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
+    -c "SELECT count(*) FROM users" 2>/dev/null || echo "0")
+echo "  Snapshot user count: ${LIVE_USER_COUNT}"
 
 # ── Phase A: Dump everything ────────────────────────────────────────────────
 

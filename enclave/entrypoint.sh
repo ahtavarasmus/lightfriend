@@ -309,6 +309,122 @@ REOF
     echo "=== Full restore complete ==="
 fi
 
+# ── 2a-pg. PG-only backup restore (disaster recovery) ────────────────────
+# If no full backup exists but a PG-only daily backup does, restore databases
+# only. Bridge/Matrix state starts fresh (users re-link).
+if [ "${FULL_RESTORE_DONE}" = "false" ]; then
+PG_BACKUP=$(ls /data/seed/lightfriend-pg-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)
+
+if [ -n "${PG_BACKUP}" ]; then
+    echo "=== PG-only backup detected: $(basename ${PG_BACKUP}) ==="
+    echo "  Databases will be restored. Bridge/Matrix state starts fresh."
+    RESTORE_STATUS="/data/seed/restore-status.json"
+    RESTORE_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+    pg_restore_abort() {
+        local msg="$1"
+        local step="$2"
+        echo "PG RESTORE FAILED: ${msg} (step: ${step})"
+        echo "{\"status\": \"FAILED\", \"timestamp\": \"${RESTORE_TIMESTAMP}\", \"error\": \"${msg}\", \"step\": \"${step}\"}" > "${RESTORE_STATUS}"
+        if [ -e /dev/vsock ]; then
+            echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"pg_only\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
+            socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
+        fi
+        su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA stop -w" 2>/dev/null || true
+        exit 1
+    }
+
+    if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
+        pg_restore_abort "BACKUP_ENCRYPTION_KEY not set" "decrypt"
+    fi
+
+    # Decrypt
+    echo "Decrypting PG backup..."
+    DECRYPT_DIR="/tmp/pg-restore"
+    mkdir -p "${DECRYPT_DIR}"
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+        -pass env:BACKUP_ENCRYPTION_KEY \
+        -in "${PG_BACKUP}" \
+        -out "${DECRYPT_DIR}/backup.tar.gz" 2>/dev/null \
+        || pg_restore_abort "Decryption failed" "decrypt"
+
+    # Extract
+    echo "Extracting..."
+    cd "${DECRYPT_DIR}"
+    tar xzf backup.tar.gz \
+        || pg_restore_abort "Archive extraction failed" "extract"
+
+    BACKUP_DIR=$(ls -d lightfriend-pg-backup-* 2>/dev/null | head -1)
+    if [ -z "${BACKUP_DIR}" ]; then
+        pg_restore_abort "No lightfriend-pg-backup-* directory in archive" "extract"
+    fi
+
+    # Verify checksums
+    cd "${DECRYPT_DIR}/${BACKUP_DIR}"
+    if [ ! -f checksums.sha256 ]; then
+        pg_restore_abort "checksums.sha256 missing" "verify-checksums"
+    fi
+    grep -v "checksums.sha256" checksums.sha256 | sha256sum -c --quiet 2>/dev/null \
+        || pg_restore_abort "Checksum verification failed" "verify-checksums"
+    echo "Checksums verified."
+
+    # Save manifest for post-restore verification
+    if [ -f manifest.json ]; then
+        cp manifest.json /tmp/backup-manifest.json
+    fi
+
+    # Restore all 4 PostgreSQL databases
+    echo "Restoring PostgreSQL databases..."
+    RESTORED_COMPONENTS=""
+    for db in lightfriend_db whatsapp_db signal_db telegram_db; do
+        dump_file="postgres/${db}.sql"
+        if [ ! -f "${dump_file}" ]; then
+            pg_restore_abort "Missing dump: ${dump_file}" "restore-${db}"
+        fi
+        echo "  Restoring ${db}..."
+        su postgres -c "psql -c \"DROP DATABASE IF EXISTS ${db}\"" 2>/dev/null || true
+        su postgres -c "psql -c \"CREATE DATABASE ${db}\"" 2>/dev/null \
+            || pg_restore_abort "Failed to create database ${db}" "restore-${db}"
+        su postgres -c "psql --set ON_ERROR_STOP=on -d ${db} < ${dump_file}" \
+            || pg_restore_abort "psql restore of ${db} failed" "restore-${db}"
+        for db_info in "lightfriend lightfriend_db" "whatsapp_user whatsapp_db" "signal_user signal_db" "telegram_user telegram_db"; do
+            owner=$(echo "$db_info" | awk '{print $1}')
+            owned_db=$(echo "$db_info" | awk '{print $2}')
+            if [ "${owned_db}" = "${db}" ]; then
+                su postgres -c "psql -c \"ALTER DATABASE ${db} OWNER TO ${owner}\"" 2>/dev/null || true
+                su postgres -c "psql -d ${db} -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO ${owner}\"" 2>/dev/null || true
+                su postgres -c "psql -d ${db} -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${owner}\"" 2>/dev/null || true
+            fi
+        done
+        echo "  ${db} restored."
+        RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"${db}\", "
+    done
+
+    # Clean stale connection data (no bridge/Matrix state to match)
+    echo "Cleaning stale connection data (PG-only restore, bridges start fresh)..."
+    su postgres -c "psql -d lightfriend_db" <<'CLEANUP'
+        TRUNCATE bridges;
+        TRUNCATE bridge_disconnection_events;
+        TRUNCATE contact_profiles CASCADE;
+        UPDATE user_secrets
+        SET matrix_username = NULL,
+            matrix_device_id = NULL,
+            encrypted_matrix_access_token = NULL,
+            encrypted_matrix_password = NULL,
+            encrypted_matrix_secret_storage_recovery_key = NULL;
+        UPDATE users SET matrix_e2ee_enabled = false;
+CLEANUP
+    echo "Connection data cleaned."
+
+    RESTORED_COMPONENTS="${RESTORED_COMPONENTS%, }"
+    rm -rf "${DECRYPT_DIR}"
+    echo "{\"status\": \"SUCCESS\", \"timestamp\": \"${RESTORE_TIMESTAMP}\", \"type\": \"pg_only\", \"components_restored\": [${RESTORED_COMPONENTS}]}" > "${RESTORE_STATUS}"
+    rm -f "${PG_BACKUP}"
+    FULL_RESTORE_DONE=true
+    echo "=== PG-only restore complete ==="
+fi
+fi
+
 # ── 2b. Restore lightfriend_db from seed dump if present ─────────────────
 # Skip when full restore was done (all data already restored above)
 if [ "${FULL_RESTORE_DONE}" = "false" ]; then

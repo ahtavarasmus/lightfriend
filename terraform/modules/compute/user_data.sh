@@ -310,10 +310,25 @@ echo "=== Pre-deploy complete ==="
 SCRIPT
 chmod +x /opt/lightfriend/pre-deploy.sh
 
+# ── PG-only backup trigger script ────────────────────────────────────────
+
+cat > /opt/lightfriend/trigger-pg-backup.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+echo "Triggering PG-only backup in enclave via VSOCK port 9006..."
+echo "This runs against live PostgreSQL (zero downtime)..."
+timeout 300 socat -T300 - VSOCK-CONNECT:16:9006 || { echo "PG backup trigger failed or timed out"; exit 1; }
+echo "PG backup complete."
+ls -la /opt/lightfriend/backups/ | tail -3
+SCRIPT
+chmod +x /opt/lightfriend/trigger-pg-backup.sh
+
 # ── Scheduled daily backup ───────────────────────────────────────────────
-# Triggers enclave export + S3 upload daily at 03:00 UTC.
-# Same scripts as pre-deploy, so backup format is identical and verified.
-# Worst-case data loss: 24 hours instead of "time since last deploy".
+# PG-only backup: zero downtime (MVCC snapshot against live PostgreSQL).
+# Full exports (all data stores, requires stopping services) only happen
+# during deploys, where maintenance mode is already active.
+# Worst-case data loss: 24 hours of PostgreSQL data. Bridge/Matrix state
+# is reconstructable (users re-link).
 
 cat > /opt/lightfriend/scheduled-backup.sh <<'SCRIPT'
 #!/bin/bash
@@ -323,17 +338,24 @@ exec 200>"$LOCKFILE"
 flock -n 200 || { echo "Skipping: another backup/deploy is running"; exit 0; }
 LOG="/var/log/lightfriend-backup.log"
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "=== Scheduled backup: $${TIMESTAMP} ===" >> "$LOG"
+echo "=== Scheduled PG backup: $${TIMESTAMP} ===" >> "$LOG"
 
-# Step 1: Trigger export inside enclave
-/opt/lightfriend/trigger-export.sh >> "$LOG" 2>&1 || {
-    echo "FAILED: export trigger failed at $${TIMESTAMP}" >> "$LOG"
+BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
+
+# Step 1: Trigger PG-only backup inside enclave (zero downtime)
+/opt/lightfriend/trigger-pg-backup.sh >> "$LOG" 2>&1 || {
+    echo "FAILED: PG backup trigger failed at $${TIMESTAMP}" >> "$LOG"
+    # Write failure marker to S3 so deploys can detect stale backups
+    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
+        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
     exit 1
 }
 
 # Step 2: Upload to S3 (upload-backup.sh verifies size match after upload)
 /opt/lightfriend/upload-backup.sh >> "$LOG" 2>&1 || {
     echo "FAILED: S3 upload/verify failed at $${TIMESTAMP}" >> "$LOG"
+    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
+        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
     exit 1
 }
 
@@ -341,7 +363,11 @@ echo "=== Scheduled backup: $${TIMESTAMP} ===" >> "$LOG"
 cd /opt/lightfriend/backups
 ls -t *.tar.gz.enc 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
 
-echo "=== Backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
+# Step 4: Write success marker to S3
+[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"pg_only\"}" | \
+    aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
+
+echo "=== PG backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
 SCRIPT
 chmod +x /opt/lightfriend/scheduled-backup.sh
 
@@ -444,8 +470,9 @@ if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
     fi
 
     # Wait for enclave verify result via VSOCK port 9004
-    echo "Waiting for enclave verify result (up to 5 min)..."
-    timeout 300 socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" 2>/dev/null || echo "Verify signal timeout"
+    # 15 min: restore can take a while (PG restore + service startup + verification)
+    echo "Waiting for enclave verify result (up to 15 min)..."
+    timeout 900 socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" 2>/dev/null || echo "Verify signal timeout"
 
     if [ -s "$VERIFY" ]; then
         aws s3 cp "$VERIFY" "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"

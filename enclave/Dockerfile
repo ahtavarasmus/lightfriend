@@ -167,9 +167,11 @@ COPY enclave/configs/ /etc/enclave-configs/
 COPY enclave/supervisord.conf /etc/supervisor/conf.d/lightfriend.conf
 COPY enclave/entrypoint.sh /entrypoint.sh
 COPY enclave/export.sh /app/export.sh
+COPY enclave/pg-backup.sh /app/pg-backup.sh
 COPY enclave/verify.sh /app/verify.sh
 COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
-RUN chmod +x /entrypoint.sh /app/export.sh /app/verify.sh /app/enter-maintenance.sh
+COPY enclave/service-watchdog.sh /app/service-watchdog.sh
+RUN chmod +x /entrypoint.sh /app/export.sh /app/pg-backup.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh
