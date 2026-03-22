@@ -1,5 +1,6 @@
 use crate::pg_schema::{
-    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons, ont_rules,
+    ont_changelog, ont_channels, ont_events, ont_links, ont_messages, ont_person_edits,
+    ont_persons, ont_rules,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -154,9 +155,6 @@ pub struct OntMessage {
     pub content: String,
     pub person_id: Option<i32>,
     pub created_at: i32,
-    pub pinned: bool,
-    pub status: Option<String>,
-    pub review_after: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]
@@ -169,9 +167,34 @@ pub struct NewOntMessage {
     pub content: String,
     pub person_id: Option<i32>,
     pub created_at: i32,
-    pub pinned: bool,
-    pub status: Option<String>,
-    pub review_after: Option<i32>,
+}
+
+// -- ont_events --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, Deserialize)]
+#[diesel(table_name = ont_events)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OntEvent {
+    pub id: i32,
+    pub user_id: i32,
+    pub description: String,
+    pub notify_at: Option<i32>,
+    pub expires_at: Option<i32>,
+    pub status: String,
+    pub created_at: i32,
+    pub updated_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = ont_events)]
+pub struct NewOntEvent {
+    pub user_id: i32,
+    pub description: String,
+    pub notify_at: Option<i32>,
+    pub expires_at: Option<i32>,
+    pub status: String,
+    pub created_at: i32,
+    pub updated_at: i32,
 }
 
 // -- ont_rules --

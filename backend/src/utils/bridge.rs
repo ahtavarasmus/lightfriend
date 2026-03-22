@@ -1364,9 +1364,6 @@ pub async fn handle_bridge_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i32,
-        pinned: false,
-        status: None,
-        review_after: None,
     };
     let state_clone = state.clone();
     tokio::spawn(async move {

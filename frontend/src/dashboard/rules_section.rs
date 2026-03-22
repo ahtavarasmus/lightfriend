@@ -660,11 +660,11 @@ fn describe_action(action_type: &str, action_config: &str) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or("tool");
         match tool {
-            "pin_message" => "Pin message".to_string(),
+            "create_event" => "Create event".to_string(),
             "send_email" => "Send email".to_string(),
             "send_chat_message" => "Send message".to_string(),
             "control_tesla" => "Tesla command".to_string(),
-            "update_tracked_item" => "Update tracked item".to_string(),
+            "update_event" => "Update event".to_string(),
             _ => "Run action".to_string(),
         }
     }

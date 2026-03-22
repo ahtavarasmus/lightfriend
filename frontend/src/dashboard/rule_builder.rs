@@ -35,7 +35,7 @@ enum SourceConfig {
         tool: String,
         args: String,
     },
-    Pinned,
+    Events,
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ impl SourceConfig {
             SourceConfig::Internet { .. } => "internet",
             SourceConfig::Tesla => "tesla",
             SourceConfig::Mcp { server, .. } => server.as_str(),
-            SourceConfig::Pinned => "pinned",
+            SourceConfig::Events => "events",
         }
     }
 
@@ -114,7 +114,7 @@ impl SourceConfig {
             SourceConfig::Internet { .. } => t == "internet",
             SourceConfig::Tesla => t == "tesla",
             SourceConfig::Mcp { server, .. } => t == format!("mcp:{}", server),
-            SourceConfig::Pinned => t == "pinned",
+            SourceConfig::Events => t == "events",
         }
     }
 }
@@ -1045,8 +1045,8 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
     let has_tracking = existing_rules.iter().any(|r| {
         r.trigger_type == "ontology_change"
             && r.status == "active"
-            && (r.action_config.contains("pin_message")
-                || r.action_config.contains("update_tracked_item"))
+            && (r.action_config.contains("create_event")
+                || r.action_config.contains("update_event"))
     });
 
     // For digest, find existing schedule times to suggest alternatives
@@ -1868,7 +1868,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         platform: "all".to_string(),
                                         limit: 50,
                                     },
-                                    SourceConfig::Pinned,
+                                    SourceConfig::Events,
                                 ]);
                                 action_mode.set(ActionMode::Notify);
                                 notify_method.set(NotifyMethod::Sms);
@@ -1885,16 +1885,16 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 logic_mode.set(LogicMode::Llm);
                                 selected_template.set(PromptTemplate::TrackItems);
                                 logic_prompt.set(String::new());
-                                active_sources_tmpl.set(vec![SourceConfig::Pinned]);
+                                active_sources_tmpl.set(vec![SourceConfig::Events]);
                                 action_mode.set(ActionMode::ToolCall);
-                                tool_name.set("update_tracked_item".to_string());
+                                tool_name.set("update_event".to_string());
                                 // ELSE branch: nested condition to pin new items
                                 else_flow.set(Some(FlowNode::LlmCondition {
                                     prompt: "Is this about a delivery, invoice, payment, deadline, or something worth tracking?".to_string(),
                                     fetch: vec![],
                                     true_branch: Box::new(Some(FlowNode::Action {
                                         action_type: "tool_call".to_string(),
-                                        config: serde_json::json!({"tool": "pin_message"}),
+                                        config: serde_json::json!({"tool": "create_event"}),
                                     })),
                                     false_branch: Box::new(None),
                                 }));
@@ -2023,8 +2023,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                 "send_email" => "send email".to_string(),
                 "respond_to_email" => "reply to email".to_string(),
                 "control_tesla" => humanize_tesla_cmd_short(&*tc_tesla_cmd).to_string(),
-                "pin_message" => "pin message".to_string(),
-                "update_tracked_item" => "update tracked item".to_string(),
+                "create_event" => "create event".to_string(),
+                "update_event" => "update event".to_string(),
                 _ if t.starts_with("mcp:") => {
                     // "mcp:server:tool" -> "MCP: tool"
                     let parts: Vec<&str> = t.splitn(3, ':').collect();
@@ -2295,8 +2295,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         "control_tesla" => serde_json::json!({
                             "command": *tc_tesla_cmd,
                         }),
-                        "pin_message" => serde_json::json!({}),
-                        "update_tracked_item" => serde_json::json!({}),
+                        "create_event" => serde_json::json!({}),
+                        "update_event" => serde_json::json!({}),
                         _ => {
                             // MCP or unknown - serialize from mcp_params map
                             let map = &*tc_mcp_params;
@@ -2461,7 +2461,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let sender_is_email = *event_filter_key == "sender" && event_filter_value.contains('@');
     let no_sender_filter = *event_filter_key == "none" || *event_filter_key == "content";
     let show_respond_email = is_event_trigger && (sender_is_email || no_sender_filter);
-    let show_pin_message = is_event_trigger;
+    let show_create_event = is_event_trigger;
     let show_update_tracked = *logic_mode == LogicMode::Llm;
 
     // Pre-compute validation for review section
@@ -2959,7 +2959,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             match &tmpl_clone {
                                                                 PromptTemplate::Summarize => match *wm {
                                                                     WhenMode::Schedule => {
-                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Pinned]);
+                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Events]);
                                                                     }
                                                                     WhenMode::Event => {
                                                                         as_tmpl.set(vec![SourceConfig::Chat { platform: "all".to_string(), limit: 50 }]);
@@ -2974,7 +2974,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                     }
                                                                 },
                                                                 PromptTemplate::TrackItems => {
-                                                                    as_tmpl.set(vec![SourceConfig::Pinned]);
+                                                                    as_tmpl.set(vec![SourceConfig::Events]);
                                                                 },
                                                                 PromptTemplate::CheckCondition | PromptTemplate::Custom => {}
                                                             }
@@ -3207,7 +3207,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                         "weather" => SourceConfig::Weather { location: profile_location.clone() },
                                                                         "internet" => SourceConfig::Internet { query: String::new() },
                                                                         "tesla" => SourceConfig::Tesla,
-                                                                        "pinned" => SourceConfig::Pinned,
+                                                                        "events" => SourceConfig::Events,
                                                                         _ => return,
                                                                     };
                                                                     current.push(new_source);
@@ -3568,11 +3568,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         <option value="respond_to_email" selected={*tool_name == "respond_to_email"}>{"Reply to email"}</option>
                                                     }
                                                     <option value="control_tesla" selected={*tool_name == "control_tesla"}>{"Tesla command"}</option>
-                                                    if show_pin_message {
-                                                        <option value="pin_message" selected={*tool_name == "pin_message"}>{"Pin message"}</option>
+                                                    if show_create_event {
+                                                        <option value="create_event" selected={*tool_name == "create_event"}>{"Create event"}</option>
                                                     }
                                                     if show_update_tracked {
-                                                        <option value="update_tracked_item" selected={*tool_name == "update_tracked_item"}>{"Update tracked item"}</option>
+                                                        <option value="update_event" selected={*tool_name == "update_event"}>{"Update event"}</option>
                                                     }
                                                 </optgroup>
                                                 if !mcp_tools.is_empty() {
@@ -3847,15 +3847,15 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             </div>
                                         }
 
-                                        if *tool_name == "pin_message" {
+                                        if *tool_name == "create_event" {
                                             <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                                                {"Pins the triggering message to your dashboard for later review. Use with Event triggers."}
+                                                {"Creates a tracked event on your dashboard linked to the triggering message. Use with Event triggers."}
                                             </div>
                                         }
 
-                                        if *tool_name == "update_tracked_item" {
+                                        if *tool_name == "update_event" {
                                             <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                                                {"Updates a tracked/pinned item's status. The AI picks the item and status from context. Completed items are auto-unpinned."}
+                                                {"Updates a tracked event's status. The AI picks the event and status from context."}
                                             </div>
                                         }
 
@@ -4091,8 +4091,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         "control_tesla" => serde_json::json!({
                                                             "command": *tc_tesla_cmd,
                                                         }),
-                                                        "pin_message" => serde_json::json!({}),
-                                                        "update_tracked_item" => serde_json::json!({}),
+                                                        "create_event" => serde_json::json!({}),
+                                                        "update_event" => serde_json::json!({}),
                                                         _ => {
                                                             let map = &*tc_mcp_params;
                                                             let obj: serde_json::Map<String, serde_json::Value> = map.iter()
@@ -4457,7 +4457,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     let cur_tool = cur_action_config
         .get("tool")
         .and_then(|v| v.as_str())
-        .unwrap_or("pin_message")
+        .unwrap_or("create_event")
         .to_string();
     let cur_notify_msg = cur_action_config
         .get("message")
@@ -4561,8 +4561,8 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
             "send_email" => "send email".to_string(),
             "respond_to_email" => "reply to email".to_string(),
             "control_tesla" => humanize_tesla_cmd_short(&cur_tc_tesla_cmd).to_string(),
-            "pin_message" => "pin message".to_string(),
-            "update_tracked_item" => "update tracked item".to_string(),
+            "create_event" => "create event".to_string(),
+            "update_event" => "update event".to_string(),
             t if t.starts_with("mcp:") => {
                 let parts: Vec<&str> = t.splitn(3, ':').collect();
                 let tool_short = parts.get(2).unwrap_or(&"tool");
@@ -4679,7 +4679,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                             };
                             let new_fetch = match &tmpl_clone {
                                 PromptTemplate::Summarize => match wm {
-                                    WhenMode::Schedule => vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Pinned],
+                                    WhenMode::Schedule => vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Events],
                                     WhenMode::Event => vec![SourceConfig::Chat { platform: "all".to_string(), limit: 50 }],
                                 },
                                 PromptTemplate::FilterImportant => match wm {
@@ -4785,7 +4785,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                             "weather" => SourceConfig::Weather { location: String::new() },
                             "internet" => SourceConfig::Internet { query: String::new() },
                             "tesla" => SourceConfig::Tesla,
-                            "pinned" => SourceConfig::Pinned,
+                            "events" => SourceConfig::Events,
                             _ => return,
                         };
                         new_fetch.push(new_source);
@@ -4918,7 +4918,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                 } else {
                     FlowNode::Action {
                         action_type: "tool_call".into(),
-                        config: serde_json::json!({"tool":"pin_message"}),
+                        config: serde_json::json!({"tool":"create_event"}),
                     }
                 };
                 let new_node = match m.as_str() {
@@ -5394,8 +5394,8 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                                 <option value="send_email" selected={cur_tool == "send_email"}>{"Send email"}</option>
                                 <option value="respond_to_email" selected={cur_tool == "respond_to_email"}>{"Reply to email"}</option>
                                 <option value="control_tesla" selected={cur_tool == "control_tesla"}>{"Tesla command"}</option>
-                                <option value="pin_message" selected={cur_tool == "pin_message"}>{"Pin message"}</option>
-                                <option value="update_tracked_item" selected={cur_tool == "update_tracked_item"}>{"Update tracked item"}</option>
+                                <option value="create_event" selected={cur_tool == "create_event"}>{"Create event"}</option>
+                                <option value="update_event" selected={cur_tool == "update_event"}>{"Update event"}</option>
                             </optgroup>
                         </select>
                     </div>
@@ -5509,15 +5509,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                         </div>
                     }
 
-                    if cur_tool == "pin_message" {
+                    if cur_tool == "create_event" {
                         <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                            {"Pins the triggering message to your dashboard for later review. Use with Event triggers."}
+                            {"Creates a tracked event on your dashboard linked to the triggering message. Use with Event triggers."}
                         </div>
                     }
 
-                    if cur_tool == "update_tracked_item" {
+                    if cur_tool == "update_event" {
                         <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                            {"Updates a tracked/pinned item's status. The AI picks the item and status from context. Completed items are auto-unpinned."}
+                            {"Updates a tracked event's status. The AI picks the event and status from context."}
                         </div>
                     }
                 }
@@ -5687,7 +5687,7 @@ fn build_rule_summary(
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
             PromptTemplate::TrackItems => {
-                Some("AI checks if it updates a tracked item".to_string())
+                Some("AI checks if it updates a tracked event".to_string())
             }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
@@ -5726,8 +5726,8 @@ fn build_rule_summary(
             "send_email" => "sends an email".to_string(),
             "respond_to_email" => "replies to the email".to_string(),
             "control_tesla" => humanize_tesla_cmd(tc_tesla_cmd).to_string(),
-            "pin_message" => "pins it to your dashboard".to_string(),
-            "update_tracked_item" => "updates the tracked item".to_string(),
+            "create_event" => "creates a tracked event".to_string(),
+            "update_event" => "updates the tracked event".to_string(),
             t if t.starts_with("mcp:") => {
                 let parts: Vec<&str> = t.splitn(3, ':').collect();
                 let tool_short = parts.get(2).unwrap_or(&"tool");
@@ -5812,8 +5812,8 @@ fn build_rule_summary(
                 _ => "texts you".to_string(),
             },
             "tool_call" => match config.get("tool").and_then(|v| v.as_str()) {
-                Some("pin_message") => "pins it".to_string(),
-                Some("update_tracked_item") => "updates the item".to_string(),
+                Some("create_event") => "creates an event".to_string(),
+                Some("update_event") => "updates the event".to_string(),
                 Some("send_email") => "sends an email".to_string(),
                 Some("send_chat_message") => "sends a message".to_string(),
                 Some("control_tesla") => {
@@ -6024,8 +6024,8 @@ fn auto_generate_name(
                         .unwrap_or("cmd");
                     format!("Tesla {}", cmd)
                 }
-                "pin_message" => "pin".to_string(),
-                "update_tracked_item" => "update item".to_string(),
+                "create_event" => "create event".to_string(),
+                "update_event" => "update event".to_string(),
                 _ if tool.starts_with("mcp:") => {
                     let parts: Vec<&str> = tool.splitn(3, ':').collect();
                     let t = parts.get(2).unwrap_or(&"tool");
@@ -6051,8 +6051,8 @@ fn capitalize_first(s: &str) -> String {
 /// Render a human-readable hint about what extra info the AI will figure out for a tool.
 fn render_llm_params_hint(tool: &str) -> Html {
     let hint = match tool {
-        "update_tracked_item" => {
-            Some("AI will pick which tracked item to update and set its new status")
+        "update_event" => {
+            Some("AI will pick which tracked event to update and set its new status")
         }
         _ => None,
     };
@@ -6067,7 +6067,7 @@ fn render_llm_params_hint(tool: &str) -> Html {
 fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, condition: &str) -> String {
     match template {
         PromptTemplate::Summarize => match when_mode {
-            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked items with approaching deadlines. Format as a numbered list, one item per line.".to_string(),
+            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked events with approaching deadlines. Format as a numbered list, one item per line.".to_string(),
             WhenMode::Event => "Summarize this message along with recent conversation context. Highlight key points and any action needed.".to_string(),
         },
         PromptTemplate::FilterImportant => match when_mode {
@@ -6078,7 +6078,7 @@ fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, conditio
             WhenMode::Schedule => format!("Check if the following condition is met based on recent messages: {}. If the condition is not met, respond with just 'skip'.", condition),
             WhenMode::Event => format!("Check if this message matches the following condition: {}. If it doesn't match, respond with just 'skip'.", condition),
         },
-        PromptTemplate::TrackItems => "Does this message relate to an already-tracked/pinned item? If it updates a tracked item (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        PromptTemplate::TrackItems => "Does this message relate to an already-tracked event? If it updates a tracked event (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
         PromptTemplate::Custom => String::new(),
     }
 }
@@ -6207,7 +6207,7 @@ fn render_review(
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
             PromptTemplate::TrackItems => {
-                Some("AI checks if it updates a tracked item".to_string())
+                Some("AI checks if it updates a tracked event".to_string())
             }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
@@ -6245,8 +6245,8 @@ fn render_review(
             "send_email" => "Sends an email".to_string(),
             "respond_to_email" => "Replies to the email".to_string(),
             "control_tesla" => capitalize_first(humanize_tesla_cmd(tc_tesla_cmd)),
-            "pin_message" => "Pins it to your dashboard".to_string(),
-            "update_tracked_item" => "Updates the tracked item".to_string(),
+            "create_event" => "Creates a tracked event".to_string(),
+            "update_event" => "Updates the tracked event".to_string(),
             t if t.starts_with("mcp:") => {
                 let parts: Vec<&str> = t.splitn(3, ':').collect();
                 format!("Runs {}", parts.get(2).unwrap_or(&"tool"))
@@ -6372,8 +6372,8 @@ fn review_action_text(action_type: &str, config: &serde_json::Value) -> String {
             _ => "Texts you".to_string(),
         },
         "tool_call" => match config.get("tool").and_then(|v| v.as_str()) {
-            Some("pin_message") => "Pins it to your dashboard".to_string(),
-            Some("update_tracked_item") => "Updates the tracked item".to_string(),
+            Some("create_event") => "Pins it to your dashboard".to_string(),
+            Some("update_event") => "Updates the tracked event".to_string(),
             Some("send_email") => "Sends an email".to_string(),
             Some("send_chat_message") => {
                 let plat = config
@@ -6488,9 +6488,9 @@ fn auto_detect_sources(prompt: &str, available: &[RuleSourceOption]) -> Vec<Sour
             SourceConfig::Tesla,
         ),
         (
-            &["tracked", "pinned", "delivery", "package", "invoice"],
-            "pinned",
-            SourceConfig::Pinned,
+            &["tracked", "event", "delivery", "package", "invoice"],
+            "events",
+            SourceConfig::Events,
         ),
         (
             &["search", "look up", "find online", "news"],

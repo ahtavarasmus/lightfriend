@@ -25,7 +25,7 @@ pub struct DashboardSummaryResponse {
     pub rules_active: i64,
     pub action_items: Vec<ActionItem>,
     pub filtered_count: i64,
-    pub pinned_messages: Vec<PinnedMessageItem>,
+    pub events: Vec<EventItem>,
     // Existing fields kept for compatibility
     pub quiet_mode: QuietModeInfo,
     pub sunrise_hour: Option<f32>,
@@ -34,13 +34,13 @@ pub struct DashboardSummaryResponse {
 }
 
 #[derive(Serialize)]
-pub struct PinnedMessageItem {
-    pub id: i64,
-    pub sender_name: String,
-    pub platform: String,
-    pub content: String,
+pub struct EventItem {
+    pub id: i32,
+    pub description: String,
+    pub notify_at: Option<i32>,
+    pub expires_at: Option<i32>,
+    pub status: String,
     pub created_at: i32,
-    pub review_after: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -198,23 +198,19 @@ pub async fn get_dashboard_summary(
     // Get quiet mode status
     let quiet_mode = get_quiet_mode_info(&state, user_id, now_ts, &tz);
 
-    // Get pinned messages
-    let pinned_messages: Vec<PinnedMessageItem> = state
+    // Get active events
+    let events: Vec<EventItem> = state
         .ontology_repository
-        .get_pinned_messages(user_id)
+        .get_active_events(user_id)
         .unwrap_or_default()
         .into_iter()
-        .map(|m| PinnedMessageItem {
-            id: m.id,
-            sender_name: m.sender_name,
-            platform: m.platform,
-            content: if m.content.len() > 200 {
-                format!("{}...", &m.content[..200])
-            } else {
-                m.content
-            },
-            created_at: m.created_at,
-            review_after: m.review_after,
+        .map(|e| EventItem {
+            id: e.id,
+            description: e.description,
+            notify_at: e.notify_at,
+            expires_at: e.expires_at,
+            status: e.status,
+            created_at: e.created_at,
         })
         .collect();
 
@@ -225,7 +221,7 @@ pub async fn get_dashboard_summary(
         rules_active,
         action_items,
         filtered_count,
-        pinned_messages,
+        events,
         quiet_mode,
         sunrise_hour,
         sunset_hour,
@@ -862,17 +858,17 @@ pub async fn get_rule_sources(
         meta: serde_json::json!({}),
     });
 
-    // Pinned: available if user has pinned messages
-    let pinned_count = state
+    // Events: available if user has tracked events
+    let events_count = state
         .ontology_repository
-        .get_pinned_messages(user_id)
-        .map(|p| p.len())
+        .get_active_events(user_id)
+        .map(|e| e.len())
         .unwrap_or(0);
     sources.push(RuleSourceOption {
-        source_type: "pinned".to_string(),
-        label: "Tracked items".to_string(),
+        source_type: "events".to_string(),
+        label: "Tracked events".to_string(),
         available: true,
-        meta: serde_json::json!({ "count": pinned_count }),
+        meta: serde_json::json!({ "count": events_count }),
     });
 
     // MCP: available if user has enabled MCP servers
@@ -1034,19 +1030,19 @@ pub async fn get_senders(
     Ok(Json(options))
 }
 
-/// POST /api/messages/{id}/unpin
-pub async fn unpin_message(
+/// POST /api/events/{id}/dismiss
+pub async fn dismiss_event(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Path(message_id): Path<i64>,
+    Path(event_id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     state
         .ontology_repository
-        .unpin_message(auth_user.user_id, message_id)
+        .dismiss_event(auth_user.user_id, event_id)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to unpin: {}", e) })),
+                Json(serde_json::json!({ "error": format!("Failed to dismiss event: {}", e) })),
             )
         })?;
     Ok(Json(serde_json::json!({ "ok": true })))

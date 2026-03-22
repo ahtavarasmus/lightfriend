@@ -56,7 +56,7 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         .execute(&mut conn);
         // Ontology tables - may not exist yet in all test environments
         let _ = diesel::sql_query(
-            "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
+            "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons, ont_messages, ont_events, ont_rules CASCADE",
         )
         .execute(&mut conn);
     }

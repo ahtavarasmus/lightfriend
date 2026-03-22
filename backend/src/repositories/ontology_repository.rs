@@ -3,12 +3,13 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types::Text;
 
 use crate::models::ontology_models::{
-    NewOntChangelog, NewOntChannel, NewOntLink, NewOntMessage, NewOntPerson, NewOntPersonEdit,
-    NewOntRule, OntChangelog, OntChannel, OntLink, OntMessage, OntPerson, OntPersonEdit, OntRule,
-    PersonWithChannels,
+    NewOntChangelog, NewOntChannel, NewOntEvent, NewOntLink, NewOntMessage, NewOntPerson,
+    NewOntPersonEdit, NewOntRule, OntChangelog, OntChannel, OntEvent, OntLink, OntMessage,
+    OntPerson, OntPersonEdit, OntRule, PersonWithChannels,
 };
 use crate::pg_schema::{
-    ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons, ont_rules,
+    ont_changelog, ont_channels, ont_events, ont_links, ont_messages, ont_person_edits,
+    ont_persons, ont_rules,
 };
 use crate::PgDbPool;
 
@@ -984,117 +985,186 @@ impl OntologyRepository {
         .execute(&mut conn)
     }
 
-    /// Purge messages older than max_age_secs (but never purge pinned messages).
+    /// Purge messages older than max_age_secs.
     pub fn purge_old_messages(&self, max_age_secs: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let cutoff = Self::now() - max_age_secs;
-        diesel::delete(
-            ont_messages::table
-                .filter(ont_messages::created_at.lt(cutoff))
-                .filter(ont_messages::pinned.eq(false)),
-        )
-        .execute(&mut conn)
+        diesel::delete(ont_messages::table.filter(ont_messages::created_at.lt(cutoff)))
+            .execute(&mut conn)
     }
 
-    /// Pin a message (set pinned=true).
-    pub fn pin_message(&self, user_id: i32, message_id: i64) -> Result<(), DieselError> {
+    // -----------------------------------------------------------------------
+    // Events (tracked items with lifecycle)
+    // -----------------------------------------------------------------------
+
+    pub fn create_event(&self, event: &NewOntEvent) -> Result<OntEvent, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(
-            ont_messages::table
-                .filter(ont_messages::id.eq(message_id))
-                .filter(ont_messages::user_id.eq(user_id)),
-        )
-        .set(ont_messages::pinned.eq(true))
-        .execute(&mut conn)?;
-        Ok(())
+        let created: OntEvent = diesel::insert_into(ont_events::table)
+            .values(event)
+            .get_result(&mut conn)?;
+        Self::log_change(
+            &mut conn,
+            event.user_id,
+            "Event",
+            created.id,
+            "created",
+            Some(format!("description={}", event.description)),
+            "user_action",
+        );
+        Ok(created)
     }
 
-    /// Pin a message and set its review_after deadline.
-    pub fn pin_message_with_deadline(
+    pub fn get_event(&self, user_id: i32, event_id: i32) -> Result<OntEvent, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::id.eq(event_id))
+            .filter(ont_events::user_id.eq(user_id))
+            .first(&mut conn)
+    }
+
+    pub fn get_active_events(&self, user_id: i32) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq("active"))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_events(
         &self,
         user_id: i32,
-        message_id: i64,
-        review_after: i32,
+        status: Option<&str>,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let mut query = ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .into_boxed();
+
+        if let Some(status) = status {
+            if status != "all" {
+                query = query.filter(ont_events::status.eq(status));
+            }
+        }
+
+        query.order(ont_events::created_at.desc()).load(&mut conn)
+    }
+
+    pub fn update_event_status(
+        &self,
+        user_id: i32,
+        event_id: i32,
+        status: &str,
     ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(
-            ont_messages::table
-                .filter(ont_messages::id.eq(message_id))
-                .filter(ont_messages::user_id.eq(user_id)),
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id)),
         )
         .set((
-            ont_messages::pinned.eq(true),
-            ont_messages::review_after.eq(Some(review_after)),
+            ont_events::status.eq(status),
+            ont_events::updated_at.eq(Self::now()),
         ))
         .execute(&mut conn)?;
         Ok(())
     }
 
-    /// Unpin a message (set pinned=false).
-    pub fn unpin_message(&self, user_id: i32, message_id: i64) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(
-            ont_messages::table
-                .filter(ont_messages::id.eq(message_id))
-                .filter(ont_messages::user_id.eq(user_id)),
-        )
-        .set(ont_messages::pinned.eq(false))
-        .execute(&mut conn)?;
-        Ok(())
+    pub fn dismiss_event(&self, user_id: i32, event_id: i32) -> Result<(), DieselError> {
+        self.update_event_status(user_id, event_id, "dismissed")
     }
 
-    /// Update a pinned message's status. If status == "completed", also unpin.
-    /// If status == "extend_deadline", push review_after forward by 7 days.
-    pub fn update_message_status(
+    pub fn update_event(
         &self,
         user_id: i32,
-        message_id: i64,
-        status: &str,
-    ) -> Result<(), DieselError> {
+        event_id: i32,
+        description: Option<&str>,
+        status: Option<&str>,
+        extend_days: Option<i32>,
+    ) -> Result<OntEvent, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        if status == "completed" {
+        let now = Self::now();
+
+        if let Some(desc) = description {
             diesel::update(
-                ont_messages::table
-                    .filter(ont_messages::id.eq(message_id))
-                    .filter(ont_messages::user_id.eq(user_id)),
+                ont_events::table
+                    .filter(ont_events::id.eq(event_id))
+                    .filter(ont_events::user_id.eq(user_id)),
             )
             .set((
-                ont_messages::status.eq(Some(status)),
-                ont_messages::pinned.eq(false),
+                ont_events::description.eq(desc),
+                ont_events::updated_at.eq(now),
             ))
-            .execute(&mut conn)?;
-        } else if status == "extend_deadline" {
-            let new_review_after = Self::now() + 7 * 86400;
-            diesel::update(
-                ont_messages::table
-                    .filter(ont_messages::id.eq(message_id))
-                    .filter(ont_messages::user_id.eq(user_id)),
-            )
-            .set((
-                ont_messages::status.eq(Some("active")),
-                ont_messages::review_after.eq(Some(new_review_after)),
-            ))
-            .execute(&mut conn)?;
-        } else {
-            diesel::update(
-                ont_messages::table
-                    .filter(ont_messages::id.eq(message_id))
-                    .filter(ont_messages::user_id.eq(user_id)),
-            )
-            .set(ont_messages::status.eq(Some(status)))
             .execute(&mut conn)?;
         }
-        Ok(())
+
+        if let Some(s) = status {
+            diesel::update(
+                ont_events::table
+                    .filter(ont_events::id.eq(event_id))
+                    .filter(ont_events::user_id.eq(user_id)),
+            )
+            .set((ont_events::status.eq(s), ont_events::updated_at.eq(now)))
+            .execute(&mut conn)?;
+        }
+
+        if let Some(days) = extend_days {
+            let extension = days * 86400;
+            diesel::update(
+                ont_events::table
+                    .filter(ont_events::id.eq(event_id))
+                    .filter(ont_events::user_id.eq(user_id)),
+            )
+            .set((
+                ont_events::notify_at.eq(Some(now + extension)),
+                ont_events::expires_at.eq(Some(now + extension)),
+                ont_events::status.eq("active"),
+                ont_events::updated_at.eq(now),
+            ))
+            .execute(&mut conn)?;
+        }
+
+        ont_events::table
+            .filter(ont_events::id.eq(event_id))
+            .filter(ont_events::user_id.eq(user_id))
+            .first(&mut conn)
     }
 
-    /// Get all pinned messages for a user.
-    pub fn get_pinned_messages(&self, user_id: i32) -> Result<Vec<OntMessage>, DieselError> {
+    /// Get active events with notify_at <= now (due for notification).
+    pub fn get_events_due_for_notification(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        ont_messages::table
-            .filter(ont_messages::user_id.eq(user_id))
-            .filter(ont_messages::pinned.eq(true))
-            .order(ont_messages::created_at.desc())
+        ont_events::table
+            .filter(ont_events::status.eq("active"))
+            .filter(ont_events::notify_at.is_not_null())
+            .filter(ont_events::notify_at.le(now))
             .load(&mut conn)
+    }
+
+    /// Get active or already-notified events with expires_at <= now.
+    pub fn get_expired_events(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::status.eq_any(&["active", "notified"]))
+            .filter(ont_events::expires_at.is_not_null())
+            .filter(ont_events::expires_at.le(now))
+            .load(&mut conn)
+    }
+
+    /// Purge completed/dismissed/expired/notified events older than max_age_secs.
+    pub fn purge_old_events(&self, max_age_secs: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let cutoff = Self::now() - max_age_secs;
+        diesel::delete(
+            ont_events::table
+                .filter(ont_events::status.eq_any(&[
+                    "completed",
+                    "dismissed",
+                    "expired",
+                    "notified",
+                ]))
+                .filter(ont_events::updated_at.lt(cutoff)),
+        )
+        .execute(&mut conn)
     }
 
     // -----------------------------------------------------------------------

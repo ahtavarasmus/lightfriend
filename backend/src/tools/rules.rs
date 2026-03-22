@@ -1,7 +1,7 @@
 use openai_api_rs::v1::{chat_completion, types};
 use std::collections::HashMap;
 
-use crate::models::ontology_models::NewOntRule;
+use crate::models::ontology_models::{NewOntEvent, NewOntRule};
 use crate::proactive::rules::{compute_next_fire_at, ActionConfig, TriggerConfig};
 use crate::tools::registry::{ToolContext, ToolHandler, ToolResult};
 use crate::UserCoreOps;
@@ -94,104 +94,102 @@ impl ToolHandler for SetReminderHandler {
             .iter()
             .any(|kw| when.to_lowercase().starts_with(kw));
 
-        let (trigger_config_str, trigger_type) = if is_recurring {
-            (
-                serde_json::json!({
-                    "schedule": "recurring",
-                    "pattern": when
-                })
-                .to_string(),
-                "schedule".to_string(),
-            )
-        } else {
-            (
-                serde_json::json!({
-                    "schedule": "once",
-                    "at": when,
-                    "fire_once": true
-                })
-                .to_string(),
-                "schedule".to_string(),
-            )
-        };
-
-        let action_config_str = serde_json::json!({
-            "method": "sms",
-            "message": message
-        })
-        .to_string();
-
-        // Compute next_fire_at
-        let next_fire_at = {
-            let trigger: TriggerConfig = serde_json::from_str(&trigger_config_str).unwrap();
-            match trigger.schedule.as_deref() {
-                Some("once") => trigger
-                    .at
-                    .as_ref()
-                    .and_then(|at| crate::proactive::utils::parse_iso_to_timestamp(at)),
-                Some("recurring") => {
-                    if let Some(ref pattern) = trigger.pattern {
-                        let user_tz = ctx
-                            .state
-                            .user_core
-                            .get_user_info(ctx.user_id)
-                            .ok()
-                            .and_then(|info| info.timezone)
-                            .unwrap_or_else(|| "UTC".to_string());
-                        compute_next_fire_at(pattern, &user_tz)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        };
-
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i32;
 
-        // Build flow_config: passthrough action node
-        let flow_config = serde_json::json!({
-            "type": "action",
-            "action_type": "notify",
-            "config": serde_json::from_str::<serde_json::Value>(&action_config_str).unwrap_or_default()
-        });
+        if !is_recurring {
+            // One-time reminder: create an Event with notify_at == expires_at
+            let notify_at = crate::proactive::utils::parse_iso_to_timestamp(&when)
+                .ok_or_else(|| {
+                    format!(
+                        "Invalid one-time reminder timestamp '{}'. Use an ISO datetime.",
+                        when
+                    )
+                })?;
 
-        let new_rule = NewOntRule {
-            user_id: ctx.user_id,
-            name: name.clone(),
-            trigger_type,
-            trigger_config: trigger_config_str,
-            logic_type: "passthrough".to_string(),
-            logic_prompt: None,
-            logic_fetch: None,
-            action_type: "notify".to_string(),
-            action_config: action_config_str,
-            status: "active".to_string(),
-            next_fire_at,
-            expires_at: None,
-            created_at: now,
-            updated_at: now,
-            flow_config: Some(flow_config.to_string()),
-        };
+            let new_event = NewOntEvent {
+                user_id: ctx.user_id,
+                description: message.clone(),
+                notify_at: Some(notify_at as i32),
+                expires_at: Some(notify_at as i32),
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            };
 
-        match ctx.state.ontology_repository.create_rule(&new_rule) {
-            Ok(rule) => Ok(ToolResult::AnswerWithTask {
-                answer: format!(
-                    "Reminder '{}' set (id={}). {}",
-                    name,
-                    rule.id,
-                    if is_recurring {
-                        format!("Recurring: {}", when)
-                    } else {
-                        "Will fire once.".to_string()
-                    }
-                ),
-                task_id: rule.id,
-            }),
-            Err(e) => Err(format!("Failed to create reminder: {}", e)),
+            match ctx.state.ontology_repository.create_event(&new_event) {
+                Ok(event) => Ok(ToolResult::Answer(format!(
+                    "Reminder '{}' set (event id={}). Will fire once.",
+                    name, event.id,
+                ))),
+                Err(e) => Err(format!("Failed to create reminder: {}", e)),
+            }
+        } else {
+            // Recurring reminder: create a Rule as before
+            let trigger_config_str = serde_json::json!({
+                "schedule": "recurring",
+                "pattern": when
+            })
+            .to_string();
+
+            let action_config_str = serde_json::json!({
+                "method": "sms",
+                "message": message
+            })
+            .to_string();
+
+            let next_fire_at = {
+                let trigger: TriggerConfig = serde_json::from_str(&trigger_config_str).unwrap();
+                if let Some(ref pattern) = trigger.pattern {
+                    let user_tz = ctx
+                        .state
+                        .user_core
+                        .get_user_info(ctx.user_id)
+                        .ok()
+                        .and_then(|info| info.timezone)
+                        .unwrap_or_else(|| "UTC".to_string());
+                    compute_next_fire_at(pattern, &user_tz)
+                } else {
+                    None
+                }
+            };
+
+            let flow_config = serde_json::json!({
+                "type": "action",
+                "action_type": "notify",
+                "config": serde_json::from_str::<serde_json::Value>(&action_config_str).unwrap_or_default()
+            });
+
+            let new_rule = NewOntRule {
+                user_id: ctx.user_id,
+                name: name.clone(),
+                trigger_type: "schedule".to_string(),
+                trigger_config: trigger_config_str,
+                logic_type: "passthrough".to_string(),
+                logic_prompt: None,
+                logic_fetch: None,
+                action_type: "notify".to_string(),
+                action_config: action_config_str,
+                status: "active".to_string(),
+                next_fire_at,
+                expires_at: None,
+                created_at: now,
+                updated_at: now,
+                flow_config: Some(flow_config.to_string()),
+            };
+
+            match ctx.state.ontology_repository.create_rule(&new_rule) {
+                Ok(rule) => Ok(ToolResult::AnswerWithTask {
+                    answer: format!(
+                        "Recurring reminder '{}' set (rule id={}). Pattern: {}",
+                        name, rule.id, when
+                    ),
+                    task_id: rule.id,
+                }),
+                Err(e) => Err(format!("Failed to create reminder: {}", e)),
+            }
         }
     }
 }
@@ -491,15 +489,15 @@ For tool_call: {"tool":"tool_name","params":{...}}"#
 }
 
 // ---------------------------------------------------------------------------
-// PinMessageHandler - pins the triggering message to the dashboard
+// CreateEventHandler - creates a tracked event linked to the triggering message
 // ---------------------------------------------------------------------------
 
-pub struct PinMessageHandler;
+pub struct CreateEventHandler;
 
 #[async_trait::async_trait]
-impl ToolHandler for PinMessageHandler {
+impl ToolHandler for CreateEventHandler {
     fn name(&self) -> &'static str {
-        "pin_message"
+        "create_event"
     }
 
     fn auto_injected_params(&self) -> Vec<&'static str> {
@@ -512,99 +510,38 @@ impl ToolHandler for PinMessageHandler {
             "message_id".to_string(),
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::Number),
-                description: Some("ID of the message to pin (auto-injected by rules)".to_string()),
+                description: Some(
+                    "ID of the triggering message (auto-injected by rules)".to_string(),
+                ),
                 ..Default::default()
             }),
         );
         properties.insert(
-            "review_after_days".to_string(),
+            "description".to_string(),
             Box::new(types::JSONSchemaDefine {
-                schema_type: Some(types::JSONSchemaType::Number),
+                schema_type: Some(types::JSONSchemaType::String),
                 description: Some(
-                    "Days until review deadline, 1-30. Default 7. Set based on item type: delivery=5, invoice=30, appointment=1."
+                    "Short description of what to track (e.g. 'Amazon package delivery', 'Invoice payment due')."
                         .to_string(),
                 ),
                 ..Default::default()
             }),
         );
-
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: "pin_message".to_string(),
-                description: Some(
-                    "Pin a message to the user's dashboard for later review.".to_string(),
-                ),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(properties),
-                    required: Some(vec!["message_id".to_string()]),
-                },
-            },
-        }
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        let args: serde_json::Value =
-            serde_json::from_str(ctx.arguments).map_err(|e| format!("Invalid JSON: {}", e))?;
-
-        let message_id = args["message_id"]
-            .as_i64()
-            .ok_or_else(|| "message_id is required".to_string())?;
-
-        let review_after_days = args["review_after_days"].as_i64().unwrap_or(7).clamp(1, 30) as i32;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i32;
-        let review_after = now + review_after_days * 86400;
-
-        ctx.state
-            .ontology_repository
-            .pin_message_with_deadline(ctx.user_id, message_id, review_after)
-            .map_err(|e| format!("Failed to pin message: {}", e))?;
-
-        Ok(ToolResult::Answer(format!(
-            "Message {} pinned to dashboard (review in {} days).",
-            message_id, review_after_days
-        )))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// UpdateTrackedItemHandler - updates status of a pinned/tracked message
-// ---------------------------------------------------------------------------
-
-pub struct UpdateTrackedItemHandler;
-
-#[async_trait::async_trait]
-impl ToolHandler for UpdateTrackedItemHandler {
-    fn name(&self) -> &'static str {
-        "update_tracked_item"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        let mut properties = HashMap::new();
         properties.insert(
-            "message_id".to_string(),
+            "notify_at_days".to_string(),
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::Number),
-                description: Some("ID of the pinned/tracked message to update".to_string()),
+                description: Some("Days from now until notification. Default 7.".to_string()),
                 ..Default::default()
             }),
         );
         properties.insert(
-            "status".to_string(),
+            "expires_at_days".to_string(),
             Box::new(types::JSONSchemaDefine {
-                schema_type: Some(types::JSONSchemaType::String),
-                description: Some("New status for the tracked item".to_string()),
-                enum_values: Some(vec![
-                    "active".to_string(),
-                    "updated".to_string(),
-                    "completed".to_string(),
-                    "extend_deadline".to_string(),
-                ]),
+                schema_type: Some(types::JSONSchemaType::Number),
+                description: Some(
+                    "Days from now until expiration. Defaults to notify_at_days.".to_string(),
+                ),
                 ..Default::default()
             }),
         );
@@ -612,9 +549,9 @@ impl ToolHandler for UpdateTrackedItemHandler {
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
-                name: "update_tracked_item".to_string(),
+                name: "create_event".to_string(),
                 description: Some(
-                    "Update the status of a tracked/pinned item. Completed items are auto-unpinned."
+                    "Create a tracked event on the user's dashboard. Links to the triggering message."
                         .to_string(),
                 ),
                 parameters: types::FunctionParameters {
@@ -622,7 +559,7 @@ impl ToolHandler for UpdateTrackedItemHandler {
                     properties: Some(properties),
                     required: Some(vec![
                         "message_id".to_string(),
-                        "status".to_string(),
+                        "description".to_string(),
                     ]),
                 },
             },
@@ -636,18 +573,171 @@ impl ToolHandler for UpdateTrackedItemHandler {
         let message_id = args["message_id"]
             .as_i64()
             .ok_or_else(|| "message_id is required".to_string())?;
-        let status = args["status"]
+        let description = args["description"]
             .as_str()
-            .ok_or_else(|| "status is required".to_string())?;
+            .ok_or_else(|| "description is required".to_string())?
+            .to_string();
 
-        ctx.state
+        let notify_at_days = args["notify_at_days"].as_i64().unwrap_or(7).clamp(1, 90) as i32;
+        let expires_at_days = args["expires_at_days"]
+            .as_i64()
+            .unwrap_or(notify_at_days as i64)
+            .clamp(1, 90) as i32;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+
+        let new_event = NewOntEvent {
+            user_id: ctx.user_id,
+            description: description.clone(),
+            notify_at: Some(now + notify_at_days * 86400),
+            expires_at: Some(now + expires_at_days * 86400),
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let event = ctx
+            .state
             .ontology_repository
-            .update_message_status(ctx.user_id, message_id, status)
-            .map_err(|e| format!("Failed to update tracked item: {}", e))?;
+            .create_event(&new_event)
+            .map_err(|e| format!("Failed to create event: {}", e))?;
+
+        // Link message to event
+        let _ = ctx.state.ontology_repository.create_link(
+            ctx.user_id,
+            "Message",
+            message_id as i32,
+            "Event",
+            event.id,
+            "triggers",
+            None,
+        );
 
         Ok(ToolResult::Answer(format!(
-            "Tracked item {} updated to '{}'.",
-            message_id, status
+            "Event '{}' created (id={}). Notify in {} days, expires in {} days.",
+            description, event.id, notify_at_days, expires_at_days
+        )))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UpdateEventHandler - updates a tracked event's status/description
+// ---------------------------------------------------------------------------
+
+pub struct UpdateEventHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for UpdateEventHandler {
+    fn name(&self) -> &'static str {
+        "update_event"
+    }
+
+    fn auto_injected_params(&self) -> Vec<&'static str> {
+        vec!["message_id"]
+    }
+
+    fn definition(&self) -> chat_completion::Tool {
+        let mut properties = HashMap::new();
+        properties.insert(
+            "event_id".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Number),
+                description: Some("ID of the event to update".to_string()),
+                ..Default::default()
+            }),
+        );
+        properties.insert(
+            "message_id".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Number),
+                description: Some(
+                    "ID of the triggering message (auto-injected by rules)".to_string(),
+                ),
+                ..Default::default()
+            }),
+        );
+        properties.insert(
+            "description".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some("Updated description for the event".to_string()),
+                ..Default::default()
+            }),
+        );
+        properties.insert(
+            "status".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some("New status for the event".to_string()),
+                enum_values: Some(vec![
+                    "active".to_string(),
+                    "completed".to_string(),
+                    "dismissed".to_string(),
+                ]),
+                ..Default::default()
+            }),
+        );
+        properties.insert(
+            "extend_days".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Number),
+                description: Some("Extend deadline by this many days from now".to_string()),
+                ..Default::default()
+            }),
+        );
+
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: "update_event".to_string(),
+                description: Some(
+                    "Update a tracked event's status, description, or deadline.".to_string(),
+                ),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(properties),
+                    required: Some(vec!["event_id".to_string()]),
+                },
+            },
+        }
+    }
+
+    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
+        let args: serde_json::Value =
+            serde_json::from_str(ctx.arguments).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+        let event_id = args["event_id"]
+            .as_i64()
+            .ok_or_else(|| "event_id is required".to_string())? as i32;
+        let description = args["description"].as_str();
+        let status = args["status"].as_str();
+        let extend_days = args["extend_days"].as_i64().map(|d| d as i32);
+
+        let event = ctx
+            .state
+            .ontology_repository
+            .update_event(ctx.user_id, event_id, description, status, extend_days)
+            .map_err(|e| format!("Failed to update event: {}", e))?;
+
+        // Always link the current message to the event
+        if let Some(message_id) = args["message_id"].as_i64() {
+            let _ = ctx.state.ontology_repository.create_link(
+                ctx.user_id,
+                "Message",
+                message_id as i32,
+                "Event",
+                event_id,
+                "updates",
+                None,
+            );
+        }
+
+        Ok(ToolResult::Answer(format!(
+            "Event {} updated. Status: {}, description: '{}'.",
+            event.id, event.status, event.description
         )))
     }
 }

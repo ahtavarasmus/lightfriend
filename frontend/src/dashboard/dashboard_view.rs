@@ -88,19 +88,19 @@ const DASHBOARD_STYLES: &str = r#"
     color: #444;
 }
 
-/* ---- Pinned Messages ---- */
-.pinned-section {
+/* ---- Tracked Events ---- */
+.events-section {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
     padding: 0.25rem 0 0.5rem;
 }
-.pinned-header {
+.events-header {
     display: flex;
     align-items: center;
     padding-bottom: 0.15rem;
 }
-.pinned-card {
+.event-card {
     display: flex;
     align-items: flex-start;
     gap: 0.5rem;
@@ -109,29 +109,21 @@ const DASHBOARD_STYLES: &str = r#"
     border-radius: 8px;
     padding: 0.5rem 0.6rem;
 }
-.pinned-card-left {
-    flex-shrink: 0;
-    padding-top: 0.15rem;
-}
-.pinned-card-body {
+.event-card-body {
     flex: 1;
     min-width: 0;
 }
-.pinned-card-sender {
+.event-card-description {
     font-size: 0.8rem;
     font-weight: 600;
     color: #ccc;
 }
-.pinned-card-preview {
+.event-card-meta {
     font-size: 0.75rem;
     color: #888;
     line-height: 1.3;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
 }
-.pinned-card-unpin {
+.event-card-dismiss {
     flex-shrink: 0;
     background: transparent;
     border: none;
@@ -141,7 +133,7 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 0.75rem;
     line-height: 1;
 }
-.pinned-card-unpin:hover {
+.event-card-dismiss:hover {
     color: #ff6b6b;
 }
 
@@ -338,7 +330,7 @@ struct DashboardSummaryResponse {
     action_items: Vec<ActionItemResponse>,
     filtered_count: i64,
     #[serde(default)]
-    pinned_messages: Vec<PinnedMessageResponse>,
+    events: Vec<EventResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
@@ -346,14 +338,15 @@ struct DashboardSummaryResponse {
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct PinnedMessageResponse {
-    id: i64,
-    sender_name: String,
-    platform: String,
-    content: String,
-    created_at: i32,
+struct EventResponse {
+    id: i32,
+    description: String,
     #[serde(default)]
-    review_after: Option<i32>,
+    notify_at: Option<i32>,
+    #[serde(default)]
+    expires_at: Option<i32>,
+    status: String,
+    created_at: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -692,11 +685,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .unwrap_or_default();
 
     let has_action_items = !visible_action_items.is_empty();
-    let pinned_messages: Vec<&PinnedMessageResponse> = (*summary)
+    let events: Vec<&EventResponse> = (*summary)
         .as_ref()
-        .map(|s| s.pinned_messages.iter().collect())
+        .map(|s| s.events.iter().collect())
         .unwrap_or_default();
-    let has_pinned = !pinned_messages.is_empty();
+    let has_events = !events.is_empty();
     let messages_handled = (*summary)
         .as_ref()
         .map(|s| s.messages_handled_today)
@@ -731,35 +724,23 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // ---- Pinned messages ----
-                    if has_pinned {
-                        <div class="pinned-section">
-                            <div class="pinned-header">
-                                <i class="fa-solid fa-thumbtack" style="color: #7EB2FF; margin-right: 0.4rem; font-size: 0.75rem;"></i>
+                    // ---- Tracked events ----
+                    if has_events {
+                        <div class="events-section">
+                            <div class="events-header">
+                                <i class="fa-solid fa-calendar-check" style="color: #7EB2FF; margin-right: 0.4rem; font-size: 0.75rem;"></i>
                                 <span style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.03em;">
-                                    {"Pinned"}
+                                    {"Events"}
                                 </span>
                             </div>
-                            { for pinned_messages.iter().map(|msg| {
-                                let msg_id = msg.id;
-                                let platform_icon = match msg.platform.as_str() {
-                                    "whatsapp" => "fa-brands fa-whatsapp",
-                                    "telegram" => "fa-brands fa-telegram",
-                                    "signal" => "fa-solid fa-comment-dots",
-                                    "email" => "fa-solid fa-envelope",
-                                    _ => "fa-solid fa-message",
-                                };
-                                let preview = if msg.content.len() > 80 {
-                                    format!("{}...", &msg.content[..80])
-                                } else {
-                                    msg.content.clone()
-                                };
+                            { for events.iter().map(|evt| {
+                                let evt_id = evt.id;
                                 let now_ts = (js_sys::Date::now() / 1000.0) as i32;
-                                let deadline_html = msg.review_after.map(|ra| {
-                                    if now_ts > ra {
+                                let deadline_html = evt.expires_at.map(|ea| {
+                                    if now_ts > ea {
                                         html! { <span style="color: #ff6b6b; font-size: 0.65rem; font-weight: 600;">{"overdue"}</span> }
                                     } else {
-                                        let days_left = (ra - now_ts) / 86400;
+                                        let days_left = (ea - now_ts) / 86400;
                                         if days_left <= 2 {
                                             html! { <span style="color: #fbbf24; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
                                         } else {
@@ -767,33 +748,29 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         }
                                     }
                                 });
-                                let on_unpin = {
+                                let on_dismiss = {
                                     let fetch_summary = fetch_summary.clone();
                                     Callback::from(move |e: MouseEvent| {
                                         e.stop_propagation();
                                         let fetch_summary = fetch_summary.clone();
                                         spawn_local(async move {
-                                            let url = format!("/api/messages/{}/unpin", msg_id);
+                                            let url = format!("/api/events/{}/dismiss", evt_id);
                                             let _ = Api::post(&url).send().await;
                                             fetch_summary.emit(());
                                         });
                                     })
                                 };
                                 html! {
-                                    <div class="pinned-card">
-                                        <div class="pinned-card-left">
-                                            <i class={platform_icon} style="color: #666; font-size: 0.8rem;"></i>
-                                        </div>
-                                        <div class="pinned-card-body">
-                                            <div class="pinned-card-sender">
-                                                {&msg.sender_name}
+                                    <div class="event-card">
+                                        <div class="event-card-body">
+                                            <div class="event-card-description">
+                                                {&evt.description}
                                                 if let Some(ref dl) = deadline_html {
                                                     <span style="margin-left: 0.4rem;">{dl.clone()}</span>
                                                 }
                                             </div>
-                                            <div class="pinned-card-preview">{preview}</div>
                                         </div>
-                                        <button class="pinned-card-unpin" onclick={on_unpin} title="Unpin">
+                                        <button class="event-card-dismiss" onclick={on_dismiss} title="Dismiss">
                                             <i class="fa-solid fa-xmark"></i>
                                         </button>
                                     </div>

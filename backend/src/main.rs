@@ -1016,8 +1016,8 @@ async fn main() {
             get(dashboard_handlers::get_rule_sources),
         )
         .route(
-            "/api/messages/{id}/unpin",
-            post(dashboard_handlers::unpin_message),
+            "/api/events/{id}/dismiss",
+            post(dashboard_handlers::dismiss_event),
         )
         // Person + Channel (ontology) routes
         .route(

@@ -424,9 +424,19 @@ diesel::table! {
         content -> Text,
         person_id -> Nullable<Int4>,
         created_at -> Int4,
-        pinned -> Bool,
-        status -> Nullable<Text>,
-        review_after -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    ont_events (id) {
+        id -> Int4,
+        user_id -> Int4,
+        description -> Text,
+        notify_at -> Nullable<Int4>,
+        expires_at -> Nullable<Int4>,
+        status -> Text,
+        created_at -> Int4,
+        updated_at -> Int4,
     }
 }
 
@@ -490,5 +500,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_changelog,
     ont_links,
     ont_messages,
+    ont_events,
     ont_rules,
 );

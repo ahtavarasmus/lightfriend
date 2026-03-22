@@ -103,13 +103,6 @@ static CHANNEL_DEF: ObjectTypeDef = ObjectTypeDef {
 
 static MESSAGE_PROPS: &[PropertyDef] = &[
     PropertyDef {
-        name: "pinned",
-        description:
-            "Set to 'true' to show only pinned/tracked items. Omit to show all recent messages.",
-        prop_type: "String",
-        filter: Some(FilterSource::Static(&["true"])),
-    },
-    PropertyDef {
         name: "platform",
         description: "Filter by platform. Omit to include all platforms.",
         prop_type: "String",
@@ -127,8 +120,27 @@ static MESSAGE_PROPS: &[PropertyDef] = &[
 
 static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Message",
-    description: "Query messages. Set pinned='true' to list tracked items with IDs, statuses, and deadlines. All filters are optional - omit to get recent messages.",
+    description: "Query recent messages. All filters are optional - omit to get recent messages.",
     properties: MESSAGE_PROPS,
+    linkable_to: &[],
+};
+
+static EVENT_PROPS: &[PropertyDef] = &[PropertyDef {
+    name: "status",
+    description: "Filter by event status. Omit to show only active events.",
+    prop_type: "String",
+    filter: Some(FilterSource::Static(&[
+        "active",
+        "notified",
+        "expired",
+        "dismissed",
+    ])),
+}];
+
+static EVENT_DEF: ObjectTypeDef = ObjectTypeDef {
+    name: "Event",
+    description: "Query tracked events. Shows active events with IDs, descriptions, and deadlines.",
+    properties: EVENT_PROPS,
     linkable_to: &[],
 };
 
@@ -139,7 +151,7 @@ static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
 impl OntologyRegistry {
     pub fn build() -> Self {
         Self {
-            object_types: vec![&PERSON_DEF, &CHANNEL_DEF, &MESSAGE_DEF],
+            object_types: vec![&PERSON_DEF, &CHANNEL_DEF, &MESSAGE_DEF, &EVENT_DEF],
         }
     }
 

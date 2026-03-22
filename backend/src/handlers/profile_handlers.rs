@@ -1901,7 +1901,7 @@ pub async fn web_chat_stream(
                                 "ask_perplexity" => "Searching the web...".to_string(),
                                 "create_task" => "Creating item...".to_string(),
                                 "send_sms" | "send_email" => "Preparing message...".to_string(),
-                                "fetch_tracked_items" => "Checking items...".to_string(),
+                                "create_event" | "update_event" => "Managing events...".to_string(),
                                 "direct_response" => "Responding...".to_string(),
                                 other => format!("Using {}...", other.replace('_', " ")),
                             };

@@ -177,6 +177,84 @@ async fn test_query_channel_no_params_error() {
 }
 
 // =============================================================================
+// Event queries
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_query_event_filters_by_completed_status() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    let event = state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Invoice follow-up".to_string(),
+            notify_at: Some(now - 60),
+            expires_at: Some(now + 3600),
+            status: "completed".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+
+    let result = handle_query(
+        "query_event",
+        r#"{"status":"completed","query":"invoice"}"#,
+        &state,
+        user.id,
+    )
+    .await;
+
+    assert!(result.is_ok());
+    let output = result.unwrap();
+    assert!(output.contains(&format!("[event_id={}]", event.id)));
+    assert!(output.contains("[status=completed]"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_query_event_status_all_includes_non_active_events() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Active package".to_string(),
+            notify_at: Some(now + 60),
+            expires_at: Some(now + 3600),
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Dismissed package".to_string(),
+            notify_at: Some(now - 60),
+            expires_at: Some(now + 3600),
+            status: "dismissed".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+
+    let result = handle_query("query_event", r#"{"status":"all"}"#, &state, user.id).await;
+
+    assert!(result.is_ok());
+    let output = result.unwrap();
+    assert!(output.contains("Active package"));
+    assert!(output.contains("Dismissed package"));
+}
+
+// =============================================================================
 // =============================================================================
 // Error cases
 // =============================================================================

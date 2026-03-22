@@ -53,7 +53,7 @@ pub enum FetchSource {
         #[serde(default)]
         args: String,
     },
-    Pinned,
+    Events,
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +135,7 @@ pub fn resolve_prompt_template(prompt: &str, trigger_type: &str) -> String {
         } else {
             "Only notify if delaying this message over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates, casual messages, and vague requests are NOT critical. If not critical, respond with just 'skip'."
         }.to_string(),
-        "track_items" => "Does this message relate to an already-tracked/pinned item? If it updates a tracked item (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        "track_items" => "Does this message relate to an already-tracked event? If it updates a tracked event (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
         _ if id.starts_with("check_condition:") => {
             let condition = id.strip_prefix("check_condition:").unwrap_or("");
             if is_schedule {
@@ -609,31 +609,26 @@ pub(crate) async fn prefetch_sources(
                         .push_str(&format!("\n\n--- MCP {}:{} ---\n{}", server, tool, result));
                 }
             }
-            FetchSource::Pinned => {
-                let pinned = state
+            FetchSource::Events => {
+                let events = state
                     .ontology_repository
-                    .get_pinned_messages(rule.user_id)
+                    .get_active_events(rule.user_id)
                     .unwrap_or_default();
-                if !pinned.is_empty() {
+                if !events.is_empty() {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs() as i32;
-                    let formatted: Vec<String> = pinned
+                    let formatted: Vec<String> = events
                         .iter()
-                        .map(|m| {
-                            let status_tag = m
-                                .status
-                                .as_deref()
-                                .map(|s| format!(" [status={}]", s))
-                                .unwrap_or_default();
-                            let deadline_tag = m
-                                .review_after
-                                .map(|ra| {
-                                    if now > ra {
+                        .map(|e| {
+                            let deadline_tag = e
+                                .expires_at
+                                .map(|ea| {
+                                    if now > ea {
                                         " [OVERDUE]".to_string()
                                     } else {
-                                        let days_left = (ra - now) / 86400;
+                                        let days_left = (ea - now) / 86400;
                                         if days_left <= 2 {
                                             format!(" [due in {} days]", days_left)
                                         } else {
@@ -643,18 +638,13 @@ pub(crate) async fn prefetch_sources(
                                 })
                                 .unwrap_or_default();
                             format!(
-                                "[id={}] [{}]{}{} {}: {}",
-                                m.id,
-                                m.platform,
-                                status_tag,
-                                deadline_tag,
-                                m.sender_name,
-                                m.content
+                                "[event_id={}] [status={}]{} {}",
+                                e.id, e.status, deadline_tag, e.description
                             )
                         })
                         .collect();
                     prefetched.push_str(&format!(
-                        "\n\n--- Tracked/pinned items ---\n{}",
+                        "\n\n--- Tracked events ---\n{}",
                         formatted.join("\n")
                     ));
                 }
@@ -876,7 +866,7 @@ async fn execute_flow_action(
                             }
                         }
                     }
-                    if tool_name == "pin_message" {
+                    if tool_name == "create_event" {
                         if let Some(snapshot) = trigger_snapshot {
                             if let Some(mid) = snapshot.get("message_id").and_then(|v| v.as_i64()) {
                                 p["message_id"] = serde_json::json!(mid);
@@ -911,8 +901,8 @@ async fn execute_flow_action(
                             "Rule {} ({}): tool '{}' executed successfully",
                             rule.id, rule.name, tool_name
                         );
-                        // For update_tracked_item, send the LLM's message as SMS notification
-                        if tool_name == "update_tracked_item" && !message.is_empty() {
+                        // For update_event, send the LLM's message as SMS notification
+                        if tool_name == "update_event" && !message.is_empty() {
                             send_notification(
                                 state,
                                 rule.user_id,
@@ -1300,7 +1290,7 @@ pub async fn evaluate_flow_test(
                         FetchSource::Internet { query } => format!("internet: {}", query),
                         FetchSource::Tesla => "tesla".into(),
                         FetchSource::Mcp { server, tool, .. } => format!("mcp {}:{}", server, tool),
-                        FetchSource::Pinned => "pinned items".into(),
+                        FetchSource::Events => "tracked events".into(),
                     })
                     .collect();
                 let _ = tx

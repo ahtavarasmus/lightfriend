@@ -376,9 +376,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             content: content.clone(),
                                             person_id: matched_person_id,
                                             created_at: now,
-                                            pinned: false,
-                                            status: None,
-                                            review_after: None,
                                         };
                                         let state_emit = state.clone();
                                         let uid = user.id;
@@ -583,6 +580,18 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
                 _ => {}
             }
+
+            // Purge dismissed/expired/notified events older than 30 days
+            let event_max_age = 30 * 24 * 3600;
+            match state.ontology_repository.purge_old_events(event_max_age) {
+                Ok(count) if count > 0 => {
+                    tracing::info!("Purged {} old events (>30 days)", count);
+                }
+                Err(e) => {
+                    error!("Failed to purge old events: {}", e);
+                }
+                _ => {}
+            }
         })
     })
     .expect("Failed to create message purge job");
@@ -591,6 +600,59 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(message_purge_job)
         .await
         .expect("Failed to add message purge job to scheduler");
+
+    // Every minute: process event notifications and expirations
+    let state_clone = Arc::clone(&state);
+    let event_cron_job = Job::new_async("30 * * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32;
+
+            // Notify events that are due
+            let due_events = state
+                .ontology_repository
+                .get_events_due_for_notification(now)
+                .unwrap_or_default();
+            for event in &due_events {
+                let message = format!("Event reminder: {}", event.description);
+                crate::proactive::utils::send_notification(
+                    &state,
+                    event.user_id,
+                    &message,
+                    "event_notification".to_string(),
+                    None,
+                )
+                .await;
+                let _ = state.ontology_repository.update_event_status(
+                    event.user_id,
+                    event.id,
+                    "notified",
+                );
+            }
+
+            // Expire events past their expiration
+            let expired_events = state
+                .ontology_repository
+                .get_expired_events(now)
+                .unwrap_or_default();
+            for event in &expired_events {
+                let _ = state.ontology_repository.update_event_status(
+                    event.user_id,
+                    event.id,
+                    "expired",
+                );
+            }
+        })
+    })
+    .expect("Failed to create event cron job");
+
+    sched
+        .add(event_cron_job)
+        .await
+        .expect("Failed to add event cron job to scheduler");
 
     // Every minute: fire schedule-based ont_rules that are due
     let state_clone = Arc::clone(&state);
