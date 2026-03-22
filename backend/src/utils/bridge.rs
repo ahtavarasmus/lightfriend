@@ -1013,8 +1013,6 @@ use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
 use matrix_sdk::RoomMemberships;
 use strsim;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 /// Returns the timestamp (in seconds) up to which the user has "seen" messages in this room.
 /// This checks read receipts and user replies to determine what the user has already seen.
 /// Returns None if no seen status can be determined.
@@ -1287,183 +1285,63 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-    use matrix_sdk::ruma::{
-        api::client::room::get_room_event,
-        events::receipt::{ReceiptThread, ReceiptType},
-    };
-    use tokio::time::{sleep, Duration};
-    let bridge = match state.user_repository.get_bridge(user_id, service.as_str()) {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            tracing::error!("No bridge found for service {}", service);
-            return;
-        }
-        Err(e) => {
-            tracing::error!("Error getting bridge for service {}: {}", service, e);
-            return;
-        }
-    };
-
-    tracing::info!("Computing wait time based on last seen");
-
-    // Get current time in seconds (Unix timestamp)
-    let now_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    const SHORT_WAIT: u64 = 120; // 2 minutes (increased from 30s)
-    const LONG_WAIT: u64 = 600; // 10 minutes (increased from 5min)
-    const ACTIVITY_THRESHOLD: i32 = 300; // 5 minutes
-
-    let wait_time = match bridge.last_seen_online {
-        Some(last_seen) => {
-            let age = now_secs - last_seen;
-            if age > ACTIVITY_THRESHOLD {
-                SHORT_WAIT
-            } else {
-                LONG_WAIT
-            }
-        }
-        None => SHORT_WAIT,
-    };
-    tracing::info!(
-        "Waiting for {} seconds before processing (user activity inferred as {})",
-        wait_time,
-        if wait_time == SHORT_WAIT {
-            "inactive"
-        } else {
-            "active"
-        }
-    );
-
-    sleep(Duration::from_secs(wait_time)).await;
-
-    // Check if user has read this or a later message (via bridged receipt)
-    let own_user_id = client.user_id().unwrap();
-    if let Ok(Some((receipt_event_id, _))) = room
-        .load_user_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, own_user_id)
-        .await
-    {
-        // Fetch the receipted event to get its timestamp (approximate order)
-        let request =
-            get_room_event::v3::Request::new(room.room_id().to_owned(), receipt_event_id.clone());
-        if let Ok(response) = client.send(request).await {
-            if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
-                if any_event.origin_server_ts().0 >= event.origin_server_ts.0 {
-                    tracing::info!(
-                        "Skipping processing because user has read this or a later message"
-                    );
-                    let last_seen_online =
-                        i32::try_from(any_event.origin_server_ts().as_secs()).unwrap();
-                    let rows = state
-                        .user_repository
-                        .update_bridge_last_seen_online(user_id, service.as_str(), last_seen_online)
-                        .unwrap();
-                    tracing::info!("Updated {:#?} rows for last_seen_online (user_id: {}, service: {}, value: {})", rows, user_id, service, last_seen_online);
-                    if rows == 0 {
-                        tracing::warn!(
-                            "No bridge row matched for update - possible race or mismatch"
-                        );
-                    }
-                    tracing::info!("set the last_seen_online to: {}", last_seen_online);
-                    return;
-                }
-            }
-        }
-    }
-
-    tracing::info!("No recent read detected via read receipt; checking for user replies");
-
-    // Check if user has sent any replies after this message (strongest signal they've seen it)
-    let messages = room.messages(MessagesOptions::backward()).await;
-    if let Ok(messages) = messages {
-        let mut found_user_reply = false;
-        for message_event in messages.chunk {
-            if let Ok(AnySyncTimelineEvent::MessageLike(msg_event)) =
-                message_event.raw().deserialize()
-            {
-                // Check if this message is from the user (not the bridge bot)
-                if msg_event.sender() == own_user_id {
-                    // Check if user's message came after the trigger message
-                    if msg_event.origin_server_ts().0 > event.origin_server_ts.0 {
-                        tracing::info!(
-                            "User has sent a reply after this message - skipping notification"
-                        );
-                        found_user_reply = true;
-
-                        // Update last_seen_online based on user's reply timestamp
-                        let last_seen_online =
-                            i32::try_from(msg_event.origin_server_ts().as_secs()).unwrap();
-                        let rows = state
-                            .user_repository
-                            .update_bridge_last_seen_online(
-                                user_id,
-                                service.as_str(),
-                                last_seen_online,
-                            )
-                            .unwrap();
-                        tracing::info!("Updated {} rows for last_seen_online based on reply (user_id: {}, service: {}, value: {})",
-                            rows, user_id, service, last_seen_online);
-                        break;
-                    }
-                }
-            }
-        }
-
-        if found_user_reply {
-            return;
-        }
-    }
-
-    tracing::info!("No user reply detected; proceeding with message processing");
+    // Check this is an incoming bridge message (not user's own)
     let sender_prefix = get_sender_prefix(&service);
-    tracing::debug!("sender_prefix: {}", sender_prefix);
     if !sender_localpart.starts_with(&sender_prefix) {
-        // User sent a message in this room, not an incoming bridge message
         return;
     }
-    // Check if user has valid subscription
+
+    // Check subscription
     let has_valid_sub = state
         .user_repository
         .has_valid_subscription_tier(user_id, "tier 2")
         .unwrap_or(false);
     if !has_valid_sub {
         tracing::debug!(
-            "User {} does not have valid subscription for WhatsApp monitoring",
+            "User {} does not have valid subscription, skipping",
             user_id
         );
         return;
     }
-    // Only Autopilot and BYOT plan users get automatic LLM processing
     let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
     if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
         tracing::debug!(
-            "User {} on {:?} plan - no automatic message processing",
+            "User {} on {:?} plan - no auto features",
             user_id,
             user_plan
         );
         return;
     }
+
     // Extract message content
     let content = match event.content.msgtype {
         MessageType::Text(t) => t.body,
         MessageType::Notice(n) => n.body,
-        MessageType::Image(_) => "📎 IMAGE".into(),
-        MessageType::Video(_) => "📎 VIDEO".into(),
-        MessageType::File(_) => "📎 FILE".into(),
-        MessageType::Audio(_) => "📎 AUDIO".into(),
-        MessageType::Location(_) => "📍 LOCATION".into(),
+        MessageType::Image(_) => "IMAGE".into(),
+        MessageType::Video(_) => "VIDEO".into(),
+        MessageType::File(_) => "FILE".into(),
+        MessageType::Audio(_) => "AUDIO".into(),
+        MessageType::Location(_) => "LOCATION".into(),
         MessageType::Emote(t) => t.body,
         _ => return,
     };
-    tracing::debug!("message: {}", content);
 
-    // Extract chat_name early for Person lookup and notification routing
+    // Skip error messages
+    if is_error_message(&content) {
+        tracing::debug!("Skipping error message");
+        return;
+    }
+
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
-    // --- Ontology Person + Channel lookup ---
+    // Check if this is a group chat (same heuristic as get_service_rooms)
+    let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+        Ok(members) => members.len() > 3,
+        Err(_) => false,
+    };
+
+    // Ontology Person lookup (for person_id on the message)
     let matching_person = state
         .ontology_repository
         .find_person_by_room_id(user_id, &current_room_id)
@@ -1472,461 +1350,51 @@ pub async fn handle_bridge_message(
             None
         });
 
-    // --- Store message in ont_messages + emit ontology change (non-blocking) ---
-    {
-        let person_id = matching_person.as_ref().map(|p| p.person.id);
-        let msg = crate::models::ontology_models::NewOntMessage {
-            user_id,
-            room_id: current_room_id.clone(),
-            platform: service.clone(),
-            sender_name: chat_name.clone(),
-            content: content.clone(),
-            person_id,
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i32,
-            pinned: false,
-            status: None,
-        };
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            match state_clone.ontology_repository.insert_message(&msg) {
-                Ok(created) => {
-                    let snapshot = serde_json::json!({
-                        "message_id": created.id,
-                        "platform": msg.platform,
-                        "sender_name": msg.sender_name,
-                        "content": msg.content,
-                        "room_id": msg.room_id,
-                    });
-                    crate::proactive::rules::emit_ontology_change(
-                        &state_clone,
-                        user_id,
-                        "Message",
-                        created.id as i32,
-                        "created",
-                        snapshot,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to store bridge message: {}", e);
-                }
-            }
-        });
-    }
-
-    // Get user settings for default notification mode (needed for both group and notification routing)
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get user settings: {}", e);
-            return;
-        }
+    // Store message in ont_messages + emit ontology change.
+    // Rules handle all notification logic from here.
+    let person_id = matching_person.as_ref().map(|p| p.person.id);
+    let msg = crate::models::ontology_models::NewOntMessage {
+        user_id,
+        room_id: current_room_id.clone(),
+        platform: service.clone(),
+        sender_name: chat_name.clone(),
+        content: content.clone(),
+        person_id,
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32,
+        pinned: false,
+        status: None,
+        review_after: None,
     };
-
-    // Check if this is a group room (more than 3 members)
-    let members = match room.members(RoomMemberships::JOIN).await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("Failed to fetch room members: {}", e);
-            return;
-        }
-    };
-    let member_count = members.len() as u64;
-    tracing::debug!("members: {}", member_count);
-
-    // Group chat handling: check notification mode to bypass @mention requirement
-    if member_count > 3 {
-        let effective_mode = if let Some(ref person_with_channels) = matching_person {
-            if let Some(channel) = person_with_channels
-                .channels
-                .iter()
-                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
-            {
-                let user_default_mode = user_settings
-                    .phone_contact_notification_mode
-                    .as_deref()
-                    .unwrap_or("critical");
-                person_with_channels.effective_notification_mode(channel, user_default_mode)
-            } else {
-                String::new()
-            }
-        } else {
-            // No Person found - use user defaults
-            user_settings
-                .phone_contact_notification_mode
-                .clone()
-                .unwrap_or_else(|| "critical".to_string())
-        };
-        let is_priority_group = effective_mode == "all";
-
-        if !is_priority_group {
-            let is_mentioned = event
-                .content
-                .mentions
-                .as_ref()
-                .map(|m| m.user_ids.contains(&matrix_user_id))
-                .unwrap_or(false);
-            if !is_mentioned {
-                tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned and not in 'all' mode profile", member_count);
-                return;
-            }
-            tracing::info!(
-                "User {} is mentioned in message (event ID: {})",
-                user_id,
-                event.event_id
-            );
-        } else {
-            tracing::info!(
-                "Group {} matches contact profile with 'all' mode, processing all messages",
-                chat_name
-            );
-        }
-    }
-
-    // Skip error messages using pure function
-    if is_error_message(&content) {
-        tracing::debug!("Skipping error message because content contained error messages");
-        return;
-    }
-    // New logic for handling "yes" responses in non-group chats
-    if member_count <= 3 {
-        let lowered_content = content.trim().to_lowercase();
-        if lowered_content == "yes" || lowered_content == "y" {
-            // Fetch the latest sent message
-            let room_id_str = room.room_id().as_str();
-            match get_latest_sent_message_in_room(&service, &state, user_id, room_id_str).await {
-                Ok(Some(prev_msg)) => {
-                    if prev_msg.content.contains("Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"") {
-                        // Fetch the triggering message
-                        match get_triggering_message_in_room(&service, &state, user_id, room_id_str).await {
-                            Ok(Some(triggering_msg)) => {
-                                let service_cap = capitalize(&service);
-                                let chat_name = remove_bridge_suffix(&room_name);
-                                let message = format!("{} from {}: {}", service_cap, chat_name, triggering_msg.content);
-                                let first_message = format!("Hey, someone confirmed a time-sensitive {} message.", service_cap);
-
-                                // Spawn a new task for sending critical message notification
-                                let state_clone = state.clone();
-                                let notification_type = format!("{}_critical", service);
-                                let meta_service = service.clone();
-                                let meta_sender = chat_name.clone();
-                                let meta_content = triggering_msg.content.clone();
-                                tokio::spawn(async move {
-                                    crate::proactive::utils::send_notification_with_context(
-                                        &state_clone,
-                                        user_id,
-                                        &message,
-                                        notification_type,
-                                        Some(first_message),
-                                        Some(crate::proactive::utils::NotificationMeta {
-                                            platform: Some(meta_service),
-                                            sender: Some(meta_sender),
-                                            content: Some(meta_content),
-                                        }),
-                                    ).await;
-                                });
-                                return;
-                            }
-                            Ok(None) => {
-                                tracing::info!("No triggering message found for 'yes' response");
-                                return;
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to fetch triggering message: {}", e);
-                                return;
-                            }
-                        }
-                    } else {
-                        // Ignore the message if previous doesn't match
-                        tracing::debug!("Ignoring 'yes' message as previous sent message does not match the expected prompt");
-                        return;
-                    }
-                }
-                Ok(None) => {
-                    // Ignore if no previous sent message found
-                    tracing::debug!("Ignoring 'yes' message as no previous sent message found");
-                    return;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to fetch latest sent message: {}", e);
-                    // Proceed to normal handling on error
-                }
-            }
-        }
-    }
-    // chat_name already defined earlier for Person lookup
-
-    fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
-        let prefix = format!("{} from ", capitalize(service));
-        let separator = ": ";
-        let max_len = 157;
-        let static_len = prefix.len() + separator.len();
-        let mut remaining = max_len - static_len;
-        // Reserve up to 30 chars for sender
-        let mut sender_trimmed = sender.chars().take(30).collect::<String>();
-        if sender.len() > sender_trimmed.len() {
-            sender_trimmed.push('…');
-        }
-        remaining = remaining.saturating_sub(sender_trimmed.len());
-        let mut content_trimmed = content.chars().take(remaining).collect::<String>();
-        if content.len() > content_trimmed.len() {
-            content_trimmed.push('…');
-        }
-        format!(
-            "{}{}{}{}",
-            prefix, sender_trimmed, separator, content_trimmed
-        )
-    }
-
-    let service_cap = capitalize(&service);
-
-    // Determine notification mode and type.
-    // Priority: ontology Person+Channel -> user defaults
-    let (notification_mode, notification_type_str, notify_on_call, profile_nickname) = {
-        let ontology_settings = matching_person.as_ref().and_then(|pwc| {
-            pwc.channels
-                .iter()
-                .find(|c| c.room_id.as_deref() == Some(current_room_id.as_str()))
-                .map(|channel| {
-                    let user_default_mode = user_settings
-                        .phone_contact_notification_mode
-                        .as_deref()
-                        .unwrap_or("critical");
-                    let user_default_type = user_settings
-                        .phone_contact_notification_type
-                        .as_deref()
-                        .unwrap_or("sms");
-                    let user_default_on_call = user_settings.phone_contact_notify_on_call != 0;
-
-                    let mode = pwc.effective_notification_mode(channel, user_default_mode);
-                    let ntype = pwc.effective_notification_type(channel, user_default_type);
-                    let on_call = pwc.effective_notify_on_call(channel, user_default_on_call);
-                    let nickname = Some(pwc.display_name().to_string());
-
-                    tracing::info!(
-                        "Using ontology Person '{}' settings: mode={}, type={}, on_call={}",
-                        pwc.display_name(),
-                        mode,
-                        ntype,
-                        on_call
-                    );
-
-                    (mode, ntype, on_call, nickname)
-                })
-        });
-
-        if let Some(settings) = ontology_settings {
-            settings
-        } else {
-            // No Person found - use user defaults based on contact type
-            let is_phone_contact = is_phone_contact_from_room_name(room_name.as_str());
-            if is_phone_contact.unwrap_or(true) {
-                let mode = user_settings
-                    .phone_contact_notification_mode
-                    .clone()
-                    .unwrap_or_else(|| "critical".to_string());
-                let ntype = user_settings
-                    .phone_contact_notification_type
-                    .clone()
-                    .unwrap_or_else(|| "sms".to_string());
-                let notify = user_settings.phone_contact_notify_on_call != 0;
-                (mode, ntype, notify, None)
-            } else {
-                let mode = user_settings
-                    .default_notification_mode
-                    .clone()
-                    .unwrap_or_else(|| "critical".to_string());
-                let ntype = user_settings
-                    .default_notification_type
-                    .clone()
-                    .unwrap_or_else(|| "sms".to_string());
-                let notify = user_settings.default_notify_on_call != 0;
-                (mode, ntype, notify, None)
-            }
-        }
-    };
-
-    tracing::debug!("notification_mode: {}", notification_mode);
-    tracing::debug!("notification_type: {}", notification_type_str);
-    tracing::debug!("profile_nickname: {:?}", profile_nickname);
-
-    // Handle incoming/missed calls using per-profile notify_on_call setting
-    if content.contains("Incoming call") || content.contains("Missed call") {
-        if notify_on_call {
-            let suffix = match notification_type_str.as_str() {
-                "call" => "_call",
-                _ => "_sms",
-            };
-            let notification_type = format!("{}_incoming_call{}", service, suffix);
-            let what_to_inform = format!(
-                "You have an incoming {} call from {}",
-                service_cap, chat_name
-            );
-            let first_message = format!(
-                "Hello, you have an incoming {} call from {}.",
-                service_cap, chat_name
-            );
-
-            let state_clone = state.clone();
-            let meta_service = service.clone();
-            let meta_sender = chat_name.clone();
-            let meta_content = content.clone();
-            tokio::spawn(async move {
-                crate::proactive::utils::send_notification_with_context(
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        match state_clone.ontology_repository.insert_message(&msg) {
+            Ok(created) => {
+                let snapshot = serde_json::json!({
+                    "message_id": created.id,
+                    "platform": msg.platform,
+                    "sender_name": msg.sender_name,
+                    "content": msg.content,
+                    "room_id": msg.room_id,
+                    "is_group": is_group,
+                });
+                crate::proactive::rules::emit_ontology_change(
                     &state_clone,
                     user_id,
-                    &what_to_inform,
-                    notification_type,
-                    Some(first_message),
-                    Some(crate::proactive::utils::NotificationMeta {
-                        platform: Some(meta_service),
-                        sender: Some(meta_sender),
-                        content: Some(meta_content),
-                    }),
+                    "Message",
+                    created.id as i32,
+                    "created",
+                    snapshot,
                 )
                 .await;
-            });
-        } else {
-            tracing::debug!(
-                "Skipping incoming call notification for user {} (notify_on_call=false)",
-                user_id
-            );
-        }
-        return;
-    }
-
-    // Handle based on notification mode
-    match notification_mode.as_str() {
-        "all" => {
-            // Send immediate notification for ALL messages from this contact/group
-            let suffix = match notification_type_str.as_str() {
-                "call" => "_call",
-                _ => "_sms",
-            };
-            let notification_type = format!("{}_profile{}", service, suffix);
-
-            // Check if user has enough credits
-            match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
-                Ok(()) => {
-                    let state_clone = state.clone();
-                    let content_clone = content.clone();
-                    let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
-                    let message = trim_for_sms(&service, sender_display, &content_clone);
-                    let first_message = format!(
-                        "Hello, you have a {} message from {}.",
-                        service_cap, sender_display
-                    );
-                    let meta_service = service.clone();
-                    let meta_sender = sender_display.to_string();
-                    let meta_content = content_clone.clone();
-
-                    tokio::spawn(async move {
-                        crate::proactive::utils::send_notification_with_context(
-                            &state_clone,
-                            user_id,
-                            &message,
-                            notification_type,
-                            Some(first_message),
-                            Some(crate::proactive::utils::NotificationMeta {
-                                platform: Some(meta_service),
-                                sender: Some(meta_sender),
-                                content: Some(meta_content),
-                            }),
-                        )
-                        .await;
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "User {} does not have enough credits for profile notification: {}",
-                        user_id,
-                        e
-                    );
-                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to store bridge message: {}", e);
             }
         }
-        "critical" => {
-            // Critical message checking removed (legacy item system deleted).
-            // Ontology rules now handle message-triggered notifications.
-            tracing::debug!(
-                "Critical mode is no longer supported (items system removed), skipping for user {}",
-                user_id
-            );
-        }
-        "mention" => {
-            // @mention only mode: already handled by the group member check above
-            // If we reach here, user was @mentioned in a group or this is a DM
-            // For groups: user was mentioned, so notify like "all" mode
-            if member_count > 3 {
-                let suffix = match notification_type_str.as_str() {
-                    "call" => "_call",
-                    _ => "_sms",
-                };
-                let notification_type = format!("{}_mention{}", service, suffix);
-
-                match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await
-                {
-                    Ok(()) => {
-                        let state_clone = state.clone();
-                        let content_clone = content.clone();
-                        let sender_display = profile_nickname.as_ref().unwrap_or(&chat_name);
-                        let message = trim_for_sms(&service, sender_display, &content_clone);
-                        let first_message = format!(
-                            "Hello, you were mentioned in a {} group {}.",
-                            service_cap, sender_display
-                        );
-                        let meta_service = service.clone();
-                        let meta_sender = sender_display.to_string();
-                        let meta_content = content_clone.clone();
-
-                        tokio::spawn(async move {
-                            crate::proactive::utils::send_notification_with_context(
-                                &state_clone,
-                                user_id,
-                                &message,
-                                notification_type,
-                                Some(first_message),
-                                Some(crate::proactive::utils::NotificationMeta {
-                                    platform: Some(meta_service),
-                                    sender: Some(meta_sender),
-                                    content: Some(meta_content),
-                                }),
-                            )
-                            .await;
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "User {} does not have enough credits for mention notification: {}",
-                            user_id,
-                            e
-                        );
-                    }
-                }
-            }
-            // For DMs (member_count <= 3), mention mode doesn't apply, skip
-        }
-        "digest" | "ignore" => {
-            // For digest mode: message will be picked up by digest job, no immediate notification
-            // For ignore mode: skip entirely (applies to both default settings and profile exceptions)
-            if notification_mode == "ignore" {
-                tracing::debug!("Message ignored (notification_mode=ignore)");
-            } else {
-                tracing::debug!("Message will be included in digest (notification_mode=digest)");
-            }
-            // Skip triage item creation for digest/ignore
-        }
-        _ => {
-            // Unknown mode, treat as critical
-            tracing::warn!(
-                "Unknown notification mode: {}, treating as critical",
-                notification_mode
-            );
-        }
-    }
+    });
 }
 
 pub async fn search_bridge_rooms(

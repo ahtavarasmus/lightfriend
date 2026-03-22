@@ -179,6 +179,8 @@ pub fn privacy_policy() -> Html {
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
             </div>
         </div>
     }
@@ -371,6 +373,8 @@ pub fn terms_and_conditions() -> Html {
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
             </div>
         </div>
 

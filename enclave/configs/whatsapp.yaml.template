@@ -1,0 +1,74 @@
+# WhatsApp bridge configuration for enclave (single container)
+
+network:
+    os_name: lightfriend
+    displayname_template: "{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"
+    call_start_notices: true
+    mute_status_broadcast: false
+    initial_auto_reconnect: true
+    history_sync:
+        max_initial_conversations: 0
+
+homeserver:
+    address: http://localhost:8008
+    domain: localhost
+
+appservice:
+    address: http://localhost:29318
+    hostname: 0.0.0.0
+    port: 29318
+    id: whatsapp
+    bot:
+        username: whatsappbot
+        displayname: WhatsApp Bridge
+    ephemeral_events: true
+    async_transactions: true
+    username_template: whatsapp_{{.}}
+
+database:
+    type: postgres
+    uri: postgres://whatsapp_user:whatsapp_password@localhost:5432/whatsapp_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
+
+history_sync:
+    max_initial_conversations: 0
+
+backfill:
+    enabled: false
+
+bridge:
+    username_template: whatsapp_{{.}}
+    displayname_template: "{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"
+    permissions:
+        "*": user
+        "@admin:localhost": admin
+    cleanup_on_logout:
+        enabled: true
+        manual:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+        bad_credentials:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+
+encryption:
+    allow: false
+    default: false
+    appservice: false
+    require: false
+
+double_puppet:
+    servers: {}
+    secrets:
+        localhost: as_token:${DOUBLE_PUPPET_SECRET}
+
+logging:
+    min_level: info
+    writers:
+    - type: stdout
+      format: pretty-colored

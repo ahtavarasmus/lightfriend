@@ -53,3 +53,15 @@ variable "cloudflare_domain" {
   description = "Domain name for the application"
   type        = string
 }
+
+variable "subdomain" {
+  description = "Subdomain prefix (e.g. 'enclave' for enclave.example.com)"
+  type        = string
+  default     = "enclave"
+}
+
+variable "github_repo" {
+  description = "GitHub repository (owner/repo) for OIDC deploy"
+  type        = string
+  default     = "ahtavarasmus/lightfriend"
+}

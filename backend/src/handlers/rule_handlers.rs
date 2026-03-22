@@ -1,16 +1,20 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
 use serde::Deserialize;
 use serde_json::json;
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use crate::handlers::auth_middleware::AuthUser;
-use crate::models::ontology_models::NewOntRule;
-use crate::proactive::rules::{compute_next_fire_at, ActionConfig, TriggerConfig};
+use crate::models::ontology_models::{NewOntRule, OntRule};
+use crate::proactive::rules::{
+    compute_next_fire_at, evaluate_flow_test, ActionConfig, FlowNode, RuleTestStep, TriggerConfig,
+};
 use crate::repositories::user_core::UserCoreOps;
+use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -310,4 +314,251 @@ pub async fn delete_rule(
         })?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Rule test endpoints
+// ---------------------------------------------------------------------------
+
+const WEB_CHAT_COST_EUR: f32 = 0.01;
+const WEB_CHAT_COST_US: f32 = 0.5;
+
+#[derive(Deserialize)]
+pub struct StartRuleTestRequest {
+    pub flow_config: String,
+    pub message: String,
+    #[serde(default = "default_sender")]
+    pub sender: String,
+    #[serde(default)]
+    pub rule_name: String,
+}
+
+fn default_sender() -> String {
+    "Test Sender".to_string()
+}
+
+pub struct PendingRuleTest {
+    pub flow_config: String,
+    pub message: String,
+    pub sender: String,
+    pub rule_name: String,
+    pub user_id: i32,
+    pub created_at: std::time::Instant,
+}
+
+/// POST /api/rules/test - validate flow, deduct credits, store pending test
+pub async fn start_rule_test(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<StartRuleTestRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate flow_config parses
+    let _node: FlowNode = serde_json::from_str(&req.flow_config).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Invalid flow_config: {}", e) })),
+        )
+    })?;
+
+    // Check user & credits
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("DB error: {}", e) })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "User not found" })),
+            )
+        })?;
+
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Please subscribe to use rule testing" })),
+        ));
+    }
+
+    let is_us_or_ca = user.phone_number.starts_with("+1");
+    let (credits_left_cost, credits_cost) = if is_us_or_ca {
+        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+    } else {
+        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
+    };
+
+    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
+    if !has_credits {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            Json(json!({ "error": "Insufficient credits" })),
+        ));
+    }
+
+    // Deduct
+    let charged_amount = if user.credits_left >= credits_left_cost {
+        let new_val = user.credits_left - credits_left_cost;
+        state
+            .user_repository
+            .update_user_credits_left(auth_user.user_id, new_val)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
+                )
+            })?;
+        credits_left_cost
+    } else {
+        let new_val = user.credits - credits_cost;
+        state
+            .user_repository
+            .update_user_credits(auth_user.user_id, new_val)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
+                )
+            })?;
+        credits_cost
+    };
+
+    let _ = state.user_repository.log_usage(LogUsageParams {
+        user_id: auth_user.user_id,
+        sid: None,
+        activity_type: "rule_test".to_string(),
+        credits: Some(charged_amount),
+        time_consumed: None,
+        success: Some(true),
+        reason: None,
+        status: None,
+        recharge_threshold_timestamp: None,
+        zero_credits_timestamp: None,
+    });
+
+    let test_id = uuid::Uuid::new_v4().to_string();
+    state.pending_rule_tests.insert(
+        test_id.clone(),
+        PendingRuleTest {
+            flow_config: req.flow_config,
+            message: req.message,
+            sender: req.sender,
+            rule_name: req.rule_name,
+            user_id: auth_user.user_id,
+            created_at: std::time::Instant::now(),
+        },
+    );
+
+    Ok(Json(json!({ "test_id": test_id })))
+}
+
+#[derive(Deserialize)]
+pub struct TestStreamQuery {
+    pub test_id: String,
+}
+
+/// GET /api/rules/test-stream?test_id=... - SSE stream of test steps
+pub async fn test_rule_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(query): Query<TestStreamQuery>,
+) -> axum::response::sse::Sse<
+    impl futures::stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>,
+> {
+    let stream = async_stream::stream! {
+        // Look up and remove pending test
+        let pending = match state.pending_rule_tests.remove(&query.test_id) {
+            Some((_, p)) => p,
+            None => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    json!({"step": "error", "message": "Test not found or expired"}).to_string(),
+                ));
+                yield Ok(axum::response::sse::Event::default().data(
+                    json!({"step": "complete"}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        // Verify ownership
+        if pending.user_id != auth_user.user_id {
+            yield Ok(axum::response::sse::Event::default().data(
+                json!({"step": "error", "message": "Unauthorized"}).to_string(),
+            ));
+            yield Ok(axum::response::sse::Event::default().data(
+                json!({"step": "complete"}).to_string(),
+            ));
+            return;
+        }
+
+        // Check TTL (60s)
+        if pending.created_at.elapsed().as_secs() > 60 {
+            yield Ok(axum::response::sse::Event::default().data(
+                json!({"step": "error", "message": "Test expired"}).to_string(),
+            ));
+            yield Ok(axum::response::sse::Event::default().data(
+                json!({"step": "complete"}).to_string(),
+            ));
+            return;
+        }
+
+        // Parse flow
+        let root: FlowNode = match serde_json::from_str(&pending.flow_config) {
+            Ok(n) => n,
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    json!({"step": "error", "message": format!("Invalid flow: {}", e)}).to_string(),
+                ));
+                yield Ok(axum::response::sse::Event::default().data(
+                    json!({"step": "complete"}).to_string(),
+                ));
+                return;
+            }
+        };
+
+        let trigger_context = format!("Message from {}: {}", pending.sender, pending.message);
+
+        // Build a synthetic OntRule
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+        let rule = OntRule {
+            id: 0,
+            user_id: pending.user_id,
+            name: if pending.rule_name.is_empty() { "Test Rule".to_string() } else { pending.rule_name },
+            trigger_type: "test".to_string(),
+            trigger_config: "{}".to_string(),
+            logic_type: "flow".to_string(),
+            logic_prompt: None,
+            logic_fetch: None,
+            action_type: "test".to_string(),
+            action_config: "{}".to_string(),
+            status: "active".to_string(),
+            next_fire_at: None,
+            expires_at: None,
+            last_triggered_at: None,
+            created_at: now,
+            updated_at: now,
+            flow_config: Some(pending.flow_config),
+        };
+
+        // Run evaluation with mpsc channel
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<RuleTestStep>(32);
+        let state_clone = Arc::clone(&state);
+        tokio::spawn(async move {
+            evaluate_flow_test(&state_clone, &rule, &trigger_context, &root, &tx).await;
+            let _ = tx.send(RuleTestStep::Complete).await;
+        });
+
+        while let Some(step) = rx.recv().await {
+            let data = serde_json::to_string(&step).unwrap_or_default();
+            yield Ok(axum::response::sse::Event::default().data(data));
+        }
+    };
+
+    axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }

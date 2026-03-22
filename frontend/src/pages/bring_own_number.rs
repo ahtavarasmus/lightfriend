@@ -994,7 +994,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     }).unwrap_or(true); // Default to true if no country (block access until country is known)
 
     let can_edit = props.is_logged_in && (
-        props.sub_tier.as_deref() == Some("tier 2") || !is_local_number_country
+        props.sub_tier.is_some() || !is_local_number_country
     );
     let is_phone_valid = {
         let val = &*phone_number;

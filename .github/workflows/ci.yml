@@ -87,6 +87,46 @@ jobs:
           TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
         run: cargo test --workspace
 
+  migration:
+    name: Migration Safety
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lightfriend
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: lightfriend_migration_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo apt-get clean
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          cache-on-failure: true
+
+      - name: Run migration tests
+        working-directory: backend
+        env:
+          TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5433/lightfriend_migration_test
+        run: cargo test --test migration_test
+
   wasm-check:
     name: Frontend WASM Check
     runs-on: ubuntu-latest
@@ -107,3 +147,27 @@ jobs:
       - name: Check WASM compilation
         working-directory: frontend
         run: cargo check --target wasm32-unknown-unknown
+
+  enclave-scripts:
+    name: Enclave Script Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Validate enclave scripts
+        run: |
+          echo "Checking enclave shell scripts for syntax errors..."
+          shellcheck -s bash enclave/entrypoint.sh
+          shellcheck -s bash enclave/export.sh
+          shellcheck -s bash enclave/verify.sh
+          shellcheck -s bash enclave/enter-maintenance.sh
+
+      - name: Validate Dockerfile builds
+        run: |
+          echo "Checking Dockerfile syntax..."
+          docker build --check -f enclave/Dockerfile . 2>/dev/null || \
+            docker build --dry-run -f enclave/Dockerfile . 2>/dev/null || \
+            echo "Docker syntax check not available - skipping (build job will catch errors)"

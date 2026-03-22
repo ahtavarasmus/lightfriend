@@ -8,8 +8,9 @@ use gloo_timers::future::TimeoutFuture;
 // Auth type enum
 #[derive(Clone, PartialEq)]
 pub enum AuthType {
-    QrCode,      // WhatsApp, Signal - displays image
-    LoginLink,   // Telegram - displays clickable link
+    QrCode,        // Signal - displays image
+    QrCodeOrPhone, // WhatsApp - QR code or phone number pairing
+    LoginLink,     // Telegram - displays clickable link
 }
 
 // Bridge configuration - only truly different values
@@ -27,12 +28,25 @@ pub struct BridgeConfig {
 const POLL_INTERVAL_MS: i32 = 5000;        // 5 seconds
 const POLL_DURATION_MS: i32 = 300000;      // 5 minutes
 
+/// Map backend error strings to user-friendly messages
+fn humanize_error(raw: &str) -> String {
+    match raw {
+        "cleanup_in_progress" => "Previous connection is still being cleaned up. Please wait a moment and try again.".to_string(),
+        "bridge_not_found" => "The messaging bridge could not be found. Please try again.".to_string(),
+        "already_connected" => "This account is already connected.".to_string(),
+        "rate_limited" => "Too many attempts. Please wait a minute before trying again.".to_string(),
+        "invalid_qr" | "qr_expired" => "The QR code has expired. Please try connecting again.".to_string(),
+        "matrix_error" => "There was an issue with the messaging server. Please try again later.".to_string(),
+        other => other.to_string(),
+    }
+}
+
 // Bridge configs
 pub const WHATSAPP_CONFIG: BridgeConfig = BridgeConfig {
     name: "WhatsApp",
     id: "whatsapp",
     logo_url: "https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg",
-    auth_type: AuthType::QrCode,
+    auth_type: AuthType::QrCodeOrPhone,
     instructions: &[
         "Open WhatsApp on your phone",
         "Go to Settings > Linked Devices",
@@ -98,6 +112,11 @@ struct BridgeStatus {
     connected_account: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct PhonePairingResponse {
+    pairing_code: String,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 struct HealthCheckResponse {
     healthy: bool,
@@ -113,7 +132,6 @@ struct ErrorResponse {
 pub struct BridgeConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
     pub config: BridgeConfig,
 }
 
@@ -137,6 +155,45 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let is_resetting = use_state(|| false);
     let reset_success = use_state(|| false);
     let is_cleaning_up = use_state(|| false);
+    let remaining_seconds = use_state(|| 0_i32);
+    let poll_start_time = use_state(|| 0.0_f64);
+
+    // Countdown timer effect - ticks every second while connecting
+    {
+        let remaining_seconds = remaining_seconds.clone();
+        let poll_start_time = poll_start_time.clone();
+        let is_connecting_dep = *is_connecting;
+        use_effect_with_deps(
+            move |is_conn: &bool| {
+                let interval_holder: std::rc::Rc<std::cell::RefCell<Option<gloo_timers::callback::Interval>>> =
+                    std::rc::Rc::new(std::cell::RefCell::new(None));
+                if *is_conn {
+                    let remaining_seconds = remaining_seconds.clone();
+                    let poll_start_time_val = *poll_start_time;
+                    let interval = gloo_timers::callback::Interval::new(1_000, move || {
+                        if poll_start_time_val > 0.0 {
+                            let elapsed = (js_sys::Date::now() - poll_start_time_val) / 1000.0;
+                            let remaining = ((POLL_DURATION_MS as f64 / 1000.0) - elapsed).max(0.0) as i32;
+                            remaining_seconds.set(remaining);
+                        }
+                    });
+                    *interval_holder.borrow_mut() = Some(interval);
+                } else {
+                    remaining_seconds.set(0);
+                }
+                let holder = interval_holder;
+                move || {
+                    holder.borrow_mut().take();
+                }
+            },
+            is_connecting_dep,
+        );
+    }
+
+    // Phone pairing state (WhatsApp only)
+    let phone_login_mode = use_state(|| false);  // true = phone mode, false = QR mode
+    let phone_input = use_state(String::new);
+    let pairing_code = use_state(|| None::<String>);
 
     // Function to fetch status
     let fetch_status = {
@@ -146,6 +203,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         let was_connecting = was_connecting.clone();
         let is_connecting = is_connecting.clone();
         let auth_data = auth_data.clone();
+        let pairing_code = pairing_code.clone();
+        let phone_login_mode = phone_login_mode.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -155,6 +214,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let was_connecting = was_connecting.clone();
             let is_connecting = is_connecting.clone();
             let auth_data = auth_data.clone();
+            let pairing_code = pairing_code.clone();
+            let phone_login_mode = phone_login_mode.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
             spawn_local(async move {
@@ -170,6 +231,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     is_connecting.set(false);
                                     was_connecting.set(false);
                                     auth_data.set(None);
+                                    pairing_code.set(None);
+                                    phone_login_mode.set(false);
                                     error.set(None); // Clear any previous timeout errors
                                     // Show success message only if we were actively connecting
                                     if was_in_connecting_state {
@@ -225,6 +288,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         let error = error.clone();
         let fetch_status = fetch_status.clone();
         let is_cleaning_up = is_cleaning_up.clone();
+        let poll_start_time = poll_start_time.clone();
+        let remaining_seconds = remaining_seconds.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -234,10 +299,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let error = error.clone();
             let fetch_status = fetch_status.clone();
             let is_cleaning_up = is_cleaning_up.clone();
+            let poll_start_time = poll_start_time.clone();
+            let remaining_seconds = remaining_seconds.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
             is_connecting.set(true);
             was_connecting.set(true);
+            poll_start_time.set(js_sys::Date::now());
+            remaining_seconds.set(POLL_DURATION_MS / 1000);
             spawn_local(async move {
                 // Retry loop for cleanup_in_progress
                 let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
@@ -329,7 +398,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 // Other error
                                 is_connecting.set(false);
                                 if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    error.set(Some(err_response.error));
+                                    error.set(Some(humanize_error(&err_response.error)));
                                 } else {
                                     error.set(Some(format!("Failed to start {} connection", bridge_name)));
                                 }
@@ -345,6 +414,141 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     }
                 }
                 // Exhausted retries waiting for cleanup
+                is_connecting.set(false);
+                is_cleaning_up.set(false);
+                error.set(Some("Cleanup is taking too long. Please try again later.".to_string()));
+            });
+        })
+    };
+
+    // Function to start phone pairing connection (WhatsApp only)
+    let start_phone_connection = {
+        let is_connecting = is_connecting.clone();
+        let was_connecting = was_connecting.clone();
+        let pairing_code = pairing_code.clone();
+        let error = error.clone();
+        let fetch_status = fetch_status.clone();
+        let is_cleaning_up = is_cleaning_up.clone();
+        let phone_input = phone_input.clone();
+        let bridge_id = bridge_id.to_string();
+        let bridge_name = bridge_name.to_string();
+        Callback::from(move |_| {
+            let is_connecting = is_connecting.clone();
+            let was_connecting = was_connecting.clone();
+            let pairing_code = pairing_code.clone();
+            let error = error.clone();
+            let fetch_status = fetch_status.clone();
+            let is_cleaning_up = is_cleaning_up.clone();
+            let phone_number = (*phone_input).clone();
+            let bridge_id = bridge_id.clone();
+            let bridge_name = bridge_name.clone();
+
+            if phone_number.trim().is_empty() {
+                error.set(Some("Please enter a phone number".to_string()));
+                return;
+            }
+
+            is_connecting.set(true);
+            was_connecting.set(true);
+            spawn_local(async move {
+                let max_cleanup_retries = 30;
+                for _retry in 0..max_cleanup_retries {
+                    let url = format!("/api/auth/{}/connect-phone", bridge_id);
+                    let body = serde_json::json!({ "phone_number": phone_number });
+                    match Api::post(&url).json(&body).unwrap().send().await {
+                        Ok(response) => {
+                            let status = response.status();
+                            if status == 409 {
+                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                    if err_response.error == "cleanup_in_progress" {
+                                        is_cleaning_up.set(true);
+                                        TimeoutFuture::new(2_000).await;
+                                        continue;
+                                    }
+                                }
+                            }
+                            is_cleaning_up.set(false);
+
+                            if status == 200 {
+                                match response.json::<PhonePairingResponse>().await {
+                                    Ok(phone_response) => {
+                                        pairing_code.set(Some(phone_response.pairing_code));
+                                        error.set(None);
+                                        // Start polling for connection status
+                                        let start_time = js_sys::Date::now();
+                                        fn create_poll_fn(
+                                            start_time: f64,
+                                            poll_duration: i32,
+                                            poll_interval: i32,
+                                            is_connecting: UseStateHandle<bool>,
+                                            pairing_code: UseStateHandle<Option<String>>,
+                                            error: UseStateHandle<Option<String>>,
+                                            fetch_status: Callback<()>,
+                                        ) -> Box<dyn Fn()> {
+                                            Box::new(move || {
+                                                if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                                    is_connecting.set(false);
+                                                    pairing_code.set(None);
+                                                    error.set(Some("Connection attempt timed out".to_string()));
+                                                    return;
+                                                }
+                                                fetch_status.emit(());
+                                                let is_connecting = is_connecting.clone();
+                                                let pairing_code = pairing_code.clone();
+                                                let error = error.clone();
+                                                let fetch_status = fetch_status.clone();
+                                                let poll_fn = create_poll_fn(
+                                                    start_time,
+                                                    poll_duration,
+                                                    poll_interval,
+                                                    is_connecting,
+                                                    pairing_code,
+                                                    error,
+                                                    fetch_status,
+                                                );
+                                                let handle = gloo_timers::callback::Timeout::new(
+                                                    poll_interval as u32,
+                                                    move || poll_fn(),
+                                                );
+                                                handle.forget();
+                                            })
+                                        }
+                                        let poll_fn = create_poll_fn(
+                                            start_time,
+                                            POLL_DURATION_MS,
+                                            POLL_INTERVAL_MS,
+                                            is_connecting.clone(),
+                                            pairing_code.clone(),
+                                            error.clone(),
+                                            fetch_status.clone(),
+                                        );
+                                        poll_fn();
+                                        return;
+                                    }
+                                    Err(_) => {
+                                        is_connecting.set(false);
+                                        error.set(Some("Failed to parse pairing response".to_string()));
+                                        return;
+                                    }
+                                }
+                            } else {
+                                is_connecting.set(false);
+                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                    error.set(Some(err_response.error));
+                                } else {
+                                    error.set(Some(format!("Failed to start {} phone connection", bridge_name)));
+                                }
+                                return;
+                            }
+                        }
+                        Err(_) => {
+                            is_connecting.set(false);
+                            is_cleaning_up.set(false);
+                            error.set(Some(format!("Failed to start {} phone connection", bridge_name)));
+                            return;
+                        }
+                    }
+                }
                 is_connecting.set(false);
                 is_cleaning_up.set(false);
                 error.set(Some("Cleanup is taking too long. Please try again later.".to_string()));
@@ -639,11 +843,24 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         </>
                     } else {
                         if *is_connecting {
-                            if let Some(data) = (*auth_data).clone() {
+                            // Show pairing code if in phone mode
+                            if let Some(code) = (*pairing_code).clone() {
+                                <div class="login-link-container">
+                                    <p class="connect-instruction">{"Enter this pairing code in WhatsApp:"}</p>
+                                    <div class="pairing-code-display">
+                                        <span class="pairing-code">{&code}</span>
+                                    </div>
+                                    <p class="instruction">{"1. Open WhatsApp on your phone"}</p>
+                                    <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
+                                    <p class="instruction">{"3. Tap 'Link a Device'"}</p>
+                                    <p class="instruction">{"4. Tap 'Link with phone number instead'"}</p>
+                                    <p class="instruction">{"5. Enter the code shown above"}</p>
+                                </div>
+                            } else if let Some(data) = (*auth_data).clone() {
                                 <div class="login-link-container">
                                     {
                                         match config.auth_type {
-                                            AuthType::QrCode => html! {
+                                            AuthType::QrCode | AuthType::QrCodeOrPhone => html! {
                                                 <>
                                                     <p class="connect-instruction">{format!("Scan the QR code below with your {} app:", bridge_name)}</p>
                                                     <img src={data} alt={format!("{} QR Code", bridge_name)} class="qr-code" />
@@ -662,6 +879,11 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     { for config.instructions.iter().enumerate().map(|(i, instruction)| {
                                         html! { <p class="instruction">{format!("{}. {}", i + 1, instruction)}</p> }
                                     })}
+                                    if *remaining_seconds > 0 {
+                                        <div class="poll-countdown">
+                                            {format!("{}:{:02} remaining", *remaining_seconds / 60, *remaining_seconds % 60)}
+                                        </div>
+                                    }
                                 </div>
                             } else {
                                 <div class="loading-container">
@@ -669,9 +891,11 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                         {
                                             if *is_cleaning_up {
                                                 "Cleaning up previous connection..."
+                                            } else if *phone_login_mode {
+                                                "Getting pairing code..."
                                             } else {
                                                 match config.auth_type {
-                                                    AuthType::QrCode => "Generating QR code...",
+                                                    AuthType::QrCode | AuthType::QrCodeOrPhone => "Generating QR code...",
                                                     AuthType::LoginLink => "Generating login link...",
                                                 }
                                             }
@@ -681,13 +905,69 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 </div>
                             }
                         } else {
-                            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+                            if props.sub_tier.is_some() {
                                 <p class="service-description">
                                     {format!("Send and receive {} messages through SMS or voice calls.", bridge_name)}
                                 </p>
-                                <button onclick={start_connection} class="connect-button">
-                                    {format!("Connect {}", bridge_name)}
-                                </button>
+                                if *phone_login_mode && config.auth_type == AuthType::QrCodeOrPhone {
+                                    // Phone number input mode
+                                    <div class="phone-input-container">
+                                        <input
+                                            type="tel"
+                                            placeholder="+1234567890"
+                                            value={(*phone_input).clone()}
+                                            class="phone-input"
+                                            oninput={
+                                                let phone_input = phone_input.clone();
+                                                Callback::from(move |e: InputEvent| {
+                                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                    phone_input.set(input.value());
+                                                })
+                                            }
+                                            onkeypress={
+                                                let start_phone_connection = start_phone_connection.clone();
+                                                Callback::from(move |e: KeyboardEvent| {
+                                                    if e.key() == "Enter" {
+                                                        start_phone_connection.emit(());
+                                                    }
+                                                })
+                                            }
+                                        />
+                                        <button onclick={
+                                            let start_phone_connection = start_phone_connection.clone();
+                                            Callback::from(move |_| start_phone_connection.emit(()))
+                                        } class="connect-button">
+                                            {"Get Pairing Code"}
+                                        </button>
+                                        <button onclick={
+                                            let phone_login_mode = phone_login_mode.clone();
+                                            let error = error.clone();
+                                            Callback::from(move |_| {
+                                                phone_login_mode.set(false);
+                                                error.set(None);
+                                            })
+                                        } class="switch-method-link">
+                                            {"Use QR code instead"}
+                                        </button>
+                                    </div>
+                                } else {
+                                    // Default: QR code connect button
+                                    <button onclick={start_connection} class="connect-button">
+                                        {format!("Connect {}", bridge_name)}
+                                    </button>
+                                    if config.auth_type == AuthType::QrCodeOrPhone {
+                                        <button onclick={
+                                            let phone_login_mode = phone_login_mode.clone();
+                                            let error = error.clone();
+                                            Callback::from(move |_| {
+                                                phone_login_mode.set(true);
+                                                error.set(None);
+                                            })
+                                        } class="switch-method-link">
+                                            {"Or link with phone number instead"}
+                                        </button>
+                                    }
+                                }
                             } else {
                                 <div class="upgrade-prompt">
                                     <div class="upgrade-content">
@@ -909,6 +1189,57 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                     }
+                    .switch-method-link {
+                        background: none;
+                        border: none;
+                        color: #7EB2FF;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        margin-top: 0.5rem;
+                        padding: 0.3rem 0;
+                        text-decoration: underline;
+                        transition: color 0.2s ease;
+                    }
+                    .switch-method-link:hover {
+                        color: #1E90FF;
+                    }
+                    .phone-input-container {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 0.5rem;
+                        margin-top: 1rem;
+                    }
+                    .phone-input {
+                        background: rgba(255, 255, 255, 0.1);
+                        border: 1px solid rgba(30, 144, 255, 0.3);
+                        border-radius: 8px;
+                        color: #fff;
+                        padding: 0.8rem 1rem;
+                        font-size: 1rem;
+                        outline: none;
+                        transition: border-color 0.2s ease;
+                    }
+                    .phone-input:focus {
+                        border-color: #1E90FF;
+                    }
+                    .phone-input::placeholder {
+                        color: rgba(255, 255, 255, 0.4);
+                    }
+                    .pairing-code-display {
+                        background: rgba(30, 144, 255, 0.1);
+                        border: 2px solid rgba(30, 144, 255, 0.3);
+                        border-radius: 12px;
+                        padding: 1.5rem;
+                        text-align: center;
+                        margin: 1rem 0;
+                    }
+                    .pairing-code {
+                        font-family: monospace;
+                        font-size: 2rem;
+                        font-weight: bold;
+                        color: #fff;
+                        letter-spacing: 0.3rem;
+                    }
                     .disconnect-button {
                         background: transparent;
                         border: 1px solid rgba(255, 99, 71, 0.3);
@@ -1071,6 +1402,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         color: #999;
                         margin-top: 0.5rem;
                         font-size: 0.9rem;
+                    }
+                    .poll-countdown {
+                        color: #888;
+                        font-size: 0.85rem;
+                        margin-top: 1rem;
+                        padding: 0.5rem 1rem;
+                        background: rgba(255, 255, 255, 0.05);
+                        border-radius: 6px;
+                        display: inline-block;
                     }
                     .loading-container {
                         text-align: center;

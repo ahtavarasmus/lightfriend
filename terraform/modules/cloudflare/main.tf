@@ -30,7 +30,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
 
   config {
     ingress_rule {
-      hostname = "api-${var.environment}.${var.domain}"
+      hostname = "${var.subdomain}.${var.domain}"
       service  = "http://localhost:3000"
     }
     ingress_rule {
@@ -40,21 +40,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   }
 }
 
-resource "cloudflare_record" "api" {
-  zone_id = var.cloudflare_zone_id
-  name    = "api-${var.environment}"
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
-  type    = "CNAME"
-  proxied = true
-  comment = "Lightfriend API - ${var.environment}"
-}
-
-# Optional: Frontend subdomain
 resource "cloudflare_record" "app" {
   zone_id = var.cloudflare_zone_id
-  name    = "app-${var.environment}"
+  name    = var.subdomain
   content = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
   type    = "CNAME"
   proxied = true
-  comment = "Lightfriend App - ${var.environment}"
+  comment = "Lightfriend - ${var.environment}"
 }

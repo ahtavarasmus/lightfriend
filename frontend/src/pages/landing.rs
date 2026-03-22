@@ -296,23 +296,91 @@ pub fn landing() -> Html {
                 </div>
             </section>
 
-            <section class="features-section">
-                <div class="features-grid-compact scroll-animate">
-                    <h2>{"What You Get"}</h2>
-                    <p class="features-subheader">{"Lightfriend is a private AI assistant that gives any phone user access to WhatsApp, email, web search, and more via SMS and voice calls."}</p>
-                    <div class="features-flat-grid">
-                        <div class="feature-chip"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
-                        <div class="feature-chip"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
-                        <div class="feature-chip"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-search"></i><span>{"Web Search"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-cloud-sun"></i><span>{"Weather"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-image"></i><span>{"Photo Analysis"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-qrcode"></i><span>{"QR Scanning"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-bell"></i><span>{"Proactive Alerts"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-newspaper"></i><span>{"Daily Digests"}</span></div>
-                        <div class="feature-chip"><i class="fas fa-car"></i><span>{"Tesla Control"}</span></div>
-                        <div class="feature-chip feature-chip-availability"><i class="fas fa-globe"></i><span>{"40+ Countries"}</span></div>
+            // Section: Your Data, Connected
+            <section class="connected-section scroll-animate">
+                <h2>{"Your Data, Connected"}</h2>
+                <div class="connected-grid">
+                    <div class="connected-group">
+                        <h3 class="connected-group-label">{"Messaging"}</h3>
+                        <div class="connected-items">
+                            <div class="connected-item"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
+                            <div class="connected-item"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
+                            <div class="connected-item"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
+                            <div class="connected-item"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
+                        </div>
+                    </div>
+                    <div class="connected-group">
+                        <h3 class="connected-group-label">{"Smart Devices"}</h3>
+                        <div class="connected-items">
+                            <div class="connected-item"><i class="fas fa-car"></i><span>{"Tesla"}</span></div>
+                        </div>
+                    </div>
+                    <div class="connected-group">
+                        <h3 class="connected-group-label">{"Extensible"}</h3>
+                        <div class="connected-items">
+                            <div class="connected-item"><i class="fas fa-plug"></i><span>{"MCP (Bring Your Own Service)"}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            // Section: Automate Anything with Rules
+            <section class="rules-section scroll-animate">
+                <h2>{"Automate Anything with Rules"}</h2>
+                <div class="rules-grid">
+                    <div class="rule-block">
+                        <div class="rule-block-label">{"WHEN"}</div>
+                        <h3>{"Trigger"}</h3>
+                        <p class="rule-block-desc">{"Defines when the rule runs"}</p>
+                        <ul class="rule-block-list">
+                            <li>{"Time-based: daily, hourly, specific times"}</li>
+                            <li>{"Event-driven: when a message arrives"}</li>
+                        </ul>
+                    </div>
+                    <div class="rule-block">
+                        <div class="rule-block-label">{"IF"}</div>
+                        <h3>{"Condition"}</h3>
+                        <p class="rule-block-desc">{"Decides whether to act"}</p>
+                        <ul class="rule-block-list">
+                            <li>{"Fetch data from your connected services"}</li>
+                            <li>{"Match keywords in messages"}</li>
+                            <li>{"Let AI evaluate conditions with predefined instructions"}</li>
+                            <li>{"Summarize or decide on actions"}</li>
+                        </ul>
+                    </div>
+                    <div class="rule-block">
+                        <div class="rule-block-label">{"THEN"}</div>
+                        <h3>{"Action"}</h3>
+                        <p class="rule-block-desc">{"Executes the result"}</p>
+                        <ul class="rule-block-list">
+                            <li>{"Send SMS/email notification"}</li>
+                            <li>{"Call any Lightfriend tool"}</li>
+                            <li>{"Track messages on your dashboard"}</li>
+                            <li>{"Call your own MCP server"}</li>
+                        </ul>
+                    </div>
+                </div>
+                <p class="rules-note">{"IF and THEN blocks can be chained up to 3 times for complex logic. Popular rules have ready-made templates so you don't start from scratch."}</p>
+            </section>
+
+            // Section: Talk to Lightfriend Your Way
+            <section class="interaction-section scroll-animate">
+                <h2>{"Talk to Lightfriend Your Way"}</h2>
+                <div class="interaction-grid">
+                    <div class="interaction-card">
+                        <div class="interaction-icon"><i class="fas fa-comment-sms"></i></div>
+                        <h3>{"SMS"}</h3>
+                        <p>{"Text your assistant from any phone"}</p>
+                    </div>
+                    <div class="interaction-card">
+                        <div class="interaction-icon"><i class="fas fa-phone"></i></div>
+                        <h3>{"Voice Call"}</h3>
+                        <p>{"Call and talk naturally"}</p>
+                    </div>
+                    <div class="interaction-card">
+                        <div class="interaction-icon"><i class="fas fa-desktop"></i></div>
+                        <h3>{"Web Dashboard"}</h3>
+                        <p>{"Full control from your browser"}</p>
                     </div>
                 </div>
             </section>
@@ -323,29 +391,31 @@ pub fn landing() -> Html {
                 </div>
             </div>
 
-            <section class="why-lightfriend-section scroll-animate">
-                <h2>{"Why Lightfriend"}</h2>
-                <div class="why-cards-grid">
-                    <div class="why-card scroll-animate">
-                        <div class="why-card-icon"><i class="fas fa-lock"></i></div>
-                        <h3>{"Private AI Processing"}</h3>
-                        <p>{"AI runs inside Tinfoil's cryptographically verified secure enclaves using open source models. Your prompts and AI responses can't be seen in plaintext outside the enclave - not even by the cloud provider."}</p>
+            // Section: Verifiably Private
+            <section class="privacy-section scroll-animate">
+                <h2>{"Verifiably Private"}</h2>
+                <div class="privacy-content">
+                    <div class="privacy-visibility">
+                        <div class="privacy-vis-card privacy-can-see">
+                            <h3><i class="fas fa-eye"></i>{" What we can see"}</h3>
+                            <p>{"Only your phone number and email (for subscription management)."}</p>
+                        </div>
+                        <div class="privacy-vis-card privacy-cannot-see">
+                            <h3><i class="fas fa-eye-slash"></i>{" What we can NOT see"}</h3>
+                            <p>{"Your messages, emails, contacts, or any private data."}</p>
+                        </div>
                     </div>
-                    <div class="why-card scroll-animate">
-                        <div class="why-card-icon"><i class="fas fa-shield-halved"></i></div>
-                        <h3>{"Zero Prompt Injection"}</h3>
-                        <p>{"Requests are processed through isolated pipelines. Your AI assistant can't be manipulated by malicious content in your messages."}</p>
+                    <div class="privacy-how">
+                        <h3>{"How it works"}</h3>
+                        <ol class="privacy-steps">
+                            <li>{"Lightfriend is fully open source on GitHub"}</li>
+                            <li>{"Runs on Amazon Nitro Enclaves - a special processor that can prove it's running the exact code from GitHub"}</li>
+                            <li>{"Your data is encrypted inside the enclave with a key only available inside the verified processor"}</li>
+                            <li>{"On software updates: data is exported encrypted, a blockchain smart contract verifies the new code matches GitHub, then releases the encryption key to the new verified processor"}</li>
+                            <li>{"AI processing uses Tinfoil - a verifiably private AI provider using the same enclave technology"}</li>
+                        </ol>
                     </div>
-                    <div class="why-card scroll-animate">
-                        <div class="why-card-icon"><i class="fas fa-code-branch"></i></div>
-                        <h3>{"Fully Open Source"}</h3>
-                        <p>{"Every line of code is on GitHub. Audit it, self-host it, or contribute."}</p>
-                    </div>
-                    <div class="why-card scroll-animate">
-                        <div class="why-card-icon"><i class="fas fa-plug"></i></div>
-                        <h3>{"No Setup Required"}</h3>
-                        <p>{"Sign up, connect your apps, done. No extra hardware or server configuration needed."}</p>
-                    </div>
+                    <p class="privacy-closing">{"End-to-end verifiably private. Not just a promise - cryptographic proof."}</p>
                 </div>
             </section>
 
@@ -394,18 +464,6 @@ pub fn landing() -> Html {
                         <div class="faq-item">
                             <h3>{"Can Lightfriend also send messages?"}</h3>
                             <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
-                        </div>
-                        <div class="faq-item">
-                            <h3>{"How private is Lightfriend?"}</h3>
-                            <p>{"AI inference runs inside Tinfoil’s cryptographically verified secure enclaves using open source models - your prompts and AI responses can’t be seen in plaintext outside the enclave. Beyond that, Lightfriend runs on a secure EU server with no logging of your chats, searches, or personal info. All credentials are encrypted, and optional conversation history gets deleted automatically as you go. Messaging app chats (like WhatsApp) are temporary too: only accessible for 2 days, then gone. The code’s open-source on GitHub, anyone can check it’s legit. You own your data and can delete it anytime."}</p>
-                        </div>
-                        <div class="faq-item">
-                            <h3>{"Do I need any extra hardware?"}</h3>
-                            <p>{"No. Sign up, connect your apps, done. No devices, no server setup."}</p>
-                        </div>
-                        <div class="faq-item">
-                            <h3>{"How does Lightfriend help with ADHD?"}</h3>
-                            <p>{"Lightfriend removes the biggest ADHD triggers: infinite scroll, notification overload, and app-switching. Instead of picking up a smartphone and losing focus, you get important updates via SMS or voice call. AI filtering means only critical messages reach you, and scheduled digests add structure to your day without requiring willpower. Many of our users switched to dumbphones specifically because of ADHD."}</p>
                         </div>
                     </div>
                 </div>
@@ -508,6 +566,8 @@ pub fn landing() -> Html {
                             <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                             {" | "}
                             <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                            {" | "}
+                            <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
                             {" | "}
                             <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
                         </div>
@@ -2047,8 +2107,8 @@ pub fn landing() -> Html {
         filter: blur(0);
     }
 
-    /* ========== Compact Features Grid ========== */
-    .features-grid-compact {
+    /* ========== Your Data, Connected ========== */
+    .connected-section {
         padding: 4rem 2rem;
         max-width: 900px;
         margin: 0 auto;
@@ -2056,72 +2116,71 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
-    .features-grid-compact h2 {
+    .connected-section h2 {
         font-size: 2.5rem;
-        margin-bottom: 2rem;
+        margin-bottom: 2.5rem;
         background: linear-gradient(45deg, #fff, #7EB2FF);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-    .features-subheader {
-        font-size: 1.15rem;
-        color: #bbb;
-        margin-bottom: 2rem;
-        line-height: 1.6;
-        max-width: 600px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    .features-flat-grid {
+    .connected-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 1rem;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2rem;
     }
-    .feature-chip {
+    .connected-group {
+        text-align: center;
+    }
+    .connected-group-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 1rem;
+        font-weight: 600;
+    }
+    .connected-items {
         display: flex;
         flex-direction: column;
+        gap: 0.75rem;
+    }
+    .connected-item {
+        display: flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 1rem 0.5rem;
+        justify-content: center;
+        gap: 0.6rem;
+        padding: 0.75rem 1rem;
         background: rgba(126, 178, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         transition: all 0.3s ease;
     }
-    .feature-chip:hover {
+    .connected-item:hover {
         border-color: rgba(255, 255, 255, 0.25);
         background: rgba(126, 178, 255, 0.08);
         transform: translateY(-2px);
     }
-    .feature-chip i {
-        font-size: 1.3rem;
+    .connected-item i {
+        font-size: 1.2rem;
         color: #7EB2FF;
     }
-    .feature-chip span {
-        font-size: 0.85rem;
+    .connected-item span {
+        font-size: 0.95rem;
         color: #ddd;
         font-weight: 500;
     }
-    .feature-chip-availability {
-        border-color: rgba(126, 178, 255, 0.25);
-        background: rgba(126, 178, 255, 0.06);
-    }
     @media (max-width: 768px) {
-        .features-flat-grid {
-            grid-template-columns: repeat(3, 1fr);
-            gap: 0.75rem;
+        .connected-grid {
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
         }
-        .features-grid-compact h2 {
+        .connected-section h2 {
             font-size: 2rem;
         }
     }
-    @media (max-width: 480px) {
-        .features-flat-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-    }
-    /* ========== Why Lightfriend Section ========== */
-    .why-lightfriend-section {
+
+    /* ========== Automate Anything with Rules ========== */
+    .rules-section {
         padding: 4rem 2rem;
         max-width: 1000px;
         margin: 0 auto;
@@ -2129,57 +2188,250 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
-    .why-lightfriend-section h2 {
+    .rules-section h2 {
+        font-size: 2.5rem;
+        margin-bottom: 2.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .rules-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+        text-align: left;
+    }
+    .rule-block {
+        background: rgba(126, 178, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        padding: 2rem;
+        transition: all 0.3s ease;
+    }
+    .rule-block:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
+        transform: translateY(-3px);
+    }
+    .rule-block-label {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        margin-bottom: 0.75rem;
+        background: rgba(126, 178, 255, 0.15);
+        color: #7EB2FF;
+    }
+    .rule-block h3 {
+        font-size: 1.2rem;
+        color: #fff;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .rule-block-desc {
+        font-size: 0.9rem;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 1rem;
+    }
+    .rule-block-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .rule-block-list li {
+        font-size: 0.9rem;
+        color: #bbb;
+        line-height: 1.6;
+        padding: 0.3rem 0;
+        padding-left: 1.2rem;
+        position: relative;
+    }
+    .rule-block-list li::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0.7rem;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(126, 178, 255, 0.5);
+    }
+    .rules-note {
+        margin-top: 1.5rem;
+        font-size: 0.95rem;
+        color: rgba(255, 255, 255, 0.5);
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+        line-height: 1.6;
+    }
+    @media (max-width: 768px) {
+        .rules-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+        .rules-section h2 {
+            font-size: 2rem;
+        }
+    }
+
+    /* ========== Talk to Lightfriend Your Way ========== */
+    .interaction-section {
+        padding: 4rem 2rem;
+        max-width: 800px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+    .interaction-section h2 {
+        font-size: 2.5rem;
+        margin-bottom: 2.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .interaction-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+    }
+    .interaction-card {
+        background: rgba(126, 178, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+    .interaction-card:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
+        transform: translateY(-3px);
+    }
+    .interaction-icon {
+        margin-bottom: 1rem;
+    }
+    .interaction-icon i {
+        font-size: 1.8rem;
+        color: #7EB2FF;
+    }
+    .interaction-card h3 {
+        font-size: 1.15rem;
+        color: #fff;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .interaction-card p {
+        font-size: 0.9rem;
+        color: #bbb;
+        line-height: 1.5;
+        margin: 0;
+    }
+    @media (max-width: 768px) {
+        .interaction-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+        .interaction-section h2 {
+            font-size: 2rem;
+        }
+    }
+
+    /* ========== Verifiably Private ========== */
+    .privacy-section {
+        padding: 4rem 2rem;
+        max-width: 900px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+    .privacy-section h2 {
         font-size: 2.5rem;
         margin-bottom: 2rem;
         background: linear-gradient(45deg, #fff, #7EB2FF);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-    .why-cards-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1.5rem;
+    .privacy-content {
+        text-align: left;
     }
-    .why-card {
+    .privacy-visibility {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    .privacy-vis-card {
         background: rgba(126, 178, 255, 0.03);
         backdrop-filter: blur(8px);
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 16px;
-        padding: 2rem;
-        text-align: left;
-        transition: all 0.3s ease;
+        padding: 1.5rem;
     }
-    .why-card:hover {
-        border-color: rgba(255, 255, 255, 0.25);
-        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
-        transform: translateY(-3px);
-    }
-    .why-card-icon {
-        margin-bottom: 1rem;
-    }
-    .why-card-icon i {
-        font-size: 1.5rem;
-        color: #7EB2FF;
-    }
-    .why-card h3 {
-        font-size: 1.2rem;
+    .privacy-vis-card h3 {
+        font-size: 1.1rem;
         color: #fff;
         margin-bottom: 0.75rem;
         font-weight: 600;
     }
-    .why-card p {
+    .privacy-vis-card h3 i {
+        color: #7EB2FF;
+        margin-right: 0.3rem;
+    }
+    .privacy-vis-card p {
         font-size: 0.95rem;
         color: #bbb;
         line-height: 1.6;
         margin: 0;
     }
+    .privacy-how {
+        background: rgba(126, 178, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    .privacy-how h3 {
+        font-size: 1.2rem;
+        color: #fff;
+        margin-bottom: 1rem;
+        font-weight: 600;
+    }
+    .privacy-steps {
+        padding-left: 1.5rem;
+        margin: 0;
+    }
+    .privacy-steps li {
+        font-size: 0.95rem;
+        color: #bbb;
+        line-height: 1.7;
+        padding: 0.35rem 0;
+    }
+    .privacy-steps li::marker {
+        color: #7EB2FF;
+        font-weight: 600;
+    }
+    .privacy-closing {
+        text-align: center;
+        font-size: 1.15rem;
+        color: rgba(255, 255, 255, 0.8);
+        font-weight: 500;
+        font-style: italic;
+    }
     @media (max-width: 768px) {
-        .why-cards-grid {
+        .privacy-visibility {
             grid-template-columns: 1fr;
             gap: 1rem;
         }
-        .why-lightfriend-section h2 {
+        .privacy-section h2 {
             font-size: 2rem;
         }
     }

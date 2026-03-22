@@ -28,13 +28,17 @@ variable "security_group_id" {
   type        = string
 }
 
-variable "cloudflare_tunnel_token" {
-  description = "Cloudflare tunnel token for cloudflared"
-  type        = string
-  sensitive   = true
-}
-
 variable "domain" {
   description = "Domain name for DNS records"
+  type        = string
+}
+
+variable "subdomain" {
+  description = "Subdomain prefix (e.g. 'enclave' for enclave.example.com)"
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository (owner/repo) for OIDC deploy"
   type        = string
 }

@@ -465,6 +465,10 @@ fn render_rule_card(rule: &RuleData, on_edit: &Callback<RuleData>, is_new: bool,
         let rules_state = rules_state.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
+            let window = web_sys::window().unwrap();
+            if !window.confirm_with_message("Delete this rule?").unwrap_or(false) {
+                return;
+            }
             // Optimistic local removal
             let updated: Vec<RuleData> = (*rules_state).iter().filter(|r| r.id != rule_id).cloned().collect();
             rules_state.set(updated);

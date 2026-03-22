@@ -113,6 +113,42 @@ impl FlowNode {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt templates: stored as "template:<id>" in flow_config, resolved at eval time
+// ---------------------------------------------------------------------------
+
+/// Resolve a prompt string. If it starts with "template:", expand to the
+/// current canonical prompt text. Otherwise return as-is (custom prompt).
+pub fn resolve_prompt_template(prompt: &str, trigger_type: &str) -> String {
+    let id = match prompt.strip_prefix("template:") {
+        Some(id) => id,
+        None => return prompt.to_string(),
+    };
+    let is_schedule = trigger_type == "schedule";
+    match id {
+        "summarize" => if is_schedule {
+            "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked items with approaching deadlines. Format as a numbered list, one item per line."
+        } else {
+            "Summarize this message along with recent conversation context. Highlight key points and any action needed."
+        }.to_string(),
+        "filter_important" => if is_schedule {
+            "Review recent messages and emails. Only notify if delaying over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates and vague requests are NOT critical. If nothing critical, respond with just 'skip'."
+        } else {
+            "Only notify if delaying this message over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates, casual messages, and vague requests are NOT critical. If not critical, respond with just 'skip'."
+        }.to_string(),
+        "track_items" => "Does this message relate to an already-tracked/pinned item? If it updates a tracked item (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        _ if id.starts_with("check_condition:") => {
+            let condition = id.strip_prefix("check_condition:").unwrap_or("");
+            if is_schedule {
+                format!("Check if the following condition is met based on recent messages: {}. If the condition is not met, respond with just 'skip'.", condition)
+            } else {
+                format!("Check if this message matches the following condition: {}. If it doesn't match, respond with just 'skip'.", condition)
+            }
+        }
+        _ => prompt.to_string(), // unknown template, use as-is
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config types (deserialized from JSON columns)
 // ---------------------------------------------------------------------------
 
@@ -129,6 +165,12 @@ pub struct TriggerConfig {
     // Common: fire once then auto-complete
     #[serde(default)]
     pub fire_once: bool,
+    // Delay before evaluating (seconds). During this window, check if user
+    // already saw the message. None or 0 = immediate (no seen-check).
+    // Default 300 (5 min) for ontology_change rules.
+    pub delay_seconds: Option<i32>,
+    // Group chat mode: "all" = all messages, "mention_only" = only @mentions
+    pub group_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -140,7 +182,7 @@ pub struct ActionConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct LogicResult {
+pub(crate) struct LogicResult {
     should_act: bool,
     message: Option<String>,
     #[serde(flatten)]
@@ -172,11 +214,10 @@ pub fn matches_trigger(
         return false;
     }
 
-    // Must match change type
-    if let Some(ref expected_change) = config.change {
-        if !expected_change.eq_ignore_ascii_case(change_type) {
-            return false;
-        }
+    // Must match change type (default to "created" if not specified)
+    let expected_change = config.change.as_deref().unwrap_or("created");
+    if !expected_change.eq_ignore_ascii_case(change_type) {
+        return false;
     }
 
     // Check filters against entity snapshot
@@ -190,6 +231,20 @@ pub fn matches_trigger(
                 .to_lowercase()
                 .contains(&expected_value.to_lowercase())
             {
+                return false;
+            }
+        }
+    }
+
+    // Group chat "mention_only" filter: skip messages that don't contain @mention
+    if let Some(ref mode) = config.group_mode {
+        if mode == "mention_only" {
+            let content = entity_snapshot
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            // Check for @mention patterns (bridged platforms relay mentions as @name)
+            if !content.contains('@') {
                 return false;
             }
         }
@@ -209,12 +264,7 @@ pub async fn evaluate_and_execute(
     trigger_context: &str,
     trigger_snapshot: Option<&serde_json::Value>,
 ) {
-    // Mark as triggered
-    let _ = state
-        .ontology_repository
-        .update_rule_last_triggered(rule.id);
-
-    // Check expiry
+    // Check expiry FIRST (before marking as triggered)
     if let Some(expires) = rule.expires_at {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -227,6 +277,11 @@ pub async fn evaluate_and_execute(
             return;
         }
     }
+
+    // Mark as triggered (only if not expired)
+    let _ = state
+        .ontology_repository
+        .update_rule_last_triggered(rule.id);
 
     // All rules use flow_config
     if let Some(ref flow_json) = rule.flow_config {
@@ -287,6 +342,32 @@ async fn evaluate_flow(
             true_branch,
             false_branch,
         } => {
+            // Safety: group chat messages must never be evaluated with LLM.
+            // If the trigger has group_mode set, skip LLM and execute true_branch directly.
+            let trigger: TriggerConfig =
+                serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+            if trigger.group_mode.is_some() {
+                info!(
+                    "Rule {} ({}): skipping LLM eval for group chat, executing action directly",
+                    rule.id, rule.name
+                );
+                if let Some(branch) = true_branch.as_ref() {
+                    return Box::pin(evaluate_flow(
+                        state,
+                        rule,
+                        trigger_context,
+                        trigger_snapshot,
+                        branch,
+                        prev_message,
+                        prev_extras,
+                    ))
+                    .await;
+                }
+                return Ok(());
+            }
+
+            // Resolve template prompts to actual text
+            let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
             // Peek at true_branch to extract tool params for LLM
             let extra_params = extract_tool_params(state, true_branch.as_ref());
             let prefetched = prefetch_sources(state, rule, fetch).await;
@@ -294,7 +375,7 @@ async fn evaluate_flow(
                 state,
                 rule,
                 trigger_context,
-                prompt,
+                &resolved_prompt,
                 &prefetched,
                 extra_params.as_ref(),
             )
@@ -379,7 +460,7 @@ async fn evaluate_flow(
 /// Peek at a branch node: if it's a tool_call Action, look up the tool's
 /// parameter schema and return params that the LLM should fill (excluding
 /// auto-injected ones).
-fn extract_tool_params(
+pub(crate) fn extract_tool_params(
     state: &Arc<AppState>,
     branch: &Option<FlowNode>,
 ) -> Option<HashMap<String, Box<types::JSONSchemaDefine>>> {
@@ -411,7 +492,7 @@ fn extract_tool_params(
 // Prefetch sources helper
 // ---------------------------------------------------------------------------
 
-async fn prefetch_sources(
+pub(crate) async fn prefetch_sources(
     state: &Arc<AppState>,
     rule: &OntRule,
     sources: &[FetchSource],
@@ -534,6 +615,10 @@ async fn prefetch_sources(
                     .get_pinned_messages(rule.user_id)
                     .unwrap_or_default();
                 if !pinned.is_empty() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i32;
                     let formatted: Vec<String> = pinned
                         .iter()
                         .map(|m| {
@@ -542,9 +627,29 @@ async fn prefetch_sources(
                                 .as_deref()
                                 .map(|s| format!(" [status={}]", s))
                                 .unwrap_or_default();
+                            let deadline_tag = m
+                                .review_after
+                                .map(|ra| {
+                                    if now > ra {
+                                        " [OVERDUE]".to_string()
+                                    } else {
+                                        let days_left = (ra - now) / 86400;
+                                        if days_left <= 2 {
+                                            format!(" [due in {} days]", days_left)
+                                        } else {
+                                            String::new()
+                                        }
+                                    }
+                                })
+                                .unwrap_or_default();
                             format!(
-                                "[id={}] [{}]{} {}: {}",
-                                m.id, m.platform, status_tag, m.sender_name, m.content
+                                "[id={}] [{}]{}{} {}: {}",
+                                m.id,
+                                m.platform,
+                                status_tag,
+                                deadline_tag,
+                                m.sender_name,
+                                m.content
                             )
                         })
                         .collect();
@@ -563,7 +668,7 @@ async fn prefetch_sources(
 // LLM condition evaluation
 // ---------------------------------------------------------------------------
 
-async fn call_llm_condition(
+pub(crate) async fn call_llm_condition(
     state: &Arc<AppState>,
     rule: &OntRule,
     trigger_context: &str,
@@ -942,6 +1047,104 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
 }
 
 // ---------------------------------------------------------------------------
+// Message seen-check: did the user already see this message?
+// ---------------------------------------------------------------------------
+
+/// Check if the user has already seen a message (via read receipts or email
+/// Seen flag). Returns true if the message was seen and should be skipped.
+async fn check_message_seen(
+    state: &Arc<AppState>,
+    user_id: i32,
+    platform: &str,
+    room_id: &str,
+    message_created_at: i32,
+) -> bool {
+    match platform {
+        "email" => {
+            // Check IMAP \Seen flag for this email
+            let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
+            check_email_seen(state, user_id, uid).await
+        }
+        // Bridge platforms: check Matrix read receipts
+        _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
+    }
+}
+
+/// Check if user read the email in their actual email app via IMAP \Seen flag.
+async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) -> bool {
+    use crate::repositories::user_core::UserCoreOps;
+
+    let creds = match state.user_repository.get_imap_credentials(user_id) {
+        Ok(Some(c)) => c,
+        _ => return false,
+    };
+    let (_description, password, server, port) = creds;
+    let server = match server {
+        Some(s) => s,
+        None => return false,
+    };
+    let port = port.unwrap_or(993) as u16;
+    let email = match state.user_core.find_by_id(user_id) {
+        Ok(Some(u)) => u.email,
+        _ => return false,
+    };
+
+    // Run in spawn_blocking since imap is synchronous
+    let uid = email_uid.to_string();
+    tokio::task::spawn_blocking(move || {
+        let tls = match native_tls::TlsConnector::new() {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        let client = match imap::connect((server.as_str(), port), &server, &tls) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let mut session = match client.login(&email, &password) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let _ = session.select("INBOX");
+
+        let is_seen = match session.uid_fetch(&uid, "FLAGS") {
+            Ok(messages) => messages
+                .iter()
+                .any(|msg| msg.flags().iter().any(|flag| flag.to_string() == "\\Seen")),
+            Err(_) => false,
+        };
+        let _ = session.logout();
+        is_seen
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Check if user saw a bridge message via Matrix read receipts.
+async fn check_bridge_seen(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    message_created_at: i32,
+) -> bool {
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let matrix_room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_id) {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+    let room = match client.get_room(&matrix_room_id) {
+        Some(r) => r,
+        None => return false,
+    };
+    match crate::utils::bridge::get_room_seen_timestamp(&room, &client).await {
+        Some(seen_ts) => seen_ts >= message_created_at as i64,
+        None => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Ontology change signal
 // ---------------------------------------------------------------------------
 
@@ -954,6 +1157,15 @@ pub async fn emit_ontology_change(
     change_type: &str,
     entity_snapshot: serde_json::Value,
 ) {
+    // Skip completed messages early (before evaluating any rules)
+    if entity_type == "Message" {
+        if let Some(status) = entity_snapshot.get("status").and_then(|v| v.as_str()) {
+            if status == "completed" {
+                return;
+            }
+        }
+    }
+
     let rules = match state.ontology_repository.get_ontology_change_rules(user_id) {
         Ok(r) => r,
         Err(e) => {
@@ -973,15 +1185,250 @@ pub async fn emit_ontology_change(
         serde_json::to_string(&entity_snapshot).unwrap_or_default()
     );
 
+    // Extract message metadata for seen-checks (if this is a Message event)
+    let msg_platform = entity_snapshot
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let msg_room_id = entity_snapshot
+        .get("room_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let msg_created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
     for rule in rules {
         if matches_trigger(&rule, entity_type, change_type, &entity_snapshot) {
             let state = Arc::clone(state);
             let rule = rule.clone();
             let ctx = trigger_context.clone();
             let snap = entity_snapshot.clone();
+            let platform = msg_platform.clone();
+            let room_id = msg_room_id.clone();
+            let is_message = entity_type == "Message";
+
+            // Parse delay from trigger config (default 300s for ontology_change)
+            let trigger: TriggerConfig =
+                serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+            let delay = trigger.delay_seconds.unwrap_or(300);
+
             tokio::spawn(async move {
+                if delay > 0 && is_message {
+                    // Wait, then check if user already saw the message
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
+
+                    if check_message_seen(&state, rule.user_id, &platform, &room_id, msg_created_at)
+                        .await
+                    {
+                        info!(
+                            "Rule {} ({}): skipping - user already saw the message",
+                            rule.id, rule.name
+                        );
+                        return;
+                    }
+                }
                 evaluate_and_execute(&state, &rule, &ctx, Some(&snap)).await;
             });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rule test: step-by-step evaluation for the test panel
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum RuleTestStep {
+    Prefetching {
+        sources: Vec<String>,
+    },
+    EvaluatingLlm {
+        prompt_preview: String,
+    },
+    LlmResult {
+        decided: bool,
+        message: Option<String>,
+    },
+    CheckingKeyword {
+        keyword: String,
+    },
+    KeywordResult {
+        matched: bool,
+    },
+    WouldExecute {
+        action_type: String,
+        description: String,
+    },
+    NoAction {
+        reason: String,
+    },
+    Error {
+        message: String,
+    },
+    Complete,
+}
+
+/// Walk a flow tree for testing: real LLM calls, but actions are described
+/// instead of executed. Each step is sent through `tx`.
+pub async fn evaluate_flow_test(
+    state: &Arc<AppState>,
+    rule: &OntRule,
+    trigger_context: &str,
+    node: &FlowNode,
+    tx: &tokio::sync::mpsc::Sender<RuleTestStep>,
+) {
+    match node {
+        FlowNode::LlmCondition {
+            prompt,
+            fetch,
+            true_branch,
+            false_branch,
+        } => {
+            // Prefetch
+            if !fetch.is_empty() {
+                let source_names: Vec<String> = fetch
+                    .iter()
+                    .map(|s| match s {
+                        FetchSource::Email => "email".into(),
+                        FetchSource::Chat { platform, .. } => format!("chat ({})", platform),
+                        FetchSource::Weather { .. } => "weather".into(),
+                        FetchSource::Internet { query } => format!("internet: {}", query),
+                        FetchSource::Tesla => "tesla".into(),
+                        FetchSource::Mcp { server, tool, .. } => format!("mcp {}:{}", server, tool),
+                        FetchSource::Pinned => "pinned items".into(),
+                    })
+                    .collect();
+                let _ = tx
+                    .send(RuleTestStep::Prefetching {
+                        sources: source_names,
+                    })
+                    .await;
+            }
+            let prefetched = prefetch_sources(state, rule, fetch).await;
+
+            let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
+            let preview = if resolved_prompt.len() > 120 {
+                format!("{}...", &resolved_prompt[..120])
+            } else {
+                resolved_prompt.clone()
+            };
+            let _ = tx
+                .send(RuleTestStep::EvaluatingLlm {
+                    prompt_preview: preview,
+                })
+                .await;
+
+            let extra_params = extract_tool_params(state, true_branch.as_ref());
+            match call_llm_condition(
+                state,
+                rule,
+                trigger_context,
+                &resolved_prompt,
+                &prefetched,
+                extra_params.as_ref(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let decided = result.should_act;
+                    let msg = result.message.clone();
+                    let _ = tx
+                        .send(RuleTestStep::LlmResult {
+                            decided,
+                            message: msg,
+                        })
+                        .await;
+
+                    let next = if decided { true_branch } else { false_branch };
+                    if let Some(branch) = next.as_ref() {
+                        Box::pin(evaluate_flow_test(state, rule, trigger_context, branch, tx))
+                            .await;
+                    } else {
+                        let reason = if decided {
+                            "Condition was true but no action configured"
+                        } else {
+                            "Condition was false and no else branch"
+                        };
+                        let _ = tx
+                            .send(RuleTestStep::NoAction {
+                                reason: reason.to_string(),
+                            })
+                            .await;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(RuleTestStep::Error {
+                            message: format!("LLM error: {}", e),
+                        })
+                        .await;
+                }
+            }
+        }
+        FlowNode::KeywordCondition {
+            keyword,
+            true_branch,
+            false_branch,
+        } => {
+            let _ = tx
+                .send(RuleTestStep::CheckingKeyword {
+                    keyword: keyword.clone(),
+                })
+                .await;
+            let matched = !keyword.is_empty()
+                && trigger_context
+                    .to_lowercase()
+                    .contains(&keyword.to_lowercase());
+            let _ = tx.send(RuleTestStep::KeywordResult { matched }).await;
+
+            let next = if matched { true_branch } else { false_branch };
+            if let Some(branch) = next.as_ref() {
+                Box::pin(evaluate_flow_test(state, rule, trigger_context, branch, tx)).await;
+            } else {
+                let reason = if matched {
+                    "Keyword matched but no action configured"
+                } else {
+                    "Keyword did not match and no else branch"
+                };
+                let _ = tx
+                    .send(RuleTestStep::NoAction {
+                        reason: reason.to_string(),
+                    })
+                    .await;
+            }
+        }
+        FlowNode::Action {
+            action_type,
+            config,
+        } => {
+            let description = match action_type.as_str() {
+                "notify" => {
+                    let method = config
+                        .get("method")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("sms");
+                    format!("send {} notification", method)
+                }
+                "tool_call" => {
+                    let tool = config
+                        .get("tool")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    format!("call tool '{}'", tool)
+                }
+                other => format!("execute '{}' action", other),
+            };
+            let _ = tx
+                .send(RuleTestStep::WouldExecute {
+                    action_type: action_type.clone(),
+                    description,
+                })
+                .await;
         }
     }
 }

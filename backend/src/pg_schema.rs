@@ -423,6 +423,7 @@ diesel::table! {
         created_at -> Int4,
         pinned -> Bool,
         status -> Nullable<Text>,
+        review_after -> Nullable<Int4>,
     }
 }
 

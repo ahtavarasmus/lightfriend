@@ -40,6 +40,7 @@ pub struct PinnedMessageItem {
     pub platform: String,
     pub content: String,
     pub created_at: i32,
+    pub review_after: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -213,6 +214,7 @@ pub async fn get_dashboard_summary(
                 m.content
             },
             created_at: m.created_at,
+            review_after: m.review_after,
         })
         .collect();
 
@@ -353,7 +355,7 @@ fn get_quiet_mode_info(
 
     match quiet_until {
         None => QuietModeInfo {
-            is_quiet: rule_count > 0 && false, // only quiet if explicitly set
+            is_quiet: false, // only quiet if explicitly set via quiet_until
             until: None,
             until_display: None,
             rule_count,
@@ -524,7 +526,7 @@ pub async fn get_activity_feed(
             ("person", "deleted") => (format!("Removed {}", entity_name), "fa-user-minus"),
             ("person", "merged") => (format!("Merged into {}", entity_name), "fa-people-arrows"),
             ("channel", "created") => (format!("Channel added for {}", entity_name), "fa-plug"),
-            ("channel", "deleted") => (format!("Channel removed"), "fa-plug-circle-minus"),
+            ("channel", "deleted") => ("Channel removed".to_string(), "fa-plug-circle-minus"),
             ("rule", "created") => (
                 format!("Rule created: {}", entity_name),
                 "fa-wand-magic-sparkles",
@@ -909,8 +911,10 @@ pub async fn get_rule_sources(
 pub struct SenderOption {
     pub name: String,
     pub platform: Option<String>, // None = person (matches all channels), Some = specific channel
-    pub source: String,           // "person", "chat"
+    pub source: String,           // "person", "chat", "group"
     pub msg_count: Option<i64>,
+    #[serde(default)]
+    pub is_group: bool,
 }
 
 /// GET /api/dashboard/senders
@@ -941,6 +945,7 @@ pub async fn get_senders(
                 platform: None,
                 source: "person".to_string(),
                 msg_count: None,
+                is_group: false,
             });
         }
 
@@ -953,6 +958,7 @@ pub async fn get_senders(
                     platform: Some(ch.platform.clone()),
                     source: "person".to_string(),
                     msg_count: None,
+                    is_group: false,
                 });
             }
         }
@@ -972,9 +978,58 @@ pub async fn get_senders(
                 platform: Some(platform.clone()),
                 source: "chat".to_string(),
                 msg_count: Some(*count),
+                is_group: false,
             });
         }
     }
+
+    // 3. All bridge rooms (fills in chats not yet in ont_messages + identifies groups)
+    let services = ["signal", "whatsapp", "telegram"];
+    let matrix_clients = state.matrix_clients.lock().await;
+    if let Some(client) = matrix_clients.get(&user_id) {
+        for service in &services {
+            let bridge_ok = state
+                .user_repository
+                .get_bridge(user_id, service)
+                .ok()
+                .flatten()
+                .map(|b| b.status == "connected")
+                .unwrap_or(false);
+            if !bridge_ok {
+                continue;
+            }
+            if let Ok(rooms) = crate::utils::bridge::get_service_rooms(client, service).await {
+                for room in rooms {
+                    let display = crate::utils::bridge::remove_bridge_suffix(&room.display_name);
+                    if room.is_group {
+                        let key = format!("group:{}:{}", display.to_lowercase(), service);
+                        if seen.insert(key) {
+                            options.push(SenderOption {
+                                name: display,
+                                platform: Some(service.to_string()),
+                                source: "group".to_string(),
+                                msg_count: None,
+                                is_group: true,
+                            });
+                        }
+                    } else {
+                        // Non-group bridge room - add if not already present from ont_messages
+                        let key = format!("chat:{}:{}", display.to_lowercase(), service);
+                        if seen.insert(key) {
+                            options.push(SenderOption {
+                                name: display,
+                                platform: Some(service.to_string()),
+                                source: "chat".to_string(),
+                                msg_count: None,
+                                is_group: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    drop(matrix_clients);
 
     Ok(Json(options))
 }

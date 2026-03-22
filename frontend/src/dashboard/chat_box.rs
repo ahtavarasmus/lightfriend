@@ -39,6 +39,7 @@ const CHAT_STYLES: &str = r#"
     max-width: 85%;
     line-height: 1.4;
     font-size: 0.9rem;
+    white-space: pre-wrap;
 }
 .chat-msg.user {
     background: rgba(30, 144, 255, 0.15);
@@ -739,6 +740,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     chat_loading_msg.set(false);
                                     if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
                                         let _ = input.focus();
+                                    }
+                                    // Refresh dashboard in case tools made changes before the error
+                                    if let Some(window) = web_sys::window() {
+                                        let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                        let _ = window.dispatch_event(&event);
                                     }
                                     es_ref.close();
                                 }

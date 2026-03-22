@@ -8,7 +8,9 @@ backend/database.db
 backend/backend/
 backend/uploads/
 backend/target/
+tools/attestation-verifier/target/
 .env
+docs/OPERATOR_RUNBOOK.md
 backend/src/api/payloads.md
 second_terminal
 *.pem

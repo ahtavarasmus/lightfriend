@@ -337,7 +337,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     for email in &sorted_emails {
                                         // Find matching ontology Person for this email sender
                                         let mut matched_person_id: Option<i32> = None;
-                                        let mut person_notification = None;
                                         if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id) {
                                             let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
                                             let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
@@ -348,26 +347,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             let handle_lower = handle.to_lowercase();
                                                             if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower) {
                                                                 matched_person_id = Some(pwc.person.id);
-                                                                // Check if this person has "all" notification mode
-                                                                if pwc.effective_notification_mode(channel, "default") == "all" {
-                                                                    let suffix = match pwc.effective_notification_type(channel, "sms").as_str() {
-                                                                        "call" => "_call",
-                                                                        _ => "_sms",
-                                                                    };
-                                                                    person_notification = Some((
-                                                                        format!("email_priority{}", suffix),
-                                                                        format!(
-                                                                            "Email from: {}\nSubject: {}\nContent: {}",
-                                                                            email.from.as_deref().unwrap_or("Unknown"),
-                                                                            email.subject.as_deref().unwrap_or("No subject"),
-                                                                            email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
-                                                                        ),
-                                                                        format!("Hello, you have a critical email from {} with subject: {}",
-                                                                            email.from.as_deref().unwrap_or("Unknown"),
-                                                                            email.subject.as_deref().unwrap_or("No subject")
-                                                                        ),
-                                                                    ));
-                                                                }
                                                                 break;
                                                             }
                                                         }
@@ -399,6 +378,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             created_at: now,
                                             pinned: false,
                                             status: None,
+                                            review_after: None,
                                         };
                                         let state_emit = state.clone();
                                         let uid = user.id;
@@ -428,19 +408,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             }
                                         });
 
-                                        // Send notification for "all" mode contacts
-                                        if let Some((notification_type, message, first_message)) = person_notification {
-                                            let state_clone = state.clone();
-                                            tokio::spawn(async move {
-                                                crate::proactive::utils::send_notification(
-                                                    &state_clone,
-                                                    user.id,
-                                                    &message,
-                                                    notification_type,
-                                                    Some(first_message),
-                                                ).await;
-                                            });
-                                        }
+                                        // Rules handle all notification logic via ontology change events
                                     }
                                 }
                             },
@@ -645,35 +613,40 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             for rule in due_rules {
                 let state = state.clone();
                 let rule_clone = rule.clone();
+
+                // Update next_fire_at BEFORE spawn to prevent double-fire
+                let trigger: crate::proactive::rules::TriggerConfig =
+                    serde_json::from_str(&rule_clone.trigger_config).unwrap_or_default();
+                if trigger.schedule.as_deref() == Some("recurring") {
+                    if let Some(ref pattern) = trigger.pattern {
+                        let user_tz = state
+                            .user_core
+                            .get_user_info(rule_clone.user_id)
+                            .ok()
+                            .and_then(|info| info.timezone)
+                            .unwrap_or_else(|| "UTC".to_string());
+                        if let Some(next) =
+                            crate::proactive::rules::compute_next_fire_at(pattern, &user_tz)
+                        {
+                            let _ = state
+                                .ontology_repository
+                                .update_rule_next_fire_at(rule_clone.id, next);
+                        }
+                    }
+                }
+                if trigger.schedule.as_deref() == Some("once") || trigger.fire_once {
+                    let _ = state
+                        .ontology_repository
+                        .update_rule_next_fire_at(rule_clone.id, i32::MAX);
+                }
+
                 tokio::spawn(async move {
-                    // Build trigger context
                     let ctx = format!(
                         "Schedule trigger fired at {}",
                         chrono::Utc::now().to_rfc3339()
                     );
                     crate::proactive::rules::evaluate_and_execute(&state, &rule_clone, &ctx, None)
                         .await;
-
-                    // Compute and set next fire time for recurring rules
-                    let trigger: crate::proactive::rules::TriggerConfig =
-                        serde_json::from_str(&rule_clone.trigger_config).unwrap_or_default();
-                    if trigger.schedule.as_deref() == Some("recurring") {
-                        if let Some(ref pattern) = trigger.pattern {
-                            let user_tz = state
-                                .user_core
-                                .get_user_info(rule_clone.user_id)
-                                .ok()
-                                .and_then(|info| info.timezone)
-                                .unwrap_or_else(|| "UTC".to_string());
-                            if let Some(next) =
-                                crate::proactive::rules::compute_next_fire_at(pattern, &user_tz)
-                            {
-                                let _ = state
-                                    .ontology_repository
-                                    .update_rule_next_fire_at(rule_clone.id, next);
-                            }
-                        }
-                    }
                 });
             }
 

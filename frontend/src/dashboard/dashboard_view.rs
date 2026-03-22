@@ -10,7 +10,6 @@ use super::settings_panel::{SettingsPanel, SettingsTab};
 use super::rules_section::RulesSection;
 use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
 use super::activity_feed::ActivityFeed;
-use super::people_list::PeopleList;
 
 const DASHBOARD_STYLES: &str = r#"
 .palantir-dashboard {
@@ -59,54 +58,6 @@ const DASHBOARD_STYLES: &str = r#"
     flex: 1;
     overflow-y: auto;
     min-height: 0;
-}
-
-/* ---- People list (simple) ---- */
-.people-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-}
-.people-list-empty {
-    font-size: 0.8rem;
-    color: #555;
-    padding: 0.5rem 0;
-}
-.person-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-.person-row:hover {
-    background: rgba(255, 255, 255, 0.04);
-}
-.person-name {
-    font-size: 0.85rem;
-    color: #ddd;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.person-channels {
-    display: flex;
-    gap: 0.3rem;
-}
-.person-channel-badge {
-    font-size: 0.6rem;
-    color: #777;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-    text-transform: capitalize;
 }
 
 /* ---- Status Hero (compact) ---- */
@@ -401,6 +352,8 @@ struct PinnedMessageResponse {
     platform: String,
     content: String,
     created_at: i32,
+    #[serde(default)]
+    review_after: Option<i32>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -765,6 +718,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 } else {
                                     msg.content.clone()
                                 };
+                                let now_ts = (js_sys::Date::now() / 1000.0) as i32;
+                                let deadline_html = msg.review_after.map(|ra| {
+                                    if now_ts > ra {
+                                        html! { <span style="color: #ff6b6b; font-size: 0.65rem; font-weight: 600;">{"overdue"}</span> }
+                                    } else {
+                                        let days_left = (ra - now_ts) / 86400;
+                                        if days_left <= 2 {
+                                            html! { <span style="color: #fbbf24; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                                        } else {
+                                            html! { <span style="color: #666; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                                        }
+                                    }
+                                });
                                 let on_unpin = {
                                     let fetch_summary = fetch_summary.clone();
                                     Callback::from(move |e: MouseEvent| {
@@ -783,7 +749,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                             <i class={platform_icon} style="color: #666; font-size: 0.8rem;"></i>
                                         </div>
                                         <div class="pinned-card-body">
-                                            <div class="pinned-card-sender">{&msg.sender_name}</div>
+                                            <div class="pinned-card-sender">
+                                                {&msg.sender_name}
+                                                if let Some(ref dl) = deadline_html {
+                                                    <span style="margin-left: 0.4rem;">{dl.clone()}</span>
+                                                }
+                                            </div>
                                             <div class="pinned-card-preview">{preview}</div>
                                         </div>
                                         <button class="pinned-card-unpin" onclick={on_unpin} title="Unpin">
@@ -876,9 +847,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     </div>
 
                     <div class="peace-separator"></div>
-
-                    // ---- People ----
-                    <PeopleList />
                 </div>
 
                 // ======== RIGHT PANEL ========

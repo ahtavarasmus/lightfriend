@@ -16,14 +16,12 @@ cd backend && diesel migration run
 cd frontend && trunk serve        # Dev server (port 8080)
 ```
 
-**Docker (Recommended):**
+**Docker (Enclave):**
 ```bash
-just build-native                 # Build for current platform
-just up                          # Start all services
-just logs-core                   # View logs
+just build-local                  # Build enclave image for current platform
+just up                          # Start enclave
+just logs                        # View logs
 ```
-
-See [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for complete Docker documentation.
 
 ## Architecture
 

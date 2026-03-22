@@ -769,6 +769,7 @@ impl OntologyRepository {
     // -----------------------------------------------------------------------
 
     /// Create a link between two entities. Uses ON CONFLICT to avoid duplicates.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_link(
         &self,
         user_id: i32,
@@ -998,6 +999,27 @@ impl OntologyRepository {
         Ok(())
     }
 
+    /// Pin a message and set its review_after deadline.
+    pub fn pin_message_with_deadline(
+        &self,
+        user_id: i32,
+        message_id: i64,
+        review_after: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::id.eq(message_id))
+                .filter(ont_messages::user_id.eq(user_id)),
+        )
+        .set((
+            ont_messages::pinned.eq(true),
+            ont_messages::review_after.eq(Some(review_after)),
+        ))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
     /// Unpin a message (set pinned=false).
     pub fn unpin_message(&self, user_id: i32, message_id: i64) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1012,6 +1034,7 @@ impl OntologyRepository {
     }
 
     /// Update a pinned message's status. If status == "completed", also unpin.
+    /// If status == "extend_deadline", push review_after forward by 7 days.
     pub fn update_message_status(
         &self,
         user_id: i32,
@@ -1028,6 +1051,18 @@ impl OntologyRepository {
             .set((
                 ont_messages::status.eq(Some(status)),
                 ont_messages::pinned.eq(false),
+            ))
+            .execute(&mut conn)?;
+        } else if status == "extend_deadline" {
+            let new_review_after = Self::now() + 7 * 86400;
+            diesel::update(
+                ont_messages::table
+                    .filter(ont_messages::id.eq(message_id))
+                    .filter(ont_messages::user_id.eq(user_id)),
+            )
+            .set((
+                ont_messages::status.eq(Some("active")),
+                ont_messages::review_after.eq(Some(new_review_after)),
             ))
             .execute(&mut conn)?;
         } else {
@@ -1117,6 +1152,7 @@ impl OntologyRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_rule(
         &self,
         user_id: i32,

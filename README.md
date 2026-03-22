@@ -2,41 +2,9 @@
 
 Full-stack AI assistant SaaS with Rust backend (Axum) and frontend (Yew WebAssembly), integrating with Matrix homeserver for multi-platform messaging.
 
-## Quick Start (Docker)
+The code is open source for verifiability - the production deployment runs inside an AWS Nitro Enclave.
 
-```bash
-# 1. Copy environment template
-cp .env.example .env
-
-# 2. Generate secrets
-just generate-secrets >> .env
-
-# 3. Edit .env and verify the generated values
-
-# 4. Build and start all services
-just build-prebuilt
-just up
-
-# 5. Create Matrix admin user
-just create-admin adminuser YourPassword
-```
-
-Services will be running at:
-- **Frontend**: http://localhost:8080 (or run separately: `cd frontend && trunk serve`)
-- **Backend API**: http://localhost:3000
-- **Synapse**: http://localhost:8008
-
-## Services
-
-| Component | Description | Port |
-|-----------|-------------|------|
-| Backend | Rust (Axum) API server | 3000 |
-| Frontend | Yew (WebAssembly) UI | 8080 |
-| Synapse | Matrix homeserver | 8008 |
-| Bridges | WhatsApp, Signal, Messenger, Instagram | - |
-| PostgreSQL | Database for Synapse and bridges | 5432 |
-
-## Local Development (without Docker)
+## Local Development
 
 ```bash
 # Terminal 1: Backend
@@ -46,11 +14,28 @@ cd backend && cargo run
 cd frontend && trunk serve
 ```
 
-Requires manual Matrix server setup - see [Matrix Setup Guide](docs/MATRIX_SETUP_GUIDE.md).
+- **Backend API**: http://localhost:3000
+- **Frontend**: http://localhost:8080
+
+## Docker (Enclave)
+
+The enclave image bundles everything (PostgreSQL, Tuwunel, mautrix bridges, Lightfriend backend) into a single container under supervisord.
+
+```bash
+# Build for current platform (local testing)
+just build-local
+
+# Start
+just up
+
+# View logs
+just logs
+```
+
+See `just --list` for all available commands.
 
 ## Documentation
 
-- [Docker Setup](docs/DOCKER_SETUP.md) - commands, build methods, troubleshooting, backups
 - [Matrix Setup Guide](docs/MATRIX_SETUP_GUIDE.md) - manual Matrix setup for local dev
 - [Infrastructure Setup](docs/INFRASTRUCTURE_SETUP.md) - cloud deployment with Terraform
 - [CLAUDE.md](CLAUDE.md) - project architecture and development guide

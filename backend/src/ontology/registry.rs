@@ -101,6 +101,37 @@ static CHANNEL_DEF: ObjectTypeDef = ObjectTypeDef {
     linkable_to: &["Person"],
 };
 
+static MESSAGE_PROPS: &[PropertyDef] = &[
+    PropertyDef {
+        name: "pinned",
+        description:
+            "Set to 'true' to show only pinned/tracked items. Omit to show all recent messages.",
+        prop_type: "String",
+        filter: Some(FilterSource::Static(&["true"])),
+    },
+    PropertyDef {
+        name: "platform",
+        description: "Filter by platform. Omit to include all platforms.",
+        prop_type: "String",
+        filter: Some(FilterSource::Static(&[
+            "whatsapp", "telegram", "signal", "email",
+        ])),
+    },
+    PropertyDef {
+        name: "sender_name",
+        description: "Filter by sender name. Omit to include all senders.",
+        prop_type: "String",
+        filter: Some(FilterSource::Dynamic("person_names")),
+    },
+];
+
+static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
+    name: "Message",
+    description: "Query messages. Set pinned='true' to list tracked items with IDs, statuses, and deadlines. All filters are optional - omit to get recent messages.",
+    properties: MESSAGE_PROPS,
+    linkable_to: &[],
+};
+
 // ---------------------------------------------------------------------------
 // Registry implementation
 // ---------------------------------------------------------------------------
@@ -108,7 +139,7 @@ static CHANNEL_DEF: ObjectTypeDef = ObjectTypeDef {
 impl OntologyRegistry {
     pub fn build() -> Self {
         Self {
-            object_types: vec![&PERSON_DEF, &CHANNEL_DEF],
+            object_types: vec![&PERSON_DEF, &CHANNEL_DEF, &MESSAGE_DEF],
         }
     }
 

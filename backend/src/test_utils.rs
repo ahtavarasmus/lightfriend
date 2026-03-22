@@ -149,6 +149,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         ontology_repository,
         ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),
+        pending_rule_tests: Arc::new(dashmap::DashMap::new()),
+        maintenance_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
 
